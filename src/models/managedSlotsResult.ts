@@ -63,6 +63,7 @@ export interface ManagedSlotBudgetEvidence {
     reason: string;
     attempts?: number;
     failedDeletes?: number;
+    uncounted?: true;
     lastError?: string | null;
   }>;
   evictionFailures: Array<{ platform: "android" | "ios"; stableDeviceId: string; message: string }>;

@@ -139,6 +139,99 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
     return computeManagedSlotResourceUsage(await registry.snapshotManagedSlotResources());
   }
 
+  warmTest("failed journaled cache deletion preserves the next cache", async () => {
+    await assignManagedSlotDevice(registry, "android", "active", "active", "exec");
+    await cache("amslot-first");
+    timer.advanceTime(1);
+    await cache("amslot-second");
+    const second = (await registry.listFreeDevices()).find(
+      (row) => row.stableDeviceId === "amslot-second",
+    );
+    deleter.beforeDelete = async (target) => {
+      deleter.failWith = target.stableId === "amslot-first" ? "native delete failed" : undefined;
+    };
+    const result = await make(2).reconcile(await request());
+    expect(deleter.stableIds()).toEqual(["amslot-first"]);
+    expect(inventory.has("amslot-second")).toBe(true);
+    expect(
+      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-second"),
+    ).toEqual(second);
+    expect(
+      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-first"),
+    ).toMatchObject({ deletion: { failedDeletes: 1 } });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "managed_slot_budget_exhausted",
+        budget: {
+          limit: 2,
+          usage: { total: 4 },
+          retained: [
+            { stableDeviceId: "amslot-first", reason: "deletion_pending", failedDeletes: 1 },
+          ],
+          evictionFailures: [{ stableDeviceId: "amslot-first" }],
+        },
+      },
+    });
+    expect(provisioner.calls).toEqual([]);
+  });
+
+  for (const markerCount of [1, 2]) {
+    warmTest(
+      `stuck markers preserve cache unless creation can fit (markers=${markerCount})`,
+      async () => {
+        for (let index = 0; index < markerCount; index += 1) {
+          const row = await cache(`amslot-stuck-${index}`);
+          await registry.beginFreeDeviceDeletion(row, OWNER);
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            await registry.recordFreeDeviceDeletionAttempt(row, OWNER, {
+              error: "native delete failed",
+              nativeDeleteFailed: true,
+              nextAttemptAtMs: timer.now() + 60_000,
+            });
+          }
+          timer.advanceTime(1);
+        }
+        await cache("amslot-cache");
+        const nativeCounts: number[] = [];
+        provisioner.beforeCreate = async () => {
+          nativeCounts.push(inventory.devices.length + 1);
+        };
+        const result = await make(1).reconcile(await request());
+        if (markerCount === 1) {
+          expect(result.outcome).toBe("ready");
+          expect(deleter.stableIds()).toEqual(["amslot-cache"]);
+          expect(inventory.has("amslot-cache")).toBe(false);
+          expect(nativeCounts).toEqual([2]);
+          expect((await usage()).total).toBe(1);
+        } else {
+          expect(result).toMatchObject({
+            outcome: "failed",
+            failure: {
+              code: "managed_slot_budget_exhausted",
+              budget: {
+                retained: [
+                  { stableDeviceId: "amslot-stuck-0", reason: "deletion_stuck", uncounted: true },
+                  { stableDeviceId: "amslot-stuck-1", reason: "deletion_stuck" },
+                ],
+              },
+            },
+          });
+          expect(deleter.calls).toEqual([]);
+          expect(inventory.has("amslot-cache")).toBe(true);
+          expect(
+            (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-cache"),
+          ).toMatchObject({ deletion: null });
+        }
+        expect(
+          (await registry.listOpenSlotJournal()).filter(
+            (entry) => entry.target.oldStableId === "amslot-cache",
+          ),
+        ).toEqual([]);
+      },
+    );
+  }
+
   warmTest(
     "at the limit journaled LRU deletion retains newer cache and admits creation",
     async () => {
@@ -302,28 +395,26 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
     expect(deleter.stableIds()).toEqual(["amslot-old", "amslot-old"]);
   });
 
-  warmTest(
-    "a shortfall of two with one pending deletion evicts exactly one more cache",
-    async () => {
-      const pending = await cache("amslot-pending");
-      await registry.beginFreeDeviceDeletion(pending, OWNER);
-      timer.advanceTime(1);
-      await cache("amslot-next");
-      timer.advanceTime(1);
-      await cache("amslot-newer");
-      const result = await make(2).reconcile(await request());
-      expect(result).toMatchObject({
-        outcome: "failed",
-        failure: { code: "managed_slot_budget_exhausted" },
-      });
-      expect(deleter.stableIds()).toEqual(["amslot-next"]);
-      expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
-        "amslot-pending",
-        "amslot-newer",
-      ]);
-      expect(provisioner.calls).toEqual([]);
-    },
-  );
+  warmTest("a shortfall of two with one pending deletion preserves every cache", async () => {
+    const pending = await cache("amslot-pending");
+    await registry.beginFreeDeviceDeletion(pending, OWNER);
+    timer.advanceTime(1);
+    await cache("amslot-next");
+    timer.advanceTime(1);
+    await cache("amslot-newer");
+    const result = await make(2).reconcile(await request());
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "managed_slot_budget_exhausted" },
+    });
+    expect(deleter.stableIds()).toEqual([]);
+    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
+      "amslot-pending",
+      "amslot-next",
+      "amslot-newer",
+    ]);
+    expect(provisioner.calls).toEqual([]);
+  });
 
   warmTest("a hanging cache delete settles at the preparation deadline with timeout", async () => {
     await cache("amslot-cache");

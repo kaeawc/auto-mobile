@@ -705,7 +705,10 @@ reservations cannot take capacity promised to earlier ones. A replacement keeps 
 continuous charge through delete, verified absence, and preparation of its successor.
 An over-limit read is confirmed by a fresh independent read before eviction or refusal.
 
-With headroom, unrelated cache is retained. Creation needing room may evict eligible
+With headroom, unrelated cache is retained. When over the limit, creation is refused
+before deleting cache if a counted deletion is still pending or the remaining
+eligible caches cannot free enough room. Retry after the pending deletion finishes
+or becomes stuck. Creation needing room may evict eligible
 unassigned cache from either platform, oldest `freedAtMs` first. Assignments in every
 scope (including abandoned but revivable scopes), open journal targets, stopping or
 already deleting rows, held devices, foreign claims, incomplete discovery, pooled
@@ -720,11 +723,14 @@ Markers with 3 or more failed native deletes do not count as committed room.
 Before a cache deletion, a transaction marks its exact free row as deletion pending.
 That durable marker fences adoption and shutdown. Only authoritative absence removes
 it. A failed native delete is one that ran and did not confirm absence, including a
-delete that timed out. Blocked redrives and a passed preparation deadline never
+delete that timed out. A refusal before any native work (including an unregistered
+delete workflow), blocked redrives, and a passed preparation deadline never
 count as failed native deletes. Failed or unconfirmed deletion remains charged as
-`deleting` until its marker has 3 failed native deletes. At that threshold, an unbound
-marker contributes no resource charge or reservation ranking; a device still bound
-to a slot remains charged. The marker stays journaled and is still retried with
+`deleting` until its marker has 3 failed native deletes. At that threshold, at most one unbound stuck marker host-wide contributes no
+resource charge or reservation ranking: the one whose deletion started first
+(ties use platform, then stable device id). Further stuck markers count again as
+`deleting`; a device still bound to a slot remains charged and does not consume
+the exemption. The marker stays journaled and is still retried with
 backoff; the journal owner loop retries it even when that daemon's own limit is
 unset, taking over from a dead owner while leaving live foreign owners alone.
 No internal job queue is added for capacity refusals.
@@ -734,7 +740,7 @@ that marked cache when it becomes safe.
 
 Admission and eviction are bounded by the acquisition's preparation deadline.
 A delete journaled but not confirmed before that deadline stays charged until
-3 failed native deletes and is finished by periodic redrive. A
+3 failed native deletes, when it may receive the single exemption, and is finished by periodic redrive. A
 deadline passing during admission returns `timeout`.
 
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
@@ -749,7 +755,8 @@ reason `deletion_pending` when they have fewer than 3 failed native deletes and
 `deletion_stuck` at 3 or more failed native deletes. Both include `attempts`,
 `failedDeletes`, and `lastError` (a string or null). A stuck device still exists on
 the host and remains protected from adoption and eviction. Real device count can
-therefore exceed the limit by the number of stuck markers, with no cap.
+exceed the limit by at most one uncounted stuck marker at a time. The exempt
+`deletion_stuck` row carries `uncounted: true`; other stuck rows omit that field.
 
 ## Error codes
 

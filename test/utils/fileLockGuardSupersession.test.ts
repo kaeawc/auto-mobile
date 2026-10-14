@@ -294,6 +294,113 @@ test("release by content leaves aged-out live claimant's successor guard", () =>
   expect(f.fs.paths()).toEqual([PATH]);
 });
 
+function guardRelease() {
+  const f = fixture();
+  const base = prefix(f.fs);
+  const racer = f.acquire(101);
+  underGuard(f, racer, base);
+  // Revalidation fails and unwinds through the reclaimer's finally.
+  f.fs.update(PATH, `${OLD}\nchanged`);
+  const guard = `${base}.0`;
+  racer.until((step) => step.op === "readText" && step.path === guard);
+  f.fs.operations.length = 0;
+  return { f, racer, guard };
+}
+
+test("guard release retries a transient content read and removes the guard", () => {
+  const { f, racer, guard } = guardRelease();
+  let attempts = 0;
+  f.fs.failure = (op, path) =>
+    op === "readText" && path === guard && ++attempts === 1 ? "EIO" : undefined;
+  expect(racer.finish()).toBe(false);
+  expect(attempts).toBe(2);
+  expect(f.fs.exists(guard)).toBe(false);
+  expect(
+    f.fs.operations.filter((step) => step.path === guard && step.op === "readText"),
+  ).toHaveLength(2);
+});
+
+test("guard release retries a transient unlink failure", () => {
+  const { f, racer, guard } = guardRelease();
+  let attempts = 0;
+  f.fs.failure = (op, path) =>
+    op === "unlink" && path === guard && ++attempts === 1 ? "EIO" : undefined;
+  expect(racer.finish()).toBe(false);
+  expect(attempts).toBe(2);
+  expect(f.fs.exists(guard)).toBe(false);
+  expect(
+    f.fs.operations.filter((step) => step.path === guard && step.op === "unlink"),
+  ).toHaveLength(2);
+});
+
+test("guard release whose read keeps failing leaves the guard and is debug/warn-logged as today (3 attempts recorded)", () => {
+  const { f, racer, guard } = guardRelease();
+  const raw = f.fs.peek(guard)?.raw;
+  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  try {
+    f.fs.failure = (op, path) => (op === "readText" && path === guard ? "EIO" : undefined);
+    expect(racer.finish()).toBe(false);
+    expect(f.fs.peek(guard)?.raw).toBe(raw);
+    expect(f.fs.operations.filter((step) => step.path === guard)).toEqual(
+      Array.from({ length: 3 }, () => ({ op: "readText", path: guard })),
+    );
+    expect(debug).toHaveBeenCalledWith(
+      `Reclaim guard release skipped at ${guard}: content changed or unavailable`,
+    );
+  } finally {
+    debug.mockRestore();
+  }
+});
+
+test.each(["changed", "missing"])("guard release does not retry a %s content read", (state) => {
+  const { f, racer, guard } = guardRelease();
+  const successor = "202\nsuccessor\n\ncurrent-generation";
+  if (state === "changed") {
+    f.fs.update(guard, successor);
+  } else {
+    f.fs.unlink(guard);
+  }
+  f.fs.operations.length = 0;
+  expect(racer.finish()).toBe(false);
+  expect(f.fs.operations.filter((step) => step.path === guard)).toEqual([
+    { op: "readText", path: guard },
+  ]);
+  expect(f.fs.peek(guard)?.raw).toBe(state === "changed" ? successor : undefined);
+});
+
+test.each(["EIO", "ENOENT"])("guard release unlink exhaustion/absence: %s", (code) => {
+  const { f, racer, guard } = guardRelease();
+  const raw = f.fs.peek(guard)?.raw;
+  let attempts = 0;
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    f.fs.failure = (op, path) => {
+      if (op !== "unlink" || path !== guard) {
+        return undefined;
+      }
+      attempts++;
+      if (code === "ENOENT") {
+        f.fs.failure = undefined;
+        f.fs.unlink(guard);
+      }
+      return code;
+    };
+    expect(racer.finish()).toBe(false);
+    expect(attempts).toBe(code === "EIO" ? 3 : 1);
+    expect(f.fs.peek(guard)?.raw).toBe(code === "EIO" ? raw : undefined);
+    if (code === "EIO") {
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(`Reclaim guard removal failed at ${guard}: EIO`),
+        expect.objectContaining({ code }),
+      );
+    } else {
+      expect(warn).not.toHaveBeenCalled();
+    }
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 test("cap: named slot limit warns with lock untouched and no rename", () => {
   const f = fixture();
   const base = seedGuards(f, RECLAIM_GUARD_SLOT_LIMIT);
@@ -428,7 +535,12 @@ test.each(["writeFile", "top-unlink", "lower-unlink"])(
       expect(f.acquire(101).finish()).toBe(true);
       exactHolder(f.fs, 101);
       expect(f.fs.paths()).toEqual([PATH]);
-      expect(warn).toHaveBeenCalled();
+      if (failure === "writeFile") {
+        expect(warn).toHaveBeenCalled();
+      } else {
+        // A single failed guard unlink now completes on retry without warning.
+        expect(warn).not.toHaveBeenCalled();
+      }
     } finally {
       write.mockRestore();
       unlink.mockRestore();

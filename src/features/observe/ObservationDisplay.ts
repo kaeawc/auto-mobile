@@ -2,6 +2,8 @@ import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from
 import {
   buildDisconnectedPanelMessage,
   POSTURE_PANEL_ROLES,
+  panelKeyForFingerprint,
+  type PanelFingerprint,
   type Posture,
 } from "../../models/DisplayPanel";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
@@ -21,6 +23,26 @@ import { ActionableError } from "../../models/ActionableError";
 import { DisplaySelectionError } from "./DisplaySelection";
 import { selectedDisplayPin } from "./SessionDisplayContext";
 import type { Timer } from "../../utils/SystemTimer";
+
+type AndroidPanelIdentity =
+  | string
+  | null
+  | {
+      panelUniqueId?: string | null;
+      panelFingerprint?: PanelFingerprint;
+    };
+
+function panelForAndroidIdentity(
+  panels: readonly DisplayPanel[],
+  identity: AndroidPanelIdentity | undefined,
+): DisplayPanel | undefined {
+  const evidence = typeof identity === "string" ? { panelUniqueId: identity } : identity;
+  const direct = panels.find(
+    (panel) => panel.key === physicalPanelKey(evidence?.panelUniqueId ?? ""),
+  );
+  const key = direct?.key ?? panelKeyForFingerprint(panels, evidence?.panelFingerprint);
+  return panels.find((panel) => panel.key === key);
+}
 
 export interface ObservedAndroidDisplay {
   display: DisplayRef;
@@ -199,11 +221,11 @@ export class ObservedAndroidDisplayCache {
     adb: Pick<AdbExecutor, "executeCommand">,
     displayId: number | null | undefined,
     signal?: AbortSignal,
-    panelUniqueId?: string | null,
+    identity?: AndroidPanelIdentity,
     allowProbe = true,
   ): Promise<DisplayPanel | undefined> {
     const panels = device.displays?.panels ?? [];
-    const direct = panels.find((panel) => panel.key === physicalPanelKey(panelUniqueId ?? ""));
+    const direct = panelForAndroidIdentity(panels, identity);
     if (direct) {
       return direct;
     }

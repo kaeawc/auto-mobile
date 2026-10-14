@@ -233,6 +233,14 @@
         "acquireNewSession": false
       }
     },
+    "managed_slot_acquisition_failed.registry_schema_unsupported": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.daemon_unavailable": {
       "expected": "fail",
       "fields": {
@@ -602,6 +610,24 @@
         "code": "session_terminal_release_in_progress",
         "retryable": false,
         "acquireNewSession": true
+      }
+    },
+    "target_identity_unresolved": {
+      "expected": "retry",
+      "fields": {
+        "code": "target_identity_unresolved",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
+    "target_identity_unresolved.device": {
+      "expected": "retry",
+      "fields": {
+        "code": "target_identity_unresolved",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
       }
     },
     "daemon_queue_timeout": {

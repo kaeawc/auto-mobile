@@ -128,10 +128,21 @@ function cloneObserveResult(obs: ObserveResult): ObserveResult {
   return JSON.parse(JSON.stringify(obs)) as ObserveResult;
 }
 
-/** Drops legacy wire nulls from schema-declared hierarchy fields and never creates the key. */
-function dropNullHierarchyFields(out: ObserveResult): void {
+/** Normalize hierarchy optionals and strip internal panel evidence from served captures. */
+function sanitizeHierarchyMetadata(out: ObserveResult): void {
   if (out.viewHierarchy !== undefined && out.viewHierarchy !== null) {
     out.viewHierarchy = normalizeHierarchyOptionalFields(out.viewHierarchy);
+    delete out.viewHierarchy.panelFingerprint;
+  }
+  // Android raw captures serialize the same top-level wire metadata into a JSON string.
+  const raw = out.rawViewHierarchy;
+  const rawJson = raw?.json;
+  if (raw && rawJson?.includes('"panelFingerprint"')) {
+    const hierarchy: unknown = JSON.parse(rawJson);
+    if (hierarchy && typeof hierarchy === "object" && "panelFingerprint" in hierarchy) {
+      delete hierarchy.panelFingerprint;
+      raw.json = JSON.stringify(hierarchy, null, 2);
+    }
   }
 }
 
@@ -152,7 +163,7 @@ export function sanitizeObserveResult(
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
   const out = clone(obs);
-  dropNullHierarchyFields(out);
+  sanitizeHierarchyMetadata(out);
 
   stripPerformanceAudit(out);
   reduceTopLevelDebugPerfTelemetry(out);

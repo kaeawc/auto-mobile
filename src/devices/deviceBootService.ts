@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../daemon/deviceAcquisitionRefusals";
 import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -107,18 +108,60 @@ export class AndroidAvdIdentityConflictError extends ActionableError {
   }
 }
 
-/** A live emulator with an unanswered AVD-name probe may be the requested image. */
-export class AndroidAvdIdentityUnresolvedError extends ActionableError {
+/** Shared retry evidence for an emulator whose AVD identity cannot be proved. */
+class AndroidIdentityUnresolvedError extends ActionableError {
   readonly code = "target_identity_unresolved";
   readonly retryable = true;
+  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
+  readonly deviceId?: string;
 
   constructor(
-    readonly avdName: string,
+    message: string,
     readonly candidateSerials: readonly string[],
+  ) {
+    super(message);
+    if (candidateSerials.length === 1) {
+      this.deviceId = candidateSerials[0];
+    }
+  }
+
+  toPayload(): Record<string, unknown> {
+    return {
+      code: this.code,
+      retryable: this.retryable,
+      retryAfterMs: this.retryAfterMs,
+      candidateSerials: this.candidateSerials,
+      ...(this.deviceId !== undefined ? { deviceId: this.deviceId } : {}),
+    };
+  }
+}
+
+/** A live emulator with an unanswered AVD-name probe may be the requested image. */
+export class AndroidAvdIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
+  constructor(
+    readonly avdName: string,
+    candidateSerials: readonly string[],
   ) {
     super(
       `target_identity_unresolved: Cannot prove whether Android AVD '${avdName}' is already running; ` +
         `AVD name is unavailable for ${candidateSerials.join(", ")}. Retry after identity discovery recovers.`,
+      candidateSerials,
+    );
+  }
+
+  override toPayload(): Record<string, unknown> {
+    return { ...super.toPayload(), avdName: this.avdName };
+  }
+}
+
+/** adb lists the serial, but its unanswered probe prevents lifecycle identity resolution. */
+export class AndroidDeviceIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
+  constructor(deviceId: string) {
+    super(
+      `target_identity_unresolved: Android emulator '${deviceId}' is listed by adb but did not answer its AVD-name probe, ` +
+        "so it cannot be resolved for lifecycle coordination. Retry once it responds; " +
+        "if it stays unresponsive, call killDevice for it and then startDevice.",
+      [deviceId],
     );
   }
 }

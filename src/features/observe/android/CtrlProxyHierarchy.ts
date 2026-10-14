@@ -1,3 +1,4 @@
+import { panelFingerprintFromWire } from "../../../models/DisplayPanel";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
@@ -1252,6 +1253,7 @@ export class CtrlProxyHierarchy {
           captureSequence: accessibilityHierarchy.captureSequence,
           displayId: accessibilityHierarchy.displayId,
           panelUniqueId: accessibilityHierarchy.panelUniqueId,
+          panelFingerprint: panelFingerprintFromWire(accessibilityHierarchy.panelFingerprint),
           hierarchy: {
             error: errorMessage,
           },
@@ -1307,6 +1309,7 @@ export class CtrlProxyHierarchy {
         captureSequence: accessibilityHierarchy.captureSequence,
         displayId: accessibilityHierarchy.displayId,
         panelUniqueId: accessibilityHierarchy.panelUniqueId,
+        panelFingerprint: panelFingerprintFromWire(accessibilityHierarchy.panelFingerprint),
         hierarchy: convertedHierarchy,
         packageName: resolvedPackageName,
         windows: linkWindowRoots(convertedHierarchy, accessibilityHierarchy.windows),

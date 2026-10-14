@@ -13,7 +13,12 @@ const PARENT = 4100;
 const SUPERVISOR = 4200;
 
 function harness(
-  options: { ownerPid?: number; launchParentPid?: number; ownerGenerationToken?: string } = {},
+  options: {
+    ownerPid?: number;
+    launchParentPid?: number;
+    ownerGenerationToken?: string;
+    generationCheckEvery?: number;
+  } = {},
   generation?: FakeLockOwnerGenerationProbe,
 ) {
   const timer = new FakeTimer();
@@ -227,5 +232,84 @@ describe("ExecutionOwnerWatch process generation", () => {
     expect(losses).toEqual([
       { at: 17 * EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" },
     ]);
+  });
+});
+
+describe("ExecutionOwnerWatch generation cadence and recapture", () => {
+  test("cheap identity reads detect reuse at the next interval exactly once", async () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    generation.verdict = "same";
+    const { timer, watch, losses } = harness(
+      { ownerPid: SUPERVISOR, generationCheckEvery: 1 },
+      generation,
+    );
+    watch.start();
+    expect(generation.compareCalls).toHaveLength(1);
+    generation.verdict = "different";
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toEqual([{ at: EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" }]);
+    timer.advanceTime(10 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toHaveLength(1);
+  });
+
+  test.each([undefined, 0, -1, 1.5, NaN, Infinity])(
+    "cadence %s uses the fifth-check fallback",
+    async (generationCheckEvery) => {
+      const generation = new FakeLockOwnerGenerationProbe();
+      const { timer, watch, losses } = harness({ generationCheckEvery }, generation);
+      watch.start(); // Startup is check 1.
+      generation.verdict = "different";
+      timer.advanceTime(3 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      await settle();
+      expect(losses).toEqual([]);
+      expect(generation.compareCalls).toEqual([]);
+      timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      await settle();
+      expect(losses).toEqual([
+        { at: 4 * EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" },
+      ]);
+    },
+  );
+
+  test("recaptures an initially unreadable token and compares only on the following check", async () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    generation.token = undefined;
+    const { timer, watch, losses } = harness(
+      { ownerPid: SUPERVISOR, generationCheckEvery: 1 },
+      generation,
+    );
+    watch.start();
+    const startupReads = generation.currentCalls.length;
+    generation.token = "darwin-utc:Thu Oct 1 07:45:41 2026";
+    generation.verdict = "different";
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(generation.currentCalls.length).toBe(startupReads + 1);
+    expect(generation.compareCalls).toEqual([]);
+    expect(losses).toEqual([]);
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(generation.compareCalls).toEqual([{ pid: SUPERVISOR, recorded: generation.token }]);
+    expect(losses).toEqual([{ at: 2 * EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" }]);
+  });
+
+  test("a permanently unreadable token keeps PID-only liveness and stops on PID death", async () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    generation.token = undefined;
+    const { timer, watch, losses, kill } = harness({ generationCheckEvery: 1 }, generation);
+    watch.start();
+    timer.advanceTime(3 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(generation.currentCalls).toEqual([PARENT, PARENT, PARENT, PARENT, PARENT]);
+    expect(generation.compareCalls).toEqual([]);
+    expect(losses).toEqual([]);
+    const reads = generation.currentCalls.length;
+    kill(PARENT);
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(generation.currentCalls).toHaveLength(reads);
+    expect(losses).toEqual([{ at: 4 * EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" }]);
   });
 });

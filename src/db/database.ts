@@ -23,7 +23,11 @@ import {
 import { logger } from "../utils/logger";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../utils/bunTestRunnerProcess";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { BunSqliteDialect, DEFAULT_OPTIMIZE_INTERVAL_MS } from "./bunSqliteDialect";
+import {
+  BunSqliteDialect,
+  DEFAULT_OPTIMIZE_INTERVAL_MS,
+  DEFAULT_RETRY_TOTAL_WAIT_MS,
+} from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   createIncompleteExtractionError,
@@ -43,6 +47,14 @@ type BunDatabase = import("bun:sqlite").Database;
 let bunDatabaseConstructor: BunDatabaseConstructor | null = null;
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+/**
+ * bun:sqlite waits synchronously: keep app waits short and let the dialect's async
+ * retry cover DEFAULT_RETRY_TOTAL_WAIT_MS while yielding between attempts (#11858).
+ */
+export const SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS = 250;
+export const APP_CONNECTION_MAX_RETRY_ATTEMPTS =
+  Math.ceil(DEFAULT_RETRY_TOTAL_WAIT_MS / SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS) + 1;
 
 /**
  * Runtime cap on the WAL file: after each passive/auto checkpoint SQLite
@@ -95,9 +107,12 @@ function resolveBunDatabaseConstructor(): BunDatabaseConstructor {
   return bunDatabaseConstructor;
 }
 
-export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
+export function configureSqliteDatabase(
+  sqliteDb: SqlitePragmaDatabase,
+  busyTimeoutMs = SQLITE_BUSY_TIMEOUT_MS,
+): void {
   // Wait for transient writer locks instead of failing immediately with SQLITE_BUSY
-  sqliteDb.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+  sqliteDb.exec(`PRAGMA busy_timeout = ${busyTimeoutMs};`);
 
   // Enable WAL mode for better concurrent read performance
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
@@ -374,10 +389,13 @@ function createSqliteKysely<T>(dbPath: string, beforeQuery?: () => Promise<void>
   });
 }
 
-function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
+function openConfiguredSqliteDatabase(
+  dbPath: string,
+  busyTimeoutMs = SQLITE_BUSY_TIMEOUT_MS,
+): BunDatabase {
   const BunDatabaseConstructor = resolveBunDatabaseConstructor();
   const sqliteDb = new BunDatabaseConstructor(dbPath);
-  configureSqliteDatabase(sqliteDb);
+  configureSqliteDatabase(sqliteDb, busyTimeoutMs);
   return sqliteDb;
 }
 
@@ -480,9 +498,10 @@ function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
   const sqliteDialect = new BunSqliteDialect({
     database: () => {
       assertActive();
-      return openConfiguredSqliteDatabase(dbPath);
+      return openConfiguredSqliteDatabase(dbPath, SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS);
     },
     beforeQuery: waitForMigrationsBeforeQuery,
+    retry: { maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS },
     optimizeIntervalMs: DEFAULT_OPTIMIZE_INTERVAL_MS,
   });
   const driver = sqliteDialect.createDriver();

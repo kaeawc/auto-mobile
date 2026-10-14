@@ -179,6 +179,25 @@ export class FakeSlotRegistry implements SlotRegistry {
     return { kind: "ready", assignment: copy(assignment), created: true };
   }
 
+  async removeUnboundSlot(
+    key: SlotKey,
+    expected: { generation: number; stableDeviceId: null },
+  ): Promise<boolean> {
+    assertValidSlotKey(key);
+    const current = this.assignments.get(slotId(key));
+    if (
+      !current ||
+      current.generation !== expected.generation ||
+      current.stableDeviceId !== null ||
+      current.state !== "provisioning" ||
+      current.execOwner !== null ||
+      this.findOpenEntry(key)
+    ) {
+      return false;
+    }
+    return this.assignments.delete(slotId(key));
+  }
+
   async commitBinding(
     key: SlotKey,
     expected: SlotBindingExpectation,

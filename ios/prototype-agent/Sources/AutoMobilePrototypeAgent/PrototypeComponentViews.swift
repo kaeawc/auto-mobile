@@ -67,7 +67,7 @@ struct PrototypeTextFieldView: View {
                 if let symbol = prototypeSymbol(node.leadingIcon) { PrototypeGlyph(symbol: symbol) }
                 field
                     .submitLabel(.search)
-                    .prototypeIdentifier(node.partIdentifier("input"))
+                    .prototypeIdentifier(node.testTag ?? node.id)
                     .simultaneousGesture(TapGesture().onEnded { model.activate(.node(node)) })
                 if !draft.text.isEmpty {
                     Button { draft.type("") } label: {

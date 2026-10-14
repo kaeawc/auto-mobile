@@ -719,7 +719,8 @@ struct NodeView: View {
             .opacity(style?.alpha ?? 1)
             .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
             .modifier(IdentifierModifier(
-                identifier: node.testTag ?? node.id,
+                // The search bar's editable field owns the node identifier.
+                identifier: node.type == "searchBar" ? nil : node.testTag ?? node.id,
                 label: accessibilityLabelOverride,
                 grouping: grouping
             ))

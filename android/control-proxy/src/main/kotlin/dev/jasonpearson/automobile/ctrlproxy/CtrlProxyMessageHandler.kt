@@ -502,6 +502,7 @@ class CtrlProxyMessageHandler(
           request.displayId,
           request.reset,
           request.appearance,
+          request.replaceOthers,
         )
       }
       is DismissPrototype -> {

@@ -26,12 +26,17 @@ export interface PrototypeShowOptions {
   displayId?: number;
   /** Start a same-id show fresh instead of replacing the prototype in place. */
   reset?: boolean;
+  /** Android only: false retains the other shown ids (prototype_multi_surface_v1). */
+  replaceOthers?: boolean;
   /**
    * Pins what the system setting means for this show. The caller sets it only for a device
    * advertising `prototype_appearance_v1`; absent follows the device and sends nothing.
    */
   appearance?: PrototypeAppearanceOverride;
 }
+
+/** Show flags shared with legacy positional appearance callers in the Android client. */
+export type PrototypeShowOverrides = Pick<PrototypeShowOptions, "appearance" | "replaceOthers">;
 
 /** A device's own view of its prototype, where the platform can answer one. */
 export interface PrototypeDeviceStatus {

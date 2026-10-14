@@ -43,6 +43,11 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
       children: [{ type: "spacer" }],
     }),
   },
+  prototype_gestures_v1: fixture({
+    ...label,
+    onLongPress: [{ type: "emit", name: "long" }],
+    onDoubleTap: [{ type: "emit", name: "double" }],
+  }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

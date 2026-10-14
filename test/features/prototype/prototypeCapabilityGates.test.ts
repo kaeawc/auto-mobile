@@ -8,6 +8,7 @@ import { prototypeDataModelUnsupportedMessage } from "../../../src/features/prot
 import { prototypeTextFieldOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypeTextFieldOptions";
 import { prototypeFlowGridUnsupportedMessage } from "../../../src/features/prototype/prototypeFlowGrid";
 import { prototypePagerOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypePagerOptions";
+import { prototypeGesturesUnsupportedMessage } from "../../../src/features/prototype/prototypeGestures";
 
 test("plain and non-spec inputs require no capability", () => {
   for (const spec of [undefined, null, 3, {}, { root: { type: "text", text: "Hello" } }]) {
@@ -18,9 +19,14 @@ test("required gates report fields and original messages", () => {
   const spec = {
     data: { x: 1 },
     root: {
-      type: "text",
-      text: "{data:/x}",
-      style: { background: { light: "#FFFFFF", dark: "#000000" } },
+      type: "box",
+      onLongPress: [{ type: "emit", name: "long" }],
+      onDoubleTap: [{ type: "emit", name: "double" }],
+      child: {
+        type: "text",
+        text: "{data:/x}",
+        style: { background: { light: "#FFFFFF", dark: "#000000" } },
+      },
       children: [
         { type: "textField", label: "Name" },
         { type: "grid", columns: 2 },
@@ -33,30 +39,31 @@ test("required gates report fields and original messages", () => {
     "prototype_data_model_v1",
     "prototype_text_field_options_v1",
     "prototype_flow_grid_v1",
+    "prototype_gestures_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
-    ["root.style.background"],
-    ["data", "root.text"],
+    ["root.child.style.background"],
+    ["data", "root.child.text"],
     ["root.children[0].label"],
     ["root.children[1]"],
+    ["root.onLongPress", "root.onDoubleTap"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
     prototypeDataModelUnsupportedMessage,
     prototypeTextFieldOptionsUnsupportedMessage,
     prototypeFlowGridUnsupportedMessage,
+    prototypeGesturesUnsupportedMessage,
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),
-  ).toEqual(
-    required.map((gate) => gate.fields),
-  );
+  ).toEqual(required.map((gate) => gate.fields));
   expect(required.find((gate) => gate.capability === "prototype_theme_modes_v1")).toMatchObject({
-    fields: ["root.style.background"],
+    fields: ["root.child.style.background"],
     unsupportedMessage: prototypeThemeModesUnsupportedMessage,
   });
   expect(required.find((gate) => gate.capability === "prototype_data_model_v1")).toMatchObject({
-    fields: ["data", "root.text"],
+    fields: ["data", "root.child.text"],
     unsupportedMessage: prototypeDataModelUnsupportedMessage,
   });
   const pagerSpec = {

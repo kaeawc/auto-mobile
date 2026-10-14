@@ -301,6 +301,12 @@ sealed class PrototypeNode {
   /** The node's accessible label; replaces the label derived from its text, icon or kind. */
   abstract val contentDescription: String?
   abstract val onTap: List<PrototypeAction>?
+  open val onLongPress: List<PrototypeAction>?
+    get() = null
+
+  open val onDoubleTap: List<PrototypeAction>?
+    get() = null
+
   abstract val style: PrototypeStyle?
   abstract val styleWhen: List<PrototypeStyleWhen>?
   abstract val visibleWhen: PrototypeCondition?
@@ -318,6 +324,8 @@ data class PrototypeBoxNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -336,6 +344,8 @@ data class PrototypeRowNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -354,6 +364,8 @@ data class PrototypeColumnNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -448,6 +460,8 @@ data class PrototypeTextNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -465,6 +479,8 @@ data class PrototypeImageNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -484,6 +500,8 @@ data class PrototypeIconNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
@@ -696,6 +714,8 @@ data class PrototypeCardNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,

@@ -208,7 +208,9 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 }
 
 function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
-  mapList(data, "onTap", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  for (const field of ["onTap", "onLongPress", "onDoubleTap"]) {
+    mapList(data, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
 }
 
 /** A `{label, onTap?}` part (dialog or snackbar button, app bar action): label and actions bind. */
@@ -259,7 +261,7 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
 
 /**
  * Visits one node's own bindable fields (not its children) in a fixed order: `text`, component
- * fields, `visibleWhen`, `styleWhen`, `onTap`, then state-key fields. Returns a copy with each
+ * fields, `visibleWhen`, `styleWhen`, `onTap`, `onLongPress`, `onDoubleTap`, then state-key fields. Returns a copy with each
  * visited value replaced by the visitor's result.
  */
 export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor): Raw {

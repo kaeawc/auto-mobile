@@ -33,6 +33,7 @@ enum PrototypeAgentProtocol {
         iconSfSymbolsCapability,
         dataModelCapability,
         textFieldOptionsCapability,
+        gesturesCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -82,6 +83,8 @@ enum PrototypeAgentProtocol {
     /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
     /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"
+    /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
+    static let gesturesCapability = "prototype_gestures_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"

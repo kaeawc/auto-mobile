@@ -550,6 +550,22 @@ the first fully visible page; page events, placeholders and navigation bindings 
 their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 Indicator and carousel remain deferred.
 
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. A node with only `onLongPress` and/or `onDoubleTap` does not
+consume single taps: the nearest ancestor's `onTap` runs. All three lists may coexist. The
+single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
+fires immediately. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.
+
 ## Saved prototype on-disk layout (#12254)
 
 One saved prototype lives in the viewer app container:

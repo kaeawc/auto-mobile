@@ -1013,6 +1013,9 @@ export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_opt
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 
+/** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
+export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
+
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms
  * (#11218): `{light, dark}` colour pairs, role names in gradient stops and scrims,

@@ -42,6 +42,9 @@ const COMMON_NODE_FIELDS = [
   "safeAreaPadding",
 ];
 
+const GESTURE_NODE_TYPES = ["box", "row", "column", "text", "image", "icon", "card"];
+const GESTURE_NODE_FIELDS = ["onLongPress", "onDoubleTap"];
+
 function spec(root: Record<string, unknown>, state: Record<string, unknown> = {}) {
   return { id: "panel", window: { placement: { type: "fullscreen" } }, state, root };
 }
@@ -56,6 +59,11 @@ describe("prototype node contract parity", () => {
     const contractFields = Object.keys(contractNodes[type].fields).sort();
     expect(zodNodeShapes().get(type)).toEqual(contractFields);
     expect(contractFields).toEqual(expect.arrayContaining(COMMON_NODE_FIELDS));
+    for (const field of GESTURE_NODE_FIELDS) {
+      const supported = GESTURE_NODE_TYPES.includes(type);
+      expect(contractFields.includes(field)).toBe(supported);
+      expect(zodNodeShapes().get(type)?.includes(field)).toBe(supported);
+    }
   });
 
   test("style has the same fields in Zod and the contract", () => {

@@ -1634,3 +1634,19 @@ itself; authors wrap it in `scroll`. Row-major placement starts a new row when
 a child's span does not fit. Optional integer `span >= 1` is valid only on a
 direct grid child and cannot exceed fixed columns; the renderer clamps spans
 to the resolved runtime count. Shared fixtures define host validation behavior.
+
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. A node with only `onLongPress` and/or `onDoubleTap` does not
+consume single taps: the nearest ancestor's `onTap` runs. All three lists may coexist. The
+single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
+fires immediately. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.

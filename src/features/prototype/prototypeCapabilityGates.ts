@@ -3,6 +3,7 @@ import {
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_GESTURES_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeThemeModeFields,
@@ -19,6 +20,7 @@ import {
   prototypePagerOptionFields,
   prototypePagerOptionsUnsupportedMessage,
 } from "./prototypePagerOptions";
+import { prototypeGestureFields, prototypeGesturesUnsupportedMessage } from "./prototypeGestures";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -52,6 +54,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
     fields: prototypePagerOptionFields,
     unsupportedMessage: prototypePagerOptionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_GESTURES_CAPABILITY,
+    fields: prototypeGestureFields,
+    unsupportedMessage: prototypeGesturesUnsupportedMessage,
   },
 ];
 

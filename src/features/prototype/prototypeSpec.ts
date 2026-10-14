@@ -449,6 +449,10 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
+const gestureNodeShape = {
+  onLongPress: z.array(actionSchema).min(1).max(32).optional(),
+  onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
+};
 const commonNodeShape = {
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
@@ -480,13 +484,13 @@ const repeatSchema = z
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
-  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["box"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
   .strict();
 const rowBaseSchema = z
-  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["row"]) })
   .strict();
 const columnBaseSchema = z
-  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
   .strict();
 const flowBaseSchema = z
   .object({
@@ -508,11 +512,12 @@ const gridBaseSchema = z
   })
   .strict();
 const textBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["text"]), text: z.string() })
+  .object({ ...commonNodeShape, ...gestureNodeShape, type: z.enum(["text"]), text: z.string() })
   .strict();
 const imageBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...gestureNodeShape,
     type: z.enum(["image"]),
     asset: imageAssetSchema,
     contentScale: z.enum(["fit", "crop", "fill"]).optional(),
@@ -521,6 +526,7 @@ const imageBaseSchema = z
 const iconBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...gestureNodeShape,
     type: z.enum(["icon"]),
     name: iconNameSchema,
     variant: iconVariantSchema.optional(),
@@ -630,6 +636,7 @@ const chipBaseSchema = z
 const cardBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...gestureNodeShape,
     type: z.enum(["card"]),
     variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })

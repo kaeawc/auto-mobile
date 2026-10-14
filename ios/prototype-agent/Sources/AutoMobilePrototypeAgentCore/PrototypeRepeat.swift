@@ -9,7 +9,8 @@ import Foundation
 ///
 /// Bound per instance, as on Android: a `text` node's `text`, the component label, title and
 /// button fields listed on `bindTextFields`; `setState` values and `emit` names in
-/// `onTap`; the `equals`/`notEquals` operands of `visibleWhen` and `styleWhen` conditions,
+/// `onTap`, `onLongPress` and `onDoubleTap`; the `equals`/`notEquals` operands of `visibleWhen`
+/// and `styleWhen` conditions,
 /// recursively through `all`/`any`/`not`; and every state key (#11051): `stateKey`,
 /// `hourKey`/`minuteKey`, a list item's trailing key, `openWhen.key`, condition keys and the keys
 /// of `setState`, `toggle`, `increment` and `decrement`. A string that is exactly one placeholder keeps the
@@ -154,9 +155,7 @@ private struct Instance {
         PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
         bindStateKeys(&fields)
-        if case let .array(actions)? = fields["onTap"] {
-            fields["onTap"] = .array(actions.map(bindAction))
-        }
+        bindPartFields(&fields)
         if let condition = fields["visibleWhen"] {
             fields["visibleWhen"] = bindCondition(condition)
         }
@@ -210,7 +209,9 @@ private struct Instance {
 
     /// A part's actions; its label was already mapped by `bindTextFields`.
     private func bindPartFields(_ part: inout [String: JSONValue]) {
-        if case let .array(actions)? = part["onTap"] { part["onTap"] = .array(actions.map(bindAction)) }
+        for key in ["onTap", "onLongPress", "onDoubleTap"] {
+            if case let .array(actions)? = part[key] { part[key] = .array(actions.map(bindAction)) }
+        }
     }
 
     private func bindPart(_ key: String, in fields: inout [String: JSONValue]) {

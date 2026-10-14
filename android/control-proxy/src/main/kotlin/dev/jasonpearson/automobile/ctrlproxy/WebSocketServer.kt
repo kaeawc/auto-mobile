@@ -364,6 +364,7 @@ class WebSocketServer(
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
+    add("prototype_gestures_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved

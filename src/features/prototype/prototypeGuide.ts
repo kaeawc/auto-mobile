@@ -11,6 +11,7 @@ import {
   GUIDE_COST,
   GUIDE_DATA,
   GUIDE_ERRORS,
+  GUIDE_GESTURES,
   GUIDE_INTRO,
   GUIDE_PATCH,
   GUIDE_REPEAT,
@@ -107,9 +108,12 @@ function fieldRuleValues(definition: string, field: string): string[] {
 /** Markdown limits table; every value comes from the contract's `limits`. */
 export function renderLimitsTable(): string {
   const rows = Object.entries(contract.limits).map(([name, value]) => `| \`${name}\` | ${value} |`);
-  const onTap = (definitions.node.variants?.box.fields?.onTap.rule ?? {}) as Rule;
+  const actionFields = ["onTap", "onLongPress", "onDoubleTap"];
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
-  rows.push(`| actions per \`onTap\` | ${onTap.min}..${onTap.max} |`);
+  for (const field of actionFields) {
+    const rule = (definitions.node.variants?.box.fields?.[field].rule ?? {}) as Rule;
+    rows.push(`| actions per \`${field}\` | ${rule.min}..${rule.max} |`);
+  }
   rows.push(`| \`repeat.items\` | ${items.min}..${items.max} |`);
   rows.push(`| \`use\` nesting (host-expanded components) | ${MAX_PROTOTYPE_COMPONENT_DEPTH} |`);
   return ["| Limit | Value |", "| --- | --- |", ...rows].join("\n");
@@ -138,7 +142,13 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap` lists.",
+    "Used in `onTap`, `onLongPress` and `onDoubleTap` lists.",
+    "",
+    `Gesture fields are available only on ${code(
+      Object.entries(definitions.node.variants ?? {})
+        .filter(([, variant]) => variant.fields?.onLongPress !== undefined)
+        .map(([type]) => type),
+    )}; they require \`prototype_gestures_v1\`.`,
     "",
     ...variantLines(variants, new Map()),
   ].join("\n");
@@ -223,6 +233,7 @@ export function renderPrototypeGuide(): string {
     renderWindow(),
     renderNodes(),
     renderActions(),
+    GUIDE_GESTURES,
     GUIDE_REPEAT,
     GUIDE_DATA,
     GUIDE_PATCH,

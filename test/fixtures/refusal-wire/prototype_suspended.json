@@ -1,0 +1,13 @@
+{
+  "code": "prototype_suspended",
+  "builder": "PrototypeSuspendedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"layer \\\"prototype\\\" was requested, but the AutoMobile prototype is hidden because the app it was shown over is not in front. Bring that app back to the foreground (the prototype returns with its state), or omit layer.\",\"code\":\"prototype_suspended\",\"retryable\":false,\"nextAction\":\"bring the app the prototype was shown over back to the foreground (launchApp), or show the prototype again\",\"details\":{\"prototypeSuspended\":true}}"
+      }
+    ],
+    "isError": true
+  }
+}

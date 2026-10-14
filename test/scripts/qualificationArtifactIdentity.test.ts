@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
+import { readTarGzEntries } from "../../scripts/qualification/tarEntries";
 import {
   identifyArtifact,
   parseIdentityArgs,
@@ -27,7 +28,7 @@ const release: ReleaseChecksumEntry = {
 function packageTarball(files: Map<string, Uint8Array>): Uint8Array {
   const entries = [...files].map(([path, data]) => {
     const header = Buffer.alloc(512);
-    header.write(`package/${path.slice(root.length + 1)}`, 0, 100);
+    header.write(`package/${path.slice(root.length + 1).replaceAll("\\", "/")}`, 0, 100);
     header.write("0000644\0", 100);
     header.write("0000000\0", 108);
     header.write("0000000\0", 116);
@@ -42,6 +43,13 @@ function packageTarball(files: Map<string, Uint8Array>): Uint8Array {
   });
   return gzipSync(Buffer.concat([...entries, Buffer.alloc(1024)]));
 }
+test("packageTarball uses forward slashes for Windows fixture keys", () => {
+  const entries = readTarGzEntries(
+    packageTarball(new Map([[`${root}\\dist\\src\\index.js`, new Uint8Array([1])]])),
+  );
+  expect(entries.map(({ path }) => path)).toEqual(["package/dist/src/index.js"]);
+  expect(entries.every(({ path }) => !path.includes("\\"))).toBe(true);
+});
 function fixture() {
   const files = new Map<string, Uint8Array>();
   const put = (path: string, text: string | Uint8Array) =>
@@ -82,7 +90,7 @@ function fixture() {
       [...files.keys()]
         .map((path) => path.replaceAll("\\", "/"))
         .filter((path) => path.startsWith(`${dir.replaceAll("\\", "/")}/`))
-        .map((path) => path.slice(dir.length + 1))
+        .map((path) => path.slice(dir.replaceAll("\\", "/").length + 1))
         .sort(),
     listNonRegular: () => [],
     git: (args, cwd) => {

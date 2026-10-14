@@ -19,6 +19,7 @@ export type ManagedSlotDispositionName = "created" | "reused" | "adopted" | "rep
  * `capacity_exhausted`, ...) or an acquisition-level one:
  *
  * - `contract_unsupported`: the daemon does not advertise `managed-slots/v1`, or does not advertise a capability a config field needs (`managed-slots/v1.deviceFamily`).
+ * - `registry_schema_unsupported`: a newer daemon migrated the shared registry beyond this build's schema.
  * - `scope_invalidated`: this runner incarnation was reset; it never accepts work again.
  * - `scope_transition_pending`: a newer incarnation is waiting for the old one's owners/cleanup.
  * - `execution_policy_failed`: the session could not be put on the managed-execution policy.
@@ -29,6 +30,7 @@ export type ManagedSlotDispositionName = "created" | "reused" | "adopted" | "rep
 export const MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES = [
   "managed_slot_config_invalid",
   "contract_unsupported",
+  "registry_schema_unsupported",
   "managed_slot_group_unsupported",
   "managed_slots_unsupported",
   "scope_invalidated",
@@ -57,6 +59,19 @@ export interface ManagedSlotBudgetEvidence {
     deleting: number;
     orphaned: number;
   };
+  charged: Array<{
+    platform: "android" | "ios";
+    stableDeviceId: string;
+    kind:
+      | "assigned_active"
+      | "assigned_idle"
+      | "free"
+      | "deleting"
+      | "deletion_stuck"
+      | "preparing"
+      | "orphaned";
+    uncounted?: true;
+  }>;
   retained: Array<{
     platform: "android" | "ios";
     stableDeviceId: string;

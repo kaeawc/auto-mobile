@@ -7,6 +7,8 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { ActionableError } from "../../models/ActionableError";
+import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
 
 /** Matches a `kill -0` failure caused by the target being owned by another
  * user/process (EPERM), not by it being gone (ESRCH). The process exists in
@@ -30,7 +32,13 @@ interface ProcessClientOptions {
   readonly releaseAttempts?: number;
   readonly releaseGraceMs?: number;
   readonly ownerPid?: number;
+  readonly processGeneration?: LockOwnerGenerationProbe;
 }
+
+type TerminationIdentities = {
+  tokens: Map<number, string | undefined>;
+  dropped: Set<number>;
+};
 
 /**
  * The sole host-process boundary for the CtrlProxy XCTest runner.
@@ -43,6 +51,7 @@ export class IosCtrlProxyProcessClient {
   private readonly releaseAttempts: number;
   private readonly releaseGraceMs: number;
   private readonly ownerPid: number;
+  private readonly processGeneration: LockOwnerGenerationProbe;
 
   constructor(
     private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor(),
@@ -52,6 +61,7 @@ export class IosCtrlProxyProcessClient {
     this.releaseAttempts = options.releaseAttempts ?? 4;
     this.releaseGraceMs = options.releaseGraceMs ?? 250;
     this.ownerPid = options.ownerPid ?? process.pid;
+    this.processGeneration = options.processGeneration ?? defaultLockOwnerGenerationProbe;
   }
 
   async findExternalXcodebuildCtrlProxyProcess(
@@ -280,38 +290,38 @@ export class IosCtrlProxyProcessClient {
     ) {
       return;
     }
-    let descendants: number[];
+    const discovery = options.skipGraceful
+      ? await this.discoverDescendantsBeforeImmediateTermination(
+          pid,
+          options.preKillDeadlineMs ?? deadline,
+        )
+      : { descendants: await this.findDescendantProcessIds(pid, deadline), error: undefined };
+    const descendants = discovery.descendants;
+    const identities = this.captureTerminationIdentities([pid, ...descendants]);
     if (options.skipGraceful) {
-      const discovery = await this.discoverDescendantsBeforeImmediateTermination(
-        pid,
-        options.preKillDeadlineMs ?? deadline,
-      );
-      descendants = discovery.descendants;
-      await this.signalGroup(pid, "KILL", deadline);
-      await this.signalPids([pid], "KILL", deadline);
+      await this.signalGroup(pid, "KILL", deadline, identities);
+      await this.signalPids([pid], "KILL", deadline, identities);
       if (discovery.error !== undefined) {
         throw new Error(`CtrlProxy descendant discovery failed for PID ${pid}`, {
           cause: discovery.error,
         });
       }
-    } else {
-      descendants = await this.findDescendantProcessIds(pid, deadline);
     }
     const targets = [...descendants].reverse().concat(pid);
     if (!options.skipGraceful) {
-      await this.signalGroup(pid, "TERM", deadline);
-      await this.signalPids(targets, "TERM", deadline);
-      if (await this.waitForExit([pid, ...descendants], deadline)) {
+      await this.signalGroup(pid, "TERM", deadline, identities);
+      await this.signalPids(targets, "TERM", deadline, identities);
+      if (await this.waitForExit([pid, ...descendants], deadline, identities)) {
         return;
       }
     }
     if (options.skipGraceful) {
-      await this.signalPids([...descendants].reverse(), "KILL", deadline);
+      await this.signalPids([...descendants].reverse(), "KILL", deadline, identities);
     } else {
-      await this.signalGroup(pid, "KILL", deadline);
-      await this.signalPids(targets, "KILL", deadline);
+      await this.signalGroup(pid, "KILL", deadline, identities);
+      await this.signalPids(targets, "KILL", deadline, identities);
     }
-    if (!(await this.waitForExit([pid, ...descendants], deadline))) {
+    if (!(await this.waitForExit([pid, ...descendants], deadline, identities))) {
       throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
     }
   }
@@ -392,12 +402,37 @@ export class IosCtrlProxyProcessClient {
   }
 
   async terminateProcess(pid: number): Promise<void> {
-    await this.signalPids([pid], "TERM");
-    if (await this.waitForExit([pid])) {
+    const identities = this.captureTerminationIdentities([pid]);
+    await this.signalPids([pid], "TERM", undefined, identities);
+    if (await this.waitForExit([pid], undefined, identities)) {
       return;
     }
-    await this.signalPids([pid], "KILL");
-    await this.waitForExit([pid]);
+    await this.signalPids([pid], "KILL", undefined, identities);
+    await this.waitForExit([pid], undefined, identities);
+  }
+
+  private captureTerminationIdentities(pids: number[]): TerminationIdentities {
+    return {
+      tokens: new Map(pids.map((pid) => [pid, this.processGeneration.current(pid)])),
+      dropped: new Set(),
+    };
+  }
+
+  private hasChangedIdentity(pid: number, identities?: TerminationIdentities): boolean {
+    if (!identities) {
+      return false;
+    }
+    if (identities.dropped.has(pid)) {
+      return true;
+    }
+    const token = identities.tokens.get(pid);
+    // No token or an unknown comparison preserves PID-only behavior.
+    if (token === undefined || this.processGeneration.compare(pid, token) !== "different") {
+      return false;
+    }
+    identities.dropped.add(pid);
+    logger.warn(`[IOSCtrlProxy] PID ${pid} now names a different process; skipping signal`);
+    return true;
   }
 
   hasDeviceIdentity(text: string, deviceId: string): boolean {
@@ -531,7 +566,11 @@ export class IosCtrlProxyProcessClient {
     pid: number,
     signal: "TERM" | "KILL",
     deadline?: number,
+    identities?: TerminationIdentities,
   ): Promise<void> {
+    if (this.hasChangedIdentity(pid, identities)) {
+      return;
+    }
     try {
       await this.executeCommand("kill", [`-${signal}`, "--", `-${pid}`], deadline);
     } catch (error) {
@@ -543,8 +582,12 @@ export class IosCtrlProxyProcessClient {
     pids: number[],
     signal: "TERM" | "KILL",
     deadline?: number,
+    identities?: TerminationIdentities,
   ): Promise<void> {
     for (const pid of pids) {
+      if (this.hasChangedIdentity(pid, identities)) {
+        continue;
+      }
       try {
         await this.executeCommand("kill", [`-${signal}`, String(pid)], deadline);
       } catch (error) {
@@ -553,9 +596,13 @@ export class IosCtrlProxyProcessClient {
     }
   }
 
-  private async waitForExit(pids: number[], deadline?: number): Promise<boolean> {
+  private async waitForExit(
+    pids: number[],
+    deadline?: number,
+    identities?: TerminationIdentities,
+  ): Promise<boolean> {
     for (let attempt = 0; attempt < this.releaseAttempts; attempt++) {
-      if (await this.haveExited(pids, deadline)) {
+      if (await this.haveExited(pids, deadline, identities)) {
         return true;
       }
       const delayMs = this.remainingTimeoutMs(deadline);
@@ -563,12 +610,16 @@ export class IosCtrlProxyProcessClient {
         delayMs === undefined ? this.releaseGraceMs : Math.min(this.releaseGraceMs, delayMs),
       );
     }
-    return this.haveExited(pids, deadline);
+    return this.haveExited(pids, deadline, identities);
   }
 
-  private async haveExited(pids: number[], deadline?: number): Promise<boolean> {
+  private async haveExited(
+    pids: number[],
+    deadline?: number,
+    identities?: TerminationIdentities,
+  ): Promise<boolean> {
     for (const pid of pids) {
-      if (await this.isRunning(pid, deadline)) {
+      if ((await this.isRunning(pid, deadline)) && !this.hasChangedIdentity(pid, identities)) {
         return false;
       }
     }

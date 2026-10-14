@@ -1,4 +1,5 @@
 import type { PrototypeHiddenReason } from "./prototypeHidden";
+import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -103,6 +104,8 @@ export interface PrototypeStatusStore {
     displayId?: number,
     details?: PrototypeRecordDetails,
   ): PrototypeLastResult;
+  readonly shownSpecs: PrototypeShownSpecs;
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
 }
 /** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
 export interface PrototypeRecordDetails {
@@ -187,6 +190,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void {
+    this.shownSpecs.retainOnly(scope.deviceId, prototype.id);
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key) ?? {
       ...scope,
@@ -303,6 +307,23 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     return structuredClone(entry);
   }
 
+  readonly shownSpecs = new PrototypeShownSpecs();
+
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        const patched = { ...entry };
+        if (data === undefined) {
+          delete patched.data;
+        } else {
+          patched.data = structuredClone(data);
+        }
+        stored.shown.set(id, patched);
+      }
+    }
+  }
+
   /** Consume successful shows' windows, while preserving their device answers in lastResult. */
   private consumeShowDispatch(deviceId: string, entry: PrototypeLastResult): PrototypeLastResult {
     if (entry.lastAction !== "show" || !entry.success || !entry.id) {
@@ -342,6 +363,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       stored.snapshot = snapshot?.id === entry.id ? snapshot : undefined;
       stored.shown.set(entry.id, entry);
     } else if (entry.lastAction === "dismiss" && entry.success) {
+      this.shownSpecs.forget(stored.deviceId, entry.all ? undefined : entry.id);
       if (entry.all) {
         this.clearShown(stored.deviceId);
       } else if (entry.id) {
@@ -354,6 +376,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   clearDevice(deviceId: string): void {
+    this.shownSpecs.clearDevice(deviceId);
     this.showDispatches.delete(deviceId);
     for (const [key, stored] of this.scopes) {
       if (stored.deviceId === deviceId) {
@@ -380,6 +403,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   dismissed(scope: PrototypeScope, id: string): void {
+    this.shownSpecs.forget(scope.deviceId, id);
     this.clearShown(scope.deviceId, id);
   }
 

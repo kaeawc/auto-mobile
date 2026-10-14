@@ -119,3 +119,28 @@ build_flags() {
     printf '%s' "$value" | jq -e 'type == "array"' >/dev/null
   done < <(grep -oE "gradle-flags: '\[.*\]'" "$workflow" | sed "s/^gradle-flags: '//; s/'$//")
 }
+
+@test "gradle-flags is only ever read through env mappings in the action" {
+  # The debug step once echoed `${{ inputs.gradle-flags }}` straight into the
+  # shell source, so a crafted test_filter executed as shell.
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]+[A-Z_]+:\ \$\{\{\ inputs\.gradle-flags\ \}\}$ ]]
+  done < <(grep 'inputs.gradle-flags' "$ACTION")
+}
+
+@test "record-screenshot-baselines reads test_filter only through env or the validated flag array" {
+  workflow=".github/workflows/record-screenshot-baselines.yml"
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]+TEST_FILTER:\ \$\{\{\ inputs\.test_filter\ \}\}$ ]] ||
+      [[ "$line" =~ ^[[:space:]]+gradle-flags:\ \' ]]
+  done < <(grep 'inputs.test_filter' "$workflow")
+}
+
+@test "record-screenshot-baselines validates test_filter before the first Gradle run" {
+  workflow=".github/workflows/record-screenshot-baselines.yml"
+  validate_line="$(grep -n 'name: "Validate test_filter"' "$workflow" | cut -d: -f1)"
+  first_gradle_line="$(grep -n 'uses: ./.github/actions/gradle-task-run' "$workflow" | head -1 | cut -d: -f1)"
+  [ -n "$validate_line" ]
+  [ "$validate_line" -lt "$first_gradle_line" ]
+  grep -qF '=~ ^[A-Za-z0-9_.*-]+$ ]]' "$workflow"
+}

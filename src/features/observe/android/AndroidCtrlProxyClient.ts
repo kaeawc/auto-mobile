@@ -1,3 +1,4 @@
+import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
 import {
   prototypePatchReplyFields,
   type PrototypePatchRequest,
@@ -375,6 +376,7 @@ export interface AndroidDisplayTransition {
   change: "added" | "changed" | "removed" | "device_state";
   displayId: number;
   panelUniqueId?: string;
+  panelFingerprint?: PanelFingerprint;
   width?: number;
   height?: number;
   state?: number;
@@ -403,6 +405,10 @@ export function displayTransitionFromWire(value: unknown): AndroidDisplayTransit
   };
   if (typeof event.panelUniqueId === "string") {
     result.panelUniqueId = event.panelUniqueId;
+  }
+  const fingerprint = panelFingerprintFromWire(event.panelFingerprint);
+  if (fingerprint) {
+    result.panelFingerprint = fingerprint;
   }
   if (typeof event.width === "number") {
     result.width = event.width;

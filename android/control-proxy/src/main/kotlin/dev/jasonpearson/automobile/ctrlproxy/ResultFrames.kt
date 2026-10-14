@@ -111,6 +111,15 @@ internal fun displayTransitionFrame(transition: DisplayTransition): String =
     put("change", transition.change)
     put("displayId", transition.displayId)
     if (transition.panelUniqueId != null) put("panelUniqueId", transition.panelUniqueId)
+    transition.panelFingerprint?.let { fingerprint ->
+      put(
+        "panelFingerprint",
+        buildJsonObject {
+          put("width", fingerprint.width)
+          put("height", fingerprint.height)
+        },
+      )
+    }
     if (transition.width != null) put("width", transition.width)
     if (transition.height != null) put("height", transition.height)
     if (transition.state != null) put("state", transition.state)

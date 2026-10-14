@@ -3,6 +3,13 @@ import { IosPrototypeInstaller } from "../../../../src/features/prototype/ios/io
 import { prototypeBundleId } from "../../../../src/features/prototype/ios/iosPrototypeBundleId";
 import { DefaultDataContainerWriter } from "../../../../src/features/prototype/ios/iosPrototypeInstallerAdapters";
 import * as errors from "../../../../src/features/prototype/ios/iosPrototypeInstallerErrors";
+import fixture from "../../../fixtures/prototype-saved-layout/layout.json";
+import type { PrototypeJson } from "../../../../src/features/prototype/prototypeSpec";
+import type { PrototypeAssetUpload } from "../../../../src/features/prototype/prototypeAssets";
+import { DirectorySavedPrototypeLayoutWriter } from "../../../../src/features/prototype/savedPrototypeLayout";
+import { FakeSavedPrototypeLayoutFileSystem } from "../../../fakes/FakeSavedPrototypeLayoutFileSystem";
+import { FakeSavedPrototypeLayoutWriter } from "../../../fakes/FakeSavedPrototypeLayoutWriter";
+import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { logger } from "../../../../src/utils/logger";
 import { FakeHostCommandExecutor } from "../../../fakes/FakeHostCommandExecutor";
 import {
@@ -101,7 +108,9 @@ describe("IosPrototypeInstaller", () => {
       `codesign --verify ${app}`,
     ]);
     expect(h.simctl.installed).toEqual([{ udid, appPath: app }]);
-    expect(h.data.writes).toEqual([{ containerPath: "/container", spec: input.spec }]);
+    expect(h.data.writes).toEqual([
+      { containerPath: "/container", spec: input.spec, assets: undefined },
+    ]);
     expect(h.files.removed).toEqual(["/temp/install"]);
   });
 
@@ -195,7 +204,9 @@ describe("IosPrototypeInstaller", () => {
         displayName: input.prototypeId,
       });
       expect(h.simctl.installed).toEqual([{ udid, appPath: app }]);
-      expect(h.data.writes).toEqual([{ containerPath: "/container", spec: input.spec }]);
+      expect(h.data.writes).toEqual([
+        { containerPath: "/container", spec: input.spec, assets: undefined },
+      ]);
       expect(h.files.removed).toEqual(["/temp/install"]);
       expect(warn).toHaveBeenCalledWith("Could not remove temporary prototype viewer directory", {
         temp: "/temp/install",
@@ -218,17 +229,34 @@ describe("IosPrototypeInstaller", () => {
 
   test("update reinstalls same bundle and replaces spec without uninstalling", async () => {
     const h = harness();
-    const writer = new DefaultDataContainerWriter(h.files);
-    spyOn(h.data, "write").mockImplementation((path, spec) => writer.write(path, spec));
-    const first = await h.installer.install(input);
-    const second = await h.installer.install({ ...input, spec: { version: 2 } });
+    const files = new FakeSavedPrototypeLayoutFileSystem();
+    const writer = new DefaultDataContainerWriter(
+      new DirectorySavedPrototypeLayoutWriter(files, new FakeIdGenerator()),
+      h.files,
+    );
+    spyOn(h.data, "write").mockImplementation((path, spec, assets) =>
+      writer.write(path, spec, assets),
+    );
+    const spec = JSON.parse(fixture.specJson) as PrototypeJson;
+    const first = await h.installer.install({ ...input, spec });
+    const updatedSpec = { ...spec, id: "updated" };
+    const second = await h.installer.install({ ...input, spec: updatedSpec });
     expect(first.bundleId).toBe(second.bundleId);
     expect(h.simctl.containers).toEqual([first.bundleId, first.bundleId]);
     expect(h.simctl.installed).toHaveLength(2);
     expect(h.simctl.deleted).toEqual([]);
     expect(h.plist.written?.value.CFBundleName).toBe(input.prototypeId);
     expect(h.plist.written?.value.CFBundleDisplayName).toBe(input.prototypeId);
-    expect(h.files.files.get("/container/Documents/prototype.json")).toBe('{"version":2}');
+    expect(
+      Buffer.from(files.files.get("/container/Documents/prototype/spec.json") ?? []).toString(),
+    ).toBe(JSON.stringify(updatedSpec));
+    expect(files.files.has("/container/Documents/prototype.json")).toBe(false);
+    expect(h.files.removed).toEqual([
+      "/container/Documents/prototype.json",
+      "/temp/install",
+      "/container/Documents/prototype.json",
+      "/temp/install",
+    ]);
   });
 
   test("lists only prototype prefix apps and deletes by bundle id or explicit prototype id", async () => {
@@ -288,16 +316,48 @@ describe("IosPrototypeInstaller", () => {
     });
   }
 
-  test("default data writer only creates Documents and writes prototype.json", async () => {
+  test("default data writer delegates versioned layout and removes legacy spec", async () => {
     const operations = new InstallerOperationRecorder();
     const files = new FakeInstallerFileSystem(operations);
-    await new DefaultDataContainerWriter(files).write("/data", { screens: [1], unicode: "日本" });
-    expect(operations.events).toEqual([
-      "mkdir:/data/Documents",
-      "write:/data/Documents/prototype.json",
+    const layout = new FakeSavedPrototypeLayoutWriter();
+    const spec = JSON.parse(fixture.specJson) as PrototypeJson;
+    await new DefaultDataContainerWriter(layout, files).write("/data", spec);
+    expect(layout.requests).toEqual([
+      {
+        destination: "/data/Documents/prototype",
+        request: { specJson: JSON.stringify(spec), assets: [] },
+      },
     ]);
-    expect([...files.files]).toEqual([
-      ["/data/Documents/prototype.json", '{"screens":[1],"unicode":"日本"}'],
-    ]);
+    expect(operations.events).toEqual(["cleanup"]);
+    expect(files.removed).toEqual(["/data/Documents/prototype.json"]);
+    expect([...files.files]).toEqual([]);
+  });
+
+  test("passes caller image and font bytes unchanged to the data writer", async () => {
+    const h = harness();
+    const assets: readonly PrototypeAssetUpload[] = [
+      { id: "image", mimeType: "image/png", bytes: Uint8Array.of(1) },
+      { id: "font", mimeType: "font/ttf", bytes: Uint8Array.of(2) },
+    ];
+    await h.installer.install({ ...input, assets });
+    expect(h.data.writes).toEqual([{ containerPath: "/container", spec: input.spec, assets }]);
+    expect(h.data.writes[0].assets).toBe(assets);
+  });
+
+  test("wraps layout rejection with its reason in DataWriteError", async () => {
+    const h = harness();
+    const layout = new FakeSavedPrototypeLayoutWriter();
+    layout.result = { kind: "rejected", reason: "INVALID_SPEC", message: "Invalid saved spec" };
+    const writer = new DefaultDataContainerWriter(layout, h.files);
+    spyOn(h.data, "write").mockImplementation((path, spec, assets) =>
+      writer.write(path, spec, assets),
+    );
+    const error = await h.installer.install(input).then(
+      () => undefined,
+      (reason) => reason,
+    );
+    expect(error).toBeInstanceOf(errors.DataWriteError);
+    expect(error.cause).toMatchObject({ message: "Invalid saved spec", reason: "INVALID_SPEC" });
+    expect(h.files.removed).toEqual(["/temp/install"]);
   });
 });

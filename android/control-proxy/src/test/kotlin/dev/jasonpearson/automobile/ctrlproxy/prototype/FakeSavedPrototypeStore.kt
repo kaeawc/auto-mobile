@@ -36,8 +36,15 @@ internal class FakeSavedPrototypeStore(private val clock: () -> Long = { 0L }) :
       }
       .sortedWith(compareByDescending<SavedPrototypeSummary> { it.savedAt }.thenBy { it.id })
 
-  override fun load(id: String): SavedPrototypeLoadResult =
-    stored[id] ?: SavedPrototypeLoadResult.NotFound
+  val loadCalls = mutableListOf<String>()
+  var loadResult: SavedPrototypeLoadResult? = null
+  var loadFailure: Exception? = null
+
+  override fun load(id: String): SavedPrototypeLoadResult {
+    loadCalls += id
+    loadFailure?.let { throw it }
+    return loadResult ?: stored[id] ?: SavedPrototypeLoadResult.NotFound
+  }
 
   override fun delete(id: String): Boolean = stored.remove(id) != null
 }

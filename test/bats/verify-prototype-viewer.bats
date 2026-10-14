@@ -35,11 +35,11 @@ set -euo pipefail
 if [[ "$1" == -extract ]]; then
   echo "${VERIFY_TEST_MINOS:-17.0}"
 else
-  [[ "$1 $2 $3" == '-convert xml1 -o' ]]
+  [[ "$1 $2 $3 $4" == '-convert xml1 -o -' ]]
   if [[ "${VERIFY_TEST_FAILURE:-}" == icon ]]; then
-    printf '<plist version="1.0"><dict><key>CFBundleIcons</key><dict><key>CFBundleIconName</key><string>icon</string></dict></dict></plist>' > "$4"
+    printf '<plist version="1.0"><dict><key>CFBundleIcons</key><dict><key>CFBundleIconName</key><string>icon</string></dict></dict></plist>'
   else
-    printf '<plist version="1.0"><dict/></plist>' > "$4"
+    printf '<plist version="1.0"><dict/></plist>'
   fi
 fi
 SCRIPT

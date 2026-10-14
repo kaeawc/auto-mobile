@@ -561,5 +561,6 @@ Prepare Release records the archive SHA-256 in `prototypeViewerSha256` alongside
 pin, and includes `prototype-viewer` in artifact provenance. Release reuses that
 verified artifact and publishes its checksum in the release notes. Older registry
 entries omit the optional viewer pin and resolve to "viewer unavailable". The
-release URL and checksum resolvers provide the metadata for a later host-side
-provider; this release wiring does not install or launch the viewer.
+host template provider resolves an explicit path, then `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`,
+then configured local builds, then a checksum-pinned release cache or download
+(unless `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD` is enabled).

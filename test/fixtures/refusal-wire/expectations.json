@@ -612,6 +612,24 @@
         "acquireNewSession": true
       }
     },
+    "target_identity_unresolved": {
+      "expected": "retry",
+      "fields": {
+        "code": "target_identity_unresolved",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
+    "target_identity_unresolved.device": {
+      "expected": "retry",
+      "fields": {
+        "code": "target_identity_unresolved",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
     "daemon_queue_timeout": {
       "expected": "retry",
       "fields": {

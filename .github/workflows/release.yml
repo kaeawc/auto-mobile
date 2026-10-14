@@ -30,6 +30,12 @@ permissions:
   id-token: write
   packages: write
 
+# Release builds must not consume or seed Actions caches: cache entries are
+# unsigned, and any job on main can write a key a release step restores
+# (setup-bun binary, Gradle, buildx, Android SDK, gems). Called reusable
+# workflows cannot exceed this mode, so it also covers their builds.
+cache-mode: none
+
 jobs:
   validate-release-tag:
     name: "Validate Release Tag"
@@ -107,6 +113,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+          no-cache: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -344,13 +351,27 @@ jobs:
       # Central automatically releases its deployment, so a later npm/Homebrew
       # failure must never make a new SDK selectable without its matching APK.
       # The MCP Registry and Docker image are best-effort distribution channels.
+      #
+      # mcp-publisher runs with MCP_DNS_PRIVATE_KEY, which controls every server
+      # name under our DNS namespace, so the binary is pinned to a release and
+      # its SHA-256 is checked before extraction. To bump: take the
+      # mcp-publisher_linux_amd64.tar.gz line from the release's
+      # registry_<version>_checksums.txt (it also matches the asset digest in
+      # the GitHub releases API).
       - name: Install mcp-publisher
         continue-on-error: true
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
         run: |
+          set -euo pipefail
           URL="https://github.com/modelcontextprotocol/registry"
-          URL="$URL/releases/latest/download"
+          URL="$URL/releases/download/$MCP_PUBLISHER_VERSION"
           URL="$URL/mcp-publisher_linux_amd64.tar.gz"
-          curl -L "$URL" | tar xz mcp-publisher
+          curl -fsSL --retry 3 -o mcp-publisher.tar.gz "$URL"
+          echo "$MCP_PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+          rm mcp-publisher.tar.gz
 
       - name: Create GitHub Release
         shell: bash
@@ -423,7 +444,6 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "21"
-          cache: "gradle"
 
       - name: Setup Android SDK
         continue-on-error: true
@@ -529,6 +549,7 @@ jobs:
         continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          MCP_DNS_PRIVATE_KEY: ${{ secrets.MCP_DNS_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           # Assign first, then test — see the npm step for why.
@@ -538,7 +559,7 @@ jobs:
             exit 0
           fi
           ./mcp-publisher login dns --domain jasonpearson.dev \
-            --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
+            --private-key "$MCP_DNS_PRIVATE_KEY"
           ./mcp-publisher publish
 
       # Homebrew publishing moved to its own terminal `publish-homebrew` job
@@ -601,8 +622,6 @@ jobs:
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Summary
         env:

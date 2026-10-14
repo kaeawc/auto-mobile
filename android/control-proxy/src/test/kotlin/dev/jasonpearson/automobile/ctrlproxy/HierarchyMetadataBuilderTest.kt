@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import java.io.File
@@ -33,6 +34,7 @@ class HierarchyMetadataBuilderTest {
           deviceModel = "Pixel",
           isEmulator = true,
           accessibilityTool = true,
+          panelFingerprint = PanelFingerprintInfo(1080, 2400),
         ),
       )
 
@@ -40,6 +42,8 @@ class HierarchyMetadataBuilderTest {
     requireNotNull(hierarchy).run {
       assertEquals(2, displayId)
       assertEquals("display-2", panelUniqueId)
+      assertEquals(1080, panelFingerprint?.width)
+      assertEquals(2400, panelFingerprint?.height)
       assertEquals(1080, screenWidth)
       assertEquals(2400, screenHeight)
       assertEquals(1, rotation)
@@ -75,6 +79,7 @@ class HierarchyMetadataBuilderTest {
       listOf(
         "displayId",
         "panelUniqueId",
+        "panelFingerprint",
         "screenWidth",
         "screenHeight",
         "rotation",

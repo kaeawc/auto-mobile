@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceMode
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceSource
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import java.util.Random
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -33,6 +34,105 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ViewHierarchyExtractorTest {
+
+  @Test
+  fun `prototype presence precedes content filtering and null roots remain unknown`() {
+    val calls = mutableListOf<Boolean?>()
+    val extractor =
+      ViewHierarchyExtractor(
+        prototypeHiddenReason = { _, captured ->
+          calls += captured
+          null
+        },
+      )
+    val ownPackage = "dev.jasonpearson.automobile.ctrlproxy"
+    for (root in listOf(fakeNode(ownPackage), null)) {
+      val frame =
+        extractor.extractFromAllWindows(
+          listOf(
+            fakeWindow(
+              1,
+              1,
+              root,
+              type = AccessibilityWindowInfo.TYPE_SYSTEM,
+              title = PROTOTYPE_WINDOW_TITLE,
+            ),
+          ),
+          null,
+        )
+      assertEquals(if (root == null) null else true, calls.last())
+      assertNull(frame.hierarchy)
+    }
+  }
+
+  @Test
+  fun `filtered prototype beside readable app is still captured`() {
+    val calls = mutableListOf<Boolean?>()
+    val extractor =
+      ViewHierarchyExtractor(
+        prototypeHiddenReason = { _, captured ->
+          calls += captured
+          null
+        },
+      )
+    val frame =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(1, 0, fakeNode("app.example", text = "App")),
+          fakeWindow(
+            2,
+            1,
+            fakeNode("dev.jasonpearson.automobile.ctrlproxy"),
+            type = AccessibilityWindowInfo.TYPE_SYSTEM,
+            title = PROTOTYPE_WINDOW_TITLE,
+          ),
+        ),
+        null,
+      )
+    assertEquals(listOf(true), calls)
+    assertEquals(listOf("App"), frame.hierarchy?.children?.map { it.text })
+  }
+
+  @Test
+  fun `hidden provider receives captured own window presence and single root unknown`() {
+    val calls = mutableListOf<Pair<Int, Boolean?>>()
+    val extractor =
+      ViewHierarchyExtractor(
+        prototypeHiddenReason = { display, captured ->
+          calls += display to captured
+          PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN
+        },
+      )
+    val ownPackage = "dev.jasonpearson.automobile.ctrlproxy"
+    for ((pkg, title, expected) in
+      listOf(
+        Triple(ownPackage, PROTOTYPE_WINDOW_TITLE, true),
+        Triple("com.android.systemui", PROTOTYPE_WINDOW_TITLE, false),
+        Triple(ownPackage, "Highlight", false),
+      )) {
+      val frame =
+        extractor.extractFromAllWindows(
+          listOf(
+            fakeWindow(
+              1,
+              1,
+              fakeNode(pkg, text = "Window"),
+              type = AccessibilityWindowInfo.TYPE_SYSTEM,
+              title = title,
+            ),
+          ),
+          null,
+          disableAllFiltering = true,
+          displayId = 2,
+        )
+      assertEquals(2 to expected, calls.last())
+      assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, frame.prototypeHiddenReason)
+    }
+    val single =
+      extractor.extractFromActiveWindow(fakeNode("app.example", text = "Root"), displayId = 3)
+    assertEquals(3 to null, calls.last())
+    assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, single?.prototypeHiddenReason)
+  }
 
   @Test
   fun `window extraction selects only the requested display roots`() {

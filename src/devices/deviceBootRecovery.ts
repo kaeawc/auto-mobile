@@ -9,7 +9,10 @@ import {
 import type { DeviceProvisioner } from "./deviceProvisioning";
 import { MultiPlatformDeviceManager } from "./deviceUtils";
 import type { PlatformDeviceManager } from "./deviceUtils";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimulatorStillShuttingDownError,
+  SimCtlClient,
+} from "../utils/ios-cmdline-tools/SimCtlClient";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -58,7 +61,18 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       firstFailure = error;
     }
     this.throwIfCancelled(signal);
-    await this.recover(signal, () => this.dependencies.shutdown(target));
+    try {
+      await this.recover(signal, () => this.dependencies.shutdown(target), true);
+    } catch (error) {
+      if (error instanceof SimulatorStillShuttingDownError) {
+        logger.warn(
+          "[CI iOS boot] simulator shutdown remains pending; skipping erase and boot retry",
+          error,
+        );
+        throw firstFailure;
+      }
+      throw error;
+    }
     this.throwIfCancelled(signal);
     await this.recover(signal, () => this.dependencies.erase(target.deviceId!));
     this.throwIfCancelled(signal);
@@ -87,10 +101,14 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
   private async recover(
     signal: AbortSignal | undefined,
     action: () => Promise<void>,
+    guardPendingShutdown = false,
   ): Promise<void> {
     const actionPromise = Promise.resolve()
       .then(action)
       .catch((error) => {
+        if (guardPendingShutdown && error instanceof SimulatorStillShuttingDownError) {
+          throw error;
+        }
         // Recovery is best-effort; an unavailable simulator can still be retried.
         logger.debug(`[CI iOS boot] recovery command failed: ${error}`);
       });

@@ -1,3 +1,10 @@
+import { getHostEmulatorProcessStopper } from "../../src/devices/hostEmulatorProcessStopper";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -111,6 +118,10 @@ describe("a recovery's stop confirmation after killing an untracked emulator (#1
       // Routed into the unconfirmed-recovery path: deferred, not relaunched.
       expect(outcome).toEqual({ result: "deferred" });
       expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.killOptions[0]?.processStop?.expectedAvdName).toBe(original.name);
+      expect(s.manager.killOptions[0]?.processStop?.stopper).toBe(
+        getHostEmulatorProcessStopper(s.timer),
+      );
       expect(s.manager.startedDevices).toHaveLength(0);
       expect(s.manager.offlineProbes.length).toBeGreaterThan(1);
       expect(s.manager.offlineProbes.every((ids) => ids.join() === original.deviceId)).toBe(true);
@@ -158,6 +169,10 @@ describe("a recovery's stop confirmation after killing an untracked emulator (#1
       const outcome = await s.recover();
       expect(outcome).toEqual({ result: "recovered" });
       expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.killOptions[0]?.processStop?.expectedAvdName).toBe(original.name);
+      expect(s.manager.killOptions[0]?.processStop?.stopper).toBe(
+        getHostEmulatorProcessStopper(s.timer),
+      );
       expect(s.manager.offlineProbes).toEqual([[original.deviceId]]);
       expect(s.manager.startedDevices).toHaveLength(1);
     } finally {
@@ -184,6 +199,10 @@ describe("a recovery's stop when the AVD is already absent from the online list 
       const outcome = await s.recover();
       expect(outcome).toEqual({ result: "recovered" });
       expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.killOptions[0]?.processStop?.expectedAvdName).toBe(original.name);
+      expect(s.manager.killOptions[0]?.processStop?.stopper).toBe(
+        getHostEmulatorProcessStopper(s.timer),
+      );
       expect(s.manager.killTargets[0]).toEqual({
         deviceId: original.deviceId,
         name: original.name,
@@ -204,6 +223,10 @@ describe("a recovery's stop when the AVD is already absent from the online list 
       const outcome = await s.recover();
       expect(outcome).toEqual({ result: "deferred" });
       expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.killOptions[0]?.processStop?.expectedAvdName).toBe(original.name);
+      expect(s.manager.killOptions[0]?.processStop?.stopper).toBe(
+        getHostEmulatorProcessStopper(s.timer),
+      );
       expect(s.manager.startedDevices).toHaveLength(0);
       expect(s.pool.getRecoveringAndroidTargets().names).toEqual(new Set([original.name]));
     } finally {
@@ -224,3 +247,50 @@ describe("a recovery's stop when the AVD is already absent from the online list 
     }
   });
 });
+
+for (const offline of [false, true]) {
+  test(`pool ${offline ? "offline" : "online"} recovery completes through real console-timeout process fallback`, async () => {
+    const s = await setup();
+    try {
+      const adb = new FakeAdbExecutor();
+      adb.setDevices(offline ? [] : [original]);
+      adb.setDeviceStates([{ deviceId: original.deviceId, state: offline ? "offline" : "device" }]);
+      adb.setCommandResponse("emu avd name", createExecResult(`${original.name}\nOK\n`, ""));
+      const execute = adb.execute.bind(adb);
+      adb.execute = async (args, options) => {
+        const result = await execute(args, options);
+        if (args.join(" ") === "emu kill") {
+          throw new AdbCommandTimeoutError("mute emulator console");
+        }
+        return result;
+      };
+      const client = new AndroidEmulatorClient(null, null, s.timer, new FakeAdbClientFactory(adb));
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.outcome = { kind: "stopped", pid: 42, signal: "SIGTERM" };
+      stopper.onStop = () => {
+        s.manager.bootedDevices = [];
+        s.manager.offlineSerials.clear();
+      };
+      s.manager.killDevice = async (device, options) => {
+        await client.killDevice(device, {
+          ...options,
+          processStop: { stopper, expectedAvdName: original.name },
+        });
+      };
+      if (offline) {
+        s.manager.bootedDevices = [];
+        s.manager.offlineSerials.add(original.deviceId);
+      }
+      expect(await s.recover()).toEqual({ result: "recovered" });
+      expect(stopper.stopCalls).toHaveLength(1);
+      expect(stopper.stopCalls[0][0]).toEqual({
+        serial: original.deviceId,
+        avdName: original.name,
+      });
+      expect(s.manager.startedDevices).toHaveLength(1);
+      expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+    } finally {
+      s.sessions.stopCleanupTimer();
+    }
+  });
+}

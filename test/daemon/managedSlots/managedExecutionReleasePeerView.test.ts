@@ -261,6 +261,7 @@ describe("managed execution release peer view", () => {
           () => ({
             restore: async () => {
               writes.push("restore");
+              return { status: "restored" as const };
             },
           }),
         );

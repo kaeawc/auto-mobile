@@ -123,6 +123,25 @@ describe("startDevice Android deviceId with incomplete discovery", () => {
 });
 
 describe("startDevice Android deviceId with complete discovery", () => {
+  test("an unanswered emulator identity probe is a typed retryable refusal", async () => {
+    const { error } = await resolveOutcome(
+      managerWith({ devices: [emulator("Unknown (emulator-5554)")] }, {}),
+    );
+
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(wire(error)).toMatchObject({
+      success: false,
+      code: "target_identity_unresolved",
+      retryable: true,
+      retryAfterMs: 1000,
+      deviceId: "emulator-5554",
+      candidateSerials: ["emulator-5554"],
+    });
+    expect((error as Error).message).toContain("emulator-5554");
+    expect((error as Error).message).toContain("killDevice");
+    expect((error as Error).message).toContain("startDevice");
+  });
+
   test("a duplicate serial stays a plain, non-retryable ambiguity", async () => {
     const { error } = await resolveOutcome(
       managerWith({ devices: [emulator("A"), emulator("B")] }, {}),

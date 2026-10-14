@@ -5,6 +5,7 @@ import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import type { PlistReader, PlistWriter } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { PrototypeJson } from "../prototypeSpec";
+import type { PrototypeAssetUpload } from "../prototypeAssets";
 import { isPrototypeBundleId, prototypeBundleId } from "./iosPrototypeBundleId";
 import type { IconRenderer, PrototypeIconInput } from "./iosPrototypeIconRenderer";
 import {
@@ -35,7 +36,11 @@ export interface InstallerFileSystem {
 }
 
 export interface DataContainerWriter {
-  write(containerPath: string, spec: PrototypeJson): Promise<void>;
+  write(
+    containerPath: string,
+    spec: PrototypeJson,
+    assets?: readonly PrototypeAssetUpload[],
+  ): Promise<void>;
 }
 
 export interface InstalledPrototype {
@@ -65,6 +70,7 @@ export interface PrototypeInstallInput {
   prototypeId: string;
   label?: string;
   spec: PrototypeJson;
+  assets?: readonly PrototypeAssetUpload[];
   icon?: PrototypeIconInput;
 }
 
@@ -132,7 +138,7 @@ export class IosPrototypeInstaller {
         (cause) => new DataContainerError(cause),
       );
       await step(
-        () => this.deps.data.write(container, input.spec),
+        () => this.deps.data.write(container, input.spec, input.assets),
         (cause) => new DataWriteError(cause),
       );
       return { bundleId, displayName };

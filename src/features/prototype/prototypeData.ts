@@ -1,5 +1,8 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { PROTOTYPE_DATA_MODEL_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_DATA_MODEL_CAPABILITY,
+  PROTOTYPE_MENUS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
 import { mapBindableFields, record, STATE_KEY, type Raw } from "./prototypeTemplate";
 
 /** RFC 6901 pointers relative to data; the whole-document empty pointer is excluded. */
@@ -241,4 +244,35 @@ export function prototypeDataModelUnsupportedMessage(
       ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
       : "Update the connected CtrlProxy";
   return `The ${device} does not advertise ${PROTOTYPE_DATA_MODEL_CAPABILITY}, so it cannot resolve the data binding at ${fields[0]}${more}: a top-level data object, repeat.items {path}, repeat.key, {data: pointer} conditions and {data:/pointer} text placeholders. Nothing was shown. ${update}, or inline the content as literal repeat.items, state keys and literal text.`;
+}
+
+/** Only node positions count: opaque action payloads may also contain a type field. */
+export function prototypeMenuFields(spec: unknown): string[] {
+  function nodes(value: unknown, path: string): string[] {
+    const node = record(value);
+    if (!node) {
+      return [];
+    }
+    return [
+      ...(node.type === "menu" || node.type === "select" ? [path] : []),
+      ...(node.child === undefined ? [] : nodes(node.child, `${path}.child`)),
+      ...(Array.isArray(node.children)
+        ? node.children.flatMap((child, index) => nodes(child, `${path}.children[${index}]`))
+        : []),
+    ];
+  }
+  return nodes(record(spec)?.root, "root");
+}
+
+export function prototypeMenusUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
+  const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
+  const update =
+    platform === "ios"
+      ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
+      : "Update the connected CtrlProxy";
+  return `The ${device} does not advertise ${PROTOTYPE_MENUS_CAPABILITY}, so it cannot render the menu or select at ${fields[0]}${more}. Nothing was shown. ${update}, or replace menu/select with buttons and radioGroup.`;
 }

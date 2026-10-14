@@ -14,7 +14,9 @@ export type PrototypePlatformNoteConstruct =
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
   | "icon.name"
-  | "icon.variant";
+  | "icon.variant"
+  | "menu"
+  | "select";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
   platform: "ios";
@@ -208,8 +210,9 @@ interface Rule {
   kind: string;
   name?: string;
   item?: Rule;
-  fields?: Record<string, { rule: Rule }>;
+  fields?: Record<string, { rule: Rule } | undefined>;
   variants?: Record<string, Rule>;
+  options?: Rule[];
 }
 const definitions: Record<string, Rule> = contract.definitions;
 
@@ -233,7 +236,8 @@ function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence
     case "object": {
       const data = value as Record<string, unknown>;
       for (const [key, field] of Object.entries(rule.fields ?? {})) {
-        occurrences(data[key], field.rule, path ? `${path}.${key}` : key, found);
+        // Imported JSON has no undefined entries; only union inference makes fields optional.
+        occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, found);
       }
       break;
     }
@@ -260,7 +264,12 @@ function referenceOccurrences(
   if (name === "node") {
     found.push({ path, node: value as Record<string, unknown> });
   }
-  occurrences(value, definitions[name]!, path, found);
+  occurrences(
+    value,
+    name === "menuItem" ? definitions.menuItem!.options![0]! : definitions[name]!,
+    path,
+    found,
+  );
 }
 
 /** Reports the supplied (normally host-expanded device) spec without I/O or mutation. */
@@ -275,7 +284,7 @@ export function prototypePlatformNotes(
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
   const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
-  return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((legacyDifference) => {
+  const notes = PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((legacyDifference) => {
     const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
     if (supports(difference.capability)) {
       return [];
@@ -301,4 +310,21 @@ export function prototypePlatformNotes(
       },
     ];
   });
+  const menus = (["menu", "select"] as const).flatMap((type): PrototypePlatformNote[] => {
+    const paths = found.filter(({ node }) => node?.type === type).map(({ path }) => path);
+    return paths.length === 0
+      ? []
+      : [
+          {
+            platform: "ios",
+            construct: type,
+            effect: "substituted",
+            paths: paths.slice(0, 20),
+            ...(paths.length > 20 ? { total: paths.length } : {}),
+            detail:
+              "iOS draws menu/select in the prototype window rather than the system Menu/Picker popup so observe and tapOn can reach the items.",
+          },
+        ];
+  });
+  return [...notes, ...menus];
 }

@@ -1004,6 +1004,9 @@ export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
  */
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
+/** In-window menu and select nodes. */
+export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
+
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 

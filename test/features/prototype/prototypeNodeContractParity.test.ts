@@ -169,3 +169,10 @@ test("spec, repeat, and condition field sets stay in step with the data contract
     expect(validatePrototypeSpec(candidate).success).toBe(false);
   }
 });
+
+test.each(["menu", "select"])("%s participates in common node contract parity", (type) => {
+  expect(PROTOTYPE_NODE_TYPES).toContain(type);
+  expect(Object.keys(contractNodes[type].fields)).toEqual(
+    expect.arrayContaining(COMMON_NODE_FIELDS),
+  );
+});

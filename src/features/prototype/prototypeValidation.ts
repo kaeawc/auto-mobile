@@ -31,7 +31,7 @@ interface Rule {
   item?: Rule;
   options?: Rule[];
   values?: string[];
-  fields?: Record<string, { rule: Rule; optional: boolean }>;
+  fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }
 export interface PrototypeValidationError {
@@ -504,7 +504,12 @@ function radioGroupErrors(
   path: string,
   stored: unknown,
 ): PrototypeValidationError | undefined {
-  const name = value.type === "segmentedButton" ? "Segmented button" : "Radio group";
+  const name =
+    value.type === "select"
+      ? "Select"
+      : value.type === "segmentedButton"
+        ? "Segmented button"
+        : "Radio group";
   if (typeof stored !== "string") {
     return fail(`${path}.stateKey`, `${name} requires a string state key`);
   }
@@ -512,7 +517,10 @@ function radioGroupErrors(
   for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
     const optionValue = object(option)?.value;
     if (values.has(optionValue)) {
-      return fail(`${path}.options[${index}].value`, "Duplicate radio option value");
+      return fail(
+        `${path}.options[${index}].value`,
+        value.type === "select" ? "Duplicate select option value" : "Duplicate radio option value",
+      );
     }
     values.add(optionValue);
   }
@@ -671,6 +679,7 @@ function componentFormErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   switch (value.type) {
+    case "select":
     case "radioGroup":
     case "segmentedButton":
       return radioGroupErrors(value, path, stored);
@@ -723,6 +732,7 @@ function bindingErrors(
 const MODAL_NAMES: Record<string, string | undefined> = {
   bottomSheet: "Sheet",
   dialog: "Dialog",
+  menu: "Menu",
   snackbar: "Snackbar",
 };
 function openWhenErrors(

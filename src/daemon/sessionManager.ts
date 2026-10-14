@@ -11803,7 +11803,11 @@ export class SessionManager {
       return;
     }
     const now = this.sessionNow();
+    const previousHeartbeat = session.lastHeartbeat;
     session.lastHeartbeat = now;
+    logger.debug(
+      `Heartbeat accepted for session ${sessionId}; previous heartbeat age=${Math.max(0, now - previousHeartbeat)}ms`,
+    );
     // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
     // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;

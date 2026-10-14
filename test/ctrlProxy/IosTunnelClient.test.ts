@@ -13,6 +13,7 @@ import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 
 const request = { localPort: 8765, devicePort: 9100, udid: "usb-device" };
 const timers: FakeTimer[] = [];
@@ -29,6 +30,8 @@ async function flush(): Promise<void> {
 }
 
 function fixture(remoteMode = false) {
+  const processGeneration = new FakeLockOwnerGenerationProbe();
+  const signals: { pid: number; signal?: NodeJS.Signals }[] = [];
   const timer = new FakeTimer();
   timers.push(timer);
   function fakeChild(): FakeChildProcess {
@@ -56,13 +59,23 @@ function fixture(remoteMode = false) {
     stopIproxy: async () => ({ success: true }),
     getIproxyStatus: async () => ({ success: true, data: { running: true } }),
   };
-  const state = { connected: true, stopping: false, simulator: false, port: request.localPort };
+  const state = {
+    connected: true,
+    stopping: false,
+    simulator: false,
+    port: request.localPort,
+    remoteMode,
+  };
   const processClient = new IosCtrlProxyProcessClient(executor, timer);
   const client = new DefaultIosTunnelClient({
     processExecutor: executor,
     timer,
     remoteRunner: remote,
-    useRemoteRunner: () => remoteMode,
+    useRemoteRunner: () => state.remoteMode,
+    processGeneration,
+    signalProcess: (pid, signal) => {
+      signals.push({ pid, signal });
+    },
     isRunning: (pid) => processClient.isRunning(pid),
     isConnected: async () => state.connected,
     prepareRemoteStart: async () => {},
@@ -77,15 +90,50 @@ function fixture(remoteMode = false) {
         supervise: false,
       }),
   });
-  return { timer, executor, child, client, remote, state };
+  return { timer, executor, child, client, remote, state, processGeneration, signals };
 }
 
 describe("IosTunnelClient", () => {
+  for (const forced of [false, true]) {
+    test.each(["different", "same", "unknown", "unavailable"] as const)(
+      `remote PID fallback forced=${forced} respects %s generation`,
+      async (verdict) => {
+        const f = fixture(true);
+        if (verdict === "unavailable") {
+          f.processGeneration.token = undefined;
+        }
+        await f.client.start({ ...request, supervise: false });
+        // This assertion also keeps the pre-implementation red run from reaching a real signal.
+        expect(f.processGeneration.currentCalls).toEqual([123]);
+        if (verdict !== "unavailable") {
+          f.processGeneration.verdict = verdict;
+        }
+        f.state.remoteMode = false;
+        if (forced) {
+          const stop = f.client.prepareForcedStop();
+          expect(f.client.localPort).toBeNull();
+          stop.killLocal();
+        } else {
+          await f.client.stop();
+        }
+        expect(f.signals).toEqual(
+          verdict === "different" ? [] : [{ pid: 123, signal: forced ? "SIGKILL" : undefined }],
+        );
+        expect(f.processGeneration.compareCalls).toEqual(
+          verdict === "unavailable" ? [] : [{ pid: 123, recorded: f.processGeneration.token! }],
+        );
+        expect(f.client.localPort).toBeNull();
+        await f.client.stop();
+        expect(f.signals).toHaveLength(verdict === "different" ? 0 : 1);
+      },
+    );
+  }
   test("argv-only local startup records only the host port; a live duplicate reuses its owned child", async () => {
-    const { client, executor } = fixture();
+    const { client, executor, child, processGeneration } = fixture();
     await client.start(request);
     await client.start(request);
     expect(executor.getSpawnedProcesses()).toHaveLength(1);
+    expect(processGeneration.currentCalls).toEqual([child.pid!]);
     expect(executor.getSpawnedProcesses()[0].args).toEqual(["8765", "8765", "usb-device"]);
     expect(client.localPort).toBe(8765);
     expect(client.devicePort).toBeNull();

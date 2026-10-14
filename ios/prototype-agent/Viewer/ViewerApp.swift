@@ -1,4 +1,5 @@
 import CoreText
+import CryptoKit
 import SwiftUI
 import UIKit
 
@@ -84,8 +85,13 @@ struct PrototypeViewerApp: App {
 }
 
 @MainActor
-private struct PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
+private final class PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
     let model: PrototypeModel
+    private var registeredFontDigests: [String: SHA256.Digest] = [:]
+
+    init(model: PrototypeModel) {
+        self.model = model
+    }
 
     func registerImage(id: String, data: Data) -> Bool {
         guard let image = UIImage(data: data) else { return false }
@@ -93,19 +99,23 @@ private struct PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
         return true
     }
 
-    func registerFont(id: String, data: Data) -> String? {
+    func registerFont(id _: String, data: Data) -> String? {
         guard let provider = CGDataProvider(data: data as CFData),
               let font = CGFont(provider), let name = font.postScriptName
         else { return nil }
+        let face = name as String
+        let digest = SHA256.hash(data: data)
+        if let registeredDigest = registeredFontDigests[face], registeredDigest != digest { return nil }
         var error: Unmanaged<CFError>?
         let registered = CTFontManagerRegisterGraphicsFont(font, &error)
         let registrationError = error?.takeRetainedValue()
-        guard registered || registrationError.map({
-            CFErrorGetDomain($0) as String == kCTFontManagerErrorDomain as String &&
-                CFErrorGetCode($0) == CTFontManagerError.alreadyRegistered.rawValue
-        }) == true else { return nil }
-        let face = name as String
-        model.fontFaces[id] = face
+        var alreadyRegistered = false
+        if let registrationError, registeredFontDigests[face] == digest {
+            alreadyRegistered = CFErrorGetDomain(registrationError) as String == kCTFontManagerErrorDomain as String
+                && CFErrorGetCode(registrationError) == CTFontManagerError.alreadyRegistered.rawValue
+        }
+        guard registered || alreadyRegistered else { return nil }
+        registeredFontDigests[face] = digest
         return face
     }
 }

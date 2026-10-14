@@ -114,6 +114,21 @@ final class PrototypeViewerLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreadableAssetSortsBeforeExistingReaderProblem() async throws {
+        let problem = PrototypeSavedProblem(assetId: "z", kind: .missing, detail: "missing file")
+        let value = try saved(assets: ["a": asset("a", font: true)], problems: [problem])
+        let registrar = FakeRegistrar()
+        registrar.rejected = ["a"]
+        let launch = PrototypeViewerLayoutLoader(
+            reader: FakeReader(.loaded(value)), fallback: FakeFallback(), registrar: registrar
+        ).load(directory: directory)
+        XCTAssertTrue(launch.fontFaces.isEmpty)
+        XCTAssertEqual(launch.problems.map(\.assetId), ["a", "z"])
+        XCTAssertEqual(launch.problems.map(\.kind), [.unreadable, .missing])
+        XCTAssertEqual(launch.problems.last?.wireObject, problem.wireObject)
+    }
+
+    @MainActor
     func testNotFoundUsesBundledDemoOrNone() async throws {
         let value = try saved()
         let fallback = FakeFallback(.loaded(value.spec, specBytes: 123))

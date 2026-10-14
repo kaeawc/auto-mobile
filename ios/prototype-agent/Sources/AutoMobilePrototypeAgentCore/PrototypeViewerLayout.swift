@@ -83,6 +83,9 @@ struct PrototypeViewerLayoutLoader {
                 ))
             }
         }
+        problems.sort {
+            ($0.assetId, $0.kind.rawValue) < ($1.assetId, $1.kind.rawValue)
+        }
         return PrototypeViewerLaunch(
             content: .loaded(saved.spec, specBytes: specBytes),
             registeredImageIds: images, fontFaces: fonts, problems: problems

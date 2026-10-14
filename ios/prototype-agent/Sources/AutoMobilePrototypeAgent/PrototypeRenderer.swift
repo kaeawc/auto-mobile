@@ -453,7 +453,7 @@ struct NodeView: View {
         let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
         let font: Font
         if let id = resolved.fontAsset, let face = model.fontFaces[id] {
-            font = .custom(face, size: scaled).weight(weight)
+            font = .custom(face, fixedSize: scaled).weight(weight)
         } else {
             font = .system(size: scaled, weight: weight, design: design)
         }

@@ -584,6 +584,26 @@ describe("Android CtrlProxyText", () => {
         socket.sentMessages.length = 0;
       }
 
+      for (const editorConsumed of [true, false, undefined, null, 1, "true"]) {
+        const promise = textDelegate.commitViaIme("value", "prior-ime");
+        const nextRequest = await waitForRequest(socket, "request_commit_text");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "commit_text_result",
+            requestId: nextRequest.requestId,
+            success: true,
+            editorConsumed,
+          }),
+        );
+        const result = await promise;
+        if (editorConsumed === true) {
+          expect(result).toHaveProperty("editorConsumed", true);
+        } else {
+          expect(result).not.toHaveProperty("editorConsumed");
+        }
+        socket.sentMessages.length = 0;
+      }
+
       const eventPromise = textDelegate.commitViaIme(
         "Ab!",
         "prior-ime",
@@ -1264,5 +1284,33 @@ describe("IME commit trace wire response", () => {
       await client.close();
       expect(timer.getPendingTimeoutCount()).toBe(0);
     }
+  });
+});
+
+describe("device-confirmed consumed editor input", () => {
+  const confirmed = { deviceSucceeded: true, editorConsumed: true };
+  test.each([
+    ["helloworld", "hello\nworld"],
+    ["cd", "ab cd"],
+    ["cdEF", "ab cd\nef"],
+    ["(123)", "prefix 123"],
+  ])("accepts consumed input %j from %j only with both flags", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(true);
+    expect(imeInsertedTextMatches(inserted, sent, { deviceSucceeded: true })).toBe(false);
+    expect(imeInsertedTextMatches(inserted, sent, { editorConsumed: true })).toBe(false);
+    expect(
+      imeInsertedTextMatches(inserted, sent, { deviceSucceeded: false, editorConsumed: true }),
+    ).toBe(false);
+  });
+  test.each([
+    ["ab", "ab cd"],
+    ["", "ab cd"],
+    ["hello", "hello\nworld"],
+    ["abc", "a\nb\nc"],
+    ["abc", "a\nbc\n"],
+    ["helloworld", "hello\r\nworld"],
+    ["cd", "x".repeat(4097) + "cd"],
+  ])("rejects incomplete or unbounded input %j from %j", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(false);
   });
 });

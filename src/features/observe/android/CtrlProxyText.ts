@@ -32,6 +32,8 @@ export interface ImeCommitActionResult extends BaseResult {
   trace?: string[];
   /** Editor delta captured by the device; internal transport evidence only. */
   insertedText?: string;
+  /** Device reconciliation confirmed input consumed by the editor. */
+  editorConsumed?: boolean;
   partialApplication?: boolean;
   /** Device upper bound on dispatched editing units; absent/zero means unknown or none. */
   committedUnits?: number;
@@ -112,7 +114,7 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
 export function imeInsertedTextMatches(
   insertedText: string,
   text: string,
-  options?: { deviceSucceeded?: boolean },
+  options?: { deviceSucceeded?: boolean; editorConsumed?: boolean },
 ): boolean {
   if (options?.deviceSucceeded === true && text.endsWith("\n") && !text.endsWith("\r\n")) {
     if (text === "\n") {
@@ -123,6 +125,52 @@ export function imeInsertedTextMatches(
       return true;
     }
   }
+  return (
+    imeInsertedTextStrictMatches(insertedText, text) ||
+    (options?.deviceSucceeded === true &&
+      options.editorConsumed === true &&
+      imeEditorConsumedMatches(insertedText, text))
+  );
+}
+
+/** Bound additional strict checks, including suffix/newline combinations, on rich-text input. */
+function imeEditorConsumedMatches(insertedText: string, text: string): boolean {
+  if (insertedText.length === 0 || text.length > 4096) {
+    return false;
+  }
+  let candidates = 0;
+  const matches = (candidate: string): boolean => {
+    candidates++;
+    // Marker-only candidates carry no read-back evidence (the strict matcher skips them).
+    return (
+      candidate.replace(/[*_~`]/g, "").length > 0 &&
+      imeInsertedTextStrictMatches(insertedText, candidate)
+    );
+  };
+  // Try the whole request first, then proper suffixes from longest to shortest.
+  for (let start = 0; start < text.length && candidates < 128; start++) {
+    const suffix = text.slice(start);
+    if (start > 0 && matches(suffix)) {
+      return true;
+    }
+    for (
+      let index = suffix.indexOf("\n");
+      index >= 0 && candidates < 128;
+      index = suffix.indexOf("\n", index + 1)
+    ) {
+      // A CRLF is one editor unit; this tolerance is for a consumed LF only.
+      if (
+        text[start + index - 1] !== "\r" &&
+        matches(suffix.slice(0, index) + suffix.slice(index + 1))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function imeInsertedTextStrictMatches(insertedText: string, text: string): boolean {
   const markers = /[*_~`]/g;
   if (text.replace(markers, "").length === 0) {
     return true;

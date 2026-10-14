@@ -158,6 +158,7 @@ class ImeCommitDriverTest {
     assertEquals(listOf("A", "😀", "e\u0301", family, flag, "B"), sink.committedChars)
     assertEquals(text, sink.committedChars.joinToString(""))
     assertEquals(6, result.committedUnits)
+    assertFalse(result.editorConsumed)
   }
 
   @Test
@@ -920,6 +921,7 @@ class ImeCommitDriverTest {
   fun `finish and same editor non restart with no applied units never resends`() {
     val sink = restartingSink("existing:", false)
     val result = commit(sink, "line one", PRIOR_IME_ID)
+    assertFalse(result.editorConsumed)
     assertEquals(NONE_APPLIED_ERROR, result.error)
     assertEquals("existing:", sink.editorText)
     assertEquals("", result.insertedText)
@@ -1062,6 +1064,7 @@ class ImeCommitDriverTest {
     assertEquals(2, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
+    assertFalse(result.editorConsumed)
     assertEquals("hello\n", result.insertedText)
     assertEquals("hello\n", sink.editorText)
   }
@@ -1080,6 +1083,7 @@ class ImeCommitDriverTest {
     assertEquals(1, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
+    assertTrue(result.editorConsumed)
     assertEquals("line oneline two", result.insertedText)
     assertEquals("line oneline two", sink.editorText)
   }
@@ -1241,6 +1245,7 @@ class ImeCommitDriverTest {
     val result = commit(sink, "ab cd", PRIOR_IME_ID)
     assertTrue(result.success)
     assertNull(result.error)
+    assertTrue(result.editorConsumed)
     assertEquals("cd", result.insertedText)
     assertEquals("cd", sink.editorText)
     assertEquals(listOf("a", "b", " ", "c", "d"), sink.committedChars)

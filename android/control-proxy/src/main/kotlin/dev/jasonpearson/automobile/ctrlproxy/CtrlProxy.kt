@@ -2995,6 +2995,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             result.committedUnits,
             result.insertedText,
             if (trace) result.trace else null,
+            editorConsumed = result.editorConsumed,
           )
         }
       }
@@ -7729,6 +7730,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     committedUnits: Int = 0,
     insertedText: String? = null,
     trace: List<String>? = null,
+    editorConsumed: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -7743,6 +7745,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (partialApplication) put("partialApplication", true)
           if (committedUnits > 0) put("committedUnits", committedUnits)
           if (insertedText != null) put("insertedText", insertedText)
+          if (editorConsumed) put("editorConsumed", true)
           if (trace != null) put("trace", Json.encodeToJsonElement(trace))
           if (error != null) {
             put("error", error)

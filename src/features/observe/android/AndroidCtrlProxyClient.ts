@@ -482,6 +482,7 @@ interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
   trace?: unknown;
   insertedText?: string;
+  editorConsumed?: boolean;
   partialApplication?: boolean;
   committedUnits?: number;
 }
@@ -6127,6 +6128,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.resolvePendingResponse(message, (message): ImeCommitActionResult => ({
         success: message.success,
         ...(typeof message.insertedText === "string" ? { insertedText: message.insertedText } : {}),
+        ...(message.editorConsumed === true ? { editorConsumed: true } : {}),
         ...(Array.isArray(message.trace) &&
         message.trace.every((line): line is string => typeof line === "string")
           ? { trace: message.trace.slice(-256) }

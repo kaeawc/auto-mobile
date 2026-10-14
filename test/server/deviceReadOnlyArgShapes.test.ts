@@ -45,6 +45,8 @@ describe("device read-only argument shapes", () => {
       [{ argument: "action" }],
       [{ argument: 1, values: ["get"] }],
       [{ argument: "action", values: "get" }],
+      [{ argument: "", values: ["get"] }],
+      [{ argument: "action", values: [] }],
       [{ argument: "action", values: ["get", null] }],
       [{ absentArguments: "action" }],
       [{ absentArguments: [null] }],
@@ -67,8 +69,17 @@ describe("device read-only argument shapes", () => {
     expect(anyDeviceReadOnlyArgShapeMatches(shapes, {})).toBe(true);
     expect(anyDeviceReadOnlyArgShapeMatches(shapes, { action: "set" })).toBe(false);
     expect(
+      anyDeviceReadOnlyArgShapeMatches([{ argument: "", values: ["get"] }], { action: "get" }),
+    ).toBe(false);
+    expect(
       anyDeviceReadOnlyArgShapeMatches([{ argument: "action", values: [] }], { action: "get" }),
     ).toBe(false);
-    expect(anyDeviceReadOnlyArgShapeMatches([{ absentArguments: [] }], {})).toBe(true);
+    expect(anyDeviceReadOnlyArgShapeMatches([{ absentArguments: [] }], {})).toBe(false);
+    expect(
+      anyDeviceReadOnlyArgShapeMatches(
+        [{ absentArguments: [] }, { argument: "action", values: ["get"] }],
+        { action: "get" },
+      ),
+    ).toBe(true);
   });
 });

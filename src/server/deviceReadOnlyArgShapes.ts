@@ -14,25 +14,38 @@ export function matchesDeviceReadOnlyArgShape(
   return shape.absentArguments.every((argument) => args[argument] === undefined);
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry: unknown) => typeof entry === "string")
+  );
+}
+
+function isArgumentShape(value: object): boolean {
+  return (
+    "argument" in value &&
+    !("absentArguments" in value) &&
+    typeof value.argument === "string" &&
+    value.argument.length > 0 &&
+    "values" in value &&
+    isNonEmptyStringArray(value.values)
+  );
+}
+
+function isAbsentArgumentsShape(value: object): boolean {
+  return (
+    "absentArguments" in value &&
+    !("values" in value) &&
+    isNonEmptyStringArray(value.absentArguments)
+  );
+}
+
 function isDeviceReadOnlyArgShape(value: unknown): value is DeviceReadOnlyArgShape {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  if ("argument" in value) {
-    return (
-      !("absentArguments" in value) &&
-      typeof value.argument === "string" &&
-      "values" in value &&
-      Array.isArray(value.values) &&
-      value.values.every((entry: unknown) => typeof entry === "string")
-    );
-  }
-  return (
-    !("values" in value) &&
-    "absentArguments" in value &&
-    Array.isArray(value.absentArguments) &&
-    value.absentArguments.every((entry: unknown) => typeof entry === "string")
-  );
+  return isArgumentShape(value) || isAbsentArgumentsShape(value);
 }
 
 /** Invalid wire metadata never grants read access; valid entries can still match. */

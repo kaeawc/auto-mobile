@@ -2,6 +2,7 @@ import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
+import org.gradle.api.tasks.PathSensitivity
 
 plugins {
   id("automobile.kotlin-common")
@@ -182,6 +183,22 @@ val screenshotProperties =
   )
 
 tasks.withType<Test>().configureEach {
+  inputs
+    .dir(rootProject.layout.projectDirectory.dir("../test/fixtures/prototype-spec"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeSpecFixtures")
+  inputs
+    .file(rootProject.layout.projectDirectory.file("../test/fixtures/ime-commit-contract.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("imeCommitContract")
+  inputs
+    .file(rootProject.layout.projectDirectory.file("../benchmark/prototype-frame/spec.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkSpec")
+  inputs
+    .file(rootProject.layout.projectDirectory.file("../benchmark/prototype-frame/scenarios.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkScenarios")
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }

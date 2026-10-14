@@ -436,6 +436,22 @@ export type TapOnFocusResult = TapOnElementResult & {
   [tapResolvedLayer]?: HierarchyLayer;
 };
 
+/** Keep routing metadata available to internal callers without exposing it in MCP payloads. */
+function withResolvedLayer<T extends TapOnFocusResult>(
+  result: T,
+  layer: HierarchyLayer | undefined,
+): T {
+  if (layer !== undefined) {
+    Object.defineProperty(result, tapResolvedLayer, {
+      value: layer,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return result;
+}
+
 /** With no `layer`, a tap must avoid AutoMobile's own prototype windows as well (#10691). */
 function tapOwnPrototypeCoverRule(layer: TapOnElementOptions["layer"]): OwnPrototypeCoverRule {
   return layer === undefined ? "touch" : "none";
@@ -3804,17 +3820,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         };
       }
       if (isElementKeyboardFocused(element)) {
-        return {
-          success: true,
-          action: options.action,
-          element,
-          selectedElement,
-          [tapResolvedLayer]: resolvedLayer,
-          wasAlreadyFocused: true,
-          focusChanged: false,
-          focusVerified: true,
-          ...this.geometry.getElementCenter(element),
-        };
+        return withResolvedLayer(
+          {
+            success: true,
+            action: options.action,
+            element,
+            selectedElement,
+            wasAlreadyFocused: true,
+            focusChanged: false,
+            focusVerified: true,
+            ...this.geometry.getElementCenter(element),
+          },
+          resolvedLayer,
+        );
       }
     }
     const visibleBounds = this.visibleTapBounds(
@@ -3863,14 +3881,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         selection,
       );
     }
-    return {
-      success: true,
-      action: options.action,
-      element,
-      selectedElement,
-      [tapResolvedLayer]: resolvedLayer,
-      ...warningsField(displayWarnings),
-    };
+    return withResolvedLayer(
+      {
+        success: true,
+        action: options.action,
+        element,
+        selectedElement,
+        ...warningsField(displayWarnings),
+      },
+      resolvedLayer,
+    );
   }
 
   /**
@@ -4484,23 +4504,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             if (isFocused) {
               logger.info(`Element is already focused, no action needed`);
               perf.end();
-              return {
-                success: true,
-                action,
-                element: element,
-                selectedElement: selectedElementMetadata,
-                searchUntil: searchOutcome.stats,
-                [tapResolvedLayer]: resolvedElementLayer(
-                  viewHierarchy,
-                  element,
-                  this.device.platform,
-                ),
-                wasAlreadyFocused: true,
-                focusChanged: false,
-                focusVerified: true,
-                x: initialTapPoint.x,
-                y: initialTapPoint.y,
-              };
+              return withResolvedLayer(
+                {
+                  success: true,
+                  action,
+                  element: element,
+                  selectedElement: selectedElementMetadata,
+                  searchUntil: searchOutcome.stats,
+                  wasAlreadyFocused: true,
+                  focusChanged: false,
+                  focusVerified: true,
+                  x: initialTapPoint.x,
+                  y: initialTapPoint.y,
+                },
+                resolvedElementLayer(viewHierarchy, element, this.device.platform),
+              );
             }
 
             // if not, change action to tap
@@ -4738,20 +4756,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           perf.end();
-          return {
-            success: true,
-            action,
-            element: tapElement,
-            [tapResolvedLayer]: resolvedElementLayer(
-              viewHierarchy,
-              focusTarget ?? tapElement,
-              this.device.platform,
-            ),
-            selectedElement: selectedElementMetadata,
-            searchUntil: searchOutcome.stats,
-            ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
-            ...(activationWarnings.length ? { warnings: activationWarnings } : {}),
-          };
+          return withResolvedLayer(
+            {
+              success: true,
+              action,
+              element: tapElement,
+              selectedElement: selectedElementMetadata,
+              searchUntil: searchOutcome.stats,
+              ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
+              ...(activationWarnings.length ? { warnings: activationWarnings } : {}),
+            },
+            resolvedElementLayer(viewHierarchy, focusTarget ?? tapElement, this.device.platform),
+          );
         },
         {
           queryOptions: {

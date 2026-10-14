@@ -46,14 +46,23 @@ const budgets = new WeakMap<Session, { heartbeat: number; creditedMs: number }>(
 export type OwnerConnectedAtReader = (session: Session, at: number) => boolean;
 
 /**
+ * Cumulative awake-stall credit between raw owner heartbeats when the owner socket is connected
+ * at both the gap start and resume (#11992). A socket closed at resume keeps the 30 s credible
+ * stall ceiling; host sleep never spends this budget.
+ */
+export const STARVATION_CONNECTED_OWNER_CREDIT_CAP_MS = 600_000;
+
+/**
  * Extra awake-stall credit for a connected owner whose raw lease already expired (#11992).
  * Across all late ticks with the same raw owner heartbeat, total credit is at most
+ * STARVATION_CONNECTED_OWNER_CREDIT_CAP_MS when still connected at resume, otherwise
  * MAX_CREDIBLE_DAEMON_STALL_MS. Socket openness alone therefore cannot prevent release after
  * heartbeatTimeoutMs + SUSPECT_GRACE_MS + that cap, plus one scan. An on-time host retains
  * its lease + grace + one scan bound (10 s at defaults). No budget is persisted.
  */
 function connectedOwnerCredit(
   session: Session,
+  resumedAt: number,
   lostMs: number,
   gapBeganAt: number | undefined,
   reader: OwnerConnectedAtReader | undefined,
@@ -69,7 +78,10 @@ function connectedOwnerCredit(
   const heartbeat = session.lastOwnerHeartbeat ?? session.lastHeartbeat;
   const previous = budgets.get(session);
   const creditedMs = previous?.heartbeat === heartbeat ? previous.creditedMs : 0;
-  const credit = Math.min(lostMs, MAX_CREDIBLE_DAEMON_STALL_MS - creditedMs);
+  const cap = reader?.(session, resumedAt)
+    ? STARVATION_CONNECTED_OWNER_CREDIT_CAP_MS
+    : MAX_CREDIBLE_DAEMON_STALL_MS;
+  const credit = Math.min(lostMs, Math.max(0, cap - creditedMs));
   budgets.set(session, { heartbeat, creditedMs: creditedMs + credit });
   return credit;
 }
@@ -89,7 +101,7 @@ export function daemonStallLeaseExtension(
   const full = ownerLeaseLiveAt(session, gap.gapBeganAt);
   const connectedCreditMs = full
     ? 0
-    : connectedOwnerCredit(session, gap.lostMs, gap.gapBeganAt, reader);
+    : connectedOwnerCredit(session, resumedAt, gap.lostMs, gap.gapBeganAt, reader);
   const credit = full ? gap.lostMs + gap.sleptMs : connectedCreditMs;
   const before = judgedLeaseHeartbeat(session);
   const leaseStart = full || credit > 0 ? forgivenLeaseStart(before, resumedAt, credit) : undefined;

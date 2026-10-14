@@ -70,10 +70,12 @@ class ParkedKeepAwake implements KeepScreenAwakeRestorer {
   readonly gate = Promise.withResolvers<void>();
   signal: AbortSignal | undefined;
   calls = 0;
-  async restore(): Promise<void> {
+  async restore(): Promise<{ status: "restored" }> {
     this.calls++;
     this.signal = getAbortSignal();
     await this.gate.promise;
+
+    return { status: "restored" as const };
   }
 }
 

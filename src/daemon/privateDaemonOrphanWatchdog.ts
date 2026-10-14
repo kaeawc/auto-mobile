@@ -1,6 +1,8 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { parseStrictPositiveInteger } from "../utils/envNumbers";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
@@ -108,18 +110,23 @@ export class PrivateDaemonOrphanWatchdog {
   private lastClientActivityCount: number | null = null;
   private handle: NodeJS.Timeout | null = null;
   private shutdownRequested = false;
+  private launcherToken: string | undefined;
 
   constructor(
     private readonly port: PrivateDaemonOrphanPort,
     private readonly idleMs: number,
     private readonly timer: Timer = defaultTimer,
     private readonly checkIntervalMs: number = Math.min(CHECK_INTERVAL_MS, idleMs),
+    private readonly launcherGeneration: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
   ) {}
 
   start(): void {
     if (this.handle || this.idleMs <= 0) {
       return;
     }
+    this.launcherToken = this.port.launcherIsExplicit()
+      ? this.launcherGeneration.current(this.port.launcherPid())
+      : undefined;
     this.handle = this.timer.setInterval(() => this.check(), this.checkIntervalMs);
     const handle = this.handle as { unref?: () => void };
     if (typeof handle.unref === "function") {
@@ -147,7 +154,9 @@ export class PrivateDaemonOrphanWatchdog {
     }
     const launcher = this.port.launcherPid();
     return this.port.launcherIsExplicit()
-      ? !this.port.isProcessRunning(launcher)
+      ? !this.port.isProcessRunning(launcher) ||
+          (this.launcherToken !== undefined &&
+            this.launcherGeneration.compare(launcher, this.launcherToken) === "different")
       : parent !== launcher;
   }
 

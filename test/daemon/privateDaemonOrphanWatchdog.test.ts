@@ -10,6 +10,7 @@ import {
   type PrivateDaemonOrphanPort,
 } from "../../src/daemon/privateDaemonOrphanWatchdog";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 
 const IDLE_MS = 10 * 60_000;
 
@@ -50,6 +51,43 @@ class FakeOrphanPort implements PrivateDaemonOrphanPort {
 }
 
 describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
+  test.each(["different", "same", "unknown", "unavailable", "non-explicit", "disabled"] as const)(
+    "launcher generation handles %s",
+    (verdict) => {
+      const timer = new FakeTimer();
+      const port = new FakeOrphanPort();
+      const generation = new FakeLockOwnerGenerationProbe();
+      port.explicit = verdict !== "non-explicit";
+      port.ppid = port.launcher;
+      port.alive.add(port.launcher);
+      if (verdict === "unavailable") {
+        generation.token = undefined;
+      }
+      if (verdict === "different" || verdict === "same" || verdict === "unknown") {
+        generation.verdict = verdict;
+      }
+      const watchdog = new PrivateDaemonOrphanWatchdog(
+        port,
+        verdict === "disabled" ? 0 : IDLE_MS,
+        timer,
+        30_000,
+        generation,
+      );
+      watchdog.start();
+      watchdog.start();
+      expect(generation.currentCalls).toEqual(
+        ["non-explicit", "disabled"].includes(verdict) ? [] : [port.launcher],
+      );
+      expect(watchdog.check()).toBe(false);
+      timer.setCurrentTime(IDLE_MS);
+      expect(watchdog.check()).toBe(verdict === "different");
+      expect(port.shutdowns).toHaveLength(verdict === "different" ? 1 : 0);
+      if (["non-explicit", "disabled", "unavailable"].includes(verdict)) {
+        expect(generation.compareCalls).toEqual([]);
+      }
+      watchdog.stop();
+    },
+  );
   let timer: FakeTimer;
   let port: FakeOrphanPort;
   let watchdog: PrivateDaemonOrphanWatchdog;

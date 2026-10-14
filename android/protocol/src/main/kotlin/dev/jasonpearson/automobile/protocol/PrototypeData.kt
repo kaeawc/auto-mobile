@@ -317,6 +317,11 @@ object PrototypeDataResolver {
   private fun hasBindings(node: JsonObject): Boolean {
     val textBound =
       PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
+        if (
+          kind == PrototypeBindableKind.EMIT_BINDING &&
+            (value as? JsonObject)?.containsKey("data") == true
+        )
+          return@first true
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
           true

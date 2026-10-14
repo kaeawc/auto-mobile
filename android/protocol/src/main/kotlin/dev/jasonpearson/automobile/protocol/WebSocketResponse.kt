@@ -830,6 +830,7 @@ enum class PrototypeEventKind {
 /** Unsolicited frame. Pager selection is separate from authored scalar state. */
 @Serializable
 @SerialName("prototype_event")
+@OptIn(ExperimentalSerializationApi::class)
 data class PrototypeEvent(
   override val timestamp: Long,
   val id: String,
@@ -843,7 +844,13 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
-) : WebSocketResponse()
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val context: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val contextTruncated: Boolean? = null,
+) : WebSocketResponse() {
+  init {
+    require(contextTruncated != false) { "contextTruncated must be true or absent" }
+  }
+}
 
 // =============================================================================
 // Storage Results

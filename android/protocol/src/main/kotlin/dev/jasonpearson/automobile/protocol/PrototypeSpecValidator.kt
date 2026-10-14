@@ -47,6 +47,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
   val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
   val MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES")
+  val MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES: Int = limit("MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES")
   val MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH")
   val MAX_PROTOTYPE_SELECTOR_DEPTH: Int = limit("MAX_PROTOTYPE_SELECTOR_DEPTH")
   val MAX_PROTOTYPE_CONDITION_DEPTH: Int = limit("MAX_PROTOTYPE_CONDITION_DEPTH")
@@ -375,6 +376,7 @@ object PrototypeSpecValidator {
       "object" -> visitObject(value, rule, path, context, depth)
       "array" -> visitArray(value, rule, path, context, depth)
       "map" -> visitMap(value, rule, path, context, depth)
+      "record" -> visitRecord(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       "data" -> dataError(value)
       else ->
@@ -582,6 +584,26 @@ object PrototypeSpecValidator {
     return null
   }
 
+  private fun visitRecord(
+    value: JsonElement,
+    rule: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    val data = value as? JsonObject ?: return fail(path, "Expected object")
+    if (data.size > rule.number("maxEntries", Double.POSITIVE_INFINITY))
+      return fail(path, "Record entry limit exceeded")
+    for ((key, child) in data) {
+      val at = keyPath(path, key)
+      if (key.isEmpty()) return fail(at, "Invalid context name")
+      walk(child, rule.getValue("item").jsonObject, at, context, depth)?.let {
+        return it
+      }
+    }
+    return null
+  }
+
   private fun visitChoice(
     value: JsonElement,
     rule: JsonObject,
@@ -633,9 +655,11 @@ object PrototypeSpecValidator {
           (primitive != null &&
             !primitive.isString &&
             (primitive.booleanOrNull != null || primitive.doubleOrNull?.isFinite() == true))
-      "enum" ->
-        text != null && rule.getValue("values").jsonArray.any { it.jsonPrimitive.content == text }
-      "json" -> jsonCost(value) <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
+      "enum" -> rule.getValue("values").jsonArray.any { it == value }
+      "json" ->
+        jsonCost(value).let {
+          it.isFinite() && it <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
+        }
       else -> false
     }
   }
@@ -700,6 +724,12 @@ object PrototypeSpecValidator {
     for ((value, path) in context.nodes + context.actions) {
       val pager = value.text("pager") ?: continue
       if (!pagers.contains(pager)) return fail("$path.pager", "Unknown pager id")
+    }
+    for ((value, path) in context.actions) {
+      for ((name, binding) in (value["context"] as? JsonObject).orEmpty()) {
+        val page = (binding as? JsonObject)?.text("page") ?: continue
+        if (page !in pagers) return fail(keyPath("$path.context", name), "Unknown pager id")
+      }
     }
     return null
   }

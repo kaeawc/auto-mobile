@@ -94,6 +94,7 @@ struct PrototypeSpec: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        try PrototypeSizeBounds.validate(JSONValue(from: decoder))
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         window = try container.decode(WindowSpec.self, forKey: .window)

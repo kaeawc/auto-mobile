@@ -1,5 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
+  hasPendingBackOut,
+  tryAcquireExclusiveLock,
   releaseExclusiveLock,
   releaseExclusiveLockSteps,
   readLockOwnerPid,
@@ -782,7 +785,8 @@ test.each(["release", "takeover"] as const)(
           false,
         );
       }
-      expect(f.fs.operations[0]).toEqual({ op: "readText", path: PATH });
+      // An identity entry is located by stat first (fix pass 5, C1).
+      expect(f.fs.operations[0]).toEqual({ op: "stat", path: PATH });
       expect(f.fs.peek(PATH)).toBeUndefined();
       f.fs.operations.length = 0;
       releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
@@ -868,29 +872,35 @@ test("R1: an unreadable P is not read as free", () => {
     expect(a.finish()).toBe(false);
     expect(f.fs.peek(F)).toBeUndefined();
     expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
+    // After F is claimed, P is sampled by identity only (S1): a foreign inode is never read or moved.
     expect(f.fs.operations.filter((s) => s.path === PATH)).toEqual([
       { op: "readText", path: PATH },
+      { op: "stat", path: PATH },
     ]);
   } finally {
     warn.mockRestore();
   }
 });
 
-test("R2: drained back-out with other bytes now at P leaves them alone and drops the entry", () => {
+test("R2: drained back-out with another instance now at P leaves it alone and keeps the entry", () => {
   const f = retained();
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     strandBackOut("rename", f);
     f.fs.seed(PATH, raw(404));
-    f.fs.operations.length = 0;
-    expect(f.acquire(303).finish()).toBe(false);
-    expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
-    expect(f.fs.operations).toEqual([
-      { op: "readText", path: PATH },
-      { op: "stat", path: PATH },
-      { op: "readText", path: PATH },
-    ]);
-    assertNoPendingOperations(f);
+    for (let call = 0; call < 2; call++) {
+      // The doomed publication was not verifiably removed (a displacer may link it back), so
+      // the identity entry stays: one stat(P) per call, and a foreign inode is never touched.
+      f.fs.operations.length = 0;
+      expect(f.acquire(303).finish()).toBe(false);
+      expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
+      expect(f.fs.operations).toEqual([
+        { op: "stat", path: PATH },
+        { op: "stat", path: PATH },
+        { op: "readText", path: PATH },
+      ]);
+    }
+    expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
   } finally {
     warn.mockRestore();
   }
@@ -913,10 +923,10 @@ test("R2: pending-map capacity is 64 paths and evicts the oldest", () => {
       f.fs.operations.length = 0;
       releaseExclusiveLock(path, 404, "owner-404", f.fs);
       expect(f.fs.peek(path)?.raw).toBe(i === 0 ? raw(303) : undefined);
-      expect(f.fs.operations[0]).toEqual({
-        op: "readText",
-        path: i === 0 ? `${path}.displaced` : path,
-      });
+      // A remembered identity entry is located by stat(P); the evicted path starts at release's F read.
+      expect(f.fs.operations[0]).toEqual(
+        i === 0 ? { op: "readText", path: `${path}.displaced` } : { op: "stat", path },
+      );
     }
   } finally {
     warn.mockRestore();
@@ -1224,7 +1234,7 @@ test("V2: own publication provably at F with P the same instance holds", () => {
   }
 });
 
-test("V1: a successful foreign marker verification restores without remembering a back-out", () => {
+test("V1: a successful foreign marker verification restores the foreign lock and remembers the unfound publication", () => {
   const f = retained();
   const acquirer = f.acquire(202);
   acquirer.until((s) => s.op === "rename" && s.path === PATH);
@@ -1235,5 +1245,361 @@ test("V1: a successful foreign marker verification restores without remembering 
   expect(
     f.fs.operations.filter((s) => s.op === "readText" && s.path.includes(".202.release.")),
   ).toHaveLength(1);
-  assertNoPendingOperations(f);
+  // S2: the back-out never claimed its own publication, so it is not complete; the identity
+  // entry costs one stat(P) and never touches the restored foreign lock.
+  expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
+  f.fs.operations.length = 0;
+  expect(f.acquire(202).finish()).toBe(false);
+  expect(f.fs.peek(PATH)?.raw).toBe(raw(303));
+  expect(f.fs.operations).toEqual([
+    { op: "stat", path: PATH },
+    { op: "stat", path: PATH },
+    { op: "readText", path: PATH },
+  ]);
 });
+
+// ---- Fix pass 5: S1 (blocked branch), S2 (unfound back-out), S3 (tokenless reclaimOwnPid) ----
+
+const failRestore = (op: string, path: string) =>
+  path === PATH
+    ? op === "link"
+      ? "ENOTSUP"
+      : op === "openExclusive"
+        ? "ENOSPC"
+        : undefined
+    : undefined;
+const linksToPath = (racer: Racer<boolean>) =>
+  racer.trace.filter((s) => s.op === "link" && s.path === PATH).length;
+
+/** P held by `taker`, plus a stale releaser of `pid` paused before rename(P): its read predates every later publication. */
+function staleReleaser(f: ReturnType<typeof fixture>, pid: number, taker: number) {
+  f.live.add(pid);
+  f.live.add(taker);
+  const stale = new Racer(releaseExclusiveLockSteps(PATH, pid, `owner-${pid}`, f.fs));
+  stale.until((s) => s.op === "rename" && s.path === PATH);
+  expect(takeOverExclusiveLock(PATH, { pid, token: `owner-${pid}` }, f.options(taker))).toBe(true);
+  return stale;
+}
+
+function quiet<T>(body: () => T): T {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    return body();
+  } finally {
+    warn.mockRestore();
+  }
+}
+
+test("S1: a blocked own publication completed onto P by a peer is removed from P as well", () =>
+  quiet(() => {
+    const f = fixture(raw(808));
+    const stale = staleReleaser(f, 808, 707);
+    releaseExclusiveLock(PATH, 707, "owner-707", f.fs);
+    const c = f.acquire(303);
+    c.until((s) => s.op === "stat" && s.path === F);
+    f.fs.failure = failRestore;
+    stale.finish(); // 303's publication displaced; link and copy restore fail: retained at F.
+    f.fs.failure = undefined;
+    expect(f.fs.peek(F)?.raw).toBe(raw(303));
+    const e = f.acquire(404);
+    e.until((s) => s.op === "stat" && s.path === F); // 404 published at P.
+    c.until((s) => s.op === "rename" && s.path === F); // 303: F is my inode, P foreign: blocked.
+    e.until((s) => s.op === "unlink" && s.path.endsWith(".tmp") && linksToPath(e) === 2);
+    expect(f.fs.peek(PATH)).toEqual(f.fs.peek(F)!); // 404 backed out and COMPLETEd link(F, P).
+    expect(c.finish()).toBe(false);
+    expect(e.finish()).toBe(false);
+    expect(f.fs.paths()).toEqual([]); // Neither P nor F names 303, which was told false.
+    f.live.add(505);
+    expect(f.acquire(505).finish()).toBe(true);
+  }));
+
+test("S1: a blocked own publication leaves a foreign P alone", () =>
+  quiet(() => {
+    const { f, a } = ownRetainedWithPeer();
+    const held = { ...f.fs.peek(PATH)! };
+    f.fs.operations.length = 0;
+    expect(a.finish()).toBe(false);
+    expect(f.fs.peek(F)).toBeUndefined();
+    expect(f.fs.peek(PATH)).toEqual(held);
+    expect(f.fs.operations.some((s) => s.op === "rename" && s.path === PATH)).toBe(false);
+    // P was not this instance, so a displacer may still hold it privately: remembered by identity.
+    expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
+  }));
+
+test("C7: a pending identity entry costs one stat(P) per lock call until it leaves", () =>
+  quiet(() => {
+    const { f, a } = ownRetainedWithPeer();
+    expect(a.finish()).toBe(false);
+    const drain = { op: "stat", path: PATH } as const;
+    const sample = [drain, { op: "readText", path: PATH }] as const;
+    f.fs.operations.length = 0;
+    expect(f.acquire(303).finish()).toBe(false);
+    expect(f.fs.operations).toEqual([drain, ...sample]);
+    f.fs.operations.length = 0;
+    expect(takeOverExclusiveLock(PATH, { pid: 909, token: "gone" }, f.options(303))).toBe(false);
+    expect(f.fs.operations).toEqual([drain, ...sample]);
+    f.fs.operations.length = 0;
+    releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
+    expect(f.fs.operations).toEqual([
+      drain,
+      { op: "readText", path: F },
+      { op: "readText", path: PATH },
+    ]);
+    expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
+    expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
+  }));
+
+/**
+ * F holds live 101; 303 (its own process view) published at P and is about to back out when a
+ * stale releaser renames that doomed publication to its private marker (review-3 P1).
+ */
+function displacedDuringBackOut(publication: "atomic" | "legacy-wx" = "atomic") {
+  const f = fixture(raw(808));
+  const stale808 = staleReleaser(f, 808, 707);
+  const stale707 = staleReleaser(f, 707, 606);
+  releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
+  expect(f.acquire(101).finish()).toBe(true);
+  f.fs.failure = failRestore;
+  stale707.finish(); // Displaces live 101; link and copy restore fail: retained at F.
+  f.fs.failure = undefined;
+  expect(f.fs.paths()).toEqual([F]);
+  const own = f.process(303);
+  const view = own.fileSystem!;
+  const c = new Racer(acquireExclusiveLockSteps(PATH, own));
+  f.fs.linkError = publication === "legacy-wx" ? "ENOTSUP" : undefined;
+  c.until(
+    (s) =>
+      s.op === "readText" &&
+      s.path === PATH &&
+      c.trace.some((t) => (t.op === "link" || t.op === "openExclusive") && t.path === PATH),
+  );
+  f.fs.linkError = undefined;
+  const doomed = { ...f.fs.peek(PATH)! };
+  expect(doomed.raw).toBe(raw(303));
+  stale808.advance(); // rename(P -> 808's marker) takes 303's doomed publication.
+  expect(f.fs.peek(PATH)).toBeUndefined();
+  return { f, c, stale808, own, view, doomed };
+}
+
+function acquiresFresh(
+  f: ReturnType<typeof fixture>,
+  own: ReturnType<ReturnType<typeof fixture>["process"]>,
+  doomed: { ino: number },
+): void {
+  expect(tryAcquireExclusiveLock(PATH, own)).toBe(true);
+  expect(f.fs.peek(PATH)?.raw).toBe(raw(303));
+  expect(f.fs.peek(PATH)?.ino).not.toBe(doomed.ino);
+  expect(f.fs.peek(F)).toBeUndefined();
+  releaseExclusiveLock(PATH, 303, "owner-303", own.fileSystem);
+  expect(f.fs.paths()).toEqual([]);
+  expect(f.acquire(404).finish()).toBe(true);
+}
+
+test("S2: a back-out that finds P missing is remembered and drained on the next call", () =>
+  quiet(() => {
+    const { f, c, stale808, own, view, doomed } = displacedDuringBackOut();
+    c.advance(); // The back-out's read of P: ENOENT.
+    stale808.finish(); // Foreign marker: link(marker, P) restores the doomed publication.
+    expect(c.finish()).toBe(false);
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    expect(hasPendingBackOut(view, PATH)).toBe(true);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    expect(f.fs.paths()).toEqual([PATH]); // Names live 303, which was told false.
+    expect(f.acquire(404).finish()).toBe(false);
+    f.fs.operations.length = 0;
+    acquiresFresh(f, own, doomed); // 303's next call drains its doomed bytes, then acquires.
+    expect(f.fs.operations[0]).toEqual({ op: "stat", path: PATH });
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+  }));
+
+test("S2: a back-out that finds other bytes at P is remembered; the doomed publication restored later is drained", () =>
+  quiet(() => {
+    const { f, c, stale808, own, view, doomed } = displacedDuringBackOut();
+    const e = f.acquire(404);
+    e.until((s) => s.op === "stat" && s.path === F); // 404 published at the freed P.
+    expect(c.finish()).toBe(false); // 303's back-out reads 404's bytes.
+    expect(hasPendingBackOut(view, PATH)).toBe(true);
+    e.until((s) => s.op === "link" && s.path === PATH && linksToPath(e) === 1);
+    expect(f.fs.peek(PATH)).toBeUndefined(); // 404 backed out, COMPLETE not yet run.
+    stale808.finish(); // The displacer links 303's doomed publication back.
+    expect(e.finish()).toBe(false);
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    expect(f.fs.paths()).toEqual([PATH]);
+    acquiresFresh(f, own, doomed);
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+  }));
+
+test.each(["atomic", "legacy-wx"] as const)(
+  "S2: a successful acquire clears the pending back-out, so a later same-process acquire never removes the genuine hold (%s)",
+  (publication) =>
+    quiet(() => {
+      const { f, c, own, view } = displacedDuringBackOut(publication);
+      expect(c.finish()).toBe(false);
+      expect(hasPendingBackOut(view, PATH)).toBe(true);
+      releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(true);
+      const genuine = { ...f.fs.peek(PATH)! };
+      // A raw-only (legacy wx) entry is cleared by the acquire: P now legitimately carries those
+      // bytes. An identity entry stays, and can never match the genuine inode.
+      expect(hasPendingBackOut(view, PATH)).toBe(publication === "atomic");
+      f.fs.operations.length = 0;
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(false);
+      expect(f.fs.peek(PATH)).toEqual(genuine);
+      expect(f.fs.operations.some((s) => s.op === "rename")).toBe(false);
+    }),
+);
+
+test("S2: a pending doomed publication survives the process's own later acquire and release and is drained when the displacer links it back", () =>
+  quiet(() => {
+    const { f, c, stale808, own, view, doomed } = displacedDuringBackOut();
+    expect(c.finish()).toBe(false); // P missing: remembered; COMPLETE links F to P.
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    expect(tryAcquireExclusiveLock(PATH, own)).toBe(true); // G: identical bytes, another inode.
+    expect(f.fs.peek(PATH)?.raw).toBe(doomed.raw);
+    expect(f.fs.peek(PATH)?.ino).not.toBe(doomed.ino);
+    releaseExclusiveLock(PATH, 303, "owner-303", view);
+    expect(f.fs.peek(PATH)).toBeUndefined();
+    expect(hasPendingBackOut(view, PATH)).toBe(true);
+    stale808.finish(); // link(marker, P): the doomed publication names live 303 again.
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    expect(f.acquire(404).finish()).toBe(false);
+    acquiresFresh(f, own, doomed);
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+  }));
+
+test("S2: the next acquire removes a pending doomed publication a displacer retained at F", () =>
+  quiet(() => {
+    const { f, c, stale808, own, doomed } = displacedDuringBackOut();
+    expect(c.finish()).toBe(false);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    f.fs.failure = failRestore;
+    stale808.finish(); // Link and copy restore fail: 303's doomed publication is retained at F.
+    f.fs.failure = undefined;
+    expect(f.fs.paths()).toEqual([F]);
+    expect(f.fs.peek(F)).toEqual(doomed);
+    acquiresFresh(f, own, doomed);
+  }));
+
+test("S2: a release that removes the pending doomed publication from F drops the entry", () =>
+  quiet(() => {
+    const { f, c, stale808, view, doomed } = displacedDuringBackOut();
+    expect(c.finish()).toBe(false);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    f.fs.failure = failRestore;
+    stale808.finish();
+    f.fs.failure = undefined;
+    expect(f.fs.peek(F)).toEqual(doomed);
+    expect(hasPendingBackOut(view, PATH)).toBe(true);
+    releaseExclusiveLock(PATH, 303, "owner-303", view);
+    expect(f.fs.paths()).toEqual([]);
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+  }));
+
+test("S2: an acquire whose publication reuses a pending identity drops that entry", () =>
+  quiet(() => {
+    const { f, c, own, view, doomed } = displacedDuringBackOut();
+    expect(c.finish()).toBe(false);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    // The filesystem reuses the doomed inode number within the same mtime for the new publication.
+    const stat = spyOn(f.fs, "stat").mockImplementation((path) =>
+      path.endsWith(".tmp")
+        ? { ino: doomed.ino, mtimeMs: doomed.mtimeMs }
+        : FakeLockFileSystem.prototype.stat.call(f.fs, path),
+    );
+    try {
+      expect(hasPendingBackOut(view, PATH)).toBe(true);
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(true);
+      expect(hasPendingBackOut(view, PATH)).toBe(false);
+    } finally {
+      stat.mockRestore();
+    }
+  }));
+
+test("C2: at most 8 doomed publications are remembered per path; the oldest is evicted", () =>
+  quiet(() => {
+    const f = retained();
+    const doomed: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      f.fs.failure = (op, path) => (op === "rename" && path === PATH ? "EBUSY" : undefined);
+      expect(f.acquire(303).finish()).toBe(false);
+      f.fs.failure = undefined;
+      doomed.push(f.fs.peek(PATH)!.ino);
+      f.fs.rename(PATH, `${PATH}.away-${i}`); // As if a displacer held it in a private marker...
+    }
+    for (const [i, ino] of doomed.entries()) {
+      f.fs.rename(`${PATH}.away-${i}`, PATH); // ...and linked it back later.
+      releaseExclusiveLock(PATH, 404, "owner-404", f.fs); // Any lock call of the process drains.
+      expect(f.fs.peek(PATH)?.ino).toBe(i === 0 ? ino : undefined);
+      if (i === 0) {
+        f.fs.unlink(PATH);
+      }
+    }
+    expect(hasPendingBackOut(f.fs, PATH)).toBe(false);
+  }));
+
+const TOKENLESS = formatLockContent(303, undefined, undefined, "current-generation");
+
+/** Review-3 P2: a tokenless reclaimOwnPid publication displaced and retained at F before its check. */
+function tokenlessRetained(publication: "atomic" | "legacy-wx") {
+  const f = fixture(raw(808));
+  const stale = staleReleaser(f, 808, 707);
+  releaseExclusiveLock(PATH, 707, "owner-707", f.fs);
+  const options = { ...f.process(303), ownerToken: undefined, reclaimOwnPid: true };
+  f.fs.linkError = publication === "legacy-wx" ? "ENOTSUP" : undefined;
+  const c = new Racer(acquireExclusiveLockSteps(PATH, options));
+  c.until((s) => s.op === "stat" && s.path === F);
+  f.fs.linkError = undefined;
+  f.fs.failure = failRestore;
+  stale.finish();
+  f.fs.failure = undefined;
+  expect(f.fs.peek(F)?.raw).toBe(TOKENLESS);
+  expect(f.fs.peek(PATH)).toBeUndefined();
+  return { f, c, options, view: options.fileSystem! };
+}
+
+test("S3: a tokenless reclaimOwnPid acquirer does not delete its own retained publication", () =>
+  quiet(() => {
+    const { f, c, view } = tokenlessRetained("atomic");
+    expect(c.finish()).toBe(true);
+    expect(f.fs.peek(PATH)?.raw).toBe(TOKENLESS); // Never "acquired" with no lock file.
+    expect(f.fs.peek(PATH)).toEqual(f.fs.peek(F)!);
+    expect(f.acquire(404).finish()).toBe(false);
+    releaseExclusiveLock(PATH, 303, undefined, view);
+    expect(f.fs.paths()).toEqual([]);
+    expect(f.acquire(404).finish()).toBe(true);
+  }));
+
+test("S3: legacy own-bytes F removed as reclaimable with P gone returns false", () =>
+  quiet(() => {
+    const { f, c, view } = tokenlessRetained("legacy-wx");
+    expect(c.finish()).toBe(false);
+    expect(f.fs.paths()).toEqual([]);
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+    expect(f.acquire(404).finish()).toBe(true);
+  }));
+
+test.each(["guard-contended", "claim-failed"] as const)(
+  "S3: %s own-bytes F with P gone returns false and F is removed on the next call",
+  (kind) =>
+    quiet(() => {
+      const { f, c, options, view } = tokenlessRetained("legacy-wx");
+      const { ino, mtimeMs } = f.fs.peek(F)!;
+      const hash = createHash("sha256").update(TOKENLESS).digest("hex").slice(0, 32);
+      const guard = `${PATH}.reclaim.${ino}.${mtimeMs}.${hash}.0`;
+      if (kind === "guard-contended") {
+        f.fs.seed(guard, raw(202)); // A live reclaimer holds this instance's guard.
+      } else {
+        f.fs.failure = (op, path) => (op === "rename" && path === F ? "EBUSY" : undefined);
+      }
+      expect(c.finish()).toBe(false);
+      f.fs.failure = undefined;
+      expect(f.fs.peek(PATH)).toBeUndefined();
+      expect(f.fs.peek(F)?.raw).toBe(kind === "claim-failed" ? TOKENLESS : undefined);
+      expect(hasPendingBackOut(view, PATH)).toBe(kind === "claim-failed");
+      expect(tryAcquireExclusiveLock(PATH, options)).toBe(true);
+      expect(f.fs.peek(F)).toBeUndefined();
+      expect(f.fs.peek(PATH)?.raw).toBe(TOKENLESS);
+      expect(hasPendingBackOut(view, PATH)).toBe(false);
+    }),
+);

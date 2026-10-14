@@ -46,11 +46,27 @@ export const OWN_TMP_SWEEP_INTERVAL_MS = 300_000;
 export const OWN_TMP_SWEEP_CANDIDATE_LIMIT = 64;
 export const OWN_TMP_SWEEP_DIRECTORY_LIMIT = 64;
 export const BACK_OUT_RETRY_LIMIT = 3;
+const PENDING_PUBLICATION_LIMIT = 8;
+/**
+ * A publication this process linked at P and was told it does not hold, not yet verifiably removed.
+ * An atomic publication carries its identity (the tmp inode it was linked from); a legacy wx
+ * publication has none and is known by its bytes alone.
+ */
+interface DoomedPublication {
+  raw: string;
+  ino?: number;
+  mtimeMs?: number;
+}
 interface PendingBackOut {
-  raw?: string;
+  publications: DoomedPublication[];
   markers: Set<string>;
 }
 const pendingBackOuts = new WeakMap<LockFileSystem, Map<string, PendingBackOut>>();
+
+/** @internal Test seam: does this filesystem object remember an unremoved doomed publication for the path? */
+export function hasPendingBackOut(fileSystem: LockFileSystem, lockFilePath: string): boolean {
+  return (pendingBackOuts.get(fileSystem)?.get(lockFilePath)?.publications.length ?? 0) > 0;
+}
 
 // List at most once per filesystem/PID/directory every five minutes (unless the clock
 // moves backwards). Remember bounded own-PID candidates across lock basenames,
@@ -847,19 +863,39 @@ function* checkRetainedLock(
   if (retained === "absent") {
     return true;
   }
-  const publicationSample = tmp
-    ? yield* samplePublication(tmp, publishedContent, fileSystem)
-    : undefined;
-  if (yield* reclaimRetainedLock(path, retained, options, generation, reclaimed)) {
+  const pid = options.pid ?? process.pid;
+  const published: DoomedPublication =
+    (tmp ? yield* samplePublication(tmp, publishedContent, fileSystem) : undefined) ??
+    ({ raw: publishedContent } satisfies DoomedPublication);
+  const current = yield* removeRememberedRetained(path, retained, pid, fileSystem);
+  if (current === "absent") {
     return true;
   }
-  const pid = options.pid ?? process.pid;
+  // S3: F provably THIS call's publication is never judged for reclaim; identity decides below.
+  if (typeof current === "string" || !hasIdentity(published) || !sameSample(published, current)) {
+    if (isOwnBytesLeak(current, reclaimed, publishedContent, options)) {
+      return yield* reclaimOwnBytesRetained(path, published, pid, fileSystem);
+    }
+    if (yield* reclaimRetainedLock(path, current, options, generation, reclaimed)) {
+      return true;
+    }
+  }
+  return yield* settleRetainedPublication(path, current, published, pid, fileSystem);
+}
+
+function* settleRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
   const publication = yield* isRetainedPublication(
     path,
     retained,
-    publishedContent,
+    published.raw,
     fileSystem,
-    publicationSample,
+    hasIdentity(published) ? published : undefined,
   );
   if (publication === "absent") {
     yield* completeRetainedLock(path, fileSystem);
@@ -871,15 +907,117 @@ function* checkRetainedLock(
   if (publication === "older") {
     return false; // An older same-owner hold is authoritative; P is absent, foreign or unreadable.
   }
-  if (publication === "blocked") {
-    // These are our doomed bytes: only their owner's release may remove live F.
-    yield* releaseRetainedLock(path, pid, options.ownerToken, fileSystem);
+  if (publication === "blocked" && hasIdentity(published)) {
+    yield* removeBlockedPublication(path, published, pid, fileSystem);
     return false;
   }
   // Back out only P; F remains the retained owner's authority throughout COMPLETE.
-  yield* backOutLockPath(path, publishedContent, pid, fileSystem);
+  yield* backOutLockPath(path, published, pid, fileSystem);
   yield* completeRetainedLock(path, fileSystem);
   return false;
+}
+
+/**
+ * S1: this call's publication sits at F while P is someone else's. Its owner removes it by
+ * identity, F first: once the name F is claimed no COMPLETE can `link(F, P)` it any more. A peer
+ * may already have done so, hence the P sample. Never the release path, whose unlink-exhaustion
+ * fallback would link the doomed instance onto P. Unless it was verifiably removed from BOTH names
+ * a displacer may still hold it in a private marker and link it back, so it is remembered.
+ */
+function* removeBlockedPublication(
+  path: string,
+  published: LockSample,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const retained = yield* removeInstance(path, `${path}.displaced`, published, pid, fileSystem);
+  const linked = yield* removeInstance(path, path, published, pid, fileSystem);
+  if (retained !== "removed" || linked !== "removed") {
+    rememberBackOut(path, fileSystem, published);
+  }
+}
+
+/** S2/C3: an earlier doomed publication of this process that a displacer retained at F is removed by its owner. */
+function* removeRememberedRetained(
+  path: string,
+  retained: LockSample | "unreadable",
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | "absent" | "unreadable"> {
+  if (typeof retained === "string") {
+    return retained;
+  }
+  const doomed = pendingBackOuts
+    .get(fileSystem)
+    ?.get(path)
+    ?.publications.find((known) => hasIdentity(known) && sameSample(known, retained));
+  if (doomed === undefined || !hasIdentity(doomed)) {
+    return retained;
+  }
+  const name = `${path}.displaced`;
+  if ((yield* removeInstance(path, name, doomed, pid, fileSystem)) !== "removed") {
+    return retained;
+  }
+  // The entry stays: only a verified removal from P (or eviction) ends it.
+  return yield* sampleRetainedLock(name, fileSystem);
+}
+
+/** S3 (b): F carries exactly this call's bytes without identity proof and is judged reclaimable. */
+function isOwnBytesLeak(
+  retained: LockSample | "unreadable",
+  reclaimed: LockSample | undefined,
+  publishedContent: string,
+  options: ExclusiveLockOptions,
+): retained is LockSample {
+  return (
+    typeof retained !== "string" &&
+    retained.raw === publishedContent &&
+    !(reclaimed !== undefined && sameSample(retained, reclaimed)) &&
+    isReclaimable(retained, options)
+  );
+}
+
+/**
+ * S3 (b): the own-pid `reclaimOwnPid` leak. Without identity proof F may BE this publication
+ * (legacy wx, displaced and retained), so removing it must not by itself report "acquired":
+ * the owner removes F without the guard and holds only if P still reads its exact bytes.
+ */
+function* reclaimOwnBytesRetained(
+  path: string,
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const removed = yield* removeOwnBytesRetained(path, published.raw, pid, fileSystem);
+  if ((yield* readText(path, fileSystem)) === published.raw) {
+    return true;
+  }
+  if (!removed) {
+    rememberBackOut(path, fileSystem, { raw: published.raw });
+  }
+  if (hasIdentity(published)) {
+    // The atomic publication is at neither name: a displacer may link it back later.
+    rememberBackOut(path, fileSystem, published);
+  }
+  return false;
+}
+
+function* removeOwnBytesRetained(
+  path: string,
+  raw: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimReleasePath(`${path}.displaced`, marker, fileSystem))) {
+    return false;
+  }
+  if ((yield* readReleasePath(marker, fileSystem)) !== raw) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return false;
+  }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
+  return true;
 }
 
 function* reclaimRetainedLock(
@@ -1154,6 +1292,7 @@ function* releaseRetainedLock(
     yield* retainDisplacedLock(path, marker, fileSystem);
     return;
   }
+  yield* forgetClaimedBackOut(path, marker, claimed, fileSystem);
   yield* unlinkReleasedMarker(path, marker, fileSystem);
 }
 
@@ -1191,6 +1330,7 @@ function* releaseLockPath(
     yield* restoreDisplacedLock(lockFilePath, releaseMarker, fileSystem);
     return;
   }
+  yield* forgetClaimedBackOut(lockFilePath, releaseMarker, claimed, fileSystem);
   yield* unlinkReleasedMarker(lockFilePath, releaseMarker, fileSystem);
 }
 
@@ -1218,11 +1358,15 @@ function* unlinkReleasedMarker(
   }
 }
 
-// Bounded like ownTmpSweeps: oldest paths/markers are evicted, and separate fs objects never share state.
+function hasIdentity(publication: DoomedPublication): publication is LockSample {
+  return publication.ino !== undefined && publication.mtimeMs !== undefined;
+}
+
+// Bounded like ownTmpSweeps: oldest paths/publications/markers are evicted, and separate fs objects never share state.
 function rememberBackOut(
   path: string,
   fileSystem: LockFileSystem,
-  raw?: string,
+  publication?: DoomedPublication,
   marker?: string,
 ): void {
   let paths = pendingBackOuts.get(fileSystem);
@@ -1232,36 +1376,174 @@ function rememberBackOut(
   }
   let pending = paths.get(path);
   if (!pending) {
-    pending = { markers: new Set() };
+    pending = { publications: [], markers: new Set() };
     paths.set(path, pending);
   }
-  pending.raw = raw ?? pending.raw;
-  if (marker) {
-    pending.markers.add(marker);
+  const { publications, markers } = pending;
+  // A SET per path: two openers of one process may strand different publications.
+  if (publication && !publications.some((known) => isSamePublication(known, publication))) {
+    publications.push(publication);
   }
-  if (pending.markers.size > 8) {
-    pending.markers.delete(pending.markers.values().next().value!);
+  if (publications.length > PENDING_PUBLICATION_LIMIT) {
+    publications.shift();
+  }
+  if (marker) {
+    markers.add(marker);
+  }
+  if (markers.size > 8) {
+    markers.delete(markers.values().next().value!);
   }
   if (paths.size > 64) {
     paths.delete(paths.keys().next().value!);
   }
 }
 
-function* drainPendingBackOut(path: string, pid: number, fileSystem: LockFileSystem): Steps<void> {
+function isSamePublication(left: DoomedPublication, right: DoomedPublication): boolean {
+  return left.raw === right.raw && left.ino === right.ino && left.mtimeMs === right.mtimeMs;
+}
+
+function forgetBackOuts(
+  path: string,
+  fileSystem: LockFileSystem,
+  forget: (publication: DoomedPublication) => boolean,
+): void {
   const paths = pendingBackOuts.get(fileSystem);
   const pending = paths?.get(path);
   if (!pending) {
+    return;
+  }
+  pending.publications = pending.publications.filter((publication) => !forget(publication));
+  if (!pending.publications.length && !pending.markers.size) {
+    paths?.delete(path);
+  }
+}
+
+/**
+ * Runs first in every lock call for the path. An identity entry costs one `stat(P)` per call
+ * until it leaves by verified removal or eviction: a doomed publication that was not found may sit
+ * in a displacer's private marker and be linked back at any later time, including after this
+ * process acquired and released a genuine lock with identical bytes.
+ */
+function* drainPendingBackOut(path: string, pid: number, fileSystem: LockFileSystem): Steps<void> {
+  const pending = pendingBackOuts.get(fileSystem)?.get(path);
+  if (!pending) {
     return; // Zero fs operations on the ordinary path.
   }
-  paths?.delete(path);
-  for (const marker of pending.markers) {
+  for (const marker of [...pending.markers]) {
+    pending.markers.delete(marker);
     yield* unlinkBackOutMarker(path, marker, fileSystem);
   }
-  if (pending.raw !== undefined) {
-    yield* backOutLockPath(path, pending.raw, pid, fileSystem);
+  for (const publication of [...pending.publications]) {
+    if (yield* drainDoomedPublication(path, publication, pid, fileSystem)) {
+      forgetBackOuts(path, fileSystem, (known) => known === publication);
+    }
   }
+  forgetBackOuts(path, fileSystem, () => false);
   // A process that never calls this path's lock API again leaves P until it exits,
   // just like any live-pid lock; other processes cannot distinguish the non-holder.
+}
+
+/** True when the entry is done: its publication was verifiably removed. */
+function* drainDoomedPublication(
+  path: string,
+  publication: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  if (!hasIdentity(publication)) {
+    // Open residual (no hard links): bytes alone cannot tell this doomed publication from a
+    // later genuine one, so a raw-only entry is cleared when this process acquires P with the
+    // same bytes; a displacer linking the doomed copy back after that is not drained.
+    return (yield* backOutAttempt(path, publication.raw, pid, fileSystem)) === "removed";
+  }
+  const current = yield* samplePublication(path, publication.raw, fileSystem);
+  if (!sameSample(current, publication)) {
+    return false;
+  }
+  // F first: a retained copy of this instance could otherwise be linked onto P again.
+  const retained = yield* removeInstance(path, `${path}.displaced`, publication, pid, fileSystem);
+  const linked = yield* removeInstance(path, path, publication, pid, fileSystem);
+  return linked === "removed" && retained !== "unverified";
+}
+
+/**
+ * Remove one public name (P or F) of a doomed publication by identity: sample, claim to a private
+ * marker, verify the marker is that same instance, unlink it. A foreign instance is put back.
+ */
+function* removeInstance(
+  path: string,
+  name: string,
+  publication: LockSample,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<"removed" | "elsewhere" | "unverified"> {
+  if (!sameSample(yield* samplePublication(name, publication.raw, fileSystem), publication)) {
+    return "elsewhere";
+  }
+  if ((yield* readText(name, fileSystem)) !== publication.raw) {
+    return "unverified";
+  }
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimReleasePath(name, marker, fileSystem))) {
+    return "unverified";
+  }
+  if (!sameSample(yield* sampleLock(marker, fileSystem), publication)) {
+    if (name === path) {
+      yield* restoreDisplacedLock(path, marker, fileSystem);
+    } else {
+      yield* retainDisplacedLock(path, marker, fileSystem);
+    }
+    return "unverified";
+  }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
+  return "removed";
+}
+
+/** A release that claimed an instance equal to a remembered identity ends that entry. */
+function* forgetClaimedBackOut(
+  path: string,
+  marker: string,
+  raw: string,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const known = pendingBackOuts.get(fileSystem)?.get(path)?.publications;
+  if (!known?.some((publication) => hasIdentity(publication) && publication.raw === raw)) {
+    return; // Zero fs operations unless this process has such an entry.
+  }
+  const claimed = yield* samplePublication(marker, raw, fileSystem);
+  forgetBackOuts(path, fileSystem, (publication) => sameSample(claimed, toSample(publication)));
+}
+
+function toSample(publication: DoomedPublication): LockSample {
+  return { raw: publication.raw, ino: publication.ino ?? NaN, mtimeMs: publication.mtimeMs ?? NaN };
+}
+
+/**
+ * This process's acquire for P returned true. Its bytes are now legitimately at P, so a raw-only
+ * entry with those bytes must never drain again. An identity entry stays (acquire, takeover and
+ * release do not clear it) unless the filesystem reused that inode for this very publication.
+ */
+function* settleAcquiredBackOuts(
+  path: string,
+  content: string,
+  fileSystem: LockFileSystem,
+  publicationName: string,
+): Steps<void> {
+  const known = pendingBackOuts.get(fileSystem)?.get(path)?.publications ?? [];
+  const candidates = known.filter((publication) => publication.raw === content);
+  if (!candidates.length) {
+    return; // Zero fs operations unless this process has a pending entry for these bytes.
+  }
+  const acquired = candidates.some(hasIdentity)
+    ? yield* samplePublication(publicationName, content, fileSystem)
+    : undefined;
+  forgetBackOuts(
+    path,
+    fileSystem,
+    (publication) =>
+      candidates.includes(publication) &&
+      (!hasIdentity(publication) || sameSample(acquired, publication)),
+  );
 }
 
 // Immediate retries share the back-out/release seam; ENOENT needs no retry or warning.
@@ -1308,15 +1590,22 @@ function* claimReleasePath(
 
 function* backOutLockPath(
   path: string,
-  raw: string,
+  publication: DoomedPublication,
   pid: number,
   fileSystem: LockFileSystem,
 ): Steps<void> {
-  if (yield* backOutAttempt(path, raw, pid, fileSystem)) {
+  const outcome = yield* backOutAttempt(path, publication.raw, pid, fileSystem);
+  if (outcome === "removed") {
     return;
   }
-  rememberBackOut(path, fileSystem, raw);
-  logger.warn(`Lock back-out failed at ${path}; cleanup pending in this process`);
+  // S2: a back-out is complete only when it claimed and removed its own publication. Anything
+  // else leaves that publication possibly in a displacer's private marker, to be linked back.
+  rememberBackOut(path, fileSystem, publication);
+  if (outcome === "failed") {
+    logger.warn(`Lock back-out failed at ${path}; cleanup pending in this process`);
+  } else {
+    logger.debug(`Lock back-out did not find its publication at ${path}; removal pending`);
+  }
 }
 
 function* backOutAttempt(
@@ -1324,30 +1613,29 @@ function* backOutAttempt(
   raw: string,
   pid: number,
   fileSystem: LockFileSystem,
-): Steps<boolean> {
+): Steps<"removed" | "unfound" | "failed"> {
   const read = yield* retryLockStep({ op: "readText", path }, () => fileSystem.readText(path));
   if (typeof read === "string") {
-    return read === "missing";
+    return read === "missing" ? "unfound" : "failed";
   }
   if (read.value !== raw) {
-    return true;
+    return "unfound";
   }
   const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
   const claim = yield* retryLockStep({ op: "rename", path }, () => fileSystem.rename(path, marker));
   if (typeof claim === "string") {
-    return claim === "missing";
+    return claim === "missing" ? "unfound" : "failed";
   }
   const claimed = yield* retryLockStep({ op: "readText", path: marker }, () =>
     fileSystem.readText(marker),
   );
   if (typeof claimed === "string" || claimed.value !== raw) {
+    // Foreign or unknown claimed bytes are restored; this publication was not removed.
     yield* restoreDisplacedLock(path, marker, fileSystem);
-    // Unknown claimed bytes may have restored this doomed publication to P. Remember
-    // its exact bytes for the next call; a successful foreign read needs no pending entry.
-    return claimed !== "failed";
+    return claimed === "failed" ? "failed" : "unfound";
   }
   yield* unlinkBackOutMarker(path, marker, fileSystem);
-  return true;
+  return "removed";
 }
 
 function* unlinkBackOutMarker(
@@ -1461,6 +1749,9 @@ function* writeExclusiveLockFile(
       options.idGenerator,
       function* (tmp): Steps<void> {
         acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content, tmp);
+        if (acquired) {
+          yield* settleAcquiredBackOuts(path, content, fileSystem, tmp);
+        }
       },
     );
     const published =
@@ -1472,6 +1763,9 @@ function* writeExclusiveLockFile(
     }
     if (typeof publication !== "string") {
       acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+      if (acquired) {
+        yield* settleAcquiredBackOuts(path, content, fileSystem, path);
+      }
     }
     return { acquired, generation, swept: sweep, blocked: !acquired };
   } catch (error) {

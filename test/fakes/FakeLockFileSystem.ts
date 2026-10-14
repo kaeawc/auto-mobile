@@ -69,6 +69,28 @@ export class FakeLockFileSystem implements LockFileSystem {
     node.mtimeMs = mtimeMs;
   }
 
+  /**
+   * A distinct `LockFileSystem` object over this same namespace: one per simulated process, so
+   * state the lock keeps per filesystem object (pending back-outs) is per process. Every call
+   * delegates here, so operations and injected failures are recorded/applied exactly once.
+   */
+  view(): LockFileSystem {
+    return {
+      mkdir: (path) => this.mkdir(path),
+      list: (directory) => this.list(directory),
+      openExclusive: (path) => this.openExclusive(path),
+      write: (fd, content) => this.write(fd, content),
+      close: (fd) => this.close(fd),
+      writeFile: (path, content) => this.writeFile(path, content),
+      readText: (path) => this.readText(path),
+      stat: (path) => this.stat(path),
+      rename: (from, to) => this.rename(from, to),
+      link: (from, to) => this.link(from, to),
+      unlink: (path) => this.unlink(path),
+      exists: (path) => this.exists(path),
+    };
+  }
+
   paths(): string[] {
     return [...this.files.keys()].sort();
   }

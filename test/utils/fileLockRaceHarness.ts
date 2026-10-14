@@ -9,6 +9,8 @@ import {
   readLockOwnerPid,
   formatLockContent,
   takeOverExclusiveLock,
+  hasPendingBackOut,
+  releaseExclusiveLock,
   type ExclusiveLockOptions,
   type LockStep,
 } from "../../src/utils/fileLock";
@@ -81,7 +83,13 @@ export function fixture(raw = OLD) {
     },
   });
   const acquire = (pid: number) => new Racer(acquireExclusiveLockSteps(PATH, options(pid)));
-  return { fs, live, options, acquire, clock };
+  // One fs object per process INCARNATION: the lock keeps pending back-outs per fs object, so a
+  // shared object would let one "process" drain another's (a reopen shares its owner's options).
+  const process = (pid: number): ExclusiveLockOptions => ({
+    ...options(pid),
+    fileSystem: fs.view(),
+  });
+  return { fs, live, options, acquire, clock, process };
 }
 
 export function pauseAfterJudgement(racer: Racer<boolean>): void {
@@ -129,6 +137,8 @@ export interface Actor {
   releaseReturned?: boolean;
   reopenOwner?: Actor;
   reopened?: boolean;
+  /** Inodes this actor published by legacy wx (no hard link at its publish). */
+  legacyPublications?: Set<number>;
 }
 
 function actorRaw(actor: Actor): string {
@@ -191,7 +201,9 @@ export function advanceActor(
   if (actor.phase === "holding") {
     // Release relinquishes belief at invocation; its rename is the owner's voluntary removal.
     actor.phase = "releasing";
-    actor.racer = new Racer(releaseExclusiveLockSteps(PATH, actor.pid, `owner-${actor.pid}`, f.fs));
+    actor.racer = new Racer(
+      releaseExclusiveLockSteps(PATH, actor.pid, `owner-${actor.pid}`, actor.options.fileSystem),
+    );
   }
   try {
     actor.racer.advance();
@@ -263,7 +275,7 @@ export function runSchedule(seed: number): void {
   }
   const random = new SeededRandom(seed);
   const actors: Actor[] = [101, 202, 303, ...(seed % 3 === 0 ? [404] : [])].map((pid) => {
-    const options = { ...f.options(pid), reclaimOwnPid: kind === 3 && pid === 101 };
+    const options = { ...f.process(pid), reclaimOwnPid: kind === 3 && pid === 101 };
     return {
       pid,
       options,
@@ -276,7 +288,7 @@ export function runSchedule(seed: number): void {
   if (seed % 3 === 0 && kind !== 3) {
     // A crashed reclaimer's PID is recycled by a live process with no generation evidence.
     const options: ExclusiveLockOptions = {
-      ...f.options(707),
+      ...f.process(707),
       ownerGeneration: { current: () => undefined, compare: () => "different" },
     };
     const racer = new Racer(acquireExclusiveLockSteps(PATH, options));
@@ -315,10 +327,11 @@ function executeSchedule(context: {
   for (let count = 0; count < 1200; count++) {
     if (!freshAdded && f.fs.peek(PATH)?.raw !== originalStale(seed)) {
       f.live.add(606);
+      const options = f.process(606);
       actors.push({
         pid: 606,
-        options: f.options(606),
-        racer: f.acquire(606),
+        options,
+        racer: new Racer(acquireExclusiveLockSteps(PATH, options)),
         phase: "acquiring",
         attempts: 0,
       });
@@ -356,7 +369,7 @@ function executeSchedule(context: {
   f.live.add(505);
   let acquired = false;
   for (let attempt = 0; attempt < 6 && !acquired; attempt++) {
-    acquired = tryAcquireExclusiveLock(PATH, f.options(505));
+    acquired = tryAcquireExclusiveLock(PATH, f.process(505));
   }
   expect(acquired).toBe(true);
   exactHolder(f.fs, 505);
@@ -470,6 +483,13 @@ export function checkMutation(
       (f.fs.peek(PATH)?.raw === "" && !actor.restoreOwner))
   ) {
     actor.publicationIno = f.fs.peek(PATH)?.ino;
+    if (
+      actor.publicationIno !== undefined &&
+      operations.some((op) => op.path === PATH && op.op === "openExclusive")
+    ) {
+      // Legacy wx publication: no hard link, so no identity proof (spec-fix8 self-block).
+      (actor.legacyPublications ??= new Set()).add(actor.publicationIno);
+    }
   }
   if (retainMarker && retainIno !== undefined && f.fs.peek(retainMarker)?.ino === retainIno) {
     // A failed RETAIN rename keeps its private marker and warns, the documented worst case (6002).
@@ -551,7 +571,9 @@ function recordResiduals(fs: FakeLockFileSystem, actors: Actor[]): void {
 }
 
 function retainedActor(f: ReturnType<typeof fixture>, pid: number): Actor {
-  return { pid, options: f.options(pid), racer: f.acquire(pid), phase: "acquiring", attempts: 0 };
+  const options = f.process(pid);
+  const racer = new Racer(acquireExclusiveLockSteps(PATH, options));
+  return { pid, options, racer, phase: "acquiring", attempts: 0 };
 }
 
 function executeRetainedSchedule(seed: number, trace: string[]): void {
@@ -588,6 +610,8 @@ function executeRetainedSchedule(seed: number, trace: string[]): void {
           everResidual: a.everResidual,
           releaseReturned: a.releaseReturned,
           backOutReturned: a.backOutReturned,
+          legacyPublications: [...(a.legacyPublications ?? [])],
+          pendingBackOut: a.options.fileSystem && hasPendingBackOut(a.options.fileSystem, PATH),
           publicationCopies: [...(a.publicationCopies ?? [])],
           failedRetainMarkers: [...(a.failedRetainMarkers ?? [])],
         })),
@@ -609,7 +633,9 @@ function addStaleReleaser(context: RetainedContext): void {
   const stale = retainedActor(f, 808);
   stale.phase = "releasing";
   stale.staleRelease = true;
-  stale.racer = new Racer(releaseExclusiveLockSteps(PATH, 808, "owner-808", f.fs));
+  stale.racer = new Racer(
+    releaseExclusiveLockSteps(PATH, 808, "owner-808", stale.options.fileSystem),
+  );
   stale.racer.until((step) => step.op === "rename" && step.path === PATH);
   f.live.add(707);
   expect(takeOverExclusiveLock(PATH, { pid: 808, token: "owner-808" }, f.options(707))).toBe(true);
@@ -737,22 +763,44 @@ function assertReleasedActors(fs: FakeLockFileSystem, actors: Actor[]): void {
   }
 }
 
+function isNamed(fs: FakeLockFileSystem, actor: Actor): boolean {
+  return [PATH, `${PATH}.displaced`].some((name) => fs.peek(name)?.raw === actorRaw(actor));
+}
+
+/** The documented legacy self-block (spec-fix8): a wx publication, never provably ours, retained at F. */
+function isLegacySelfBlock(fs: FakeLockFileSystem, actor: Actor): boolean {
+  const retained = fs.peek(`${PATH}.displaced`);
+  return retained !== undefined && actor.legacyPublications?.has(retained.ino) === true;
+}
+
 function finishRetainedSchedule(context: RetainedContext): void {
   const { f, actors } = context;
   f.fs.failure = undefined;
   assertReleasedActors(f.fs, actors);
-  // A live residual owner can miss its private publication during release; if a
-  // displacer restored it after release (including an acquirer's owner back-out),
-  // release it once on that owner's behalf so
-  // the final fresh acquirer can win. Only this documented resurrection needs cleanup.
-  for (const actor of actors.filter(
+  const live = actors.filter((a) => f.live.has(a.pid) && a.phase !== "crashed");
+  // The ONLY two releases made on an actor's behalf, both documented residuals:
+  // R2 — a holder whose release missed its privately displaced publication, restored afterwards;
+  // legacy self-block — a doomed wx publication (no identity proof) retained at F.
+  for (const actor of live.filter(
     (a) =>
-      (a.releaseReturned || a.backOutReturned) &&
-      a.everResidual &&
-      f.live.has(a.pid) &&
-      [PATH, `${PATH}.displaced`].some((name) => f.fs.peek(name)?.raw === actorRaw(a)),
+      isNamed(f.fs, a) && ((a.releaseReturned && a.everResidual) || isLegacySelfBlock(f.fs, a)),
   )) {
-    new Racer(releaseExclusiveLockSteps(PATH, actor.pid, actor.options.ownerToken, f.fs)).finish();
+    releaseExclusiveLock(PATH, actor.pid, actor.options.ownerToken, actor.options.fileSystem);
+  }
+  // Every other process told "not acquired" never held. If it is still named at P or F, its own
+  // process must remember a pending back-out, or nothing will ever remove that name: stuck.
+  const toldFalse = live.filter((a) => !a.releaseReturned && !a.reopenOwner);
+  for (const actor of toldFalse.filter((a) => isNamed(f.fs, a))) {
+    if (!actor.options.fileSystem || !hasPendingBackOut(actor.options.fileSystem, PATH)) {
+      throw new Error(`live non-holder ${actor.pid} is named with no pending back-out`);
+    }
+  }
+  // What a real process does next: one more attempt with its original options, which drains
+  // its pending back-out (and releases if it now legitimately acquires).
+  for (const actor of toldFalse) {
+    if (tryAcquireExclusiveLock(PATH, actor.options)) {
+      releaseExclusiveLock(PATH, actor.pid, actor.options.ownerToken, actor.options.fileSystem);
+    }
   }
   if (actors.every((actor) => actor.phase !== "crashed")) {
     expect(
@@ -768,10 +816,24 @@ function finishRetainedSchedule(context: RetainedContext): void {
   }
   f.clock.advanceTime(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
   f.live.add(505);
+  const fresh = f.process(505);
   let acquired = false;
   for (let attempt = 0; attempt < 6 && !acquired; attempt++) {
-    acquired = tryAcquireExclusiveLock(PATH, f.options(505));
+    acquired = tryAcquireExclusiveLock(PATH, fresh);
   }
-  expect(acquired).toBe(true);
+  if (!acquired) {
+    const stuck = live
+      .filter((a) => isNamed(f.fs, a))
+      .map((a) => {
+        const at = [PATH, `${PATH}.displaced`].filter((n) => f.fs.peek(n)?.raw === actorRaw(a));
+        const kind = at.some((n) => a.legacyPublications?.has(f.fs.peek(n)!.ino))
+          ? "legacy"
+          : at.some((n) => a.publicationCopies?.has(f.fs.peek(n)!.ino))
+            ? "copy"
+            : "atomic";
+        return `${a.pid}/${kind}/released=${!!a.releaseReturned}/at=${at.map((n) => (n === PATH ? "P" : "F")).join("+")}`;
+      });
+    throw new Error(`STUCK ${stuck.join(";")}`);
+  }
   exactHolder(f.fs, 505);
 }

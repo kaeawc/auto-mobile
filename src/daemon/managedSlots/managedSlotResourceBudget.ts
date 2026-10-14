@@ -11,6 +11,7 @@ import type { ManagedSlotBudgetEvidence } from "../../models/managedSlotsResult"
 import {
   isStuckFreeDeviceDeletion,
   managedSlotDeletionSkip,
+  uncountedStuckFreeDeviceDeletions,
   type ManagedSlotCacheEvictor,
   type ManagedSlotEvictionCandidate,
   type ManagedSlotEvictionRegistry,
@@ -154,18 +155,13 @@ function chargeManagedDevice(
   deleting: ReadonlySet<string>,
   free: readonly FreeSlotDeviceRecord[],
   journal: readonly SlotJournalEntry[],
-  slotBound: ReadonlySet<string>,
+  uncounted: readonly FreeSlotDeviceRecord[],
 ): ResourceCharge[] {
-  const row =
-    device.holder === "free"
-      ? free.find(
-          (entry) =>
-            entry.platform === device.platform && entry.stableDeviceId === device.stableDeviceId,
-        )
-      : undefined;
   if (
-    !slotBound.has(resourceKey(device.platform, device.stableDeviceId)) &&
-    isStuckFreeDeviceDeletion(row?.deletion)
+    device.holder === "free" &&
+    uncounted.some(
+      (row) => row.platform === device.platform && row.stableDeviceId === device.stableDeviceId,
+    )
   ) {
     return [];
   }
@@ -176,10 +172,9 @@ function chargeManagedDevice(
 
 function resourceCharges(input: LedgerInput): ResourceCharge[] {
   const journal = input.openJournal.filter((entry) => isSlotJournalPhaseOpen(entry.phase));
-  const slotBound = new Set(
-    input.managed
-      .filter((device) => device.holder === "slot")
-      .map((device) => resourceKey(device.platform, device.stableDeviceId)),
+  const uncounted = uncountedStuckFreeDeviceDeletions(
+    input.free ?? [],
+    input.managed.filter((device) => device.holder === "slot"),
   );
   const deleting = new Set(
     journal
@@ -209,7 +204,7 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   );
   const seen = new Set(distinct.keys());
   const charges = [...distinct.values()].flatMap((device) =>
-    chargeManagedDevice(device, deleting, input.free ?? [], journal, slotBound),
+    chargeManagedDevice(device, deleting, input.free ?? [], journal, uncounted),
   );
 
   for (const entry of journal) {
@@ -319,10 +314,14 @@ async function readResourceCharges(
     }
     devices.push(...listing.devices);
   }
+  const uncounted = uncountedStuckFreeDeviceDeletions(
+    snapshot.free,
+    snapshot.managed.filter((device) => device.holder === "slot"),
+  );
   return {
     charges: resourceCharges({ ...snapshot, inventory: devices }),
     retained: snapshot.free.flatMap((row) => {
-      const skip = managedSlotDeletionSkip(row);
+      const skip = managedSlotDeletionSkip(row, uncounted.includes(row));
       return skip ? [skip] : [];
     }),
   };
@@ -435,12 +434,10 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         retained,
         evictionFailures,
       };
-      // Counted markers commit room while native deletion redrives; stuck markers do not.
+      // Any counted pending marker commits room until redrive finishes or it becomes stuck.
+      // Evicting beside it either over-frees capacity or deletes cache and still refuses creation.
       const shortfall = rankedCount(charges, request.journalEntryId) - limit;
-      if (
-        !this.deps.eviction ||
-        retained.filter((row) => !isStuckFreeDeviceDeletion(row)).length >= shortfall
-      ) {
+      if (!this.deps.eviction || retained.some((row) => !isStuckFreeDeviceDeletion(row))) {
         return exhausted;
       }
       checkAdmissionBudget(request, this.timer);
@@ -448,13 +445,25 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         signal: request.signal,
         deadlineMs: request.deadlineMs,
       });
-      exhausted.retained = selection.skipped;
+      exhausted.retained = selection.skipped.map(({ uncounted: _uncounted, ...row }) => ({
+        ...row,
+        ...(retained.some(
+          (marker) =>
+            marker.platform === row.platform &&
+            marker.stableDeviceId === row.stableDeviceId &&
+            marker.uncounted,
+        )
+          ? { uncounted: true as const }
+          : {}),
+      }));
       // One attempt per initially observed free row, then one final read/selection iteration.
       remaining ??= selection.candidates.length + selection.skipped.length;
-      const candidate = selection.candidates.find(
+      const untried = selection.candidates.filter(
         (device) => !attempted.has(resourceKey(device.platform, device.stableDeviceId)),
       );
-      if (!candidate || remaining === 0) {
+      // Do not destroy cache unless the remaining attempts can make this creation fit.
+      const candidate = untried[0];
+      if (untried.length < shortfall || !candidate || remaining === 0) {
         return exhausted;
       }
       remaining -= 1;

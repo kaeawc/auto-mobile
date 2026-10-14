@@ -1,3 +1,4 @@
+import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -341,6 +342,11 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "orphan_recorder_active",
+    "OrphanRecorderActiveError via shapeToolCallError",
+    () => shaped(new OrphanRecorderActiveError(DEVICE, ["startup-orphan"])),
+  ],
   [
     "plan_execution_in_progress",
     "PlanExecutionInProgressError via shapeToolCallError",
@@ -775,6 +781,7 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             reason: "deletion_stuck",
             attempts: 5,
             failedDeletes: 3,
+            uncounted: true,
             lastError: "native delete keeps failing",
           },
         ],

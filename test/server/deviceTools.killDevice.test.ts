@@ -1,3 +1,15 @@
+import { readFileSync } from "node:fs";
+import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
+import {
+  ProcessTableEmulatorProcessStopper,
+  EmulatorStillRunningError,
+  isEmulatorStopDispatchedError,
+} from "../../src/utils/android-cmdline-tools/EmulatorProcessStop";
+import {
+  FakeEmulatorProcessStopper,
+  FakeEmulatorProcessTableSource,
+  FakeEmulatorProcessSignaler,
+} from "../fakes/FakeEmulatorProcessStopper";
 import {
   clearAndroidImeQuarantine,
   quarantineAndroidIme,
@@ -17,6 +29,8 @@ import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLoss
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   defaultResolveRunningAndroidAvdName,
+  confirmPooledAvdIdentity,
+  pooledAvdNameRefusalMessage,
   killDeviceSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -45,6 +59,10 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { InMemoryEmulatorConsoleBusyRegistry } from "../../src/utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
+import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -592,6 +610,28 @@ class RealAndroidClientKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
     await this.client.killDevice(device, options);
+    this.setBootedDevices(device.platform, []);
+  }
+}
+
+/** Console requests remain pending until the injected timeout or caller abort. */
+class WedgedKillConsoleAdb extends FakeAdbExecutor {
+  constructor(private readonly timer: FakeTimer) {
+    super();
+  }
+
+  override async execute(args: string[], options: AdbExecuteOptions = {}) {
+    const recorded = await super.execute(args, options);
+    if (args[0] !== "emu" && !args.includes("ro.boot.qemu.avd_name")) {
+      return recorded;
+    }
+    return raceWithDeadline(new Promise<never>(() => {}), {
+      timer: this.timer,
+      timeoutMs: options.timeoutMs ?? 2000,
+      signal: options.signal,
+      label: args.join(" "),
+      timeoutError: () => new AdbCommandTimeoutError(`Command timed out: ${args.join(" ")}`),
+    });
   }
 }
 
@@ -699,6 +739,7 @@ describe("killDevice handler", () => {
     });
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
@@ -829,6 +870,239 @@ describe("killDevice handler", () => {
       deviceId: "emulator-5554",
     };
 
+    test("mute console with a process-table replacement refuses before any platform stop", async () => {
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.identity = {
+        kind: "mismatch",
+        pid: 83205,
+        runningAvdName: "Replacement",
+        port: 5554,
+        command: "qemu-system-aarch64 -avd Replacement -port 5554",
+      };
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /Pixel_8_Old[\s\S]*Replacement/,
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+      expect(stopper.stopCalls).toEqual([]);
+    });
+
+    for (const owned of [true, false]) {
+      for (const force of [false, true]) {
+        test(`wedged console regression: ${owned ? "daemon-spawned" : "foreign"}, force=${force}`, async () => {
+          const timer = new FakeTimer();
+          timer.enableAutoAdvance();
+          const adb = new WedgedKillConsoleAdb(timer);
+          adb.setDevices([unknownEmulator]);
+          const client = new AndroidEmulatorClient(
+            null,
+            null,
+            timer,
+            new FakeAdbClientFactory(adb),
+          );
+          manager = new RealAndroidClientKillDeviceManager(client);
+          manager.setBootedDevices("android", [unknownEmulator]);
+          const table = new FakeEmulatorProcessTableSource();
+          // Derived AVD label from the captured headless qemu process; port and pid stay captured.
+          table.rows = parsePsSnapshot(
+            readFileSync(
+              new URL(
+                "../fixtures/android-boot-admission/ps-snapshot-two-emulators-with-ports.txt",
+                import.meta.url,
+              ),
+              "utf8",
+            ),
+          ).rows.map((row) => ({
+            ...row,
+            command: row.command.replace(
+              "amslot-039fd12f-0-g1-5e7e5f80",
+              owned ? "Pixel_8_Old" : "Foreign",
+            ),
+          }));
+          const signaler = new FakeEmulatorProcessSignaler();
+          const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer);
+          setDeviceToolsDependencies({
+            androidEmulatorProcessStopper: stopper,
+            timer,
+            deviceManagerFactory: () => manager,
+            resolveRunningAndroidAvdName: (device, timeoutMs, signal) =>
+              client.resolveAvdNameForSerial(device.deviceId, { timeoutMs, signal }),
+          });
+          if (owned) {
+            await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+          }
+          const result = await killTool()
+            .handler({ device: unknownEmulator, force })
+            .then(
+              (value) => value,
+              (error: unknown) => error,
+            );
+          const dispatched = adb
+            .getExecutedCommands()
+            .some((command) => command.endsWith("emu kill"));
+          expect(dispatched).toBe(force);
+          if (owned) {
+            expect(result).not.toBeInstanceOf(Error);
+            expect(signaler.signals).toEqual([{ pid: 83205, signal: "SIGTERM" }]);
+            expect(table.calls).toHaveLength(force ? 1 : 2);
+          } else {
+            expect(result).toBeInstanceOf(Error);
+            expect((result as Error).message).toContain("83205");
+            expect((result as Error).message).toContain("-avd Foreign -port 5554");
+            expect((result as Error).message).toContain("same console");
+            expect(signaler.signals).toEqual([]);
+          }
+        });
+      }
+    }
+
+    for (const failure of [
+      "signals",
+      "console-absent",
+      "console-mismatch",
+      "mute-absent",
+      "mute-mismatch",
+    ] as const) {
+      test(`unconfirmed ${failure} preserves ownership and classifies dispatched shutdown`, async () => {
+        const dispatched = !failure.startsWith("mute");
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const device = { ...unknownEmulator, name: "Pixel_8_Old" };
+        const adb = new WedgedKillConsoleAdb(timer);
+        adb.setDevices([device]);
+        const client = new AndroidEmulatorClient(
+          null,
+          null,
+          timer,
+          new FakeAdbClientFactory(adb),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          new InMemoryEmulatorConsoleBusyRegistry(),
+        );
+        manager = new RealAndroidClientKillDeviceManager(client);
+        manager.setBootedDevices("android", [device]);
+        const table = new FakeEmulatorProcessTableSource();
+        table.rows = failure.endsWith("absent")
+          ? []
+          : [
+              {
+                pid: 83205,
+                ppid: 1,
+                command: `qemu-system-aarch64 -avd ${failure.endsWith("mismatch") ? "Replacement" : device.name} -port 5554`,
+              },
+            ];
+        const signaler = new FakeEmulatorProcessSignaler();
+        signaler.exitOn = undefined;
+        const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer);
+        const repository = new FakeDeviceSessionRepository();
+        const incidents = new InMemoryEmulatorLossIncidentStore(timer);
+        sessionManager = new SessionManager(timer, repository);
+        const pool = new DevicePool(
+          createDevicePoolDependencies(sessionManager, "daemon-session", {
+            timer,
+            deviceManager: manager,
+            deviceSessionRepository: repository,
+            emulatorLossIncidentStore: incidents,
+          }),
+        );
+        await pool.initializeWithDevices([device]);
+        DaemonState.getInstance().initialize(sessionManager, pool);
+        setDeviceToolsDependencies({
+          timer,
+          androidEmulatorProcessStopper: stopper,
+          deviceManagerFactory: () => manager,
+        });
+        const incarnation = pool.getDevice(device.deviceId);
+        const marked = spyOn(pool, "markIntentionalShutdown");
+        const cleared = spyOn(pool, "clearIntentionalShutdown");
+        const result = await killTool()
+          .handler({ device, force: dispatched })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect(result).toBeInstanceOf(Error);
+        if (failure === "console-absent") {
+          // The tool preserves its existing generic adb-error wrapper; the fence is pinned below.
+          expect((result as Error).message).toContain("Command timed out: emu kill");
+        } else {
+          expect(isEmulatorStopDispatchedError(result)).toBe(dispatched);
+        }
+        expect(marked).toHaveBeenCalledTimes(1);
+        expect(cleared).toHaveBeenCalledTimes(dispatched ? 0 : 2);
+        expect(pool.getDevice(device.deviceId)).toBe(incarnation);
+        expect(await pool.isShutdownReserved(device.deviceId)).toBe(dispatched);
+        expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+        expect(pool.getAvailableDeviceCount()).toBe(dispatched ? 0 : 1);
+        expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(
+          dispatched,
+        );
+        if (failure === "signals") {
+          expect(result).toBeInstanceOf(EmulatorStillRunningError);
+          expect(signaler.signals).toEqual([
+            { pid: 83205, signal: "SIGTERM" },
+            { pid: 83205, signal: "SIGKILL" },
+          ]);
+          expect(timer.now()).toBeLessThan(30_000);
+        } else {
+          expect(signaler.signals).toEqual([]);
+        }
+        if (dispatched) {
+          // Mirror the timeout case: a late exit is intentional, never a crash.
+          manager.childProcess.emit("exit", 0, null);
+          await pool.removeDisconnectedDevice(device.deviceId);
+          expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+          expect(await incidents.list()).toEqual([]);
+        }
+        marked.mockRestore();
+        cleared.mockRestore();
+      });
+    }
+
+    for (const status of ["absent", "unreadable"] as const) {
+      test(`pooled identity refusal explains process table ${status}`, async () => {
+        const stopper = new FakeEmulatorProcessStopper();
+        stopper.identity =
+          status === "unreadable"
+            ? { kind: "unreadable", detail: "ps failed" }
+            : { kind: "absent" };
+        setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+        await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+        await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+          status === "absent"
+            ? "The process table has no emulator candidate with this explicit port."
+            : "The process table could not be read.",
+        );
+        expect(manager.killedDeviceIds).toEqual([]);
+        expect(stopper.stopCalls).toEqual([]);
+      });
+    }
+
+    test("pooled identity refusal reports when no process table was consulted", async () => {
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      const pool = DaemonState.getInstance().getDevicePool();
+      const entry = pool.getDevice(unknownEmulator.deviceId)!;
+      const confirmation = await confirmPooledAvdIdentity(
+        unknownEmulator,
+        { avdName: "Pixel_8_Old", incarnation: entry.incarnation },
+        pool,
+        async () => undefined,
+        { timer: new FakeTimer(), deadlineMs: 30_000 },
+        false,
+      );
+      expect(confirmation.kind).toBe("refusal");
+      if (confirmation.kind !== "refusal") {
+        throw new Error("expected refusal");
+      }
+      expect(pooledAvdNameRefusalMessage(unknownEmulator, confirmation.refusal)).toContain(
+        "No process table was consulted.",
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
     test("refuses when the runtime names a different AVD than the pool", async () => {
       manager = new SuccessfulKillDeviceManager();
       setDeviceToolsDependencies({ deviceManagerFactory: () => manager });

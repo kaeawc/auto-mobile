@@ -1,4 +1,15 @@
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
+import {
+  describeForeignCtrlProxyForwards,
+  listedCtrlProxyForwardPorts,
+  parseOwnPortForward,
+  localPortFromForward,
+  rememberForeignForwardClients,
+  liveRememberedForwardClients,
+  pruneForeignForwardMemory,
+  resetForeignCtrlProxyForwardEvidenceForTesting,
+} from "./foreignCtrlProxyForwardEvidence";
+import { isProcessRunning } from "../../../utils/processLiveness";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
@@ -1082,6 +1093,8 @@ type WebSocketMessageHandlers = {
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
  */
 export interface AndroidCtrlProxy extends CtrlProxyClient {
+  isLastConnectionFailureForwardingLeaseConflict?(): boolean;
+  getLastConnectionFailureMessage?(): string | undefined;
   setRecompositionTrackingEnabled(
     enabled: boolean,
     perf?: PerformanceTracker,
@@ -1444,43 +1457,6 @@ function describeCtrlProxyForwardingLeaseConflict(
 type ForwardClientEvidence = { clientPidsByPort: Map<number, number[]> } | { probeFailure: string };
 
 /**
- * Actionable message for CtrlProxy forwards on a device that no process in this
- * coordination directory created and that another process may still use (issue
- * #10690). `evidence` says why the forward was judged live: connected client
- * PIDs, or a host TCP-table read that failed and so cannot rule a client out.
- */
-function describeForeignCtrlProxyForwards(
-  deviceId: string,
-  ports: number[],
-  ownershipDirectory: string | undefined,
-  evidence: { clientPids: number[] } | { probeFailure: string },
-): string {
-  const listed = ports.map((port) => `tcp:${port}`).join(", ");
-  const removal = ports
-    .map((port) => `\`adb -s ${deviceId} forward --remove tcp:${port}\``)
-    .join(", ");
-  const domain = ownershipDirectory === undefined ? "" : ` (records in ${ownershipDirectory})`;
-  const unrecorded =
-    `its CtrlProxy forward ${listed} was not created by this daemon (PID ${process.pid}) or ` +
-    `any daemon sharing its coordination directory${domain}`;
-  if ("clientPids" in evidence) {
-    const pids = evidence.clientPids.join(", ");
-    return (
-      `${deviceId} is driven by another AutoMobile daemon: ${unrecorded}, and PID ${pids} ` +
-      `holds a connection to it, so it was left in place. An older AutoMobile release or a ` +
-      `daemon started with a different AUTOMOBILE_COORDINATION_DIR is the usual owner; stop ` +
-      `it (\`kill ${evidence.clientPids[0]}\`) or use another device.`
-    );
-  }
-  return (
-    `${deviceId} may be driven by another AutoMobile daemon: ${unrecorded}, and its host ` +
-    `connections could not be checked (${evidence.probeFailure}), so it was left in place. ` +
-    `If no other AutoMobile daemon uses this device, remove the stale forward with ` +
-    `${removal} and retry.`
-  );
-}
-
-/**
  * Raise the appropriate error for a failed {@link CtrlProxyForwardLease.tryAcquire}
  * (issue #6260 / PRRT_kwDOP-GF5M6fuKn9). Split out of `setupPortForwarding` to keep
  * that method's branching complexity down; always throws.
@@ -1588,6 +1564,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * still in use (#10690). Tests replace it; production reads lsof/netstat.
    */
   forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
+  /** @internal Injected liveness probe for sticky foreign-forward evidence. */
+  forwardClientProcessIsRunning: (pid: number) => boolean = isProcessRunning;
   private static readonly FORWARD_CLIENT_PROBES = 2;
   private static readonly FORWARD_PORT_ATTEMPTS = 4;
   private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS = 1_000;
@@ -1901,6 +1879,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * which some test files configure in beforeAll.
    */
   public static clearInstanceRegistryForTesting(): void {
+    resetForeignCtrlProxyForwardEvidenceForTesting();
     AndroidCtrlProxyClient.instances.clear();
   }
 
@@ -2352,6 +2331,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
+    resetForeignCtrlProxyForwardEvidenceForTesting();
     for (const instance of AndroidCtrlProxyClient.instances.values()) {
       instance.close().catch((error) => {
         const logger = instance.loggerInstance;
@@ -2912,7 +2892,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * is off or the client is closed.
    */
   protected override onConnectAttemptFailed(): void {
-    if (this.closed || !this.autoReconnectEnabled) {
+    if (
+      this.closed ||
+      !this.autoReconnectEnabled ||
+      this.isLastConnectionFailureForwardingLeaseConflict()
+    ) {
       return;
     }
 
@@ -5465,26 +5449,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       (port) => this.ownsCtrlProxyPortForward(port) && !livePorts.has(port),
     );
 
-    await this.reclaimRecordedOrphanForwards(orphanedPorts, signal);
+    pruneForeignForwardMemory(this.device.deviceId, new Set(unrecordedPorts));
     if (unrecordedPorts.length > 0) {
       await this.resolveUnrecordedCtrlProxyForwards(unrecordedPorts, signal);
     }
+    await this.reclaimRecordedOrphanForwards(orphanedPorts, signal);
   }
 
   /** Host ports of this device's forwards to the CtrlProxy device port. */
   private listedCtrlProxyForwardPorts(stdout: string): Set<number> {
-    const ports = new Set<number>();
-    for (const line of stdout.split(/\r?\n/)) {
-      const forward = this.parseOwnPortForward(line);
-      if (!forward || forward.remote !== `tcp:${PortManager.DEVICE_PORT}`) {
-        continue;
-      }
-      const port = this.localPortFromForward(forward.local);
-      if (port !== null) {
-        ports.add(port);
-      }
-    }
-    return ports;
+    return listedCtrlProxyForwardPorts(this.device.deviceId, stdout);
   }
 
   /**
@@ -5544,8 +5518,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * open to its forward's host port, so a client connection from another
    * process means the forward is live and must be left alone. Two probes a
    * moment apart cover a client caught between reconnects. With no client on
-   * either probe, the forward is a leftover (a stopped older daemon, or a
-   * crash) and is removed. A failed probe cannot rule a client out, so it
+   * either probe and no remembered foreign PID still alive, the forward is
+   * a leftover (a stopped older daemon, or a crash) and is removed. Remembered
+   * live PIDs keep it foreign across socket disconnects (#12220).
+   * A failed probe cannot rule a client out, so it
    * refuses rather than risk removing a live forward.
    */
   private async resolveUnrecordedCtrlProxyForwards(
@@ -5556,9 +5532,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       ports,
       AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
       signal,
+      true,
     );
+    const rememberedOnly = "clientPidsByPort" in evidence && evidence.clientPidsByPort.size === 0;
+    if ("clientPidsByPort" in evidence) {
+      for (const port of ports) {
+        const remembered = liveRememberedForwardClients(
+          this.device.deviceId,
+          port,
+          this.forwardClientProcessIsRunning,
+        );
+        if (remembered.length > 0) {
+          evidence.clientPidsByPort.set(port, [
+            ...new Set([...(evidence.clientPidsByPort.get(port) ?? []), ...remembered]),
+          ]);
+        }
+      }
+    }
     if ("probeFailure" in evidence || evidence.clientPidsByPort.size > 0) {
-      this.throwForeignCtrlProxyForwards(ports, evidence);
+      this.throwForeignCtrlProxyForwards(ports, evidence, false, rememberedOnly);
     }
     for (const port of ports) {
       logger.warn(
@@ -5579,6 +5571,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ports: number[],
     evidence: ForwardClientEvidence,
     transient = false,
+    rememberedOnly = false,
   ): never {
     const clientPids =
       "clientPidsByPort" in evidence
@@ -5589,7 +5582,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.device.deviceId,
         ports,
         this.ctrlProxyForwardLease.ownershipDirectory?.(),
-        "probeFailure" in evidence ? evidence : { clientPids },
+        "probeFailure" in evidence ? evidence : { clientPids, rememberedOnly },
       ),
       clientPids[0],
       undefined,
@@ -5605,20 +5598,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ports: number[],
     probes: number,
     signal?: AbortSignal,
+    rememberUnrecorded = false,
   ): Promise<ForwardClientEvidence> {
     const clientPidsByPort = new Map<number, number[]>();
+    const remember = rememberUnrecorded ? rememberForeignForwardClients : undefined;
     try {
       for (let probe = 0; probe < probes; probe++) {
         if (probe > 0) {
           await this.timer.sleep(AndroidCtrlProxyClient.FORWARD_CLIENT_REPROBE_INTERVAL_MS);
         }
         for (const [port, pids] of await this.probeForwardClientsOnce(ports, signal)) {
+          remember?.(this.device.deviceId, port, pids);
           clientPidsByPort.set(port, [
             ...new Set([...(clientPidsByPort.get(port) ?? []), ...pids]),
           ]);
         }
       }
     } catch (error) {
+      signal?.throwIfAborted();
       logger.warn(
         `[CTRL_PROXY] Could not read host connections to CtrlProxy forwards on ` +
           `${this.device.deviceId}: ${errorMessage(error)}`,
@@ -5707,6 +5704,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         return false;
       }
 
+      this.assertNoLiveRememberedForeignForward(port);
       await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
       const startedAt = this.timer.now();
       const confirmationDeadlineMs = 2_000;
@@ -5728,11 +5726,33 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       PortManager.quarantine(port);
       return false;
     } catch (error) {
+      if (error instanceof CtrlProxyForwardingLeaseConflictError) {
+        throw error;
+      }
       logger.warn(
         `[CTRL_PROXY] Failed to remove CtrlProxy forward on ${this.device.deviceId} tcp:${port}: ${error}`,
         error,
       );
       return false;
+    }
+  }
+
+  private assertNoLiveRememberedForeignForward(port: number): void {
+    if (this.ownsCtrlProxyPortForward(port)) {
+      return;
+    }
+    const pids = liveRememberedForwardClients(
+      this.device.deviceId,
+      port,
+      this.forwardClientProcessIsRunning,
+    );
+    if (pids.length > 0) {
+      this.throwForeignCtrlProxyForwards(
+        [port],
+        { clientPidsByPort: new Map([[port, pids]]) },
+        false,
+        true,
+      );
     }
   }
 
@@ -5755,26 +5775,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private parseOwnPortForward(line: string): { local: string; remote: string } | null {
-    const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-    if (serial !== this.device.deviceId) {
-      return null;
-    }
-    if (extra.length !== 0) {
-      // Ignore ambiguous rows so cleanup cannot remove an unrelated service's forward.
-      logger.debug(
-        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${serial}: ${line.trim()}`,
-      );
-      return null;
-    }
-    return local && remote ? { local, remote } : null;
+    return parseOwnPortForward(this.device.deviceId, line);
   }
 
   private localPortFromForward(value: string | undefined): number | null {
-    if (value === undefined || !value.startsWith("tcp:")) {
-      return null;
-    }
-    const port = Number.parseInt(value.slice("tcp:".length), 10);
-    return Number.isInteger(port) && port > 0 ? port : null;
+    return localPortFromForward(value);
   }
 
   private async finishInvalidatedConnectionCleanup(): Promise<void> {

@@ -28,6 +28,7 @@ enum PrototypeAgentProtocol {
         themeModesCapability,
         appearanceCapability,
         windowChromeCapability,
+        dataModelCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -66,6 +67,9 @@ enum PrototypeAgentProtocol {
     /// Fullscreen `window.chrome` (#12064): `none` (default) fills the window with a hidden and
     /// accessible escape; `bar` reserves the host dismiss bar. Same name as the CtrlProxy capability.
     static let windowChromeCapability = "prototype_window_chrome_v1"
+    /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
+    /// show before repeat expansion. Status reports the shown data alongside state.
+    static let dataModelCapability = "prototype_data_model_v1"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

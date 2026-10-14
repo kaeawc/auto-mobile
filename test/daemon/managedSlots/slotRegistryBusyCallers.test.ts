@@ -212,7 +212,9 @@ describe("busy registry callers", () => {
           outcome: "failed",
           failure: { code: cause === "readiness" ? "readiness_incomplete" : "scope_not_valid" },
         });
-        expect(await registry.listOpenSlotJournal(key)).toHaveLength(0);
+        // Readiness records the flag atomically: the injected busy write now hits rollback,
+        // after native deletion. Commit refusal still retries its separate flag write.
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(cause === "readiness" ? 1 : 0);
         expect(inventory.devices).toHaveLength(0);
       } finally {
         write.mockRestore();
@@ -251,7 +253,7 @@ describe("busy registry callers", () => {
         });
         expect(provisioner.released).toEqual(["session-1"]);
         expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
-        expect(inventory.has("UDID-1")).toBe(true);
+        expect(inventory.has("UDID-1")).toBe(cause !== "readiness");
       } finally {
         write.mockRestore();
       }

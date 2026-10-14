@@ -1,3 +1,4 @@
+import { SlotJournalRemovalRegistryTimeout } from "./slotJournal";
 import { createHash } from "node:crypto";
 import { classifySqliteError } from "../../db/databaseFailureClassification";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -270,7 +271,23 @@ export interface ManagedSlotDeletionTarget {
 
 export type ManagedSlotDeletionResult =
   | { kind: "absent"; evidence?: unknown }
-  | { kind: "failed"; message: string; evidence?: unknown };
+  | {
+      kind: "failed";
+      message: string;
+      evidence?: unknown;
+      notAttempted?: {
+        reason:
+          | "workflow_unavailable"
+          | "device_assigned_to_managed_slot"
+          | "device_owned_by_other_session"
+          | "device_owned_by_other_daemon"
+          | "inventory_incomplete"
+          | "booted_inventory_incomplete"
+          | "target_identity_conflict"
+          | "target_identity_unresolved"
+          | "target_not_destroyable";
+      };
+    };
 
 /** The verified permanent delete workflow (`deleteDevice`: stop, destroy, verify absence). */
 export interface ManagedSlotDeviceDeleter {
@@ -1209,10 +1226,11 @@ export class ManagedSlotReconciler {
         const waitFailure = await this.waitForQueue(previous, request);
         if (waitFailure) {
           abandoned = true;
+          // The queued deadline has passed or waiting was aborted; allow the fixed read cap.
           return {
             outcome: "failed",
             failure: waitFailure,
-            assignment: await this.deps.registry.getAssignment(request.key),
+            assignment: await this.failedResultAssignment(request, undefined),
             evidence: { initial: null, inventoryComplete: null },
           };
         }
@@ -1265,6 +1283,30 @@ export class ManagedSlotReconciler {
     }
   }
 
+  private async failedResultAssignment(
+    request: ManagedSlotReconcileRequest,
+    deadlineMs: number | undefined,
+  ): Promise<SlotAssignmentRecord | null> {
+    try {
+      return await this.journal.removalRegistryStage(
+        () => this.deps.registry.getAssignment(request.key),
+        deadlineMs,
+      );
+    } catch (error) {
+      if (
+        error instanceof SlotJournalRemovalRegistryTimeout ||
+        classifySqliteError(error) === "retryable"
+      ) {
+        logger.warn(
+          `[ManagedSlots] failed result assignment unavailable: ${errorMessage(error)}`,
+          error,
+        );
+        return null;
+      }
+      throw error;
+    }
+  }
+
   private async reconcileSerialized(
     request: ManagedSlotReconcileRequest,
   ): Promise<ManagedSlotReconcileResult> {
@@ -1281,7 +1323,7 @@ export class ManagedSlotReconciler {
             error instanceof ReconcileAbort
               ? error.failure
               : failure("discovery_incomplete", errorMessage(error)),
-          assignment: await this.deps.registry.getAssignment(request.key),
+          assignment: await this.failedResultAssignment(request, request.deadlineMs),
           evidence,
         };
       }
@@ -1850,7 +1892,10 @@ export class ManagedSlotReconciler {
         throw new ReconcileAbort(provisionFailure(error));
       }
       return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
-        entry = await this.recordCreated(context, entry, provisioned);
+        if (provisioned.created && !this.isAutomationReady(provisioned)) {
+          this.journal.markRemovalIntended(entry);
+        }
+        entry = await this.recordCreated(context, entry, provisioned, release);
         if (!this.isAutomationReady(provisioned)) {
           return await this.discardUncommitted(
             context,
@@ -1954,15 +1999,31 @@ export class ManagedSlotReconciler {
     context: ReconcileContext,
     entry: SlotJournalEntry,
     provisioned: ManagedSlotProvisionedDevice,
+    release: () => Promise<void>,
   ): Promise<SlotJournalEntry> {
-    const recorded = await this.journal.advance(entry, {
-      expectedPhase: "creating",
-      phase: "created",
-      target: { newStableId: provisioned.device.stableId, newName: provisioned.device.name },
-    });
+    const recorded = await this.journal
+      .advance(entry, {
+        expectedPhase: "creating",
+        phase: "created",
+        target: {
+          newStableId: provisioned.device.stableId,
+          newName: provisioned.device.name,
+          ...(provisioned.created && !this.isAutomationReady(provisioned)
+            ? { removalRequested: true }
+            : {}),
+        },
+      })
+      .catch(async (error: unknown) => {
+        logger.warn(
+          `[ManagedSlots] recording created device failed: ${errorMessage(error)}`,
+          error,
+        );
+        await release();
+        throw error;
+      });
     if (recorded.kind !== "advanced") {
       // Another driver took the entry over and will settle the device by its recorded name.
-      await this.releaseSession(provisioned.sessionUuid);
+      await release();
       throw new ReconcileAbort(
         failure("concurrent_modification", "The slot's journal entry was taken over."),
       );
@@ -2043,14 +2104,29 @@ export class ManagedSlotReconciler {
     release: () => Promise<void>,
     reason: ManagedSlotReconcileFailure,
   ): Promise<never> {
-    if (provisioned.created) {
-      this.journal.markRemovalIntended(entry);
+    try {
+      if (provisioned.created) {
+        this.journal.markRemovalIntended(entry);
+        entry = await this.journal.requestRemoval(entry, {
+          deadlineMs: context.request.deadlineMs,
+          signal: context.request.signal,
+        });
+      }
+    } finally {
+      await release();
     }
-    await release();
     try {
       await this.cleanupUncommitted(context, provisioned, entry);
     } catch (error) {
-      if (classifySqliteError(error) !== "retryable") {
+      if (error instanceof SlotJournalRemovalRegistryTimeout) {
+        logger.warn(`[ManagedSlots] uncommitted cleanup deferred: ${errorMessage(error)}`, error);
+        context.evidence.uncommittedCleanup = {
+          stableId: provisioned.device.stableId,
+          removed: false,
+          message: error.message,
+        };
+      } else if (classifySqliteError(error) !== "retryable") {
+        logger.warn(`[ManagedSlots] uncommitted cleanup failed: ${errorMessage(error)}`, error);
         throw error;
       }
       // The durable entry stays open for redrive; preserve the failure that required cleanup.
@@ -2065,18 +2141,32 @@ export class ManagedSlotReconciler {
     entry: SlotJournalEntry,
   ): Promise<void> {
     if (!provisioned.created) {
-      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
+      this.noteJournal(
+        context,
+        (
+          await this.journal.removalRegistryStage(
+            () => this.journal.close(entry, "rolled_back"),
+            context.request.deadlineMs,
+          )
+        ).entry,
+      );
       return;
     }
-    entry = await this.journal.requestRemoval(entry, {
-      deadlineMs: context.request.deadlineMs,
-      signal: context.request.signal,
-    });
     this.noteJournal(context, entry);
+    if (!entry.target.removalRequested) {
+      context.evidence.uncommittedCleanup = {
+        stableId: provisioned.device.stableId,
+        removed: false,
+        message: "Removal deferred to journal redrive or its current driver.",
+      };
+      // The first flag write was attempted; memory fences adoption until a later redrive.
+      return;
+    }
     // Losing a compare-and-set never licenses deleting the device the winner committed.
-    const holder = await this.deps.registry.findDeviceHolder(
-      context.request.platform,
-      provisioned.device.stableId,
+    const holder = await this.journal.removalRegistryStage(
+      () =>
+        this.deps.registry.findDeviceHolder(context.request.platform, provisioned.device.stableId),
+      context.request.deadlineMs,
     );
     if (holder) {
       const heldBy =
@@ -2091,7 +2181,15 @@ export class ManagedSlotReconciler {
       logger.warn(
         `[ManagedSlots] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
       );
-      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
+      this.noteJournal(
+        context,
+        (
+          await this.journal.removalRegistryStage(
+            () => this.journal.close(entry, "rolled_back"),
+            context.request.deadlineMs,
+          )
+        ).entry,
+      );
       return;
     }
     const settled = await this.journal.settleCreation(entry, {

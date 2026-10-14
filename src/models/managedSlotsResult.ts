@@ -59,6 +59,19 @@ export interface ManagedSlotBudgetEvidence {
     deleting: number;
     orphaned: number;
   };
+  charged: Array<{
+    platform: "android" | "ios";
+    stableDeviceId: string;
+    kind:
+      | "assigned_active"
+      | "assigned_idle"
+      | "free"
+      | "deleting"
+      | "deletion_stuck"
+      | "preparing"
+      | "orphaned";
+    uncounted?: true;
+  }>;
   retained: Array<{
     platform: "android" | "ios";
     stableDeviceId: string;

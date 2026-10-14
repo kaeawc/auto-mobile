@@ -11,6 +11,8 @@ import { readEnvPositiveInteger } from "../../utils/envNumbers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {
@@ -61,20 +63,31 @@ interface TunnelOptions {
   restart(): Promise<void>;
   /** The environment the start timeout is read from; defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
+  processGeneration?: LockOwnerGenerationProbe;
+  signalProcess?: (pid: number, signal?: NodeJS.Signals) => void;
 }
 
 /** Sole owner of the physical iOS USB tunnel. Runner/port allocation policy stays with the manager. */
 export class DefaultIosTunnelClient implements IosTunnelClient {
   private iproxyProcessId: number | null = null;
+  private iproxyProcessGenerationToken: string | undefined;
   private iproxyProcess: ChildProcess | null = null;
   private iproxyDevicePort: number | null = null;
   private iproxyLocalPort: number | null = null;
   private readonly iproxySupervisor: DefaultProcessSupervisor;
   private readonly timer: Timer;
   private readonly processExecutor: HostProcessExecutor;
+  private readonly processGeneration: LockOwnerGenerationProbe;
+  private readonly signalProcess: (pid: number, signal?: NodeJS.Signals) => void;
   constructor(private readonly options: TunnelOptions) {
     this.timer = options.timer;
     this.processExecutor = options.processExecutor;
+    this.processGeneration = options.processGeneration ?? defaultLockOwnerGenerationProbe;
+    this.signalProcess =
+      options.signalProcess ??
+      ((pid, signal) => {
+        process.kill(pid, signal);
+      });
     this.iproxySupervisor = new DefaultProcessSupervisor({
       name: "iOS iproxy tunnel",
       timer: this.timer,
@@ -84,6 +97,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       isAlive: () => this.isSupervisedIproxyTunnelAlive(),
       onExit: () => {
         this.iproxyProcessId = null;
+        this.iproxyProcessGenerationToken = undefined;
         this.iproxyProcess = null;
         this.iproxyLocalPort = null;
       },
@@ -160,6 +174,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
 
     this.iproxyProcess = child;
     this.iproxyProcessId = child.pid;
+    this.iproxyProcessGenerationToken = this.processGeneration.current(child.pid);
     this.iproxyLocalPort = this.options.getServicePort();
     this.captureOutput(child);
     this.watchChild(child);
@@ -234,6 +249,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       throw new Error(result.error || "Failed to start iproxy tunnel via remote runner");
     }
     this.iproxyProcessId = result.data.pid;
+    this.iproxyProcessGenerationToken = this.processGeneration.current(result.data.pid);
     this.iproxyProcess = null;
     this.iproxyLocalPort = this.options.getServicePort();
     this.iproxyDevicePort = devicePort;
@@ -262,13 +278,14 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       await this.stopLocalIproxyProcess(this.iproxyProcess);
     } else if (this.iproxyProcessId) {
       try {
-        process.kill(this.iproxyProcessId);
+        this.signalTrackedProcess(this.iproxyProcessId, this.iproxyProcessGenerationToken);
       } catch (error) {
         // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
         logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
       }
     }
     this.iproxyProcessId = null;
+    this.iproxyProcessGenerationToken = undefined;
     this.iproxyProcess = null;
     this.iproxyLocalPort = null;
     if (options.clearDevicePort) {
@@ -279,8 +296,10 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   public prepareForcedStop(): ReturnType<IosTunnelClient["prepareForcedStop"]> {
     this.iproxySupervisor.stop();
     const pid = this.iproxyProcessId;
+    const token = this.iproxyProcessGenerationToken;
     const child = this.iproxyProcess;
     this.iproxyProcessId = null;
+    this.iproxyProcessGenerationToken = undefined;
     this.iproxyProcess = null;
     this.iproxyLocalPort = null;
     this.iproxyDevicePort = null;
@@ -291,7 +310,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
           if (child && typeof child.kill === "function") {
             child.kill("SIGKILL");
           } else if (pid) {
-            process.kill(pid, "SIGKILL");
+            this.signalTrackedProcess(pid, token, "SIGKILL");
           }
         } catch (error) {
           // A child can exit between tracking and shutdown.
@@ -299,6 +318,17 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         }
       },
     };
+  }
+
+  private signalTrackedProcess(pid: number, token?: string, signal?: NodeJS.Signals): void {
+    if (token !== undefined && this.processGeneration.compare(pid, token) === "different") {
+      logger.warn(
+        `[IOSCtrlProxy] iproxy PID ${pid} now names a different process; skipping signal`,
+      );
+      return;
+    }
+    // Unreadable identity preserves PID-only cleanup.
+    this.signalProcess(pid, signal);
   }
 
   /**

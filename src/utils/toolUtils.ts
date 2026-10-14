@@ -137,14 +137,22 @@ export interface StructuredToolResponse<T = unknown> {
  * @returns A properly formatted tool response with both content and structuredContent
  */
 export const createStructuredToolResponse = <T>(content: T): StructuredToolResponse<T> => {
+  const structuredContent =
+    content &&
+    typeof content === "object" &&
+    Object.getOwnPropertySymbols(content).some((key) =>
+      Object.prototype.propertyIsEnumerable.call(content, key),
+    )
+      ? (Object.fromEntries(Object.entries(content)) as T)
+      : content;
   const response: StructuredToolResponse<T> = {
     content: [
       {
         type: "text",
-        text: stringifyToolResponse(content),
+        text: stringifyToolResponse(structuredContent),
       },
     ],
-    structuredContent: content,
+    structuredContent,
   };
   if (content && typeof content === "object") {
     if ("success" in content) {

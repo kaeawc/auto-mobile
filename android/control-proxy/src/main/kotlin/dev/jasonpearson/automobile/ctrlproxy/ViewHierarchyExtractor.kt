@@ -18,8 +18,10 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.prototype.DEFAULT_CTRL_PROXY_PACKAGE
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import kotlin.math.max
 import kotlin.math.min
 
@@ -44,6 +46,11 @@ internal constructor(
     },
   /** Whether a prototype is hidden because its app left the foreground (#10261). */
   private val prototypeSuspended: () -> Boolean = { false },
+  private val prototypeHiddenReason:
+    (displayId: Int, ownPrototypeWindowCaptured: Boolean?) -> PrototypeHiddenReason? =
+    { _, _ ->
+      null
+    },
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -261,6 +268,7 @@ internal constructor(
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
         prototypeSuspended = prototypeSuspended().takeIf { it },
+        prototypeHiddenReason = prototypeHiddenReason(displayId ?: Display.DEFAULT_DISPLAY, null),
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -306,7 +314,13 @@ internal constructor(
     // Find accessibility-focused node across all windows
     var accessibilityFocusedNode: AccessibilityNodeInfo? = null
     for (window in windows) {
-      val rootNode = window.root ?: continue
+      val rootNode =
+        try {
+          window.root
+        } catch (error: Exception) {
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } ?: continue
       try {
         val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         if (focusedInWindow != null) {
@@ -325,6 +339,8 @@ internal constructor(
 
     try {
       val windowEntries = mutableListOf<WindowEntry>()
+      var ownPrototypeWindowCaptured = false
+      var prototypeRootUnreadable = false
       val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
       // Preserve the full legacy allowance for a lone primary window. Reserving a second slot
       // would truncate it sooner even when fallback is never needed.
@@ -362,9 +378,12 @@ internal constructor(
       for (window in windows) {
         val windowBudget = budget.openScope()
         var rootNode: AccessibilityNodeInfo? = null
+        val prototypeTitle = hasPrototypeTitle(window.type, window.title)
+        var prototypeRootRead = false
         try {
           rootNode = window.root
           if (rootNode == null) {
+            if (prototypeTitle) prototypeRootUnreadable = true
             if (window.id == primaryAppWindowId) {
               Log.w(
                 TAG,
@@ -382,6 +401,12 @@ internal constructor(
               Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
             }
             continue
+          }
+          if (prototypeTitle) {
+            val packageName = rootNode.packageName?.toString()
+            prototypeRootRead = packageName != null
+            if (packageName == DEFAULT_CTRL_PROXY_PACKAGE) ownPrototypeWindowCaptured = true
+            if (!prototypeRootRead) prototypeRootUnreadable = true
           }
           val windowLayer = window.layer
           if (window.isActive) {
@@ -489,6 +514,7 @@ internal constructor(
             )
           }
         } catch (e: Exception) {
+          if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
           Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
         } finally {
           finishWindowScope(windowInfos, window.id, windowBudget)
@@ -612,6 +638,14 @@ internal constructor(
             ?.hierarchy ?: mainHierarchy
       }
 
+      val capturedPrototype: Boolean? =
+        when {
+          ownPrototypeWindowCaptured -> true
+          prototypeRootUnreadable -> null
+          else -> false
+        }
+      val captureDisplayId =
+        displayId ?: windowInfos.firstOrNull()?.displayId ?: Display.DEFAULT_DISPLAY
       if (windowEntries.isEmpty()) {
         Log.w(
           TAG,
@@ -620,6 +654,7 @@ internal constructor(
         return ViewHierarchy(
           error = "No visible windows available",
           ctrlProxyIncomplete = true,
+          prototypeHiddenReason = prototypeHiddenReason(captureDisplayId, capturedPrototype),
           windows = windowInfos.takeIf { budget.truncationReasons().isNotEmpty() },
           truncationReasons = budget.truncationReasons().ifEmpty { null },
         )
@@ -692,6 +727,7 @@ internal constructor(
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
         prototypeSuspended = prototypeSuspended().takeIf { it },
+        prototypeHiddenReason = prototypeHiddenReason(captureDisplayId, capturedPrototype),
       )
     } finally {
       accessibilityFocusedNode?.recycle()

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import pointers from "../../fixtures/prototype-spec/data/pointers.json";
 import {
   PrototypeRepeatData,
+  bindPrototypeDataText,
   isPrototypeDataPointer,
   prototypeDataPointerTokens,
   resolvePrototypeDataPointer,
@@ -21,6 +22,25 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { repeatErrors, repeatKeyInstances } from "../../../src/features/prototype/prototypeRepeat";
 import cellInvalid from "../../fixtures/prototype-spec/invalid/data-repeat-path-cell-limit.json";
 import cellExact from "../../fixtures/prototype-spec/valid/data-repeat-path-cells-exact.json";
+
+import textPlaceholders from "../../fixtures/prototype-spec/data/resolve/text-placeholders.json";
+import { mapBindableFields, type Raw } from "../../../src/features/prototype/prototypeTemplate";
+
+test("data text binding matches every shared root field and never rescans replacements", () => {
+  const data = new PrototypeRepeatData(textPlaceholders.spec.data);
+  const resolve = (node: Raw): Raw => {
+    const result = mapBindableFields(node, "root", (value, _path, kind) =>
+      kind === "text" && typeof value === "string"
+        ? bindPrototypeDataText(value, (pointer) => data.rendered(pointer))
+        : value,
+    );
+    if (Array.isArray(result.children)) {
+      result.children = result.children.map((child) => resolve(child));
+    }
+    return result;
+  };
+  expect(resolve(textPlaceholders.spec.root)).toEqual(textPlaceholders.root);
+});
 
 const spec = (root: unknown = { type: "text", text: "hello" }) => ({ root });
 

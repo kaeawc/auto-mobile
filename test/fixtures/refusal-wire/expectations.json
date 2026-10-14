@@ -229,6 +229,14 @@
         "acquireNewSession": false
       }
     },
+    "managed_slot_acquisition_failed.registry_schema_unsupported": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.daemon_unavailable": {
       "expected": "fail",
       "fields": {

@@ -106,6 +106,7 @@ import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotRegistrySchemaUnsupportedError,
   ManagedSlotOwnershipUnconfirmedError,
   ManagedSlotOwnershipLostError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -680,6 +681,7 @@ export const MANAGED_SLOT_FIXTURE_PREFIX = "managed_slot_acquisition_failed.";
 const OWN_FAILURE_RETRYABLE: Readonly<Record<ManagedSlotAcquisitionOwnFailureCode, boolean>> = {
   managed_slot_config_invalid: false,
   contract_unsupported: false,
+  registry_schema_unsupported: false,
   managed_slot_group_unsupported: false,
   managed_slots_unsupported: false,
   scope_invalidated: false,
@@ -1307,6 +1309,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   string
 >([
   [
+    ManagedSlotRegistrySchemaUnsupportedError,
+    "internal registry-open refusal; ManagedSlotAcquisition maps it to the fixture-covered registry_schema_unsupported acquisition failure before serialization",
+  ],
+  [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
   ],
@@ -1387,6 +1393,8 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
+  registry_schema_unsupported:
+    "internal registry-open code mapped to the acquisition failure fixtured under managed_slot_acquisition_failed.registry_schema_unsupported",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

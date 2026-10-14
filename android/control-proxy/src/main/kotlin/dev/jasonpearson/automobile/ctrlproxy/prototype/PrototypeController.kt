@@ -32,6 +32,11 @@ fun interface PrototypeWindowOnScreen {
 fun interface PrototypeResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
+  suspend fun sendPinned(
+    requestId: String?,
+    pin: dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo,
+  ) = send(requestId, true, null)
+
   suspend fun sendSaved(
     requestId: String?,
     saved: dev.jasonpearson.automobile.protocol.SavedPrototypeInfo,

@@ -381,6 +381,8 @@ interface CtrlProxyActions {
 
   fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
 
+  fun pinSavedPrototype(requestId: String?, id: String, icon: String?)
+
   fun listSavedPrototypes(requestId: String?)
 
   fun deleteSavedPrototype(requestId: String?, id: String)

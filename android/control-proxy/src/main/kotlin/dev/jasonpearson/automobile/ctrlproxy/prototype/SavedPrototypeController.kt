@@ -8,6 +8,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
+import dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo
+import dev.jasonpearson.automobile.protocol.SavedPrototypePinStatus
+import dev.jasonpearson.automobile.protocol.SavedPrototypeShortcutUpdate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +24,7 @@ class SavedPrototypeController(
   private val shortcuts: SavedPrototypeShortcuts,
   private val sink: PrototypeResultSink,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  private val pinner: PrototypeShortcutPinner = UnsupportedShortcutPinner,
 ) {
   private val json = Json {
     prettyPrint = false
@@ -30,6 +34,46 @@ class SavedPrototypeController(
 
   suspend fun save(requestId: String?, spec: PrototypeSpec, label: String, icon: String?) =
     reply(requestId) { saveResult(spec, label, icon) }
+
+  suspend fun pin(requestId: String?, id: String, icon: String?) =
+    reply(requestId) {
+      when (val loaded = store.load(id)) {
+        SavedPrototypeLoadResult.NotFound ->
+          refusal(SavedPrototypeErrorCode.NOT_FOUND, "Saved prototype not found: $id")
+        is SavedPrototypeLoadResult.UnsupportedFormat ->
+          refusal(SavedPrototypeErrorCode.UNSUPPORTED_FORMAT, loaded.message)
+        is SavedPrototypeLoadResult.Corrupt ->
+          refusal(SavedPrototypeErrorCode.STORAGE_FAILURE, loaded.message)
+        is SavedPrototypeLoadResult.Loaded -> {
+          val bytes = icon?.let {
+            loaded.assetBytes(it)
+              ?: return@reply refusal(
+                SavedPrototypeErrorCode.MISSING_ASSET,
+                "Saved prototype has no asset: $icon",
+              )
+          }
+          when (val outcome = pinner.pin(id, loaded.label, bytes)) {
+            PinOutcome.Requested ->
+              PrototypeResult(
+                timestamp = 0,
+                success = true,
+                pin = SavedPrototypePinInfo(id, SavedPrototypePinStatus.REQUESTED),
+              )
+            is PinOutcome.AlreadyPinned ->
+              PrototypeResult(
+                timestamp = 0,
+                success = true,
+                pin = SavedPrototypePinInfo(id, SavedPrototypePinStatus.ALREADY_PINNED),
+              )
+            is PinOutcome.Unsupported ->
+              refusal(SavedPrototypeErrorCode.PIN_UNSUPPORTED, outcome.message)
+            is PinOutcome.DeviceLocked ->
+              refusal(SavedPrototypeErrorCode.DEVICE_LOCKED, outcome.message)
+            is PinOutcome.Failed -> refusal(SavedPrototypeErrorCode.PIN_FAILED, outcome.message)
+          }
+        }
+      }
+    }
 
   suspend fun list(requestId: String?) =
     reply(requestId) {
@@ -92,11 +136,41 @@ class SavedPrototypeController(
         PrototypeResult(
           timestamp = 0,
           success = true,
-          saved = SavedPrototypeInfo(result.id, result.slug, result.replaced),
+          saved =
+            SavedPrototypeInfo(
+              result.id,
+              result.slug,
+              result.replaced,
+              if (result.replaced)
+                updatePinned(
+                  result.id,
+                  label,
+                  copied.firstOrNull { it.id == icon }?.bytes,
+                )
+              else null,
+            ),
         )
       is SavedPrototypeSaveResult.Rejected -> refusal(result.reason.errorCode(), result.message)
     }
   }
+
+  private fun updatePinned(
+    id: String,
+    label: String,
+    bytes: ByteArray?,
+  ): SavedPrototypeShortcutUpdate? =
+    try {
+      when (pinner.updateIfPinned(id, label, bytes)) {
+        ShortcutUpdate.UPDATED -> SavedPrototypeShortcutUpdate.UPDATED
+        ShortcutUpdate.RATE_LIMITED -> SavedPrototypeShortcutUpdate.RATE_LIMITED
+        null -> null
+      }
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w(TAG, "Cannot update pinned prototype shortcut", error)
+      null
+    }
 
   private fun pinnedIds(): Set<String> =
     try {
@@ -133,6 +207,7 @@ class SavedPrototypeController(
     val entries = result.savedPrototypes
     val code = result.errorCode
     when {
+      result.pin != null -> sink.sendPinned(requestId, checkNotNull(result.pin))
       saved != null -> sink.sendSaved(requestId, saved)
       entries != null -> sink.sendSavedList(requestId, entries)
       code != null -> sink.sendRefusal(requestId, code, checkNotNull(result.error))

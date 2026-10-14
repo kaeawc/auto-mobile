@@ -61,6 +61,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
@@ -68,6 +69,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecod
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
@@ -1142,6 +1144,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendPinned(
+        requestId: String?,
+        pin: dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypePinnedFrame(requestId, pin) }
+          }
+        }
+      }
+
       override suspend fun sendSaved(requestId: String?, saved: SavedPrototypeInfo) {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
           resultBroadcaster.guard(requestId, "prototype_result") {
@@ -1260,6 +1273,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       prototypeAssets,
       AndroidSavedPrototypeShortcuts(this),
       prototypeResultSink,
+      pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
     )
   }
   private val prototypeAssetController by lazy {
@@ -3403,6 +3417,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     icon: String?,
   ) {
     launchRequestScope(requestId) { savedPrototypeController.save(requestId, spec, label, icon) }
+  }
+
+  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {
+    launchRequestScope(requestId) { savedPrototypeController.pin(requestId, id, icon) }
   }
 
   override fun listSavedPrototypes(requestId: String?) {

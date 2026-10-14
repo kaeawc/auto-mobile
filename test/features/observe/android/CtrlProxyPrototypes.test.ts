@@ -9,6 +9,7 @@ import { prototypePatchUnsupportedMessage } from "../../../../src/features/proto
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { MAX_PROTOTYPE_ASSET_ID_LENGTH } from "../../../../src/features/prototype/prototypeAssets";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
 import type {
   PrototypeEvent,
@@ -1187,10 +1188,17 @@ const savedCommands = [
   "save_prototype",
   "list_saved_prototypes",
   "delete_saved_prototype",
+  "pin_saved_prototype",
 ];
 const savedInfo = { id: "panel", slug: "panel", replaced: false };
 const savedEntries = [{ id: "panel", label: "Panel", slug: "panel", savedAt: 42, pinned: true }];
 const savedRequests = [
+  {
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel", "hero"),
+    params: { id: "panel", icon: "hero" },
+    reply: { pin: { id: "panel", status: "requested" } },
+  },
   {
     type: "save_prototype",
     run: (client: AndroidCtrlProxyClient) =>
@@ -1375,5 +1383,69 @@ describe("CtrlProxy saved prototype transport", () => {
     expect(fake.saveRequests).toEqual([save]);
     expect(fake.listCalls).toBe(1);
     expect(fake.deleteRequests).toEqual(["panel"]);
+  });
+});
+
+describe("saved shortcut reply validation", () => {
+  test.each(["requested", "already_pinned"])("accepts pin status %s", (status) => {
+    expect(prototypeSavedReplyFields({ pin: { id: "panel", status } })).toEqual({
+      pin: { id: "panel", status },
+    });
+  });
+  test.each(["updated", "rate_limited"])("accepts shortcut update %s", (shortcut) => {
+    expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+      saved: { ...savedInfo, shortcut },
+    });
+  });
+  test.each([null, "future", 3, { status: "requested" }, { id: "panel", status: "future" }])(
+    "drops malformed pin %p",
+    (pin) => {
+      expect(prototypeSavedReplyFields({ pin })).toEqual({});
+    },
+  );
+  test.each([null, "future", 3, {}])(
+    "drops malformed shortcut %p while retaining saved info",
+    (shortcut) => {
+      expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+        saved: savedInfo,
+      });
+    },
+  );
+  test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
+    expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
+  });
+  test.each([
+    { id: "", icon: undefined },
+    { id: "panel", icon: "" },
+    { id: "panel", icon: "x".repeat(MAX_PROTOTYPE_ASSET_ID_LENGTH + 1) },
+  ])("refuses invalid pin %p before connecting", async ({ id, icon }) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestPinSavedPrototype(id, icon)).rejects.toBeInstanceOf(
+        ActionableError,
+      );
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test.each([null, 4])("refuses non-string pin icon %p", async (icon) => {
+    const { client } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    // @ts-expect-error Exercise invalid runtime input.
+    await expect(client.requestPinSavedPrototype("panel", icon)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+  test("fake records pin requests and returns configured result", async () => {
+    const fake = new FakeCtrlProxy();
+    const result = { success: true, pin: { id: "panel", status: "already_pinned" as const } };
+    fake.setPinResult(result);
+    expect(await fake.requestPinSavedPrototype("panel", "hero")).toEqual(result);
+    expect(await fake.requestPinSavedPrototype("panel")).toEqual(result);
+    expect(fake.pinRequests).toEqual([{ id: "panel", icon: "hero" }, { id: "panel" }]);
   });
 });

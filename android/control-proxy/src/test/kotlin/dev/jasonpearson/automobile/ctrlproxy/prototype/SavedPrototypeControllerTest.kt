@@ -5,6 +5,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
+import dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo
+import dev.jasonpearson.automobile.protocol.SavedPrototypePinStatus
+import dev.jasonpearson.automobile.protocol.SavedPrototypeShortcutUpdate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -36,11 +39,16 @@ class SavedPrototypeControllerTest {
   private val store = FakeSavedPrototypeStore { 42L }
   private val assets = MemoryAssets()
   private val shortcuts = FakeSavedPrototypeShortcuts()
+  private val pinner = FakePrototypeShortcutPinner()
   private val replies = mutableListOf<PrototypeResult>()
   private val sink =
     object : PrototypeResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) {
         replies += PrototypeResult(0, requestId, success, error)
+      }
+
+      override suspend fun sendPinned(requestId: String?, pin: SavedPrototypePinInfo) {
+        replies += PrototypeResult(0, requestId, true, pin = pin)
       }
 
       override suspend fun sendSaved(requestId: String?, saved: SavedPrototypeInfo) {
@@ -67,6 +75,7 @@ class SavedPrototypeControllerTest {
       shortcuts,
       sink,
       StandardTestDispatcher(testScheduler),
+      pinner,
     )
 
   private fun onlyReply(id: String): PrototypeResult {
@@ -256,6 +265,116 @@ class SavedPrototypeControllerTest {
     }
   }
 
+  @Test
+  fun `pin maps requested and already pinned and reads only saved icon bytes`() = runTest {
+    assets.bytes["icon"] = byteArrayOf(7)
+    val controller = controller()
+    controller.save("save", spec, "Saved label", "icon")
+    assets.bytes.clear()
+    for ((outcome, status) in
+      listOf(
+        PinOutcome.Requested to SavedPrototypePinStatus.REQUESTED,
+        PinOutcome.AlreadyPinned(ShortcutUpdate.RATE_LIMITED) to
+          SavedPrototypePinStatus.ALREADY_PINNED,
+      )) {
+      replies.clear()
+      pinner.outcome = outcome
+      controller.pin("pin", "panel", "icon")
+      assertEquals(SavedPrototypePinInfo("panel", status), onlyReply("pin").pin)
+      assertEquals("Saved label", pinner.pins.last().shortLabel)
+      assertArrayEquals(byteArrayOf(7), pinner.pins.last().iconBytes)
+    }
+    replies.clear()
+    controller.pin("letter", "panel", null)
+    assertEquals(null, pinner.pins.last().iconBytes)
+    assertTrue(onlyReply("letter").success)
+  }
+
+  @Test
+  fun `pin maps launcher failures without losing messages`() = runTest {
+    val controller = controller()
+    controller.save("save", spec, "Panel", null)
+    for ((outcome, code) in
+      listOf(
+        PinOutcome.Unsupported("unsupported") to SavedPrototypeErrorCode.PIN_UNSUPPORTED,
+        PinOutcome.DeviceLocked("unlock") to SavedPrototypeErrorCode.DEVICE_LOCKED,
+        PinOutcome.Failed("failed") to SavedPrototypeErrorCode.PIN_FAILED,
+      )) {
+      replies.clear()
+      pinner.outcome = outcome
+      controller.pin("pin", "panel", null)
+      assertEquals(code, onlyReply("pin").errorCode)
+      assertFalse(replies.single().success)
+      assertTrue(replies.single().error.orEmpty().isNotEmpty())
+    }
+  }
+
+  @Test
+  fun `pin refuses missing prototype or unsaved asset without calling pinner`() = runTest {
+    val controller = controller()
+    controller.pin("missing", "absent", null)
+    assertEquals(SavedPrototypeErrorCode.NOT_FOUND, onlyReply("missing").errorCode)
+    replies.clear()
+    controller.save("save", spec, "Panel", null)
+    replies.clear()
+    assets.bytes["uploaded-only"] = byteArrayOf(1)
+    controller.pin("asset", "panel", "uploaded-only")
+    assertEquals(SavedPrototypeErrorCode.MISSING_ASSET, onlyReply("asset").errorCode)
+    assertTrue(pinner.pins.isEmpty())
+  }
+
+  @Test
+  fun `pin maps unsupported and corrupt storage`() = runTest {
+    for ((loaded, code) in
+      listOf(
+        SavedPrototypeLoadResult.UnsupportedFormat(2) to SavedPrototypeErrorCode.UNSUPPORTED_FORMAT,
+        SavedPrototypeLoadResult.Corrupt("corrupt") to SavedPrototypeErrorCode.STORAGE_FAILURE,
+      )) {
+      val backing =
+        object : SavedPrototypeStore by store {
+          override fun load(id: String) = loaded
+        }
+      replies.clear()
+      controller(backing).pin("pin", "panel", null)
+      assertEquals(code, onlyReply("pin").errorCode)
+    }
+  }
+
+  @Test
+  fun `replacement updates pinned shortcut with copied icon and typed status`() = runTest {
+    assets.bytes["icon"] = byteArrayOf(9)
+    val controller = controller()
+    controller.save("first", spec, "Panel", "icon")
+    assertTrue(pinner.updates.isEmpty())
+    for ((update, expected) in
+      listOf(
+        ShortcutUpdate.UPDATED to SavedPrototypeShortcutUpdate.UPDATED,
+        ShortcutUpdate.RATE_LIMITED to SavedPrototypeShortcutUpdate.RATE_LIMITED,
+        null to null,
+      )) {
+      replies.clear()
+      pinner.updateResult = update
+      controller.save("resave", spec, "New label", "icon")
+      assertEquals(expected, onlyReply("resave").saved?.shortcut)
+      assertEquals("New label", pinner.updates.last().shortLabel)
+      assertArrayEquals(byteArrayOf(9), pinner.updates.last().iconBytes)
+    }
+    replies.clear()
+    pinner.failure = IllegalStateException("launcher unavailable")
+    controller.save("failed-update", spec, "Still saved", "icon")
+    assertTrue(onlyReply("failed-update").success)
+    assertEquals(null, replies.single().saved?.shortcut)
+    pinner.failure = CancellationException("cancelled")
+    replies.clear()
+    try {
+      controller.save("cancel", spec, "Panel", "icon")
+      fail("Cancellation must propagate")
+    } catch (error: CancellationException) {
+      assertEquals("cancelled", error.message)
+    }
+    assertTrue(replies.isEmpty())
+  }
+
   private fun failingStore(error: Exception): SavedPrototypeStore =
     object : SavedPrototypeStore by store {
       override fun save(request: SavedPrototypeSaveRequest): SavedPrototypeSaveResult = throw error
@@ -297,5 +416,25 @@ internal class FakeSavedPrototypeShortcuts : SavedPrototypeShortcuts {
   override fun disable(ids: List<String>, message: String) {
     failure?.let { throw it }
     disabled += ids to message
+  }
+}
+
+internal class FakePrototypeShortcutPinner : PrototypeShortcutPinner {
+  var outcome: PinOutcome = PinOutcome.Requested
+  var updateResult: ShortcutUpdate? = null
+  var failure: Exception? = null
+  val pins = mutableListOf<PrototypeShortcut>()
+  val updates = mutableListOf<PrototypeShortcut>()
+
+  override fun pin(id: String, label: String, iconBytes: ByteArray?): PinOutcome {
+    failure?.let { throw it }
+    pins += PrototypeShortcut(id, label, label, iconBytes)
+    return outcome
+  }
+
+  override fun updateIfPinned(id: String, label: String, iconBytes: ByteArray?): ShortcutUpdate? {
+    failure?.let { throw it }
+    updates += PrototypeShortcut(id, label, label, iconBytes)
+    return updateResult
   }
 }

@@ -22,6 +22,20 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `pin saved prototype decodes optional icon`() {
+    assertEquals(
+      PinSavedPrototype("pin", "panel", "icon"),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"icon"}""",
+      ),
+    )
+    assertEquals(
+      PinSavedPrototype(id = "panel"),
+      json.decodeFromString<WebSocketRequest>("""{"type":"pin_saved_prototype","id":"panel"}"""),
+    )
+  }
+
+  @Test
   fun `saved prototype requests decode correlated and default fields`() {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""

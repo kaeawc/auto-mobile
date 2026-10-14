@@ -29,6 +29,7 @@ import {
   PROTOTYPE_SAVED_CAPABILITY,
   isSavedPrototypeErrorCode,
   type SavePrototypeMessage,
+  type PinSavedPrototypeMessage,
   type ListSavedPrototypesMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
@@ -63,7 +64,14 @@ export function prototypeInspectUnsupportedMessage(): string {
 export function prototypeSavedUnsupportedMessage(type: string): string {
   return `${type}: the connected CtrlProxy does not advertise ${PROTOTYPE_SAVED_CAPABILITY}; update the connected CtrlProxy.`;
 }
-const savedInfoSchema = z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() });
+const shortcutUpdateSchema = z.enum(["updated", "rate_limited"]);
+const savedInfoSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  replaced: z.boolean(),
+  shortcut: z.unknown().optional(),
+});
+const pinInfoSchema = z.object({ id: z.string(), status: z.enum(["requested", "already_pinned"]) });
 const savedEntrySchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -74,10 +82,11 @@ const savedEntrySchema = z.object({
 /** Keeps well-formed saved reply fields; a malformed list is omitted as a whole. */
 export function prototypeSavedReplyFields(
   reply: unknown,
-): Pick<PrototypeResult, "saved" | "savedPrototypes" | "errorCode"> {
+): Pick<PrototypeResult, "saved" | "savedPrototypes" | "errorCode" | "pin"> {
   const envelope = z
     .object({
       saved: z.unknown().optional(),
+      pin: z.unknown().optional(),
       savedPrototypes: z.unknown().optional(),
       errorCode: z.unknown().optional(),
     })
@@ -86,12 +95,24 @@ export function prototypeSavedReplyFields(
     return {};
   }
   const saved = savedInfoSchema.safeParse(envelope.data.saved);
+  const pin = pinInfoSchema.safeParse(envelope.data.pin);
+  const shortcut = shortcutUpdateSchema.safeParse(saved.success ? saved.data.shortcut : undefined);
   const savedPrototypes = z.array(savedEntrySchema).safeParse(envelope.data.savedPrototypes);
   if (envelope.data.savedPrototypes !== undefined && !savedPrototypes.success) {
     logger.warn("[CTRL_PROXY] Dropping malformed savedPrototypes", savedPrototypes.error);
   }
   return {
-    ...(saved.success ? { saved: saved.data } : {}),
+    ...(pin.success ? { pin: pin.data } : {}),
+    ...(saved.success
+      ? {
+          saved: {
+            id: saved.data.id,
+            slug: saved.data.slug,
+            replaced: saved.data.replaced,
+            ...(shortcut.success ? { shortcut: shortcut.data } : {}),
+          },
+        }
+      : {}),
     ...(savedPrototypes.success ? { savedPrototypes: savedPrototypes.data } : {}),
     ...(isSavedPrototypeErrorCode(envelope.data.errorCode)
       ? { errorCode: envelope.data.errorCode }
@@ -265,6 +286,30 @@ export class CtrlProxyPrototypes {
     }
     return reply;
   }
+  async requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new ActionableError("Invalid saved prototype id: expected a non-empty string");
+    }
+    if (
+      icon !== undefined &&
+      (typeof icon !== "string" || prototypeAssetIdProblem(icon) !== null)
+    ) {
+      throw new ActionableError(
+        "Invalid saved prototype icon: expected a valid asset id; explicit nulls are rejected",
+      );
+    }
+    return this.request(
+      ctrlProxyRequests.pinSavedPrototype({ requestId: "", id, icon }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   requestListSavedPrototypes(
     timeoutMs = 5000,
     perf?: PerformanceTracker,
@@ -598,6 +643,7 @@ export class CtrlProxyPrototypes {
       | DismissPrototypeMessage
       | InspectPrototypesMessage
       | PatchPrototypeMessage
+      | PinSavedPrototypeMessage
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage,
@@ -634,6 +680,7 @@ export class CtrlProxyPrototypes {
       | DismissPrototypeMessage
       | InspectPrototypesMessage
       | PatchPrototypeMessage
+      | PinSavedPrototypeMessage
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage,
@@ -644,7 +691,12 @@ export class CtrlProxyPrototypes {
     }
     const type = message.type;
     if (
-      ["save_prototype", "list_saved_prototypes", "delete_saved_prototype"].includes(type) &&
+      [
+        "save_prototype",
+        "list_saved_prototypes",
+        "delete_saved_prototype",
+        "pin_saved_prototype",
+      ].includes(type) &&
       supports(PROTOTYPE_SAVED_CAPABILITY) !== true
     ) {
       throw new ActionableError(prototypeSavedUnsupportedMessage(type));

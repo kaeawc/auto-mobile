@@ -5,6 +5,7 @@ import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
+import type { LockOwnerGenerationProbe } from "../fileLock";
 
 /** Structurally the same as boot admission's AndroidProcessRow. */
 export interface EmulatorHostProcessRow {
@@ -18,9 +19,20 @@ export interface EmulatorProcessTableSource {
     deadlineMs?: number;
   }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string }>;
 }
+export type EmulatorGroupProbe =
+  | { kind: "own-group"; pgid: number }
+  | { kind: "shared" }
+  | { kind: "absent" }
+  | { kind: "unproven" };
 export interface EmulatorProcessSignaler {
   signal(pid: number, signal: "SIGTERM" | "SIGKILL"): void;
   isRunning(pid: number): boolean;
+  /** Distinguish a proven separate group, a shared group, and a gone or unproven process. */
+  resolveOwnGroup?(
+    identity: { pid: number; command: string },
+    options: { signal?: AbortSignal; deadlineMs: number },
+  ): Promise<EmulatorGroupProbe>;
+  signalGroup?(pgid: number, signal: "SIGTERM" | "SIGKILL"): void;
 }
 type Candidate = { pid: number; command: string };
 type StopTarget = { serial: string; avdName: string };
@@ -194,7 +206,10 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     private readonly table: EmulatorProcessTableSource,
     private readonly signaler: EmulatorProcessSignaler,
     private readonly timer: Timer,
-    private readonly options: { ownPid?: number } = {},
+    private readonly options: {
+      ownPid?: number;
+      processGeneration?: LockOwnerGenerationProbe;
+    } = {},
   ) {}
 
   async identify(target: StopTarget, options: StopOptions): Promise<EmulatorProcessIdentity> {
@@ -234,10 +249,21 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     if (this.timer.now() >= options.deadlineMs) {
       return this.stillRunning(identity, false);
     }
-    // Between the ps snapshot and kill(2), a pid can exit and be reused. macOS has no
-    // pidfd to close that window; send TERM immediately after the one table read.
+    const probe = await this.resolveOwnGroup(identity, stopOptions);
+    options.signal?.throwIfAborted();
+    if (probe.kind === "absent") {
+      logger.warn(
+        `[EmulatorProcessStop] pid ${identity.pid} disappeared or changed command before SIGTERM; leaving its replacement untouched`,
+      );
+      return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
+    }
+    const group = probe.kind === "own-group" ? probe.pgid : undefined;
+    // A pid can exit and be reused; send TERM immediately after the single group probe.
     const termSentAt = this.timer.now();
-    const term = this.send(identity, "SIGTERM");
+    // The ps snapshot -> capture window remains (no pidfd on macOS), but the
+    // in-process generation capture is sub-millisecond; send TERM immediately after it.
+    const token = this.options.processGeneration?.current(identity.pid);
+    const term = this.send(identity, "SIGTERM", group);
     if (term) {
       return term;
     }
@@ -248,6 +274,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
         this.timer.now() + EMULATOR_TERM_GRACE_MS,
       ),
       options.signal,
+      token,
     );
     if (exited) {
       return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
@@ -258,16 +285,79 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       );
       return this.stillRunning(identity);
     }
-    return this.escalate(target, identity, stopOptions);
+    return this.escalate(target, identity, stopOptions, token, group);
+  }
+
+  private async resolveOwnGroup(
+    identity: Candidate,
+    options: StopOptions,
+  ): Promise<EmulatorGroupProbe> {
+    if (!this.signaler.resolveOwnGroup) {
+      logger.warn(
+        `[EmulatorProcessStop] own group unproven for pid ${identity.pid}; signalling pid only`,
+      );
+      return { kind: "unproven" };
+    }
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    try {
+      const remainingMs = options.deadlineMs - this.timer.now();
+      if (remainingMs <= 0) {
+        throw new Error("Process group deadline already spent");
+      }
+      const group = await raceWithDeadline(
+        () =>
+          this.signaler.resolveOwnGroup!(
+            { pid: identity.pid, command: identity.command },
+            { ...options, signal },
+          ),
+        {
+          timer: this.timer,
+          signal: options.signal,
+          timeoutMs: remainingMs,
+          label: "Emulator own process group",
+          onTimeout: () => controller.abort(),
+        },
+      );
+      if (group.kind === "shared" || group.kind === "absent") {
+        return group;
+      }
+      if (
+        group.kind === "own-group" &&
+        group.pgid === identity.pid &&
+        group.pgid > 1 &&
+        this.signaler.signalGroup
+      ) {
+        return group;
+      }
+      logger.warn(
+        `[EmulatorProcessStop] own group unproven for pid ${identity.pid}; signalling pid only`,
+      );
+      return { kind: "unproven" };
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      logger.warn(
+        `[EmulatorProcessStop] own group unavailable for pid ${identity.pid}; signalling pid only: ${errorMessage(error)}`,
+        error,
+      );
+      return { kind: "unproven" };
+    }
   }
 
   private async escalate(
     target: StopTarget,
     identity: Extract<EmulatorProcessIdentity, { kind: "match" }>,
     options: StopOptions,
+    token: string | undefined,
+    group?: number,
   ): Promise<EmulatorProcessStopOutcome> {
     if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);
+    }
+    if (this.generationChanged(identity.pid, token)) {
+      return this.replacementStopped(identity.pid);
     }
     const result = await this.read(options);
     if (!result.value) {
@@ -275,20 +365,29 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     }
     const row = result.value.find(({ pid }) => pid === identity.pid);
     if (!row || row.command !== identity.command) {
-      logger.warn(
-        `[EmulatorProcessStop] pid ${identity.pid} disappeared or changed arguments before SIGKILL; leaving its replacement untouched`,
-      );
-      return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
+      return this.replacementStopped(identity.pid);
     }
     const current = identifyRows(result.value, target, this.options.ownPid ?? process.pid);
     options.signal?.throwIfAborted();
     if (current.kind !== "match" || current.pid !== identity.pid) {
       return this.stillRunning(identity);
     }
+    return this.killAndWait(identity, options, token, group);
+  }
+
+  private async killAndWait(
+    identity: Extract<EmulatorProcessIdentity, { kind: "match" }>,
+    options: StopOptions,
+    token: string | undefined,
+    group?: number,
+  ): Promise<EmulatorProcessStopOutcome> {
     if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);
     }
-    const kill = this.send(identity, "SIGKILL");
+    if (this.generationChanged(identity.pid, token)) {
+      return this.replacementStopped(identity.pid);
+    }
+    const kill = this.send(identity, "SIGKILL", group);
     if (kill) {
       return kill;
     }
@@ -296,9 +395,24 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       identity.pid,
       Math.min(options.deadlineMs, this.timer.now() + EMULATOR_KILL_WAIT_MS),
       options.signal,
+      token,
     ))
       ? { kind: "stopped", pid: identity.pid, signal: "SIGKILL" }
       : this.stillRunning(identity);
+  }
+
+  private generationChanged(pid: number, token: string | undefined): boolean {
+    // Unreadable identity preserves PID-only behavior.
+    return (
+      token !== undefined && this.options.processGeneration?.compare(pid, token) === "different"
+    );
+  }
+
+  private replacementStopped(pid: number): EmulatorProcessStopOutcome {
+    logger.warn(
+      `[EmulatorProcessStop] pid ${pid} disappeared or changed arguments before SIGKILL; leaving its replacement untouched`,
+    );
+    return { kind: "stopped", pid, signal: "SIGTERM" };
   }
 
   private hasKillWaitBudget(pid: number, deadlineMs: number): boolean {
@@ -318,9 +432,14 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
   private send(
     identity: Candidate,
     signal: "SIGTERM" | "SIGKILL",
+    group?: number,
   ): EmulatorProcessStopOutcome | undefined {
     try {
-      this.signaler.signal(identity.pid, signal);
+      if (group !== undefined && this.signaler.signalGroup) {
+        this.signaler.signalGroup(group, signal);
+      } else {
+        this.signaler.signal(identity.pid, signal);
+      }
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -345,10 +464,11 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     pid: number,
     deadlineMs: number,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<boolean> {
     for (let attempt = 1; ; attempt++) {
       signal?.throwIfAborted();
-      if (!this.signaler.isRunning(pid)) {
+      if (!this.signaler.isRunning(pid) || this.generationChanged(pid, token)) {
         return true;
       }
       const remainingMs = deadlineMs - this.timer.now();

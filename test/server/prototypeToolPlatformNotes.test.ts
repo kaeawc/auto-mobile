@@ -154,6 +154,29 @@ describe("prototype tool platform notes", () => {
       root: { type: "icon", name: "alarm_add" },
     });
   });
+  test.each(["onLongPress", "onDoubleTap"] as const)(
+    "%s notes name only the authored gesture",
+    async (gesture) => {
+      agent.handshake.capabilities.push("prototype_gestures_v1");
+      const authored = {
+        ...spec,
+        root: { type: "text", text: "Press", [gesture]: [{ type: "emit", name: "gesture" }] },
+      };
+      const { payload } = await call({ action: "show", spec: authored });
+      expect(payload.success).toBe(true);
+      const note = payload.platformNotes?.find((entry) => entry.construct === "node.gestures");
+      expect(note?.paths).toEqual([`root.${gesture}`]);
+      if (gesture === "onLongPress") {
+        expect(note?.detail).toContain("Long-press");
+        expect(note?.detail).not.toContain("double-tap");
+        expect(note?.detail).not.toContain("onTap fires");
+      } else {
+        expect(note?.detail).not.toContain("Long-press");
+        expect(note?.detail).toContain("double-tap");
+        expect(note?.detail).toContain("onTap fires only after");
+      }
+    },
+  );
   test("gesture shows report system timing on iOS only, including expanded components", async () => {
     agent.handshake.capabilities.push("prototype_gestures_v1");
     client.setSupportedCommands(["prototype_gestures_v1", "prototype_persistence_replay_v1"]);

@@ -4,7 +4,9 @@ export const GUIDE_GESTURES = `## Gestures
 
 \`onLongPress\` and \`onDoubleTap\` run their action lists exactly like \`onTap\`, with no new
 event kind. A node with either list is interactive even without \`onTap\`. All three may coexist;
-when \`onDoubleTap\` is present, the single tap fires only after the system double-tap window elapses.
+a node with only \`onLongPress\` and/or \`onDoubleTap\` does not consume single taps:
+the nearest ancestor's \`onTap\` runs. The single-tap delay applies only to nodes declaring
+\`onDoubleTap\`; \`onTap\` with only \`onLongPress\` fires immediately.
 Repeat item and component prop placeholders bind in these lists just as they do in \`onTap\`.
 Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\` to drive them
 by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold

@@ -131,6 +131,7 @@ fun PrototypeSpecContent(
     val anchorLocals = remember { PrototypeAnchorLocals() }
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
+      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
@@ -878,21 +879,38 @@ private fun prototypeNodeModifier(
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
-  val longPress = node.source?.onLongPress
-  val doubleTap = node.source?.onDoubleTap
+  val longPress = node.source?.onLongPress?.takeIf { it.isNotEmpty() }
+  val doubleTap = node.source?.onDoubleTap?.takeIf { it.isNotEmpty() }
+  val gestureTaps = LocalPrototypeGestureTaps.current
   if (tappable) {
     modifier =
-      if (longPress != null || doubleTap != null) {
+      if (actions.isEmpty()) {
+        modifier
+          .prototypeGestureObserver(
+            gestureTaps,
+            presses,
+            onLongPress = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+            onDoubleTap = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          )
+          .semantics {
+            if (longPress != null) {
+              onLongClick(label = null) {
+                interact(PrototypeInteraction.Tap(longPress))
+                true
+              }
+            }
+          }
+      } else if (longPress != null || doubleTap != null) {
         modifier.combinedClickable(
           interactionSource = presses,
           indication = LocalIndication.current,
-          onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
+          onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
           onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
           onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
         )
       } else {
         modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
-          interact(PrototypeInteraction.Tap(actions))
+          gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }
       }
   }

@@ -1785,8 +1785,18 @@ function platformNotesOutput(
       effect: "substituted",
       paths: gestures.slice(0, 20),
       ...(gestures.length > 20 ? { total: gestures.length } : {}),
-      detail:
-        "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
+      detail: [
+        ...(gestures.some((path) => path.endsWith(".onLongPress"))
+          ? [
+              "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
+            ]
+          : []),
+        ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
+          ? [
+              "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
+            ]
+          : []),
+      ].join(" "),
     });
   }
   return notes.length > 0 ? { platformNotes: notes } : {};

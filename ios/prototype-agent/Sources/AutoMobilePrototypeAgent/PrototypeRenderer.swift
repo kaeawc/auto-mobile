@@ -811,7 +811,7 @@ private struct TapModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        if actions != nil || longPress != nil || doubleTap != nil {
+        if !plan.layers.isEmpty {
             let scale = style?.scale(pressed: pressed) ?? 1
             // Spec `motion: "none"` snaps like Reduce Motion (#10885).
             let spring = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
@@ -835,31 +835,22 @@ private struct TapModifier: ViewModifier {
         }
     }
 
-    @ViewBuilder
+    private var plan: PrototypeGesturePlan {
+        PrototypeGesturePlan(onTap: actions, onLongPress: longPress, onDoubleTap: doubleTap)
+    }
+
     private func tapped(_ content: some View) -> some View {
-        if let actions {
-            // When present, double tap is installed first; single tap waits for the system double-tap window.
-            doubleTapped(content).onTapGesture { model.run(actions) }
-        } else {
-            doubleTapped(content)
-        }
-    }
-
-    @ViewBuilder
-    private func doubleTapped(_ content: some View) -> some View {
-        if let doubleTap {
-            longPressed(content).onTapGesture(count: 2) { model.run(doubleTap) }
-        } else {
-            longPressed(content)
-        }
-    }
-
-    @ViewBuilder
-    private func longPressed(_ content: some View) -> some View {
-        if let longPress {
-            content.onLongPressGesture { model.run(longPress) }
-        } else {
-            content
+        // SwiftUI resolves inner-first. A long press that fails to complete lets the ancestor's
+        // tap through. Gesture-only nodes must never install a single-tap handler.
+        plan.layers.reduce(AnyView(content)) { view, layer in
+            switch layer {
+            case .longPress:
+                AnyView(view.onLongPressGesture { model.run(longPress ?? []) })
+            case .doubleTap:
+                AnyView(view.onTapGesture(count: 2) { model.run(doubleTap ?? []) })
+            case .singleTap:
+                AnyView(view.onTapGesture { model.run(actions ?? []) })
+            }
         }
     }
 }

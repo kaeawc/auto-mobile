@@ -1558,8 +1558,10 @@ No sibling issues are edited as part of this implementation.
 `onTap`) on box, row, column, text, image, icon and card only. They require
 `prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
 it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
-interactive even without `onTap`. All three lists may coexist; with `onDoubleTap`, a single tap
-fires only after the system double-tap window elapses. Long-press uses the platform default
+interactive even without `onTap`. A node with only `onLongPress` and/or `onDoubleTap` does not
+consume single taps: the nearest ancestor's `onTap` runs. All three lists may coexist. The
+single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
+fires immediately. Long-press uses the platform default
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
 
 `tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by

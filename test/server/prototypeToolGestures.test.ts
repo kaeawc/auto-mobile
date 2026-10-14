@@ -138,6 +138,26 @@ describe("prototype gestures host", () => {
       }
     },
   );
+  test.each(["onLongPress", "onDoubleTap", "both"] as const)(
+    "iOS reports timing for %s only",
+    async (usage) => {
+      advertise();
+      const root = {
+        ...plain.root,
+        ...(usage !== "onDoubleTap" ? { onLongPress: bound.root.onLongPress } : {}),
+        ...(usage !== "onLongPress" ? { onDoubleTap: bound.root.onDoubleTap } : {}),
+      };
+      const payload = await call(ios, { ...plain, root });
+      expect(payload.success).toBe(true);
+      const detail = payload.platformNotes?.find(
+        (note) => note.construct === "node.gestures",
+      )?.detail;
+      expect(detail?.includes("Long-press")).toBe(usage !== "onDoubleTap");
+      expect(detail?.includes("double-tap")).toBe(usage !== "onLongPress");
+      expect(detail?.includes("onTap fires only after")).toBe(usage !== "onLongPress");
+      expect(agentShows()).toMatchObject([{ body: { spec: { root } } }]);
+    },
+  );
   test.each([android, ios])(
     "$platform sends onTap alone without the gesture capability",
     async (device) => {

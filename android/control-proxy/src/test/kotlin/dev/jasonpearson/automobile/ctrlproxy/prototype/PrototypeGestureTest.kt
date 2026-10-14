@@ -1,11 +1,13 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.*
@@ -91,6 +93,94 @@ class PrototypeGestureTest {
     compose.onNodeWithTag("row").performTouchInput { click() }
     compose.runOnIdle { assertTrue(interactions.isEmpty()) }
     compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
+  }
+
+  private fun renderNested(parentDoubleTap: Boolean = false) {
+    val root =
+      mapPrototypeSpec(
+          PrototypeSpec(
+            "nested",
+            PrototypeWindow(PrototypeFullscreenPlacement()),
+            root =
+              PrototypeRowNode(
+                testTag = "parent",
+                onTap = tap,
+                onDoubleTap = if (parentDoubleTap) tap else null,
+                children =
+                  listOf(
+                    PrototypeTextNode(testTag = "childHold", text = "Hold", onLongPress = hold),
+                    PrototypeTextNode(
+                      testTag = "childDouble",
+                      text = "Double",
+                      onDoubleTap = double,
+                    ),
+                    PrototypeTextNode(
+                      testTag = "immediate",
+                      text = "Tap hold",
+                      onTap = tap,
+                      onLongPress = hold,
+                    ),
+                  ),
+              ),
+          ),
+        )
+        .root
+    compose.setContent {
+      doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
+      PrototypeSpecContent(root) { interactions += it }
+    }
+    compose.waitForIdle()
+    compose.mainClock.autoAdvance = false
+  }
+
+  @Test
+  fun `gesture-only hold child passes single tap to row but owns long press`() {
+    renderNested()
+    compose.onNodeWithTag("childHold", useUnmergedTree = true).performTouchInput { click() }
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
+    compose.runOnIdle { interactions.clear() }
+    compose.onNodeWithTag("childHold", useUnmergedTree = true).performTouchInput { longClick() }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(hold)), interactions) }
+  }
+
+  @Test
+  fun `gesture-only double child owns double tap and defers ancestor single tap`() {
+    renderNested()
+    compose.onNodeWithTag("childDouble", useUnmergedTree = true).performTouchInput { doubleClick() }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(double)), interactions) }
+    compose.runOnIdle { interactions.clear() }
+    compose.onNodeWithTag("childDouble", useUnmergedTree = true).performTouchInput { click() }
+    compose.runOnIdle { assertTrue(interactions.isEmpty()) }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
+  }
+
+  @Test
+  fun `gesture-only double child suppresses ancestor double-click fallback`() {
+    renderNested(parentDoubleTap = true)
+    compose.onNodeWithTag("childDouble", useUnmergedTree = true).performTouchInput { doubleClick() }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(double)), interactions) }
+  }
+
+  @Test
+  fun `gesture-only long press remains an accessibility action`() {
+    renderNested()
+    compose.onNodeWithTag("childHold", useUnmergedTree = true).performSemanticsAction(
+      SemanticsActions.OnLongClick,
+    ) {
+      assertTrue(it())
+    }
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(hold)), interactions) }
+  }
+
+  @Test
+  fun `tap with only long press fires immediately`() {
+    renderNested()
+    compose.onNodeWithTag("immediate", useUnmergedTree = true).performTouchInput { click() }
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
   }
 

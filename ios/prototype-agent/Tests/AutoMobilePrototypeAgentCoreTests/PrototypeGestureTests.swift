@@ -124,6 +124,37 @@ final class PrototypeGestureTests: XCTestCase {
         }
     }
 
+    func testGesturePlanOrdersLayersInnermostFirst() throws {
+        let root =
+            try node(
+                #"{"type":"text","text":"Tap","onTap":[{"type":"emit","name":"tap"}],"onLongPress":[{"type":"emit","name":"hold"}],"onDoubleTap":[{"type":"emit","name":"double"}]}"#
+            )
+        XCTAssertEqual(root.gesturePlan.layers, [.longPress, .doubleTap, .singleTap])
+        XCTAssertTrue(root.gesturePlan.consumesSingleTap)
+    }
+
+    func testGestureOnlyPlansNeverInstallSingleTap() throws {
+        for fields in [
+            #""onLongPress":[{"type":"emit","name":"hold"}]"#,
+            #""onDoubleTap":[{"type":"emit","name":"double"}]"#,
+            #""onLongPress":[{"type":"emit","name":"hold"}],"onDoubleTap":[{"type":"emit","name":"double"}]"#,
+        ] {
+            let root = try node("{\"type\":\"text\",\"text\":\"Tap\",\(fields)}")
+            XCTAssertFalse(root.gesturePlan.layers.isEmpty)
+            XCTAssertFalse(root.gesturePlan.layers.contains(.singleTap))
+            XCTAssertFalse(root.gesturePlan.consumesSingleTap)
+        }
+    }
+
+    func testNoGesturesAndTapOnlyPlans() throws {
+        let plain = try node(#"{"type":"text","text":"Plain"}"#)
+        XCTAssertEqual(plain.gesturePlan.layers, [])
+        XCTAssertFalse(plain.gesturePlan.consumesSingleTap)
+        let tapped = try node(#"{"type":"text","text":"Tap","onTap":[{"type":"emit","name":"tap"}]}"#)
+        XCTAssertEqual(tapped.gesturePlan.layers, [.singleTap])
+        XCTAssertTrue(tapped.gesturePlan.consumesSingleTap)
+    }
+
     func testTheAgentAdvertisesGestures() {
         XCTAssertEqual(PrototypeAgentProtocol.gesturesCapability, "prototype_gestures_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.gesturesCapability))

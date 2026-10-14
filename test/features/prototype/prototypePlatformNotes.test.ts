@@ -94,7 +94,13 @@ describe("prototype platform notes", () => {
   )("%s is lifted by its capability", (construct, capability) => {
     const notes = prototypePlatformNotes(spec, "ios", (name) => name === capability);
     expect(notes.some((note) => note.construct === construct)).toBe(false);
-    expect(notes.length).toBe(capability === "prototype_bottom_sheet_drag_v1" ? 3 : 4);
+    expect(notes.length).toBe(
+      capability === "prototype_bottom_sheet_drag_v1"
+        ? 3
+        : capability === "prototype_text_field_material_style_v1"
+          ? 5
+          : 4,
+    );
   });
   test("testTag, mapped names, disabled swipe and a single detent need no notes", () => {
     const clean = specFor({
@@ -335,5 +341,37 @@ describe("SF Symbols agent platform notes", () => {
     const notes = prototypePlatformNotes(specFor(root), "ios", currentAgent);
     expect(notes[0]).toMatchObject({ total: 22, values: ["android", "facebook"] });
     expect(notes[0].paths).toHaveLength(20);
+  });
+});
+
+describe("text field platform notes", () => {
+  test("outlined and label substitute; maxLength and filled do not", () => {
+    const fields = specFor({
+      type: "textField",
+      stateKey: "name",
+      variant: "outlined",
+      label: "Name",
+      maxLength: 20,
+    });
+    const notes = prototypePlatformNotes(fields, "ios", noCapabilities);
+    expect(notes.map(({ construct, effect, paths }) => ({ construct, effect, paths }))).toEqual([
+      { construct: "textField.variant", effect: "substituted", paths: ["root.variant"] },
+      { construct: "textField.label", effect: "substituted", paths: ["root.label"] },
+    ]);
+    expect(
+      prototypePlatformNotes(
+        fields,
+        "ios",
+        (name) => name === "prototype_text_field_material_style_v1",
+      ),
+    ).toEqual([]);
+    expect(prototypePlatformNotes(fields, "android", noCapabilities)).toEqual([]);
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "textField", stateKey: "name", variant: "filled", maxLength: 20 }),
+        "ios",
+        noCapabilities,
+      ),
+    ).toEqual([]);
   });
 });

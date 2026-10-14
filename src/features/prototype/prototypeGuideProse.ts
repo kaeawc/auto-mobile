@@ -25,6 +25,24 @@ Minimal spec:
 
 A \`{key}\` placeholder in a \`text\` node reads the state value of that key.
 
+## Text field options
+
+\`textField\` binds an initialized string state key. Optional \`label\` is a nonempty floating
+label; \`variant\` is \`filled\` (default) or \`outlined\`; nonempty \`supportingText\` appears below
+the field. \`keyboardType\` is \`text\` (default), \`number\`, \`decimal\`, \`email\`, \`phone\`, \`url\`,
+or \`password\`. \`secure\` masks text; \`multiline\` enables multiple lines. \`minLines\` and
+\`maxLines\` are integers in 1..20, permitted only with \`multiline: true\`; \`minLines\` cannot
+exceed \`maxLines\`. Multiline text cannot use \`secure: true\` or \`keyboardType: "password"\`.
+\`maxLength\` is an integer in 1..10000 and shows a character counter; the initial bound
+value cannot exceed it (UTF-16 length).
+
+All these options require \`prototype_text_field_options_v1\`. A device without the capability
+is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
+app with \`launchApp prototype: true\`, or drop the textField options.
+
+Open question: a \`secure\` field's value still lives in state and in \`change\` events/\`inspect\`;
+this slice does not redact it.
+
 ## Fullscreen host chrome
 
 \`window.chrome\` is \`"none"\` (default) or \`"bar"\`, fullscreen only, on a device advertising

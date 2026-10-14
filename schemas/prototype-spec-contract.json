@@ -2069,6 +2069,71 @@
                 "empty": true
               },
               "optional": true
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["filled", "outlined"]
+              },
+              "optional": true
+            },
+            "supportingText": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "keyboardType": {
+              "rule": {
+                "kind": "enum",
+                "values": ["text", "number", "decimal", "email", "phone", "url", "password"]
+              },
+              "optional": true
+            },
+            "secure": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "multiline": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "minLines": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 20
+              },
+              "optional": true
+            },
+            "maxLines": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 20
+              },
+              "optional": true
+            },
+            "maxLength": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 10000
+              },
+              "optional": true
             }
           }
         },

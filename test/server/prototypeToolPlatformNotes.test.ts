@@ -96,6 +96,29 @@ describe("prototype tool platform notes", () => {
     expect(payload.platformNotes).toEqual(prototypePlatformNotes(spec, "ios", () => false));
     expect(payload.platformNotes).toHaveLength(5);
   });
+  test("iOS text field options return substituted notes without a counter difference", async () => {
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        state: { name: "Ada" },
+        root: {
+          type: "textField",
+          stateKey: "name",
+          label: "Name",
+          variant: "outlined",
+          maxLength: 20,
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(
+      payload.platformNotes?.map(({ construct, effect, paths }) => ({ construct, effect, paths })),
+    ).toEqual([
+      { construct: "textField.variant", effect: "substituted", paths: ["root.variant"] },
+      { construct: "textField.label", effect: "substituted", paths: ["root.label"] },
+    ]);
+  });
   test("Android show retains its exact result shape", async () => {
     const { raw, payload } = await call({ action: "show", spec }, android);
     expect(raw).not.toHaveProperty("platformNotes");

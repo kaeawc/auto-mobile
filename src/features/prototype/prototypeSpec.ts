@@ -500,6 +500,17 @@ const textFieldBaseSchema = z
     type: z.enum(["textField"]),
     stateKey: stateKeySchema,
     placeholder: z.string().optional(),
+    label: z.string().min(1).optional(),
+    variant: z.enum(["filled", "outlined"]).optional(),
+    supportingText: z.string().min(1).optional(),
+    keyboardType: z
+      .enum(["text", "number", "decimal", "email", "phone", "url", "password"])
+      .optional(),
+    secure: z.boolean().optional(),
+    multiline: z.boolean().optional(),
+    minLines: z.number().int().min(1).max(20).optional(),
+    maxLines: z.number().int().min(1).max(20).optional(),
+    maxLength: z.number().int().min(1).max(10000).optional(),
   })
   .strict();
 const switchBaseSchema = z

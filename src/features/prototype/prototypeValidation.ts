@@ -647,6 +647,28 @@ function chipErrors(
   }
   return undefined;
 }
+/** Text field option relationships and the initial bound value; individual fields are contract-typed. */
+function textFieldErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): PrototypeValidationError | undefined {
+  const { minLines, maxLines, maxLength } = value;
+  const lineField = ["minLines", "maxLines"].find((field) => value[field] !== undefined);
+  if (value.multiline !== true && lineField !== undefined) {
+    return fail(`${path}.${lineField}`, "Requires multiline: true");
+  }
+  if (value.multiline === true && (value.secure === true || value.keyboardType === "password")) {
+    return fail(`${path}.multiline`, "Multiline text cannot be secure");
+  }
+  if (typeof minLines === "number" && typeof maxLines === "number" && minLines > maxLines) {
+    return fail(`${path}.minLines`, "minLines cannot exceed maxLines");
+  }
+  if (typeof stored === "string" && typeof maxLength === "number" && stored.length > maxLength) {
+    return fail(`${path}.stateKey`, "Text field value exceeds maxLength");
+  }
+  return undefined;
+}
 function componentBindingErrors(
   value: Record<string, unknown>,
   path: string,
@@ -671,6 +693,8 @@ function componentFormErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   switch (value.type) {
+    case "textField":
+      return textFieldErrors(value, path, stored);
     case "radioGroup":
     case "segmentedButton":
       return radioGroupErrors(value, path, stored);

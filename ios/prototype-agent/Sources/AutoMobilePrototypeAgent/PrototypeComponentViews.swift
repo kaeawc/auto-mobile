@@ -32,6 +32,8 @@ struct ComponentColors {
     var content: Color { role("onSurface", .primary) }
     var contentVariant: Color { role("onSurfaceVariant", .secondary) }
     var outline: Color { role("outlineVariant", Color(UIColor.separator)) }
+    var fieldOutline: Color { role("outline", Color(UIColor.separator)) }
+    var surfaceHighest: Color { role("surfaceContainerHighest", Color(UIColor.systemFill)) }
     var tonal: Color { role("secondaryContainer", Color.accentColor.opacity(0.18)) }
     var onTonal: Color { role("onSecondaryContainer", .accentColor) }
     var surface: Color { role("surface", Color(UIColor.systemBackground)) }
@@ -50,6 +52,9 @@ struct ComponentColors {
 /// editing ends or external stored changes restore the session's value (#12206).
 @MainActor
 struct PrototypeTextFieldView: View {
+    @Environment(\.prototypePalette) private var palette
+    private var colors: ComponentColors { ComponentColors(palette: palette) }
+    private var options: PrototypeTextFieldOptions { PrototypeTextFieldOptions(node: node) }
     let node: PrototypeNode
     let model: PrototypeModel
     @State private var draft: PrototypeTextDraft
@@ -64,9 +69,7 @@ struct PrototypeTextFieldView: View {
     var body: some View {
         let key = node.stateKey ?? ""
         let stored = model.state[key]?.displayString ?? ""
-        TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
-            .textFieldStyle(.roundedBorder)
-            .focused($focused)
+        renderedField
             .onChange(of: draft.text) { _, _ in
                 // Read live state: another callback may have changed the captured display value.
                 let stored = model.state[key]?.displayString ?? ""
@@ -91,6 +94,108 @@ struct PrototypeTextFieldView: View {
             .onChange(of: model.showRevision) { _, _ in
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
+    }
+
+    private var textBinding: Binding<String> {
+        Binding(get: { draft.text }, set: { draft.type(options.clip($0)) })
+    }
+
+    private var keyboardType: UIKeyboardType {
+        switch options.keyboard {
+        case .text: .default
+        case .number: .numberPad
+        case .decimal: .decimalPad
+        case .email: .emailAddress
+        case .phone: .phonePad
+        case .url: .URL
+        }
+    }
+
+    @ViewBuilder private var input: some View {
+        Group {
+            if options.isSecure {
+                SecureField(node.placeholder ?? "", text: textBinding)
+            } else if let lines = options.lineRange {
+                TextField(node.placeholder ?? "", text: textBinding, axis: .vertical)
+                    .lineLimit(lines)
+            } else {
+                TextField(node.placeholder ?? "", text: textBinding)
+            }
+        }
+        .focused($focused)
+        .keyboardType(keyboardType)
+    }
+
+    @ViewBuilder private var configuredInput: some View {
+        if options.keyboard == .email || options.keyboard == .url {
+            input.textInputAutocapitalization(.never).autocorrectionDisabled()
+        } else if options.isSecure {
+            input.autocorrectionDisabled()
+        } else {
+            input
+        }
+    }
+
+    @ViewBuilder private var accessibleInput: some View {
+        // Leave the native placeholder label intact when neither override is authored.
+        if let label = node.contentDescription ?? node.label {
+            configuredInput.accessibilityLabel(label)
+                .accessibilityHint(options.supportingAccessibilityValue ?? "")
+        } else {
+            configuredInput.accessibilityHint(options.supportingAccessibilityValue ?? "")
+        }
+    }
+
+    @ViewBuilder private var chromedInput: some View {
+        if node.variant == "outlined" {
+            accessibleInput.textFieldStyle(.plain)
+                .padding(12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(focused ? colors.primary : colors.fieldOutline, lineWidth: focused ? 2 : 1)
+                        .accessibilityHidden(true)
+                }
+        } else {
+            accessibleInput.textFieldStyle(.plain)
+                .padding(12)
+                .background {
+                    UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4)
+                        .fill(colors.surfaceHighest)
+                        .accessibilityHidden(true)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(focused ? colors.primary : colors.fieldOutline)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+        }
+    }
+
+    @ViewBuilder private var renderedField: some View {
+        if options.usesDrawnChrome {
+            VStack(alignment: .leading, spacing: 4) {
+                if let label = node.label {
+                    Text(label).font(.footnote).foregroundColor(colors.contentVariant)
+                        .accessibilityHidden(true)
+                }
+                chromedInput
+                if node.supportingText != nil || options.maxLength != nil {
+                    HStack(alignment: .top) {
+                        if let supporting = node.supportingText {
+                            Text(supporting).accessibilityHidden(true)
+                        }
+                        Spacer(minLength: 8)
+                        if let counter = options.counterText(for: draft.text) {
+                            Text(counter)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundColor(colors.contentVariant)
+                }
+            }
+        } else {
+            accessibleInput.textFieldStyle(.roundedBorder)
+        }
     }
 }
 

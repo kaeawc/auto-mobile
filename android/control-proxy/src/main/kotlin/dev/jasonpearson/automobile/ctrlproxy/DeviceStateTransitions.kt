@@ -129,9 +129,19 @@ internal object DeviceStateTransitions {
     context: Context,
     sdkInt: Int = Build.VERSION.SDK_INT,
     source: PostureSource = PostureSource { onPostures ->
-      PostureFlowSource(
+      val primary =
+        PostureFlowSource(
           { windowPostures(context) },
           ContextCompat.getMainExecutor(context).asCoroutineDispatcher(),
+        )
+      HingeFallbackPostureSource(
+          primary,
+          SensorHingeAngleSource(
+            context.getSystemService(android.hardware.SensorManager::class.java),
+            android.os.Handler(android.os.Looper.getMainLooper()),
+          ),
+          { Log.i("CtrlProxyDeviceState", it) },
+          ::logWarning,
         )
         .observe(onPostures)
     },

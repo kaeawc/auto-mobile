@@ -60,7 +60,7 @@ import {
   type ManagedSlotConfig,
 } from "./models/managedSlotConfig";
 import type { ManagedSlotsResult } from "./models/managedSlotsResult";
-import { assertSessionOwnerRunning, type SessionConfig } from "./models/sessionConfig";
+import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./models/sessionConfig";
 import type { SessionBrokerResult } from "./models/sessionBrokerResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
@@ -335,8 +335,14 @@ async function main() {
       !daemonRequested &&
       sessionConfig?.executionOwnerPid !== undefined
     ) {
-      const { isProcessRunning } = await import("./utils/processLiveness");
-      assertSessionOwnerRunning(sessionConfig, (pid) => isProcessRunning(pid));
+      const [{ isProcessRunning }, { defaultLockOwnerGenerationProbe }] = await Promise.all([
+        import("./utils/processLiveness"),
+        import("./daemon/lockOwnerGeneration"),
+      ]);
+      ownerGenerationToken = resolveSessionOwnerGenerationToken(sessionConfig, {
+        isProcessRunning: (pid) => isProcessRunning(pid),
+        probe: defaultLockOwnerGenerationProbe,
+      });
     }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
@@ -824,7 +830,12 @@ async function main() {
               )
             : undefined;
           const session = sessionConfig
-            ? await acquireBrokerSessionBeforeServing(proxy, sessionConfig, launchParentPid)
+            ? await acquireBrokerSessionBeforeServing(
+                proxy,
+                sessionConfig,
+                launchParentPid,
+                ownerGenerationToken,
+              )
             : undefined;
           const result = createProxyMcpServer({
             proxy,
@@ -894,8 +905,9 @@ async function acquireBrokerSessionBeforeServing(
   proxy: { acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult> },
   config: SessionConfig,
   launchParentPid: number,
+  ownerGenerationToken?: string,
 ): Promise<SessionBrokerResult> {
-  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid);
+  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid, ownerGenerationToken);
   const result = await proxy.acquireBrokerSession(config);
   const { logger } = await import("./utils/logger");
   logger.info(

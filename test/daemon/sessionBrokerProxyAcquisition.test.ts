@@ -69,6 +69,26 @@ function rig(
 }
 
 describe("session broker proxy acquisition", () => {
+  test("forwards the owner PID but omits its proxy-only start identity without mutating config", async () => {
+    const ownerConfig = {
+      ...config,
+      executionOwnerPid: 4242,
+      executionOwnerStartIdentity: "T1",
+    };
+    const { ports, calls } = rig((method) =>
+      method === "daemon/capabilities" ? { capabilities: ["session-broker/v1"] } : ready,
+    );
+    expect(await acquireSessionThroughDaemon(ownerConfig, ports)).toEqual(ready);
+    const prepare = calls.find(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)!;
+    expect(prepare.params.config).not.toHaveProperty("executionOwnerStartIdentity");
+    expect(prepare.params.config).toEqual({ ...config, executionOwnerPid: 4242 });
+    expect(ownerConfig).toEqual({
+      ...config,
+      executionOwnerPid: 4242,
+      executionOwnerStartIdentity: "T1",
+    });
+  });
+
   test("prepares once with no allocation controls and holds the exact ready UUID", async () => {
     const { ports, calls, held } = rig((method) =>
       method === "daemon/capabilities" ? { capabilities: ["session-broker/v1"] } : ready,
@@ -80,7 +100,6 @@ describe("session broker proxy acquisition", () => {
       config,
       livenessOwnerToken: "owner-1",
     });
-    expect(prepare.params.config).toBe(config);
     expect(prepare.params).not.toHaveProperty("scope");
     expect(prepare.params).not.toHaveProperty("slot");
     expect(held).toEqual([{ requestId: "request-1", sessionUuid: "session-1" }]);

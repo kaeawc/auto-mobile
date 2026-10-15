@@ -560,19 +560,21 @@ final class KeyboardWaitTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let source = try String(
-            contentsOf: packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite/GesturePerformer.swift"),
-            encoding: .utf8
-        )
+        let sourcesURL = packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite")
+        let sources = try FileManager.default.contentsOfDirectory(atPath: sourcesURL.path)
+            .filter { $0.hasPrefix("GesturePerformer") && $0.hasSuffix(".swift") && !$0.contains("NonIOSStub") }
+            .sorted()
+            .map { try String(contentsOf: sourcesURL.appendingPathComponent($0), encoding: .utf8) }
         for (name, poller) in [
             ("tapAndAwaitKeyboardFocus", "KeyboardWait.focus("),
             ("waitForKeyboardVisibility", "KeyboardWait.visibility("),
             ("waitForKeyboardClose<C: Clock>", "KeyboardWait.close("),
             ("performPressKey", "KeyboardWait.destructivePostCondition("),
         ] {
-            let start = try XCTUnwrap(source.range(of: "private func \(name)("))
+            let source = try XCTUnwrap(sources.first { $0.contains("func \(name)(") })
+            let start = try XCTUnwrap(source.range(of: "func \(name)("))
             let remaining = source[start.upperBound...]
-            let end = try XCTUnwrap(remaining.range(of: "\n        private "))
+            let end = try XCTUnwrap(remaining.range(of: "\n        private ") ?? remaining.range(of: "\n        func "))
             let function = String(source[start.lowerBound ..< end.lowerBound])
             XCTAssertTrue(function.contains("async throws"))
             XCTAssertTrue(function.contains("try await " + poller))
@@ -583,8 +585,12 @@ final class KeyboardWaitTests: XCTestCase {
                 XCTAssertTrue(function.contains("catchingObjCException({ focusedElement.exists })"))
             }
         }
-        let closeStart = try XCTUnwrap(source.range(of: "private func closeKeyboard<C: Clock>("))
-        let closeEnd = try XCTUnwrap(source[closeStart.upperBound...].range(of: "\n        @discardableResult"))
+        let source = try XCTUnwrap(sources.first { $0.contains("func closeKeyboard<C: Clock>(") })
+        let closeStart = try XCTUnwrap(source.range(of: "func closeKeyboard<C: Clock>("))
+        let closeEnd = try XCTUnwrap(
+            source[closeStart.upperBound...]
+                .range(of: "\n        private func waitForKeyboardVisibility(")
+        )
         let closeAction = String(source[closeStart.lowerBound ..< closeEnd.lowerBound])
         XCTAssertTrue(closeAction.contains("clock.now.advanced(by: .milliseconds(3500))"))
         XCTAssertEqual(closeAction.components(separatedBy: "guard clock.now < closeDeadline").count - 1, 3)

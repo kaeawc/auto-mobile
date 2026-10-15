@@ -200,7 +200,10 @@ describe("deleteDevice failure mapping agrees with killDevice's wire shaping", (
     ["owned by another daemon", () => new DeviceOwnedByOtherDaemonError("IOS-PEER", 4242)],
     ["shutting down", () => new DeviceShuttingDownError("IOS-PEER")],
     ["cleanup in progress", () => new DeviceCleanupInProgressError("IOS-PEER", 750)],
-    ["managed slot", () => new DeviceAssignedToBindingError("deleteDevice", "IOS-PEER", slotEntry)],
+    [
+      "broker binding",
+      () => new DeviceAssignedToBindingError("deleteDevice", "IOS-PEER", slotEntry),
+    ],
     ["discovery incomplete", () => new BindingDiscoveryIncompleteError("registry locked")],
     [
       "terminal release in progress",

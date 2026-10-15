@@ -26,6 +26,7 @@ test/server/appTools.listApps.test.ts
 test/server/appTools.signingGuards.test.ts
 test/server/appToolsReadiness.test.ts
 test/server/appToolsResourceInvalidation.test.ts
+test/server/bindingLifecycleExclusion.test.ts
 test/server/criticalSectionRegistration.test.ts
 test/server/databaseIos.test.ts
 test/server/deepLinkTools.test.ts
@@ -54,7 +55,6 @@ test/server/inventorySurfaceParity.test.ts
 test/server/lifecycleDeviceOwnership.test.ts
 test/server/lifecycleTools.outputSchema.test.ts
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts
-test/server/managedSlotLifecycleExclusion.test.ts
 test/server/navigationTools.listing.test.ts
 test/server/navigationTools.test.ts
 test/server/nestedPlainToolForeignOwnedSession.test.ts

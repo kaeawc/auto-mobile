@@ -24,7 +24,7 @@ import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 
-// #11174 part b / #11178 part a: a device a managed slot holds is never generic capacity, even
+// #11174 part b / #11178 part a: a device a broker binding holds is never generic capacity, even
 // while idle with no session. Every case below has no live session on the assigned device.
 
 const ios = (deviceId: string): BootedDevice => ({ deviceId, name: deviceId, platform: "ios" });
@@ -44,7 +44,7 @@ describe("DevicePool binding exclusion", () => {
   const setUp = async (devices: BootedDevice[]) => {
     manager.bootedDevices = devices;
     pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "managed-slot-exclusion", {
+      createDevicePoolDependencies(sessions, "broker-binding-exclusion", {
         timer,
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),

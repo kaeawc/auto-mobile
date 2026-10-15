@@ -68,7 +68,7 @@ async function setup() {
   return { provisioner, reconcile, capacity, registry, reconciler, timer };
 }
 
-// docs/using/managed-slots.md "Boot capacity": the error carries `externalDevices` when counted
+// docs/using/environment-variables.md "Boot capacity": the error carries `externalDevices` when counted
 // devices were not started by AutoMobile, "including a binding that must create or boot its device".
 describe("binding capacity_exhausted keeps externalDevices", () => {
   test("a gate refusal during binding provisioning names the external devices", async () => {

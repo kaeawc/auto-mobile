@@ -11,8 +11,6 @@ import {
 
 const root = path.resolve(import.meta.dir, "../..");
 const allowlist: Readonly<Record<string, string>> = {
-  "src/models/managedSlotsResult.ts":
-    "Legacy managed-slot documentation is removed separately in step d after its source API removal.",
   "android/local.properties":
     "Gitignored local Gradle SDK config that each worktree copies from a working checkout.",
   "android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk":

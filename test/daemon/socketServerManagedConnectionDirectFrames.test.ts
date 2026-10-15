@@ -23,7 +23,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 
 /**
- * A socket bound to managed slots is confined to its slot devices and slot sessions for control
+ * A socket bound to broker bindings is confined to its slot devices and slot sessions for control
  * and lifecycle (#11178, `brokerConnectionScope.ts`: "a control call on any other device, a call
  * naming any other session ... are refused with `device_outside_broker_grant`"). Every direct
  * control and lifecycle frame applies that confinement (#11596): `input/*`, the device-mutating
@@ -96,7 +96,7 @@ describe("direct frames from a managed connection outside its slots", () => {
   let canonicalIds: Map<string, string>;
   let unidentifiableIds: Set<string>;
   let discovered: BootedDevice[];
-  let managedSlotHeld: boolean;
+  let bindingHeld: boolean;
   let poolRefreshes: string[];
   let flagWrites: Array<{ key: string; enabled: boolean }>;
   const flags = [{ key: "debug", label: "Debug", description: "Debug", enabled: false }];
@@ -145,7 +145,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     flagWrites = [];
     canonicalIds = new Map();
     unidentifiableIds = new Set();
-    managedSlotHeld = true;
+    bindingHeld = true;
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(SLOT_SESSION, slotDevice.deviceId, "android", 60_000);
@@ -218,7 +218,7 @@ describe("direct frames from a managed connection outside its slots", () => {
       isAndroidTransportAssignable: (device: BootedDevice) =>
         !unidentifiableIds.has(device.deviceId),
       androidBindingHold: async (heldDeviceIds: readonly string[]) =>
-        managedSlotHeld && !heldDeviceIds.includes(slotDevice.deviceId)
+        bindingHeld && !heldDeviceIds.includes(slotDevice.deviceId)
           ? { entry: slotEntry }
           : undefined,
       assertNotAssignedToBinding: async (input: {
@@ -227,7 +227,7 @@ describe("direct frames from a managed connection outside its slots", () => {
         requesterSessionUuid?: string;
       }) => {
         if (
-          managedSlotHeld &&
+          bindingHeld &&
           input.deviceId === slotDevice.deviceId &&
           input.requesterSessionUuid !== SLOT_SESSION
         ) {
@@ -267,7 +267,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     internals.acceptingRequests = true;
     managed = new FakeSocket();
     internals.handleConnection(managed as unknown as Socket);
-    // What `daemon/acquireManagedSlots` does for the socket that asked (`bindBrokerConnection`).
+    // What broker acquisition does for the socket that asked (`bindBrokerConnection`).
     const [socketSessionId] = [...internals.sessions.keys()];
     scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [SLOT_SESSION] });
     // An ordinary connection on the same daemon: never bound, never confined.
@@ -553,7 +553,7 @@ describe("direct frames from a managed connection outside its slots", () => {
   test("an unidentified frame with nothing held still passes identity before managed confinement", async () => {
     await sessionManager.releaseSession(SLOT_SESSION);
     await sessionManager.releaseSession(GENERIC_SESSION);
-    managedSlotHeld = false;
+    bindingHeld = false;
     const target = "192.168.1.20:5555";
     unidentifiableIds.add(target);
     discovered.push({ deviceId: target, name: target, platform: "android" });

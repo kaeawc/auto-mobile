@@ -40,7 +40,7 @@ import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
-import * as managedSlotRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
+import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
 import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
@@ -120,7 +120,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/deviceBootService": deviceBoot,
   "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
   "daemon/inputDeviceOwnership": inputOwnership,
-  "daemon/sessionBroker/connectionRefusal": managedSlotRefusals,
+  "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
   "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
   "server/planExecutionInProgressRefusal": planLockRefusal,
@@ -466,7 +466,7 @@ function exportedCodeConstants(): Map<string, string> {
     acquisitionRefusals,
     inputOwnership,
     bootCapacity,
-    managedSlotRefusals,
+    brokerConnectionRefusals,
     bindingRefusals,
     boundSessionRefusal,
     daemonTypes,
@@ -489,7 +489,7 @@ interface SurfaceFields extends Omit<RefusalFields, "retryable"> {
   retryable?: boolean;
   /** The evidence the refusal carries beside its typed fields. */
   details?: Record<string, unknown>;
-  /** A managed slot failure's boot-capacity object. */
+  /** A broker provisioning failure's boot-capacity object. */
   capacity?: Record<string, unknown>;
   budget?: Record<string, unknown>;
 }
@@ -514,12 +514,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
 } {
   const payload = fixture.payload as Record<string, unknown>;
   if (
-    [
-      "device-loss-outcome",
-      "device-session-error-fields",
-      "request-failure-fields",
-      "managed-slots-response",
-    ].includes(fixture.surface)
+    ["device-loss-outcome", "device-session-error-fields", "request-failure-fields"].includes(
+      fixture.surface,
+    )
   ) {
     return { typed: payload as TypedFields };
   }
@@ -1232,7 +1229,6 @@ describe("refusal wire contract", () => {
         "proxy-tool-result",
         "request-failure-fields",
         "liveness-handover",
-        "managed-slots-response",
         "provision-envelope",
       ]);
       for (const fixture of allSurfaceFixtures.filter((fixture) =>

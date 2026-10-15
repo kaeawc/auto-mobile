@@ -46,7 +46,7 @@ function readyBinding(stableDeviceId: string, generation: number) {
 }
 
 /**
- * Behaviour every {@link SlotRegistry} must share. Run against the fake and the SQLite registry so
+ * Behaviour every {@link BindingRegistry} must share. Run against the fake and the SQLite registry so
  * a test written against the fake proves the real store too.
  */
 export function describeBindingRegistryContract(

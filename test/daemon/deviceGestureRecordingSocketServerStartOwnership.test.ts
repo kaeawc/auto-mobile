@@ -143,7 +143,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
     }
   }
 
-  test("an unheld managed-slot target keeps its slot refusal before any setup", async () => {
+  test("an unheld broker-binding target keeps its slot refusal before any setup", async () => {
     await manager.releaseSession("holder");
     let slotCalls = 0;
     const gatedServer = new TestableServer(
@@ -196,7 +196,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
-  test("ownership is rechecked after the managed-slot gate before setup", async () => {
+  test("ownership is rechecked after the broker-binding gate before setup", async () => {
     let owner = "holder";
     const ownership = spyOn(manager, "getSessionForDevice").mockImplementation(() => owner);
     const gatedServer = new TestableServer(

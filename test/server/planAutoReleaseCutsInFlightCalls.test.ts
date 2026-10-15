@@ -235,7 +235,7 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
     expect(manager.getSession("other")).not.toBeNull();
   });
 
-  test("a managed slot session survives the plan and its calls are not cut", async () => {
+  test("a broker binding session survives the plan and its calls are not cut", async () => {
     await acquire();
     DaemonState.getInstance()
       .getBrokerConnectionScopes()

@@ -62,7 +62,7 @@ an Android transport the pool cannot identify (`isAndroidTransportAssignable` is
 while a held Android device could be its alias. Held devices are every
 Android device still in the session holder map, including expired sessions and
 releases in progress until their ownership is removed, plus one unknown hold if
-the fresh managed-slot snapshot contains Android stable ids not represented by
+the fresh broker binding snapshot contains Android stable ids not represented by
 those sessions. Control frames and tools reuse that snapshot for at most one second.
 
 The pool can positively distinguish the target from a held device only when its
@@ -72,20 +72,20 @@ loopback adb port identifies a different emulator console. An emulator proven by
 its current connection's probe is also told apart from a held physical phone
 (a USB serial or physical alias group), without becoming assignable. Matching physical
 serials or alias-group keys still could alias. A loopback port cannot distinguish
-a phone or an unknown device; an unknown managed-slot hold could alias unless
+a phone or an unknown device; an unknown broker binding hold could alias unless
 the target's current folded group identifies another device.
 
 If no held device could alias the transport, control is allowed. If every
 possible alias belongs to the requester's own session (including derived label
 sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
-transport the caller targeted; an unknown managed-slot hold uses
+transport the caller targeted; an unknown broker binding hold uses
 `device_assigned_to_binding` when its registry entry is available. Address
 the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
 not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets
 keep their existing behavior; screenshot, hierarchy and observe reads never
-pass this control check. A managed connection still controls only its own slot
+pass this control check. A broker connection still controls only its granted
 devices; the existing connection and ownership checks still apply.
 
 A command whose session left the device (rebound or released) between being

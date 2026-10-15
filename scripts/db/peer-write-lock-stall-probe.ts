@@ -9,8 +9,8 @@ const paths = [
   "app-db-session-upsert",
   "app-db-session-release",
   "app-db-transaction",
-  "slot-registry-ensure-scope",
-  "slot-registry-journal",
+  "binding-registry-ensure-scope",
+  "binding-registry-journal",
 ] as const;
 const { values } = parseArgs({
   options: {
@@ -75,7 +75,7 @@ try {
     try {
       await database.ensureMigrations();
       await sql`CREATE TABLE IF NOT EXISTS peer_probe (value INTEGER)`.execute(db);
-      const registryPath = join(directory, "slot-registry.db");
+      const registryPath = join(directory, "binding-registry.db");
       registry = await openSqliteBindingRegistry({ dbPath: registryPath });
       const repository = new DeviceSessionRepository();
       let caseIndex = 0;
@@ -105,7 +105,7 @@ try {
               db
                 .transaction()
                 .execute((trx) => sql`INSERT INTO peer_probe VALUES (2)`.execute(trx));
-          } else if (path === "slot-registry-ensure-scope") {
+          } else if (path === "binding-registry-ensure-scope") {
             operation = () =>
               registry!.ensureScope({
                 managedHostScope: "probe",

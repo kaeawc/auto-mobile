@@ -190,7 +190,7 @@ export interface LivenessScenarioOptions {
    */
   ownerLeaseMs?: number;
   /**
-   * Give every daemon of the scenario the host's managed-slot registry: one in-memory registry
+   * Give every daemon of the scenario the host's broker binding registry: one in-memory registry
    * that outlives a daemon restart, as the registry file does (see
    * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
    */
@@ -276,8 +276,8 @@ function armHostTripwires(daemon: Daemon): void {
   }
 }
 
-/** Managed-slot exclusion that holds nothing: the host-wide slot registry is never opened. */
-const NO_MANAGED_SLOTS = {
+/** Broker binding exclusion that holds nothing: the host-wide binding registry is never opened. */
+const NO_BINDINGS = {
   refresh: async () => {},
   holderOf: () => undefined,
   stableIdsFor: () => new Set<string>(),
@@ -450,7 +450,7 @@ export class LivenessScenario {
   readonly exitRecords: DaemonExitRecord[] = [];
   /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
-  private readonly managedSlotsEnabled: boolean;
+  private readonly bindingsEnabled: boolean;
   private bindings: BindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
@@ -490,7 +490,7 @@ export class LivenessScenario {
     this.freshConnectionIdPerDial = options.freshConnectionIdPerDial ?? false;
     this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
-    this.managedSlotsEnabled = options.bindings ?? false;
+    this.bindingsEnabled = options.bindings ?? false;
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -688,7 +688,7 @@ export class LivenessScenario {
         selfPid: SCENARIO_DAEMON_PID,
       }),
       () => ({ listDeviceImages: async () => [] }),
-      () => NO_MANAGED_SLOTS,
+      () => NO_BINDINGS,
       () => undefined,
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
@@ -696,7 +696,7 @@ export class LivenessScenario {
       daemon as unknown as { exitRecordFileSystem: FakeDaemonExitRecordFileSystem }
     ).exitRecordFileSystem = exitFiles;
     armHostTripwires(daemon);
-    if (this.managedSlotsEnabled) {
+    if (this.bindingsEnabled) {
       // The registry is a file on the host that outlives the daemon; each process finds it open.
       this.bindings ??= await openSqliteBindingRegistry({ dbPath: ":memory:", timer: this.timer });
       (daemon as unknown as { bindingRegistry: Promise<BindingRegistry> }).bindingRegistry =
@@ -1563,15 +1563,15 @@ export class LivenessScenario {
   }
 
   /**
-   * `sessionId` becomes the execution of a managed slot, as `daemon/acquireManagedSlots` leaves
+   * `sessionId` becomes the execution of a broker binding, as broker acquisition leaves
    * it: the session is held on the managed-execution policy and the host registry records the
    * running daemon as the slot's execution owner. The reconciler's device work is the device
-   * boundary; the registry writes are the ones the acquisition makes. Needs `managedSlots`.
+   * boundary; the registry writes are the ones the acquisition makes. Needs `bindings`.
    */
   async holdAsManagedExecution(sessionId: string, idleTimeoutMs?: number): Promise<void> {
     const registry = this.bindings;
     if (!registry) {
-      throw new Error("LivenessScenario: start the scenario with `managedSlots`");
+      throw new Error("LivenessScenario: start the scenario with `bindings`");
     }
     await this.daemon.manager.adoptManagedExecutionLivenessPolicy(sessionId, { idleTimeoutMs });
     const scope = await registry.ensureScope({
@@ -1615,7 +1615,7 @@ export class LivenessScenario {
     await keeper.holdBrokerSession(`request-${sessionId}`, sessionId);
   }
 
-  async managedSlotOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {
+  async bindingOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {
     const [assignment] = (await this.bindings?.findExecutionAssignments(sessionId)) ?? [];
     return assignment?.execOwner ?? undefined;
   }

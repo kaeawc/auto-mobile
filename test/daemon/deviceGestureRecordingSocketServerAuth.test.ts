@@ -479,7 +479,7 @@ test("recording stop cannot disguise another device as the caller's own", async 
   }
 });
 
-describe("DeviceGestureRecordingSocketServer managed-slot exclusion (#11352)", () => {
+describe("DeviceGestureRecordingSocketServer broker-binding exclusion (#11352)", () => {
   const slotDevice: BootedDevice = { deviceId: "slot-1", name: "Pixel_8", platform: "android" };
   const openGate: DeviceAdmissionGate = { assertDeviceActionable: () => {} };
 

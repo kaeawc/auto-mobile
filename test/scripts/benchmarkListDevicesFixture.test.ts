@@ -45,7 +45,7 @@ describe("listDevices benchmark fixture (#11332)", () => {
     expect(payload.discovery.complete).toBe(true);
   });
 
-  test("daemon scenario reports the managed-slot and other-daemon holders", async () => {
+  test("daemon scenario reports the broker-binding and other-daemon holders", async () => {
     fixture = await installListDevicesFixture("daemon");
     const payload = await list();
     expect(payload.devices.map((d) => [d.runtime.deviceId, d.runtime.heldBy])).toEqual([

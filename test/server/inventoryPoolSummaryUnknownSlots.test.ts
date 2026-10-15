@@ -16,7 +16,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
-// Inventory contract: unknown never fails open. When the managed-slot registry is unreadable and no
+// Inventory contract: unknown never fails open. When the broker binding registry is unreadable and no
 // snapshot was ever loaded, `availableDevices` (getRefreshedStats) refuses, and the booted resource
 // drops the platform's devices as a failed observation. But the resource's pool summary then falls
 // back to the pool's own entries WITHOUT refreshing ownership, so a device a slot may hold is

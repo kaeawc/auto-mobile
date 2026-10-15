@@ -15,7 +15,7 @@ import {
 } from "./helpers/inputSocketHarness";
 
 /**
- * #11178: `input/*` frames are control. A socket bound to managed slots drives only its own slot
+ * #11178: `input/*` frames are control. A socket bound to broker bindings drives only its own slot
  * devices; the binding ends with the socket. Generic sockets are unaffected by this gate.
  */
 

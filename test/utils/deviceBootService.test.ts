@@ -546,7 +546,7 @@ describe("DeviceBootService", () => {
     expect(devices.getExecutedOperations()).toContain("startDevice:Pixel_9_API_34:180000");
   });
 
-  it("does not cold-boot a simulator image whose UDID is excluded (managed slots, #11174)", async () => {
+  it("does not cold-boot a simulator image whose UDID is excluded (broker bindings, #11174)", async () => {
     const devices = new FakeDeviceUtils();
     const excluded: DeviceInfo = {
       name: "iPhone 16",

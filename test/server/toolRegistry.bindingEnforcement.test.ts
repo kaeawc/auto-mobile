@@ -38,7 +38,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 /**
- * #11178 part b: the device-aware tool path refuses control of a device another managed slot holds
+ * #11178 part b: the device-aware tool path refuses control of a device another broker binding holds
  * (idle or not, explicit deviceId or resolved target), and confines a managed connection's control
  * to its own granted devices and sessions. Reads stay open everywhere (owner decision Q6).
  */
@@ -104,7 +104,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("ios", [slotA, slotB, free]);
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "managed-slot-enforcement", {
+      createDevicePoolDependencies(sessionManager, "broker-binding-enforcement", {
         timer,
         deviceManager: fakeDeviceUtils,
         bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),

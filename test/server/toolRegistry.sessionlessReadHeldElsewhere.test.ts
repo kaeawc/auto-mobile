@@ -25,7 +25,7 @@ import { FakeWindow } from "../fakes/FakeWindow";
 
 /**
  * A sessionless READ through the tool pipeline never readies a device someone else holds without a
- * local session: an idle managed slot's device, or a device another daemon claims (#11641).
+ * local session: an idle broker binding's device, or a device another daemon claims (#11641).
  * Readiness is not a read: it pins the current device, applies the host appearance
  * (`cmd uimode night …`) and writes `settings put secure stylus_handwriting_enabled 0`. Such a
  * read takes the read-only device path instead, as `request_observation` does

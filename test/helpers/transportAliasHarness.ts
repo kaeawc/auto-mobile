@@ -24,7 +24,7 @@ import { RealToolCallPath } from "./realToolCallPath";
 /**
  * #11618: one handset on USB and wireless debugging is ONE pooled device held under its USB
  * serial. A tool call naming it by the wireless id is the same call as one naming the USB serial:
- * the MCP ingress resolves the id to the pool's canonical id before any holder, managed-slot,
+ * the MCP ingress resolves the id to the pool's canonical id before any holder, broker-binding,
  * routing or admission decision. Real `ToolRegistry` ingress, real `DevicePool` and its real alias
  * fold; only adb, discovery and the device boundary are fakes.
  */
@@ -49,8 +49,8 @@ export interface HarnessOptions {
   avd?: string;
   /** The device HOLDER acquires from HOLDER_CONNECTION; none when omitted. */
   held?: string;
-  /** An idle managed slot is assigned this stable id. */
-  managedSlotStableId?: string;
+  /** An idle broker binding is assigned this stable id. */
+  bindingStableId?: string;
   iosRows?: BootedDevice[];
 }
 
@@ -119,8 +119,8 @@ export async function transportAliasHarness(
   PlatformDeviceManagerFactory.setInstance(discovery);
   Reflect.set(ToolRegistry, "timer", timer);
   const registry = new FakeBindingRegistry(timer);
-  if (options.managedSlotStableId) {
-    await assignBindingDevice(registry, "android", options.managedSlotStableId, "runner-b");
+  if (options.bindingStableId) {
+    await assignBindingDevice(registry, "android", options.bindingStableId, "runner-b");
   }
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "transport-alias-ingress", {
@@ -128,7 +128,7 @@ export async function transportAliasHarness(
       deviceManager: discovery,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       androidAdbFactory: adbFactory,
-      ...(options.managedSlotStableId
+      ...(options.bindingStableId
         ? { bindingExclusion: new RegistryBindingExclusion(async () => registry, timer) }
         : {}),
     }),

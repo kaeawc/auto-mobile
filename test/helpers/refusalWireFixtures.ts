@@ -591,7 +591,7 @@ const BUILDERS: readonly FixtureEntry[] = [
   ],
   [
     "device_assigned_to_binding",
-    "DeviceAssignedToManagedSlotError via shapeToolCallError",
+    "DeviceAssignedToBindingError via shapeToolCallError",
     () =>
       shaped(
         new DeviceAssignedToBindingError("killDevice", DEVICE, {
@@ -607,12 +607,12 @@ const BUILDERS: readonly FixtureEntry[] = [
   ],
   [
     "binding_ownership_unconfirmed",
-    "ManagedSlotOwnershipUnconfirmedError via shapeToolCallError",
+    "BindingOwnershipUnconfirmedError via shapeToolCallError",
     () => shaped(new BindingOwnershipUnconfirmedError(SESSION)),
   ],
   [
     "session_ownership_lost.binding_ownership_lost_at_gate",
-    "ManagedSlotOwnershipLostError via shapeToolCallError",
+    "BindingOwnershipLostError via shapeToolCallError",
     () => shaped(new BindingOwnershipLostError(SESSION)),
   ],
   [
@@ -710,14 +710,12 @@ export function buildRefusalWireFixtures(): RefusalWireFixture[] {
 
 /**
  * Surfaces that carry a typed refusal but are not an MCP tool result, so the runners' refusal
- * classifier never reads them: the control socket failure frame, deleteDevice's failure result and
- * the managed slots result (MCP initialize outcome and the `automobile:managed-slots` resource).
+ * classifier never reads them: the control socket failure frame and deleteDevice's failure result.
  * They live beside the tool-result fixtures in `surfaces/`, named `<surface>.<name>.json`.
  */
 export type RefusalSurface =
   | "socket-frame"
   | "delete-device"
-  | "managed-slots-result"
   | "overload-frame"
   | "webrtc-stream-response"
   | "aux-socket-response"
@@ -727,7 +725,6 @@ export type RefusalSurface =
   | "proxy-tool-result"
   | "request-failure-fields"
   | "liveness-handover"
-  | "managed-slots-response"
   | "provision-envelope"
   | "press-button-result";
 
@@ -1112,7 +1109,7 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [
     BindingRegistrySchemaUnsupportedError,
-    "internal registry-open refusal; ManagedSlotAcquisition maps it to the fixture-covered registry_schema_unsupported acquisition failure before serialization",
+    "Internal registry-open refusal becomes a SessionBroker failure; handler tests cover unsupported schema propagation.",
   ],
   [
     SessionConfigError,
@@ -1200,17 +1197,14 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
   registry_schema_unsupported:
-    "internal registry-open code mapped to the acquisition failure fixtured under binding_acquisition_failed.registry_schema_unsupported",
+    "Internal registry-open code translated by the broker acquisition path; covered by broker handler tests.",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:
     "internal ReleasedBoundSessionError payload; clients receive it as the session_ownership_lost fixture",
   daemon_instance_changed:
     "a daemon/heartbeat protocol answer to a proxy, never an MCP tool result a runner classifies",
-  managed_slot_registration_refused:
-    "a daemon/registerSession protocol answer to a managed proxy, never a device-tool refusal",
-  liveness_owner_conflict:
-    "a daemon liveness-ownership protocol answer to a proxy or keeper (as a managed acquisition failure it is fixtured under binding_acquisition_failed.)",
+  liveness_owner_conflict: "a daemon liveness-ownership protocol answer to a proxy or keeper",
   liveness_owner_is_proxy:
     "a daemon liveness protocol answer to an external keeper, never a tool result",
   liveness_owner_not_owner:

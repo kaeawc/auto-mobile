@@ -99,7 +99,7 @@ export type StepKind =
   | "planEnd"
   | "restart"
   | "settle"
-  // Managed-slot operations (RunOptions.managedSlots): the registry-level life of a slot.
+  // Broker binding operations (RunOptions.bindings): the registry-level life of a slot.
   | "slotAssign"
   | "slotExecStart"
   | "slotExecEnd"
@@ -272,7 +272,7 @@ export interface Violation {
 
 export interface RunOptions {
   /**
-   * Plug a fake managed-slot registry into the pool, so the slot steps can assign devices to
+   * Plug a fake broker binding registry into the pool, so the slot steps can assign devices to
    * slots. Off by default: the pool then has no slot exclusion, as before.
    */
   bindings?: boolean;
@@ -658,7 +658,7 @@ class OwnershipWorld {
     const stats = this.pool.getStats();
     const busy = devices.filter((d) => d.status === "busy").length;
     const idle = devices.filter((d) => d.status === "idle" && !d.sessionId).length;
-    // An idle device a managed slot holds counts as assigned once the pool has read the registry
+    // An idle device a broker binding holds counts as assigned once the pool has read the registry
     // (its snapshot is cached), so the stats may show it either way.
     const slotIdle = devices.filter(
       (d) => d.status === "idle" && !d.sessionId && this.slotHoldsDevice(d.id),
@@ -963,7 +963,7 @@ class OwnershipWorld {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Managed-slot operations
+  // Broker binding operations
 
   /** The slot a device index is assigned to, once a `slotAssign` step landed. */
   private slotFor(deviceIndex: number) {
@@ -1080,7 +1080,7 @@ class OwnershipWorld {
       }
       // The handler runs here. Judge the caller against the device's holder at this instant. The
       // admission reads the registry through a snapshot cached for
-      // MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
+      // BINDING_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
       const holder = this.manager.getSessionForDevice(device.deviceId) ?? undefined;
       const binding = this.slotFor(deviceIndex);
       const slotUserNow = binding?.execSession;

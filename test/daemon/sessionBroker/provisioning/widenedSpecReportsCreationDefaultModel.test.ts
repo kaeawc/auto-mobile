@@ -141,7 +141,7 @@ describe.each(REGISTRIES)("a binding whose spec widens to any model (%s)", (_nam
     expect(listed?.deviceType).toBe(IPHONE_15);
     expect(widened.requestedSpec).toEqual({ runtime: IOS_18 });
 
-    // Bug: the result (initialize outcome, automobile:managed-slots resource) names the creation
+    // Bug: the result (initialize outcome, automobile:broker-bindings resource) names the creation
     // default, an iPhone 16 that does not exist in this binding.
     expect(widened.resolvedSpec.deviceType).toBe(IPHONE_15);
   });

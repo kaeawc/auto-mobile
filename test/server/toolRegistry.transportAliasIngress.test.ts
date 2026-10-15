@@ -660,11 +660,11 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
 });
 
 describe("devices the alias fold does not concern (#11618)", () => {
-  test("an emulator's loopback adb address is its console serial for a managed slot", async () => {
+  test("an emulator's loopback adb address is its console serial for a broker binding", async () => {
     const h = await harness({
       pooledRows: [booted(EMULATOR, "Pixel"), booted(EMULATOR_TCP)],
       avd: "Pixel",
-      managedSlotStableId: "Pixel",
+      bindingStableId: "Pixel",
     });
     expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([EMULATOR]);
 
@@ -683,7 +683,7 @@ describe("devices the alias fold does not concern (#11618)", () => {
 
     expect(byCanonical).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect(byAlias).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
-    // #11641: even an idle managed slot's device is read-only, on the canonical device, without readiness.
+    // #11641: even an idle broker binding's device is read-only, on the canonical device, without readiness.
     expect(readByAlias).toBe("ran");
     expect(h.reads).toEqual([EMULATOR]);
     expect(h.tools.runs).toEqual([]);

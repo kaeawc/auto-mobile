@@ -1,6 +1,6 @@
 {
   "code": "session_ownership_lost.binding_ownership_lost_at_gate",
-  "builder": "ManagedSlotOwnershipLostError via shapeToolCallError",
+  "builder": "BindingOwnershipLostError via shapeToolCallError",
   "result": {
     "content": [
       {

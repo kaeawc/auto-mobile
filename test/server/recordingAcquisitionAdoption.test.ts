@@ -458,7 +458,7 @@ describe("ownerless recording acquisition adoption", () => {
     expect(events).toEqual(["unbound", "acquire", "unbound"]);
   });
 
-  test("a managed-slot execution session passed to the acquisition hook becomes the owner", async () => {
+  test("a broker-binding execution session passed to the acquisition hook becomes the owner", async () => {
     const recording = await startVideoRecording({ device });
     const execution = "managed-execution:slot-0";
     await pool.bindOrReuseDeviceSession(execution, device.deviceId, "android");

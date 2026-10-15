@@ -20,7 +20,7 @@ import { drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerSteppin
 
 // #11294: daemon restart recovery reserves each persisted row's device up front, so an allocation
 // arriving while rows recover a few at a time cannot take a device a later row is about to recover
-// onto. Owner decision: release on failure, managed slots win, and the row's own recovery is exempt
+// onto. Owner decision: release on failure, broker bindings win, and the row's own recovery is exempt
 // from its reservation by session id.
 
 const SIM_A = "SIM-ROW-A";
@@ -57,16 +57,16 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
   let persistence: FakeDeviceSessionPersistence;
   let sessions: SessionManager;
   let manager: FakeDeviceManager;
-  /** Simulator UDIDs a managed slot holds, as the pool's exclusion reports them. */
-  let managedSlotDevices: Set<string>;
+  /** Simulator UDIDs a broker binding holds, as the pool's exclusion reports them. */
+  let bindingDevices: Set<string>;
   /** The live execution session of the slot holding those devices, if it has one. */
-  let managedSlotExecSession: string | null;
+  let bindingExecSession: string | null;
   let pool: DevicePool;
 
   const bindingExclusion: BindingExclusion = {
     refresh: async () => {},
     holderOf: ({ stableIds }) => {
-      const stableDeviceId = stableIds.find((id) => id !== undefined && managedSlotDevices.has(id));
+      const stableDeviceId = stableIds.find((id) => id !== undefined && bindingDevices.has(id));
       return stableDeviceId === undefined
         ? undefined
         : {
@@ -76,13 +76,13 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
             scopeKey: "scope",
             bindingIndex: 0,
             scopeState: null,
-            execSessionUuid: managedSlotExecSession,
+            execSessionUuid: bindingExecSession,
           };
     },
-    stableIdsFor: () => managedSlotDevices,
+    stableIdsFor: () => bindingDevices,
   };
 
-  const setUp = async (devices: BootedDevice[], withManagedSlots = false) => {
+  const setUp = async (devices: BootedDevice[], withBindings = false) => {
     manager.bootedDevices = devices;
     pool = new DevicePool(
       createDevicePoolDependencies(sessions, "rehydration-reservation", {
@@ -90,7 +90,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        ...(withManagedSlots ? { bindingExclusion } : {}),
+        ...(withBindings ? { bindingExclusion } : {}),
       }),
     );
     await pool.initializeWithDevices(devices);
@@ -106,8 +106,8 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     persistence = new FakeDeviceSessionPersistence();
     sessions = new SessionManager(timer, persistence);
     manager = new FakeDeviceManager();
-    managedSlotDevices = new Set();
-    managedSlotExecSession = null;
+    bindingDevices = new Set();
+    bindingExecSession = null;
   });
 
   afterEach(() => {
@@ -186,7 +186,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
   });
 
   test("a device a binding already holds is not reserved", async () => {
-    managedSlotDevices.add(SIM_A);
+    bindingDevices.add(SIM_A);
     await setUp([ios(SIM_A), ios(SIM_B)], true);
 
     await pool.reserveDevicesForRehydration([
@@ -197,11 +197,11 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     expect(pool.genericAvailability(SIM_B)).toBe("reserved");
 
     // Once the slot lets go, nothing else holds the device: it was never reserved for the row.
-    managedSlotDevices.clear();
+    bindingDevices.clear();
     expect(pool.genericAvailability(SIM_A)).toBe("free");
   });
 
-  // Managed slots win even when the slot takes the device after the row reserved it: the
+  // Broker bindings win even when the slot takes the device after the row reserved it: the
   // reservation never blocks the slot, and the row then ends through the normal target-busy path.
   test("a binding that acquires a reserved device afterwards takes it from the row", async () => {
     await seedRestartReleasedRow(persistence, "row-a", SIM_A, 10);
@@ -209,8 +209,8 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
     expect(pool.genericAvailability(SIM_A)).toBe("reserved");
 
-    managedSlotDevices.add(SIM_A);
-    managedSlotExecSession = "slot-exec";
+    bindingDevices.add(SIM_A);
+    bindingExecSession = "slot-exec";
 
     await expect(
       pool.bindOrReuseDeviceSession("slot-exec", SIM_A, "ios", undefined, undefined, ios(SIM_A)),

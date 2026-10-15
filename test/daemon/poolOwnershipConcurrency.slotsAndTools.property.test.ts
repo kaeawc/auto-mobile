@@ -5,7 +5,7 @@ import {
   type HarnessProfile,
 } from "../helpers/poolOwnershipConcurrencyHarness";
 
-// Seeded properties for the managed-slot life and the tool path (#11444, #10655), on the same
+// Seeded properties for the broker-binding life and the tool path (#11444, #10655), on the same
 // pool-level harness as poolOwnershipConcurrency.property.test.ts. The slot steps assign a device
 // to a slot, start and end its execution and release it; the tool steps are a read with and
 // without a session, a control call, an `ide/*` mutation and SQL in read and write forms. After
@@ -22,7 +22,7 @@ const SEEDS_PER_TEST = 3;
 const TESTS_PER_PROFILE = 3;
 
 const PROFILES: Record<string, HarnessProfile> = {
-  /** Generic acquisitions racing slot assignment and the slot's execution lifecycle. */
+  /** Generic acquisitions racing broker binding assignment and its execution lifecycle. */
   bindings: {
     steps: STEPS,
     weights: {

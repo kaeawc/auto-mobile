@@ -8,35 +8,35 @@ import {
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
-} from "../../../src/daemon/sessionBroker/provisioning/executionReowner";
-import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+} from "../../../../src/daemon/sessionBroker/provisioning/executionReowner";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import {
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
+} from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import {
   BindingDiscoveryIncompleteError,
   BindingOwnershipUnconfirmedError,
-} from "../../../src/daemon/sessionBroker/provisioning/refusal";
+} from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   BINDING_BACK_OUT_RETRY_INITIAL_DELAY_MS,
   BINDING_BACK_OUT_RETRY_MAX_DELAY_MS,
   BINDING_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
+} from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import {
   RegistryRetryPacing,
   REGISTRY_BUSY_WRITE_MS,
   REGISTRY_RETRY_INITIAL_DELAY_MS,
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/sessionBroker/registry/registryRetryPacing";
-import { logger } from "../../../src/utils/logger";
-import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+} from "../../../../src/daemon/sessionBroker/registry/registryRetryPacing";
+import { logger } from "../../../../src/utils/logger";
+import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainMicrotasks } from "../../../helpers/fakeTimerStepping";
 
 const OWNER = { daemonId: "new-daemon", pid: 200 };
 const cleanups: Array<() => Promise<void>> = [];
@@ -674,9 +674,12 @@ test("a rejected quiet waiter is a failed re-own attempt and later retries norma
   }
 });
 
-test("published hold timing matches the derived cap in both ownership guides", () => {
-  for (const name of ["managed-slots", "device-ownership"]) {
-    const guide = readFileSync(new URL(`../../../docs/using/${name}.md`, import.meta.url), "utf8");
+test("published hold timing matches the derived cap in the ownership guide", () => {
+  for (const name of ["device-ownership"]) {
+    const guide = readFileSync(
+      new URL(`../../../../docs/using/${name}.md`, import.meta.url),
+      "utf8",
+    );
     expect(guide).toContain(`up to ${MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 1_000} s`);
     expect(guide).toContain("two shared turns at their worst case");
     expect(guide).toContain(`${MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS} ms attempt bound`);
@@ -684,8 +687,5 @@ test("published hold timing matches the derived cap in both ownership guides", (
     expect(guide).not.toContain("950 ms");
     expect(guide).not.toContain("about 300 ms");
     expect(guide).not.toContain("the previous worst-case 3.3 s is retained as headroom");
-    if (name === "managed-slots") {
-      expect(guide).toContain("A back-out attempt abandoned at its 700 ms deadline");
-    }
   }
 });

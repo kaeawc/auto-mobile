@@ -239,21 +239,21 @@ guarded by the pool's own owner check instead.
 Android's default foreign-owner gate also refuses control when an unrecorded CtrlProxy forward has a live or remembered-live foreign client PID, or a known forwarded port has an unknown owner; reads remain on the installed watch path (#12220). A failed forward listing with no known port is not cross-daemon evidence: the pool warns and keeps its claim decision, while readiness skips writes for reads and returns a distinct, non-coded retry error for control. Cancellation propagates. An unrecorded forward with no client on either probe, whose owner this daemon never saw connected, is treated as a leftover and reclaimed (#10690); PID memory uses liveness only and cannot distinguish PID reuse.
 Pool-level forward evidence is supplied by the daemon process entry point; direct (non-daemon) mode is protected by the CtrlProxy manager guard alone.
 
-Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
-the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a
-host-wide registry snapshot through the injected `ManagedSlotExclusion`
+Broker bindings: a device held by a valid broker binding is never generic
+capacity, idle or not. `DevicePool` reads a
+host-wide registry snapshot through the injected `BindingExclusion`
 (`src/daemon/sessionBroker/provisioning/exclusion.ts`) and skips such devices in idle
 selection, multi-device allocation and auto-start; explicit binds, autolock,
 `provisionDevice` adoption, `getAndroid`/`getApple`/`startDevice` targets,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
-refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
-the slot's recorded execution session; `force` never overrides. Reads stay open. A
+refuse them with non-retryable `device_assigned_to_binding` unless the caller is
+the binding's recorded execution session; `force` never overrides. Reads stay open. A
 registry never read refuses callers taking an unheld device with retryable
 `discovery_incomplete`, while a session already holding a device in this pool retains
-control of it (an absent registry means no managed slots); an unreadable one keeps
+control of it (an absent registry means no broker bindings); an unreadable one keeps
 the last good snapshot for reads and
 inventory. Taking a device requires a current snapshot; existing holders and a known
-slot's own execution or reconciler retain control during an unreadable registry.
+binding's own execution or reconciler retain control during an unreadable registry.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.

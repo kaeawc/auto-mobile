@@ -20,7 +20,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 
 // #11305: availableDevices means "allocation can lend it", so the handlers must refresh the
-// managed-slot snapshot and foreign ownership before counting, not answer from a stale cache.
+// broker-binding snapshot and foreign ownership before counting, not answer from a stale cache.
 
 const ios = (deviceId: string): BootedDevice => ({ deviceId, name: deviceId, platform: "ios" });
 const request = (method: string): DaemonRequest => ({

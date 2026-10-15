@@ -2,7 +2,11 @@
 
 `registry-schema-004.sql` is the immutable pre-retirement schema/data capture;
 its source ref and reproduction command are embedded in the SQL. Do not rewrite
-it to resemble the current schema.
+it to resemble the current schema. It was captured from commit
+`beae9ed4286b64b7dbd71df9a91208c85c0b4e37` with the historical capture script
+and driver named in the SQL header. To reproduce, use those tools and that
+revision in a separate checkout; the current tree no longer ships the capture
+tools.
 
 `registryUpgradeFromCapturedSchema.test.ts` loads the capture, retires legacy
 assignment/open-journal/free-device inventory with injected native shutdown and

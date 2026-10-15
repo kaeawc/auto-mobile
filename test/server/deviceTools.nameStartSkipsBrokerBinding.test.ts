@@ -30,7 +30,7 @@ import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindin
 isolateToolRegistry();
 
 // #11565: a NAME is a selector, not an identity (simulator display names are not unique, and a
-// name matches by substring). `startMatchExclusions` hands the boot the managed slots' devices so
+// name matches by substring). `startMatchExclusions` hands the boot the broker bindings' devices so
 // a selector-based start skips them (#11174); the lifecycle-lease resolution that runs first must
 // skip them the same way instead of refusing because its best match is a slot's simulator.
 

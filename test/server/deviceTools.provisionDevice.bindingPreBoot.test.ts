@@ -33,7 +33,7 @@ isolateToolRegistry();
 
 /**
  * #11648 item 2, pinned rather than fixed: provisionDevice names its target under
- * `device.{name,deviceId}`, which startDevice's pre-boot managed-slot check never reads. The exact
+ * `device.{name,deviceId}`, which startDevice's pre-boot broker-binding check never reads. The exact
  * provisioner's adoption guard (#11174) is what refuses a slot's stopped device before it is
  * booted or prepared, so these run the real provisioner wiring, not a stand-in for it.
  */

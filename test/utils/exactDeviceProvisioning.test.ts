@@ -122,7 +122,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       retryable: false,
       diagnostics: {
         deviceId: "slot-avd",
-        managedSlot: { scopeKey: binding.scopeKey, declaredBinding: 0, stableId: "slot-avd" },
+        binding: { scopeKey: binding.scopeKey, declaredBinding: 0, stableId: "slot-avd" },
       },
     });
     expect(guarded).toEqual(["android:slot-avd"]);

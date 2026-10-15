@@ -25,7 +25,7 @@ launch metadata are intentionally excluded.
 | `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                                                         | `file`                                                     |
 | `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                                            | `info`                                                     |
 | `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root, iOS CtrlProxy bundle cache (`ctrl-proxy-ios`), and signing entitlements (`ctrl-proxy/entitlements`); must be an absolute path shared by cooperating agents.             | OS account home `.auto-mobile`                             |
-| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the managed-slot registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server.   | OS account home `.auto-mobile/adb-servers`                 |
+| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the broker binding registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server. | OS account home `.auto-mobile/adb-servers`                 |
 | `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                                                | resolved data directory `tool_outputs`                     |
 | `AUTOMOBILE_DEBUG`                                                                  | Enable CLI debug logging; exact `1` enables; debug mode also asks a capable control-proxy for the IME commit trace and attaches it to `sendKeys` command results as `imeTrace`.                                               | off                                                        |
 | `AUTOMOBILE_DEBUG_PERF`                                                             | Enable UI performance debug tracking; exact `1` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                                              | off                                                        |
@@ -198,10 +198,10 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 
 <div class="environment-variable-table" markdown>
 
-| Variable                           | Use and accepted values                                                                                                                                                                          | Default                     |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults.           | unset; ordinary daemon mode |
-| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with managed-slot configuration, `--initial-session-uuid`, or `--no-proxy`. | unset; ordinary proxy mode  |
+| Variable                           | Use and accepted values                                                                                                                                                                | Default                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults. | unset; ordinary daemon mode |
+| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with `--initial-session-uuid` or `--no-proxy`.                    | unset; ordinary proxy mode  |
 
 </div>
 
@@ -576,24 +576,18 @@ it and learns from the tool-call error:
 }
 ```
 
-| Field                                    | Meaning                                                                                                                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                             |
-| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it).            |
-| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                                |
-| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                                     |
-| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                                        |
-| `recovery.action`                        | `daemon_stalled`: `wait_for_managed_reclaim` for a ready managed connection's slot sessions, otherwise `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`. |
+| Field                                    | Meaning                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
+| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
+| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
+| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
+| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
+| `recovery.action`                        | `daemon_stalled`: `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`.                                                                           |
 
 For `daemon_stalled` on a generic connection the harness restarts the daemon, then resumes each session
 by passing its `sessionUuid` on a tool call: the first call after the error
-re-claims it with the same owner token. A ready managed connection's slot sessions
-instead receive `wait_for_managed_reclaim`: the proxy keeps probing every heartbeat
-interval and reclaims the session itself once a daemon answers again. Do not pass a
-`sessionUuid` or try to acquire a device; retry the call later. The proxy never restarts
-the shared daemon. If no daemon comes back, restarting it or relaunching the execution
-is the runner's decision. If the session turns out to be released, calls answer
-`managed_execution_ended`. For `proxy_stalled` the listed sessions and devices are gone;
+re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
 reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
 or while a session remains handed over, **the proxy never starts or restarts the
 daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
@@ -734,16 +728,13 @@ host starts with the same value. An unset daemon creates without admission and
 is not ordered against participating daemons. Upgrade all daemons sharing the
 registry together to a build that understands the deletion marker.
 
-Total-resource admission and eviction use the acquisition's preparation deadline;
-a deadline passing during admission returns `timeout`. A deletion journaled but
-unconfirmed in time stays charged until periodic redrive finishes it. Pending
-deletions count as committed room, so only the shortfall not covered by markers
-can evict more cache. A journaled delete is never reverted, including when its
-creation was refused after a transient busy check. Unrelated cache is retained
-while there is headroom. In a budget refusal, `usage.total` includes the refused
-request's own `preparing` reservation and can read as the limit plus one or more.
-See [Total-resource capacity](managed-slots.md#total-resource-capacity) for accounting
-and recovery guidance.
+Broker provisioning counts distinct native resources across active and idle bindings,
+pending creation/deletion journals, and product-owned inventory. The retained
+budget variable keeps its historical name for upgrade compatibility; it is
+separate from the broker host configuration's session and device caps. Unconfirmed
+deletions remain charged. A budget refusal is retryable `binding_budget_exhausted`;
+free unused broker resources or raise the limit before retrying. The former
+free-pool eviction and declarative launch configuration are no longer available.
 
 The daemon's passive device work is limited to devices with a session in this
 daemon. At startup, it warms iOS CtrlProxy only for rehydrated sessions. An

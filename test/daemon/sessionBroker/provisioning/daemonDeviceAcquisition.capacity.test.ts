@@ -34,7 +34,7 @@ import { warmedTests } from "../../../helpers/warmedTests";
 // The daemon's production wiring (`createDaemonBindingAcquisition`) over the REAL provisionDevice
 // handler, the REAL deleteDevice workflow and the REAL Android boot admission gate, with fakes only
 // for the host tooling (device manager, AVD config, SDK image list, adb/ps capacity sample).
-// docs/using/managed-slots.md: a boot at the limit fails at once with retryable `capacity_exhausted`
+// docs/using/environment-variables.md: a boot at the limit fails at once with retryable `capacity_exhausted`
 // and an unknown count never fails open; a replacement must learn that BEFORE deleting the device it
 // could not replace.
 

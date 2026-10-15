@@ -942,7 +942,6 @@ test/scripts/iosIntegrationWorkflowChangeGuard.test.ts
 test/scripts/iosSimulatorProductBootLifecycle.test.ts
 test/scripts/ipaInstallFanOut.test.ts
 test/scripts/junitTestcaseTimings.test.ts
-test/scripts/managedSlotQualificationDoc.test.ts
 test/scripts/manualTestAdbHostQuery.test.ts
 test/scripts/manualTestBootGate.test.ts
 test/scripts/manualTestControlSocketProbe.test.ts

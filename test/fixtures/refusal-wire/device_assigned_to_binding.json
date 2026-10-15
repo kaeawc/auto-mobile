@@ -1,6 +1,6 @@
 {
   "code": "device_assigned_to_binding",
-  "builder": "DeviceAssignedToManagedSlotError via shapeToolCallError",
+  "builder": "DeviceAssignedToBindingError via shapeToolCallError",
   "result": {
     "content": [
       {

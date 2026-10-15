@@ -25,7 +25,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
  * One handset reachable over USB and wireless debugging is ONE pooled device (#10201): the pool
  * folds both `adb devices` rows into a canonical id and a session holds that id. A direct frame
  * may name the handset by either id, so `input/*` and `ide/*` resolve the frame's `deviceId` and
- * discovery rows to the pool's canonical id before any holder, managed-slot or admission decision
+ * discovery rows to the pool's canonical id before any holder, broker-binding or admission decision
  * (#11596). Matching the raw discovery row instead found no holder for the other transport id,
  * and a sessionless `input/tap` or `ide/setKeyValue` reached the handset a session held.
  *

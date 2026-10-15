@@ -13,7 +13,7 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // A read must never perform control-like side effects (service rebind, CtrlProxy setup) on a
-// device another session, a managed slot or another daemon holds: request_observation on such a
+// device another session, a broker binding or another daemon holds: request_observation on such a
 // device takes the connect-only read, never the session observe pipeline, and is never refused.
 
 const SLOT_EXEC = "slot-exec-session";

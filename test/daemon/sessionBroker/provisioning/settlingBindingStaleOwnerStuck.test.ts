@@ -19,7 +19,7 @@ import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-// #11545 item 1 (found by the second managed-slots hunt): #11456 judges an owner record this daemon wrote by its
+// #11545 item 1 (found by the second broker provisioning hunt): #11456 judges an owner record this daemon wrote by its
 // session, so a record whose clear failed (SQLITE_BUSY on the host-wide registry, the trigger
 // #11339 accepted as realistic) no longer pins a `ready` binding. A binding the drain marked `settling`
 // before that failed clear was still pinned: the settlement watcher (#11456) and

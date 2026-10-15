@@ -2194,7 +2194,7 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
     const firstDaemon = scenario.daemonId;
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: firstDaemon,
       sessionUuid: session,
     });
@@ -2203,7 +2203,7 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     await scenario.daemonRestart();
     expect(scenario.daemonId).not.toBe(firstDaemon);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });
@@ -2249,12 +2249,12 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     // The device's claim takes 5 s longer than the startup deadline, so the daemon starts first.
     scenario.deviceClaimDelayMs = SESSION_REHYDRATION_DEADLINE_MS + 5_000;
     await scenario.daemonRestart();
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
 
     // The claim lands: the session is this daemon's, and so is its slot.
     await scenario.idle(5_000 + KEEPER_INTERVAL_MS);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });

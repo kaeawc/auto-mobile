@@ -43,7 +43,7 @@ class RecordingKillDeviceManager extends FakeDeviceUtils {
 /**
  * Cross-slot denial with no active session (#11174 part b, #11178 part a): the slot's device is
  * idle, so the session-holder checks see an unheld device and would let anyone stop, delete or
- * drive it. The managed-slot gate refuses every caller but the slot's own execution; `force` does
+ * drive it. The broker-binding gate refuses every caller but the slot's own execution; `force` does
  * not override it.
  */
 describe("binding lifecycle and input exclusion", () => {
@@ -103,7 +103,7 @@ describe("binding lifecycle and input exclusion", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "managed-slot-lifecycle", {
+      createDevicePoolDependencies(sessionManager, "broker-binding-lifecycle", {
         timer,
         deviceManager: manager,
         bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),

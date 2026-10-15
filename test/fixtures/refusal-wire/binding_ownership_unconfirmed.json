@@ -1,6 +1,6 @@
 {
   "code": "binding_ownership_unconfirmed",
-  "builder": "ManagedSlotOwnershipUnconfirmedError via shapeToolCallError",
+  "builder": "BindingOwnershipUnconfirmedError via shapeToolCallError",
   "result": {
     "content": [
       {

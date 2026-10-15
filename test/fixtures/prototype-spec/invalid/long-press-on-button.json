@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "gestures",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "picked": "",
+      "liked": false
+    },
+    "root": {
+      "type": "button",
+      "label": "x",
+      "onLongPress": [
+        {
+          "type": "emit",
+          "name": "gesture"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onLongPress"
+}

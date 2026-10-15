@@ -26,17 +26,29 @@ enum PrototypeAgentProtocol {
         screenshotHideCapability,
         inspectCapability,
         themeModesCapability,
+        flowGridCapability,
+        pagerOptionsCapability,
         appearanceCapability,
         windowChromeCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
+        textFieldOptionsCapability,
+        gesturesCapability,
+        searchBarCapability,
+        richTextCapability,
+        menusCapability,
+        stackCapability,
+        emitContextCapability,
+        checksCapability,
         identifierTestTagOnlyCapability,
         bottomSheetDragCapability,
     ]
-    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
+    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
     static let showInPlaceCapability = "prototype_show_in_place_v1"
+    /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
+    static let stackCapability = "prototype_stack_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.
@@ -60,6 +72,11 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    /// Eager wrapping flow and equal-width spanning grid containers (#12070).
+    static let flowGridCapability = "prototype_flow_grid_v1"
+    /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
+    /// uses one on an agent that does not advertise it. Same name as the CtrlProxy capability.
+    static let pagerOptionsCapability = "prototype_pager_options_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
     /// any change of the shown prototype's mode (the device flipping, or state moving the inferred
@@ -72,7 +89,21 @@ enum PrototypeAgentProtocol {
     static let windowChromeCapability = "prototype_window_chrome_v1"
     /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
     /// show before repeat expansion. Status reports the shown data alongside state.
+    static let checksCapability = "prototype_checks_v1"
     static let dataModelCapability = "prototype_data_model_v1"
+    /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
+    /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
+    static let textFieldOptionsCapability = "prototype_text_field_options_v1"
+    /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
+    static let gesturesCapability = "prototype_gestures_v1"
+    /// Drawn search field with authored expansion, submit actions and in-window results (#12069).
+    static let searchBarCapability = "prototype_search_bar_v1"
+    /// Styled text runs with optional inline actions.
+    static let richTextCapability = "prototype_rich_text_v1"
+    /// In-window menus and exposed select option lists.
+    static let menusCapability = "prototype_menus_v1"
+    // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
+    static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"

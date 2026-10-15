@@ -23,6 +23,26 @@ const spec = prototypeSpecSchema.parse({
   root: { type: "textField", id: "id", testTag: "ptf", stateKey: "name" },
 });
 
+test("searchBar query state is a text target, including its result child", () => {
+  const search = {
+    ...spec,
+    root: {
+      type: "searchBar",
+      id: "search",
+      testTag: "query",
+      stateKey: "query",
+      activeKey: "active",
+      child: spec.root,
+    },
+  } as PrototypeSpec;
+  expect([...prototypeTextFieldKeys(search)]).toEqual([
+    ["query", "query"],
+    ["search", "query"],
+    ["ptf", "name"],
+    ["id", "name"],
+  ]);
+});
+
 test("text-field keys walk every nested object/array slot and keep both identifiers", () => {
   // Extra future slot shapes intentionally exercise the generic traversal contract.
   const nested = {

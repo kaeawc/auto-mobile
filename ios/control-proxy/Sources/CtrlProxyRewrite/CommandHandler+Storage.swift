@@ -30,20 +30,13 @@ extension CommandHandler {
     }
 
     func handleListPreferenceFiles(_ request: RequestEnvelope, startTime: Date) async -> StorageFilesResponse {
-        do {
+        await respond(requestId: request.requestId, startTime: startTime) {
             let (appId, client) = try await preferenceClient(request.appId)
             let files = try await client.list(appId: appId)
             return StorageFilesResponse(
                 requestId: request.requestId,
                 success: true,
                 files: files,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return StorageFilesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
@@ -55,7 +48,7 @@ extension CommandHandler {
     )
         async -> StorageEntriesResponse
     {
-        do {
+        await respond(requestId: request.requestId, startTime: startTime) {
             let (appId, client) = try await preferenceClient(request.appId)
             let entries = try await client.entries(appId: appId, suiteName: request.fileName ?? "Standard")
             return StorageEntriesResponse(
@@ -64,18 +57,11 @@ extension CommandHandler {
                 entries: entries,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
-        } catch {
-            return StorageEntriesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
         }
     }
 
     func handleGetPreference(_ request: RequestGetPreference, startTime: Date) async -> StorageEntryResponse {
-        do {
+        await respond(requestId: request.requestId, startTime: startTime) {
             let (appId, client) = try await preferenceClient(request.appId)
             guard let key = request.key else { throw CommandError.missingParameter("key") }
             let entry = try await client.get(appId: appId, suiteName: request.fileName ?? "Standard", key: key)
@@ -88,14 +74,6 @@ extension CommandHandler {
                 valueType: entry?.type,
                 totalTimeMs: totalTimeMs(from: startTime),
                 redacted: entry?.redacted
-            )
-        } catch {
-            return StorageEntryResponse(
-                requestId: request.requestId,
-                success: false,
-                found: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
             )
         }
     }

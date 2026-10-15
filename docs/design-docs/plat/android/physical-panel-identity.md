@@ -9,7 +9,7 @@ ruled out, and what still has to be confirmed on a device (#12233, #12208).
 ## Finding: the reflection never worked on API 29 and newer
 
 CtrlProxy reflected the hidden `Display.getUniqueId()`. The published hidden-API lists
-(`https://dl.google.com/developers/android/<release>/non-sdk/hiddenapi-flags.csv`) show the
+(`dl.google.com/developers/android/<release>/non-sdk/hiddenapi-flags.csv`) show the
 method was never reachable by an ordinary app once enforcement existed:
 
 | Release | API | Flag for `Landroid/view/Display;->getUniqueId()` |

@@ -140,7 +140,7 @@ describe("getStaticToolDefinitions", () => {
     const shapes = {
       clipboard: [{ argument: "action", values: ["get"] }],
       keyboard: [{ argument: "action", values: ["detect", "listImes", "listProfiles"] }],
-      prototype: [{ argument: "action", values: ["status", "inspect"] }],
+      prototype: [{ argument: "action", values: ["status", "inspect", "listSaved"] }],
       accessibility: [{ absentArguments: ["talkback", "voiceover"] }],
       displayConfig: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
     };

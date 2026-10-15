@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile, rename, rm, access } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { posix } from "node:path";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -16,6 +16,9 @@ import {
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
 } from "./prototypeAssets";
+
+// Simulator and prototype container paths are POSIX on every host OS.
+const { dirname, join } = posix;
 
 export const SAVED_PROTOTYPE_FORMAT_VERSION = 1;
 export const MAX_SAVED_PROTOTYPE_MANIFEST_BYTES = 262144;

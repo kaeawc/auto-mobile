@@ -184,19 +184,19 @@ val screenshotProperties =
 
 tasks.withType<Test>().configureEach {
   inputs
-    .dir(rootProject.layout.projectDirectory.dir("../test/fixtures/prototype-spec"))
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("prototypeSpecFixtures")
   inputs
-    .file(rootProject.layout.projectDirectory.file("../test/fixtures/ime-commit-contract.json"))
+    .file(layout.projectDirectory.file("../../test/fixtures/ime-commit-contract.json"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("imeCommitContract")
   inputs
-    .file(rootProject.layout.projectDirectory.file("../benchmark/prototype-frame/spec.json"))
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/spec.json"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("prototypeFrameBenchmarkSpec")
   inputs
-    .file(rootProject.layout.projectDirectory.file("../benchmark/prototype-frame/scenarios.json"))
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/scenarios.json"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("prototypeFrameBenchmarkScenarios")
   screenshotProperties.forEach { key ->

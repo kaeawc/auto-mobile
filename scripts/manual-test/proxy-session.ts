@@ -50,7 +50,6 @@ import {
   resolveBrokerClient,
   type BrokerClientFiles,
 } from "./brokerClientFiles";
-import { logger } from "../../src/utils/logger";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { isProcessRunning } from "../../src/utils/processLiveness";
@@ -560,9 +559,8 @@ export function renderResponse(response: Record<string, unknown>, full: boolean)
   } else if (typeof text === "string") {
     try {
       payload = JSON.parse(text);
-    } catch (error) {
+    } catch {
       // Plain text is a valid MCP payload; retaining it does not hide a request failure.
-      logger.debug(`MCP payload is plain text: ${errorMessage(error)}`);
       payload = text;
     }
   }

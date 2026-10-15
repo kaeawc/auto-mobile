@@ -11,6 +11,10 @@ setup() {
 #!/bin/bash
 if [[ "$*" == *"rev-parse HEAD" ]]; then printf '%s\n' head; exit 0; fi
 printf 'git %s\n'  "$*" >> "$COMMAND_LOG"
+if [[ "$*" == "ls-files --others --exclude-standard" ]]; then
+  printf '%s\n' "${MOCK_UNTRACKED_FILES:-}"
+  exit "${MOCK_UNTRACKED_STATUS:-0}"
+fi
 if [[ "$1" == "merge-base" ]]; then
   exit "${MOCK_MERGE_BASE_STATUS:-0}"
 fi
@@ -32,6 +36,19 @@ SCRIPT
 #!/bin/bash
 if [[ "$*" == *"--print-dirty-at-start"* ]]; then printf '%s\n' "${MOCK_ATTESTATION_START:-clean}"; exit 0; fi
 printf 'bun %s\n'  "$*" >> "$COMMAND_LOG"
+if [[ "$1" == "scripts/lib/affectedTests.ts" ]]; then
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--changed-files" ]]; then cp "$2" "$COMMAND_LOG.changed"; fi
+    if [[ "$1" == "--out-dir" ]]; then
+      printf '%s\n' "$2" > "$COMMAND_LOG.selection-dir"
+      printf '%s' "${MOCK_AFFECTED_UNIT:-}" > "$2/unit.txt"
+      printf '%s' "${MOCK_AFFECTED_INTEGRATION:-}" > "$2/integration-safe.txt"
+      printf '%s' "${MOCK_AFFECTED_FALLBACK:-}" > "$2/fallback.txt"
+    fi
+    shift
+  done
+  exit "${MOCK_SELECTOR_STATUS:-0}"
+fi
 if [[ "$*" == "scripts/generate-tool-definitions.ts --check" ]]; then
   exit "${MOCK_TOOL_DEFINITIONS_STATUS:-0}"
 fi
@@ -43,6 +60,9 @@ SCRIPT
 printf 'bash %s\n' "$*" >> "$COMMAND_LOG"
 if [[ "$*" == "scripts/test-as-any-baseline.sh" ]]; then
   exit "${MOCK_TEST_AS_ANY_STATUS:-0}"
+fi
+if [[ "$1" == "scripts/validate-bun-test-timings.sh" ]]; then
+  exit "${MOCK_TIMING_STATUS:-0}"
 fi
 if [[ "$1" == "scripts/all_fast_validate_checks.sh" ]]; then
   exit "${MOCK_FAST_VALIDATION_STATUS:-0}"
@@ -71,6 +91,11 @@ SCRIPT
 }
 
 teardown() {
+  if [[ -f "$COMMAND_LOG.selection-dir" ]]; then
+    local selection_dir
+    selection_dir="$(cat "$COMMAND_LOG.selection-dir")"
+    rm -rf "$selection_dir"
+  fi
   rm -rf "$MOCK_BIN"
 }
 
@@ -270,4 +295,86 @@ SCRIPT
   grep -F '=pass:' "$COMMAND_LOG"
   grep -F 'test/db integration fast path=skip:' "$COMMAND_LOG"
   ! grep -F '=PASS:' "$COMMAND_LOG"
+}
+
+@test "changed selection invokes selector and reference-only unit and safe integration runners" {
+  run env MOCK_UNAME=macOS MOCK_CHANGED_FILES=src/a.ts MOCK_WORKTREE_CHANGED_FILES=src/deleted.ts \
+    MOCK_AFFECTED_UNIT=$'test/packaging/runtimeGraphPinning.test.ts\n' MOCK_AFFECTED_INTEGRATION=$'test/a.integration.test.ts\n' \
+    PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  grep -F 'bun scripts/lib/affectedTests.ts --changed-files ' "$COMMAND_LOG"
+  grep -Fx 'src/a.ts' "$COMMAND_LOG.changed"
+  grep -Fx 'src/deleted.ts' "$COMMAND_LOG.changed"
+  grep -Fx 'bash scripts/test-ts.sh unit test/packaging/runtimeGraphPinning.test.ts' "$COMMAND_LOG"
+  grep -Fx 'bash scripts/prepush-integration-safe.sh test/a.integration.test.ts' "$COMMAND_LOG"
+}
+
+@test "changed selection fallbacks run full lanes" {
+  run env MOCK_UNAME=macOS MOCK_AFFECTED_FALLBACK=$'unit\nintegration\n' \
+    PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  grep -Fx 'bash scripts/test-ts.sh unit' "$COMMAND_LOG"
+  grep -Fx 'bash scripts/prepush-integration-safe.sh' "$COMMAND_LOG"
+}
+
+@test "empty reference-only selection leaves import-covered units to Bun changed" {
+  run env MOCK_UNAME=macOS PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  grep -Fx 'bash scripts/test-ts.sh changed' "$COMMAND_LOG"
+  ! grep -F 'bash scripts/test-ts.sh unit' "$COMMAND_LOG"
+  [[ "$output" == *"No reference-only unit extras selected."* ]]
+}
+
+@test "selector failure stops the changed gate" {
+  run env MOCK_SELECTOR_STATUS=1 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"*"affected-test selection"* ]]
+}
+
+@test "changed selection includes untracked integration tests and fixtures" {
+  run env MOCK_UNTRACKED_FILES=$'test/new.integration.test.ts\ntest/data/new.json' \
+    PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  grep -Fx 'git ls-files --others --exclude-standard' "$COMMAND_LOG"
+  grep -Fx 'test/new.integration.test.ts' "$COMMAND_LOG.changed"
+  grep -Fx 'test/data/new.json' "$COMMAND_LOG.changed"
+}
+
+@test "untracked file enumeration failure stops selection" {
+  run env MOCK_UNTRACKED_STATUS=2 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"*"affected-test selection"* ]]
+  ! grep -F 'bun scripts/lib/affectedTests.ts ' "$COMMAND_LOG"
+}
+
+@test "unlisted integration exit 3 fails gate and keeps diagnostics" {
+  run env MOCK_SELECTOR_STATUS=3 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"*"affected-test selection"* ]]
+  local selection_dir
+  selection_dir="$(cat "$COMMAND_LOG.selection-dir")"
+  [ -d "$selection_dir" ]
+  [ -f "$selection_dir/changed.txt" ]
+  [[ "$output" == *"Affected-test selection diagnostics kept at: $selection_dir"* ]]
+  ! grep -F 'bash scripts/prepush-integration-safe.sh' "$COMMAND_LOG"
+}
+
+@test "successful gate removes its unique affected selection directory" {
+  run env PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  local selection_dir
+  selection_dir="$(cat "$COMMAND_LOG.selection-dir")"
+  [[ "$selection_dir" == */scratch/affected-tests.* ]]
+  [ ! -e "$selection_dir" ]
+  [[ "$output" != *"diagnostics kept"* ]]
+}
+
+@test "failure after selection retains diagnostics until whole gate exits" {
+  run env -u RUNNER_OS MOCK_UNAME=Linux MOCK_TIMING_STATUS=1 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"*"unit timing budget"* ]]
+  local selection_dir
+  selection_dir="$(cat "$COMMAND_LOG.selection-dir")"
+  [ -d "$selection_dir" ]
+  [[ "$output" == *"Affected-test selection diagnostics kept at: $selection_dir"* ]]
 }

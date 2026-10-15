@@ -44,6 +44,7 @@ describe("ShadowStore", () => {
   });
   test("fake filesystem reads resolve backslashed paths to normalized keys", async () => {
     const fs = new FakeFileSystem();
+    await fs.ensureDir("\\shadow");
     await fs.writeFile("\\shadow\\a.tmp", "data", "utf8");
     expect(await fs.readFile("/shadow/a.tmp")).toBe("data");
     expect(await fs.readFile("\\shadow\\a.tmp")).toBe("data");

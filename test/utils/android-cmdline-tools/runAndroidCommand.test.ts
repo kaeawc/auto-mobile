@@ -64,6 +64,15 @@ describe("runAndroidCommand", () => {
     expect(h.kills).toEqual([]);
   });
 
+  test("preserves split UTF-8 characters in stdout", async () => {
+    const h = harness();
+    const pending = runAndroidCommand(h, { ...h.request, maxStdoutChars: 32 });
+    h.child.stdout?.emit("data", Buffer.from([0xe2]));
+    h.child.stdout?.emit("data", Buffer.from([0x82, 0xac]));
+    h.child.emit("close", 0);
+    await expect(pending).resolves.toMatchObject({ stdout: "€", exitCode: 0 });
+  });
+
   for (const name of ["avdmanager", "sdkmanager"] as const) {
     test(`${name} preserves its forced-settlement deadline`, async () => {
       const h = harness(name);

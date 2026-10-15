@@ -105,6 +105,7 @@ not_in_nav: |
   /design-docs/plat/android/accessibility-data-sensitive-windows.md
   /design-docs/plat/android/android-17-target-sdk-audit.md
   /design-docs/plat/android/android17-playground-audit.md
+  /design-docs/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
@@ -140,6 +141,7 @@ nav:
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
+      - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
@@ -147,6 +149,8 @@ nav:
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
+      - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

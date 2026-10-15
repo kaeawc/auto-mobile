@@ -34,6 +34,10 @@ import {
   type SimulatorAppearanceClient,
 } from "../helpers/webrtcDeviceCaptureHelpers";
 import {
+  formatNavigationTimeoutError,
+  probeWhepPageReachable,
+} from "../helpers/whepNavigationReadiness";
+import {
   recoverWhepSubscription,
   subscribeWhepReaderForPlatform,
   type ChromeReader,
@@ -346,6 +350,7 @@ function chromeBinary(): string {
 const CHROME_DEBUG_PORT = 9222;
 const CHROME_LAUNCH_ARGS = [
   "--headless=new",
+  "--no-proxy-server",
   "--autoplay-policy=no-user-gesture-required",
   `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
   "--no-first-run",
@@ -459,8 +464,30 @@ async function connectReader(
 /** Subscribe the already-running browser to the WHEP stream. On a connect
  * timeout, attach the RTCPeerConnection diagnostics (ICE state, candidates) so
  * a WHEP-connect flake is diagnosable rather than a bare message (#4409). */
-async function subscribeReader(cdp: CdpClient): Promise<void> {
-  await cdp.command("Page.navigate", { url: `http://127.0.0.1:${webRtcPort}/${streamId}` });
+async function subscribeReader(cdp: CdpClient, diagnostics: () => string): Promise<void> {
+  const url = `http://127.0.0.1:${webRtcPort}/${streamId}`;
+  const probe = await probeWhepPageReachable(url, { fetch, timeoutMs: REAL_IO_TIMEOUT_MS });
+  try {
+    await cdp.command("Page.navigate", { url });
+  } catch (error) {
+    const chromeVersion = await (async (): Promise<string | undefined> => {
+      const response = await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/version`, {
+        signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS),
+      });
+      const version = (await response.json()) as { Browser?: string };
+      return version.Browser;
+    })().catch((versionError) => {
+      // Version diagnostics are best-effort; preserve the navigation failure.
+      console.warn("Could not read Chrome version", versionError);
+      return undefined;
+    });
+    throw formatNavigationTimeoutError(error instanceof Error ? error : new Error(String(error)), {
+      url,
+      probe,
+      chromeVersion,
+      chromeDiagnostics: diagnostics(),
+    });
+  }
   try {
     await waitFor(async () => {
       try {
@@ -1252,7 +1279,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           platform,
           { chrome: chrome!, cdp: cdp! },
           {
-            subscribe: subscribeReader,
+            subscribe: (readerCdp) =>
+              subscribeReader(readerCdp, () =>
+                chromeDiagnostics(chrome!, join(artifactDir, "chrome.log")),
+              ),
             launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
             close: (readerCdp) => readerCdp.close(),
             stop,
@@ -1341,7 +1371,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
               ({ chrome, cdp } = await recoverWhepSubscription(
                 { chrome: chrome!, cdp: cdp! },
                 {
-                  subscribe: subscribeReader,
+                  subscribe: (readerCdp) =>
+                    subscribeReader(readerCdp, () =>
+                      chromeDiagnostics(chrome!, join(artifactDir, "chrome.log")),
+                    ),
                   launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
                   close: (readerCdp) => readerCdp.close(),
                   stop,

@@ -35,6 +35,19 @@ done
 source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
 repo_root="$(vcs_root)"
+
+attestation_head=""
+if [[ -e "${repo_root}/.git" ]]; then
+  attestation_head="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || true)"
+elif [[ -d "${repo_root}/.jj" ]]; then
+  attestation_head="$(cd "${repo_root}" && jj log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+fi
+# Failure to capture initial cleanliness must suppress the attestation.
+attestation_start="$(bun "${repo_root}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane android 2>/dev/null || true)"
+attestation_options=(--expected-head "$attestation_head")
+if [[ "$attestation_start" != clean ]]; then
+  attestation_options+=(--started-dirty)
+fi
 if [[ "$(pwd -P)" != "${repo_root}" ]]; then
   echo "error: run scripts/prepush-android.sh from the repository root" >&2
   exit 2
@@ -233,7 +246,7 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
     if [[ "${detekt_config_changed}" == "false" ]]; then
       detekt_tasks+=("${module_path}:detekt")
     fi
-    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
+    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-library"\)' "${module_dir}/build.gradle.kts"; then
       compile_tasks+=("${module_path}:compileDebugKotlin")
     else
       compile_tasks+=("${module_path}:compileKotlin")
@@ -272,8 +285,10 @@ echo "==> compile (${modules[*]})"
 
 if [[ "${#test_tasks[@]}" -eq 0 ]]; then
   echo "No changed modules have unit-test sources; tests are a no-op."
+  "${repo_root}/scripts/ci/record-attestations.sh" android "${attestation_options[@]}" --scope partial --scope-note "scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job" 'Android pre-push smoke check=pass:0' 'Android unit tests=skip:0' || true
   exit 0
 fi
 
 echo "==> unit tests (${test_tasks[*]})"
 (cd android && ./gradlew "${test_tasks[@]}")
+"${repo_root}/scripts/ci/record-attestations.sh" android "${attestation_options[@]}" --scope partial --scope-note "scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job" 'Android pre-push smoke check=pass:0' 'Android unit tests=pass:0' || true

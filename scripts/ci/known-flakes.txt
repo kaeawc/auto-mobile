@@ -2,6 +2,9 @@
 # Matching is case-insensitive. The second field also sees the run head branch,
 # so a signature can safely distinguish a Dependabot PR from a source failure.
 XCTestRunner Simulator Tests*|*CtrlProxy is still running after forced teardown*|RERUN-DONT-FIX|macos-26 CtrlProxy forced-teardown lifecycle flap, non-required, rerun
+XCTestRunner Simulator Tests*|*UI test action timed out after*|RERUN-DONT-FIX|macos-26 CtrlProxy UI-test action five-minute timeout (first seen 2026-09-07 to 09-13, moved from CLAUDE.md/AGENTS.md; #11875), non-required, rerun
+XCTestRunner Simulator Tests*|*simctl list*timed out*|RERUN-DONT-FIX|video-recording simctl list state probe timed out at 250ms (first seen 2026-09-07 to 09-13, moved from CLAUDE.md/AGENTS.md; #11875), non-required, rerun
+XCTestRunner Simulator Tests*|*hierarchy*exceeded 90*|RERUN-DONT-FIX|hierarchy UI test exceeded 90 seconds (first seen 2026-09-07 to 09-13, moved from CLAUDE.md/AGENTS.md; #11875), non-required, rerun
 XCTestRunner Simulator Tests*|*daemon did not become ready after*|RERUN-DONT-FIX|macos-26 daemon-ready lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests*|*navigation events did not reach getNavigationGraph*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests*|*could not bind iOS SDK events to navigation graph session*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun

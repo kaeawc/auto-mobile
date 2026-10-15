@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "text-fields",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "name": "Ada",
+      "quantity": "12",
+      "password": "secret",
+      "notes": "Hello"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "name",
+      "multiline": true,
+      "maxLines": 21
+    }
+  },
+  "expectedPath": "root.maxLines"
+}

@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "pager-options",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "pages",
+      "children": [
+        {
+          "type": "text",
+          "text": "One"
+        },
+        {
+          "type": "text",
+          "text": "Two"
+        }
+      ],
+      "pageSize": {
+        "dp": 0
+      }
+    }
+  },
+  "expectedPath": "root.pageSize.dp",
+  "expectedMessage": "Invalid number value"
+}

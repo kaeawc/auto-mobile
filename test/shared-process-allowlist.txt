@@ -740,6 +740,7 @@ test/features/record/android/GestureClassifier.test.ts
 test/features/record/android/TouchFrameReconstructor.test.ts
 test/features/record/android/TouchNodeCaptures.test.ts
 test/features/record/android/TouchNodeDiscovery.test.ts
+test/features/retryBehaviorConstants.test.ts
 test/features/screen-stream/IosScreenCaptureHelperCapability.test.ts
 test/features/screen-stream/LatestFrameQueue.test.ts
 test/features/screen-stream/encodedVideoFrameProtocol.test.ts
@@ -890,7 +891,6 @@ test/models/formFactor.test.ts
 test/models/managedSlotContract.test.ts
 test/models/removedTools.test.ts
 test/models/screenScaleMetadata.test.ts
-test/models/sessionConfig.test.ts
 test/package/noBundledCoordinationServer.guard.test.ts
 test/package/webrtcRuntimeMetadata.test.ts
 test/packaging/bunPinConsistency.test.ts

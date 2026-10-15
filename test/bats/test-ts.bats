@@ -915,7 +915,7 @@ bun_test_invocations() {
     AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/contended-reports"
   [ "$status" -eq 124 ]
   [ "$(bun_test_invocations)" -eq 1 ]
-  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner (probe slowdown 8x >= 2.5x); not retrying on the same runner. Re-run the job to get a fresh runner."* ]]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner (probe slowdown 8x >= 2.5x); not retrying on the same runner. Attempt 1 is rerun automatically on a fresh runner; on attempt 2 or later, do not rerun by hand: file or classify it as a new issue."* ]]
   [[ "$output" != *"RETRY:"* ]]
   [[ "$output" == *"retried=0"* ]]
   [[ "$output" != *"::error"* ]]

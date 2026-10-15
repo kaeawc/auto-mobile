@@ -1,0 +1,1105 @@
+{
+  "commandErrors" : [
+    {
+      "error" : "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
+      "errorCode" : "deadline_completed_late",
+      "name" : "deadline_completed_late"
+    },
+    {
+      "error" : "Command request_swipe exceeded deadline at 5000ms (gesture was not started)",
+      "errorCode" : "deadline_not_started",
+      "name" : "deadline_not_started"
+    },
+    {
+      "error" : "Command request_swipe exceeded execution bound 4500ms in phase xcuitestGesture after 4502ms; XCUITest call is still executing and the runner stays busy until it returns",
+      "errorCode" : "gesture_bound_exceeded",
+      "name" : "gesture_bound_exceeded"
+    },
+    {
+      "error" : "Command request_swipe exceeded execution bound 4500ms after 4502ms waiting on a live XCUITest query; the observed app is likely suspended or backgrounded (XCUIApplication.state can report foreground for several seconds after Home). Re-observe before acting. XCUITest call is still executing and the runner stays busy until it returns",
+      "errorCode" : null,
+      "name" : "query_bound_exceeded"
+    },
+    {
+      "error" : "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: fixture reason",
+      "errorCode" : "hierarchy_capture_failed",
+      "name" : "hierarchy_capture_failed"
+    },
+    {
+      "error" : "Unknown command type: fixture_command",
+      "errorCode" : null,
+      "name" : "unknown_command"
+    },
+    {
+      "error" : "Missing required parameter: fixture_parameter",
+      "errorCode" : null,
+      "name" : "missing_parameter"
+    },
+    {
+      "error" : "Invalid value 'fixture_value' for parameter 'fixture_parameter'",
+      "errorCode" : null,
+      "name" : "invalid_parameter"
+    },
+    {
+      "error" : "Command execution failed: fixture reason",
+      "errorCode" : null,
+      "name" : "execution_failed"
+    },
+    {
+      "error" : "arrow key was not sent: XCUITest failed while finding the focused text input during fixture phase (fixture detail); the UI likely changed mid-query, so observe again and retry",
+      "errorCode" : "focus_query_failed",
+      "name" : "focus_query_failed"
+    }
+  ],
+  "responses" : [
+    {
+      "name" : "tap_coordinates_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "tapDiagnostics" : {
+          "requested" : {
+            "coordinateConstruction" : "appFrameOriginPlusPointOffset",
+            "durationMs" : 35,
+            "mode" : "press",
+            "units" : "points",
+            "x" : 12.5,
+            "y" : 25.5
+          },
+          "sampleErrors" : [
+
+          ]
+        },
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "tap_coordinates_result"
+      }
+    },
+    {
+      "name" : "swipe_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "swipe_result"
+      }
+    },
+    {
+      "name" : "multi_finger_swipe_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "multi_finger_swipe_result"
+      }
+    },
+    {
+      "name" : "drag_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "drag_result"
+      }
+    },
+    {
+      "name" : "pinch_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "pinchPath" : "event-path",
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "pinch_result"
+      }
+    },
+    {
+      "name" : "set_text_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "set_text_result"
+      }
+    },
+    {
+      "name" : "append_text_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "append_text_result"
+      }
+    },
+    {
+      "name" : "clear_text_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "clear_text_result"
+      }
+    },
+    {
+      "name" : "ime_action_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "ime_action_result"
+      }
+    },
+    {
+      "name" : "select_all_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "select_all_result"
+      }
+    },
+    {
+      "name" : "press_key_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result",
+        "verified" : true,
+        "warning" : "fixture warning"
+      }
+    },
+    {
+      "name" : "press_button_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_button_result"
+      }
+    },
+    {
+      "name" : "press_home_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_home_result"
+      }
+    },
+    {
+      "name" : "press_back_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_back_result"
+      }
+    },
+    {
+      "name" : "recent_apps_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "recent_apps_result"
+      }
+    },
+    {
+      "name" : "action_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "action_result",
+        "warning" : "fixture warning"
+      }
+    },
+    {
+      "name" : "launch_app_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "launch_app_result"
+      }
+    },
+    {
+      "name" : "reset_permissions_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "reset_permissions_result"
+      }
+    },
+    {
+      "name" : "highlight_response",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "highlight_response"
+      }
+    },
+    {
+      "name" : "set_preference_result",
+      "wire" : {
+        "effectiveValueDiffers" : true,
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "resolvedStore" : "Standard",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "set_preference_result"
+      }
+    },
+    {
+      "name" : "remove_preference_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "remove_preference_result"
+      }
+    },
+    {
+      "name" : "clear_preferences_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "clear_preferences_result"
+      }
+    },
+    {
+      "name" : "screenshot",
+      "wire" : {
+        "data" : "aW9z",
+        "format" : "png",
+        "frameContext" : "frame-42",
+        "requestId" : "fixture-request-id",
+        "rotation" : 1,
+        "timestamp" : 1700000000000,
+        "type" : "screenshot"
+      }
+    },
+    {
+      "name" : "hierarchy_update",
+      "wire" : {
+        "data" : {
+          "insets" : {
+            "available" : false,
+            "displayCutoutInfo" : {
+              "classification" : "unknown"
+            },
+            "source" : "unavailable",
+            "units" : "unknown"
+          },
+          "packageName" : "fixture.app",
+          "screenHeight" : 844,
+          "screenWidth" : 390,
+          "updatedAt" : 1700000000000
+        },
+        "frameContext" : "frame-42",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "servedFromCache" : true,
+        "timestamp" : 1700000000000,
+        "type" : "hierarchy_update"
+      }
+    },
+    {
+      "name" : "keyboard_result",
+      "wire" : {
+        "method" : "fixture",
+        "open" : true,
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "keyboard_result"
+      }
+    },
+    {
+      "name" : "rotate_result",
+      "wire" : {
+        "currentOrientation" : "landscape",
+        "previousOrientation" : "portrait",
+        "requestId" : "fixture-request-id",
+        "rotationPerformed" : true,
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "rotate_result",
+        "value" : 1
+      }
+    },
+    {
+      "name" : "hinge_angle_result",
+      "wire" : {
+        "angle" : 90,
+        "error" : "unsupported",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "hinge_angle_result"
+      }
+    },
+    {
+      "name" : "magic_tap_result",
+      "wire" : {
+        "available" : true,
+        "error" : "not handled",
+        "handled" : false,
+        "requestId" : "fixture-request-id",
+        "requiresVoiceOver" : false,
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "magic_tap_result",
+        "unsupported" : true
+      }
+    },
+    {
+      "name" : "sdk_trigger_result",
+      "wire" : {
+        "available" : true,
+        "error" : "fixture failure",
+        "reason" : "fixture",
+        "registeredModules" : [
+          "callkit"
+        ],
+        "requestId" : "fixture-request-id",
+        "sdkError" : "unknown_trigger",
+        "statusCode" : 404,
+        "success" : false,
+        "supportedTriggers" : [
+          "incoming"
+        ],
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_trigger_result"
+      }
+    },
+    {
+      "name" : "voiceover_state_result",
+      "wire" : {
+        "enabled" : true,
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "voiceover_state_result"
+      }
+    },
+    {
+      "name" : "voiceover_set_result",
+      "wire" : {
+        "error" : "fixture failure",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "voiceover_set_result"
+      }
+    },
+    {
+      "name" : "preference_files",
+      "wire" : {
+        "files" : [
+          {
+            "displayName" : "Defaults",
+            "entryCount" : 2,
+            "name" : "Standard",
+            "path" : "\/fixture"
+          }
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "preference_files"
+      }
+    },
+    {
+      "name" : "preferences",
+      "wire" : {
+        "entries" : [
+          {
+            "key" : "token",
+            "redacted" : true,
+            "type" : "STRING",
+            "value" : "hidden"
+          }
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "preferences"
+      }
+    },
+    {
+      "name" : "get_preference_result",
+      "wire" : {
+        "found" : true,
+        "key" : "token",
+        "redacted" : true,
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "get_preference_result",
+        "value" : "hidden",
+        "valueType" : "STRING"
+      }
+    },
+    {
+      "name" : "set_network_mock_rules_result",
+      "wire" : {
+        "ok" : true,
+        "rejectedMockIds" : [
+          "mock-42"
+        ],
+        "rejectedReasons" : {
+          "mock-42" : "invalid pattern"
+        },
+        "requestId" : "fixture-request-id",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "set_network_mock_rules_result"
+      }
+    },
+    {
+      "name" : "set_network_fault_rules_result",
+      "wire" : {
+        "ok" : true,
+        "requestId" : "fixture-request-id",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "set_network_fault_rules_result"
+      }
+    },
+    {
+      "name" : "set_network_error_simulation_result",
+      "wire" : {
+        "ok" : true,
+        "requestId" : "fixture-request-id",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "set_network_error_simulation_result"
+      }
+    },
+    {
+      "name" : "sdk_capabilities_result",
+      "wire" : {
+        "available" : true,
+        "bundleId" : "fixture.app",
+        "capabilities" : [
+          "database",
+          "hierarchy"
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_capabilities_result"
+      }
+    },
+    {
+      "name" : "execute_sql_result",
+      "wire" : {
+        "columns" : [
+          "id"
+        ],
+        "diagnostic" : {
+          "code" : "fixture",
+          "message" : "fixture diagnostic"
+        },
+        "queryType" : "query",
+        "requestId" : "fixture-request-id",
+        "rows" : [
+          [
+            "42"
+          ],
+          [
+            null
+          ]
+        ],
+        "rowsAffected" : 2,
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "truncated" : true,
+        "type" : "execute_sql_result"
+      }
+    },
+    {
+      "name" : "list_databases_result",
+      "wire" : {
+        "databases" : [
+          {
+            "name" : "app",
+            "path" : "\/app.sqlite",
+            "sizeBytes" : 4096
+          }
+        ],
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "list_databases_result"
+      }
+    },
+    {
+      "name" : "storage_capabilities_result",
+      "wire" : {
+        "capabilities" : {
+          "coreDataStores" : [
+
+          ],
+          "mutationAuthorized" : true,
+          "readOnly" : false,
+          "registeredAppGroupSuites" : [
+            "group.fixture"
+          ],
+          "unavailableStores" : [
+            "locked"
+          ]
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "storage_capabilities_result"
+      }
+    },
+    {
+      "name" : "list_tables_result",
+      "wire" : {
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "tables" : [
+          "users"
+        ],
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "list_tables_result"
+      }
+    },
+    {
+      "name" : "table_data_result",
+      "wire" : {
+        "columns" : [
+          "id"
+        ],
+        "diagnostic" : {
+          "code" : "fixture",
+          "message" : "fixture diagnostic"
+        },
+        "requestId" : "fixture-request-id",
+        "rows" : [
+          [
+            "42"
+          ],
+          [
+            null
+          ]
+        ],
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "total" : 2,
+        "totalTimeMs" : 17,
+        "type" : "table_data_result"
+      }
+    },
+    {
+      "name" : "table_structure_result",
+      "wire" : {
+        "columns" : [
+          {
+            "defaultValue" : "0",
+            "name" : "id",
+            "nullable" : false,
+            "primaryKey" : true,
+            "type" : "INTEGER"
+          }
+        ],
+        "diagnostic" : {
+          "code" : "fixture",
+          "message" : "fixture diagnostic"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "table_structure_result"
+      }
+    },
+    {
+      "name" : "current_focus_result",
+      "wire" : {
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "totalTimeMs" : 17,
+        "type" : "current_focus_result"
+      }
+    },
+    {
+      "name" : "traversal_order_result",
+      "wire" : {
+        "elements" : [
+
+        ],
+        "focusedIndex" : 0,
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "totalCount" : 0,
+        "totalTimeMs" : 17,
+        "type" : "traversal_order_result"
+      }
+    },
+    {
+      "name" : "clipboard_result",
+      "wire" : {
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "text" : "fixture text",
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "clipboard_result"
+      }
+    },
+    {
+      "name" : "error_deadline_completed_late",
+      "wire" : {
+        "error" : "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
+        "errorCode" : "deadline_completed_late",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_deadline_not_started",
+      "wire" : {
+        "error" : "Command request_swipe exceeded deadline at 5000ms (gesture was not started)",
+        "errorCode" : "deadline_not_started",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_gesture_bound_exceeded",
+      "wire" : {
+        "error" : "Command request_swipe exceeded execution bound 4500ms in phase xcuitestGesture after 4502ms; XCUITest call is still executing and the runner stays busy until it returns",
+        "errorCode" : "gesture_bound_exceeded",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_query_bound_exceeded",
+      "wire" : {
+        "error" : "Command request_swipe exceeded execution bound 4500ms after 4502ms waiting on a live XCUITest query; the observed app is likely suspended or backgrounded (XCUIApplication.state can report foreground for several seconds after Home). Re-observe before acting. XCUITest call is still executing and the runner stays busy until it returns",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_hierarchy_capture_failed",
+      "wire" : {
+        "error" : "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: fixture reason",
+        "errorCode" : "hierarchy_capture_failed",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_unknown_command",
+      "wire" : {
+        "error" : "Unknown command type: fixture_command",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_missing_parameter",
+      "wire" : {
+        "error" : "Missing required parameter: fixture_parameter",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_invalid_parameter",
+      "wire" : {
+        "error" : "Invalid value 'fixture_value' for parameter 'fixture_parameter'",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_execution_failed",
+      "wire" : {
+        "error" : "Command execution failed: fixture reason",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_focus_query_failed",
+      "wire" : {
+        "error" : "arrow key was not sent: XCUITest failed while finding the focused text input during fixture phase (fixture detail); the UI likely changed mid-query, so observe again and retry",
+        "errorCode" : "focus_query_failed",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "runner_busy",
+      "wire" : {
+        "blockingCommandType" : "request_activate_accessibility_link",
+        "blockingDeadlineRemainingMs" : -5000,
+        "blockingElapsedMs" : 35000,
+        "error" : "runner_busy",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "error"
+      }
+    }
+  ],
+  "responseTypes" : [
+    "action_result",
+    "append_text_result",
+    "clear_preferences_result",
+    "clear_text_result",
+    "clipboard_result",
+    "connected",
+    "current_focus_result",
+    "drag_result",
+    "execute_sql_result",
+    "get_preference_result",
+    "hierarchy_update",
+    "highlight_response",
+    "hinge_angle_result",
+    "ime_action_result",
+    "keyboard_result",
+    "launch_app_result",
+    "list_databases_result",
+    "list_tables_result",
+    "magic_tap_result",
+    "multi_finger_swipe_result",
+    "pinch_result",
+    "preference_files",
+    "preferences",
+    "press_back_result",
+    "press_button_result",
+    "press_home_result",
+    "press_key_result",
+    "recent_apps_result",
+    "remove_preference_result",
+    "reset_permissions_result",
+    "rotate_result",
+    "screenshot",
+    "sdk_capabilities_result",
+    "sdk_trigger_result",
+    "select_all_result",
+    "set_hierarchy_poll_interval_result",
+    "set_network_error_simulation_result",
+    "set_network_fault_rules_result",
+    "set_network_mock_rules_result",
+    "set_preference_result",
+    "set_text_result",
+    "shake_result",
+    "storage_capabilities_result",
+    "swipe_result",
+    "table_data_result",
+    "table_structure_result",
+    "tap_coordinates_result",
+    "traversal_order_result",
+    "voiceover_set_result",
+    "voiceover_state_result"
+  ]
+}

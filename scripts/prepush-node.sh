@@ -32,8 +32,9 @@ while [[ "$#" -gt 0 ]]; do
       cat <<'EOF'
 Usage: scripts/prepush-node.sh [--changed] [--timing]
 
-Run the Node pull-request gates in fail-fast order. --changed uses the
-repository's affected-unit-test runner; format, typecheck, and lint remain
+Run the Node pull-request gates in fail-fast order. --changed uses
+Bun's changed runner plus reference-only unit extras and affected
+safe integration tests; caps fall back to full unit/safe integration lanes; format, typecheck, and lint remain
 full because their repository-wide baselines and boundaries have no safe
 changed-file mode. Tool definitions drift and the static Fast Validation subset
 also run in both modes. --timing
@@ -163,6 +164,56 @@ db_integration_fast_path() {
   fi
 }
 
+affected_selection_dir=""
+# shellcheck disable=SC2317,SC2329 # invoked via the EXIT trap
+cleanup_affected_selection() {
+  local exit_code=$?
+  if [[ -n "$affected_selection_dir" ]]; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      rm -rf "$affected_selection_dir"
+    else
+      echo "Affected-test selection diagnostics kept at: $affected_selection_dir" >&2
+    fi
+  fi
+}
+
+affected_test_selection() {
+  local branch_changes worktree_changes untracked_changes="" selection_dir file
+  local -a units=() integrations=()
+  branch_changes="$(vcs_changed_files_since_merge_base origin/main)" || return $?
+  worktree_changes="$(vcs_touched_files_including_deleted)" || return $?
+  if ! vcs_uses_jj; then
+    untracked_changes="$(git ls-files --others --exclude-standard)" || return $?
+  fi
+  mkdir -p "$ROOT/scratch"
+  selection_dir="$(mktemp -d "$ROOT/scratch/affected-tests.XXXXXX")" || return $?
+  affected_selection_dir="$selection_dir"
+  trap cleanup_affected_selection EXIT
+  printf '%s\n%s\n%s\n' "$branch_changes" "$worktree_changes" "$untracked_changes" > "$selection_dir/changed.txt"
+  bun scripts/lib/affectedTests.ts --changed-files "$selection_dir/changed.txt" --out-dir "$selection_dir" || return $?
+  # unit.txt adds references and the tier validator to Bun's changed run.
+  while IFS= read -r file; do
+    [[ -z "$file" ]] || units+=("$file")
+  done < "$selection_dir/unit.txt"
+  while IFS= read -r file; do
+    [[ -z "$file" ]] || integrations+=("$file")
+  done < "$selection_dir/integration-safe.txt"
+  if grep -Fx unit "$selection_dir/fallback.txt" > /dev/null; then
+    env AUTOMOBILE_TEST_MODE=true bash scripts/test-ts.sh unit || return $?
+  elif [[ "${#units[@]}" -gt 0 ]]; then
+    env AUTOMOBILE_TEST_MODE=true bash scripts/test-ts.sh unit "${units[@]}" || return $?
+  else
+    echo "No reference-only unit extras selected."
+  fi
+  if grep -Fx integration "$selection_dir/fallback.txt" > /dev/null; then
+    bash scripts/prepush-integration-safe.sh || return $?
+  elif [[ "${#integrations[@]}" -gt 0 ]]; then
+    bash scripts/prepush-integration-safe.sh "${integrations[@]}" || return $?
+  else
+    echo "No affected safe integration tests selected."
+  fi
+}
+
 run_gate "stale-base guard" stale_base_guard
 run_gate "format check" bun run format:check
 run_gate "typecheck" bun run typecheck
@@ -183,6 +234,9 @@ if [[ "$runner_os" != "Windows" && "$unit_mode" == "unit" ]]; then
   unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
 fi
 run_gate "${unit_mode} unit tests" "${unit_env[@]}" bash scripts/test-ts.sh "$unit_mode"
+if [[ "$changed_mode" -eq 1 ]]; then
+  run_gate "affected-test selection" affected_test_selection
+fi
 run_gate "test/db integration fast path" db_integration_fast_path
 
 if [[ "$timing_requested" -eq 1 || ( "$runner_os" != "macOS" && "$runner_os" != "Windows" ) ]]; then

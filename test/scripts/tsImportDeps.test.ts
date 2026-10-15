@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import {
   gitKnownPathLookup,
+  relativeModuleSpecifiers,
   resolveRelativeImportPaths,
   type KnownPathLookup,
 } from "../../scripts/lib/tsImportDeps";
@@ -11,6 +13,22 @@ function fakeKnownPaths(...paths: string[]): KnownPathLookup {
   const known = new Set(paths);
   return { has: (candidate) => known.has(candidate) };
 }
+
+test("module extraction preserves type edges by default and can omit them", () => {
+  const ast = ts.createSourceFile(
+    "consumer.ts",
+    [
+      'import type A from "./a";',
+      'export type { B } from "./b";',
+      'import { type C, type D } from "./c";',
+      'import type E = require("./e");',
+      'import Value, { type F } from "./f";',
+    ].join("\n"),
+    ts.ScriptTarget.Latest,
+  );
+  expect(relativeModuleSpecifiers(ast)).toEqual(["./a", "./b", "./c", "./e", "./f"]);
+  expect(relativeModuleSpecifiers(ast, { includeTypeOnly: false })).toEqual(["./f"]);
+});
 
 describe("resolveRelativeImportPaths", () => {
   let repoRoot: string;

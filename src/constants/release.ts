@@ -85,6 +85,18 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.85",
+    apkSha256: "9ef71670b95bff7d96ae795fa361b0e21eb7eb3e089701e5ae276f2e8754add7",
+    ipaSha256: "71335d7ac069b450570ba3bdee5b7a33c2371f6db26b2d135abe2166779af932",
+    runnerSha256: "cf3dc0876397aa3b7076fe7a07170a3451ef7c00db923ccf0d0ac9c151d183da",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "77c3a86153ce9cc906f96da73d617d21d4bad1081270157cfbe80a6c83ea5e59",
+    screenCaptureHelperSha256: "5455ac8cb729acd2fcf5dcf6a808432a28a13f0d128338385b9f2a0a697575be",
+    prototypeAgentSha256: "d729d1511995c36b2f9fbbfbb2a081fc2a5ab910c063c390d5b1b8082bbf64a9",
+    prototypeViewerSha256: "0e72fa0161da041de843dec69fe07b96ca22716691d3a98cb865af9401a555e4",
+    networkFilterSha256: "a09fe223557bff2161e077506d1547289ffb63762553b26fa00d99fb488595e9",
+  },
+  {
     version: "0.0.84",
     apkSha256: "9e551d6d686c3e25100346302aaad3383fa185ede00c102a221c3183830f4651",
     ipaSha256: "2d047a55cbe7f178b2f0554856e54d1d18264c46c19d4d81651774ae3536b4dc",

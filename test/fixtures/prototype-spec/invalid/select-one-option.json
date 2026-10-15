@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "select",
+      "testTag": "choice",
+      "stateKey": "choice",
+      "label": "Choice",
+      "options": [
+        {
+          "value": "a",
+          "label": "A"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.options",
+  "expectedMessage": "Array length out of range"
+}

@@ -123,6 +123,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
@@ -1221,6 +1222,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 null,
                 missingAssets,
                 appearance,
+                hiddenReason = hiddenReason,
+              )
+            }
+          }
+        }
+      }
+
+      override suspend fun sendShownNavigation(
+        requestId: String?,
+        missingAssets: List<String>,
+        appearance: PrototypeAppearance,
+        pages: Map<String, Int>,
+        stacks: Map<String, PrototypeStackSnapshot>,
+        hiddenReason: PrototypeHiddenReason?,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              prototypeResultFrame(
+                requestId,
+                true,
+                null,
+                missingAssets,
+                appearance,
+                pages = pages,
+                stacks = stacks,
                 hiddenReason = hiddenReason,
               )
             }

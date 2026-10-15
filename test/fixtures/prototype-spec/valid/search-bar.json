@@ -1,0 +1,74 @@
+{
+  "id": "search",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "query": "",
+    "active": true
+  },
+  "root": {
+    "type": "searchBar",
+    "stateKey": "query",
+    "placeholder": "Search",
+    "leadingIcon": "search",
+    "variant": "bar",
+    "activeKey": "active",
+    "trailingActions": [
+      {
+        "icon": "close",
+        "label": "Clear",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "query",
+            "value": ""
+          }
+        ]
+      },
+      {
+        "icon": "filter_list",
+        "label": "Filters",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "filters"
+          }
+        ]
+      }
+    ],
+    "onSubmit": [
+      {
+        "type": "emit",
+        "name": "submit"
+      }
+    ],
+    "child": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "One"
+        },
+        {
+          "type": "text",
+          "text": "Two"
+        },
+        {
+          "type": "text",
+          "text": "Three"
+        },
+        {
+          "type": "text",
+          "text": "Four"
+        },
+        {
+          "type": "text",
+          "text": "Five"
+        }
+      ]
+    }
+  }
+}

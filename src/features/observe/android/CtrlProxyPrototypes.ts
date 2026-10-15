@@ -12,7 +12,10 @@ import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   actionSchema,
+  prototypeHasStack,
+  prototypeStackUnsupportedMessage,
   prototypeSpecSchema,
+  prototypeJsonObjectSchema,
   type PrototypeSpec,
 } from "../../prototype/prototypeSpec";
 import {
@@ -34,6 +37,7 @@ import {
   type ListSavedPrototypesMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   type PatchPrototypeMessage,
@@ -162,14 +166,54 @@ const prototypeEventEnvelopeSchema = z.object({
   kind: z.string().min(1),
 });
 
+/** Optional navigation snapshots from newer devices; malformed entries are ignored. */
+const stackEntrySchema = z
+  .object({
+    path: z.array(z.string().min(1)).min(1).max(32),
+    depth: z.number().int().min(1).max(32),
+  })
+  .refine((entry) => entry.path.length === entry.depth);
+export function parsePrototypeStacks(value: unknown): PrototypeEvent["stacks"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value).flatMap(([id, entry]) => {
+    const parsed = stackEntrySchema.safeParse(entry);
+    return id && parsed.success ? [[id, parsed.data] as const] : [];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+export const prototypeStacksSchema = z.unknown().optional().transform(parsePrototypeStacks);
+
 /** One `prototype_event` push of a kind this host knows. */
-export const prototypeEventSchema = prototypeEventEnvelopeSchema.extend({
-  kind: z.enum(PROTOTYPE_EVENT_KINDS),
-  name: z.string().nullable(),
-  payload: actionSchema.options[0].shape.payload.unwrap(),
-  state: prototypeSpecSchema.shape.state.unwrap(),
-  pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
-});
+export const prototypeEventSchema = prototypeEventEnvelopeSchema
+  .extend({
+    kind: z.enum(PROTOTYPE_EVENT_KINDS),
+    validity: z.record(z.string().min(1), z.boolean()).optional(),
+    keys: z.array(z.string().min(1)).min(1).max(8).optional(),
+    name: z.string().nullable(),
+    payload: actionSchema.options[0].shape.payload.unwrap(),
+    context: prototypeJsonObjectSchema.optional(),
+    contextTruncated: z.literal(true).optional(),
+    state: prototypeSpecSchema.shape.state.unwrap(),
+    pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
+    stacks: prototypeStacksSchema,
+  })
+  .superRefine((event, context) => {
+    const field =
+      event.kind === "change"
+        ? "validity"
+        : event.kind === "validation_failed"
+          ? "keys"
+          : undefined;
+    if (field !== undefined && event[field] === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message: `Required for ${event.kind} events`,
+      });
+    }
+  });
 
 /**
  * Decodes one `prototype_event` push; shared by CtrlProxy and the iOS prototype agent transport.
@@ -712,6 +756,13 @@ export class CtrlProxyPrototypes {
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
     }
+    if (
+      message.type === "show_prototype" &&
+      prototypeHasStack(message.spec) &&
+      supports(PROTOTYPE_STACK_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeStackUnsupportedMessage("android"));
+    }
     this.requireMultiSurfaceSupport(message, supports);
     const type = message.type;
     if (
@@ -736,10 +787,15 @@ export class CtrlProxyPrototypes {
     ) {
       throw new ActionableError(prototypeInspectUnsupportedMessage());
     }
+    if (message.type === "show_prototype") {
+      this.requirePrototypeDisplaySupport(message);
+    }
+  }
+
+  private requirePrototypeDisplaySupport(message: ShowPrototypeMessage): void {
     if (
-      message.type === "show_prototype" &&
       message.displayId !== undefined &&
-      supports(PROTOTYPE_DISPLAY_CAPABILITY) !== true
+      this.context.isCommandSupported?.(PROTOTYPE_DISPLAY_CAPABILITY) !== true
     ) {
       // Never send displayId to a device that would ignore it and show on the default display.
       throw new ActionableError(prototypeDisplayUnsupportedMessage(message.displayId));

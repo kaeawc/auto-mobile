@@ -7,7 +7,6 @@ import {
 import {
   setDeviceManager,
   setDeviceLockProbe,
-  setOrientationReaderFactory,
   resetBootedDevicesResourceCache,
   getBootedDevicesForPlatforms,
 } from "../../../src/server/bootedDeviceResources";
@@ -36,7 +35,6 @@ class SlowCatalog extends FakeAvdManager {
 afterEach(() => {
   setDeviceManager(null);
   setDeviceLockProbe(null);
-  setOrientationReaderFactory(null);
   resetBootedDevicesResourceCache();
   resetDeviceToolsDependencies();
   invalidateAndroidInventoryProvenanceAndCatalog();
@@ -64,13 +62,15 @@ describe("Android inventory read budgets", () => {
       lockSignal = getAbortSignal();
       return lateLock.promise;
     });
-    setOrientationReaderFactory(() => ({
+    const orientationReaderFactory = () => ({
       readOrientation: async (_device, signal) => {
         orientationSignal = signal;
         return lateOrientation.promise;
       },
-    }));
-    const pending = getBootedDevicesForPlatforms(["android"], timer);
+    });
+    const pending = getBootedDevicesForPlatforms(["android"], timer, {
+      injectedOrientationReaderFactory: orientationReaderFactory,
+    });
     await new Promise<void>((resolve) => setImmediate(resolve));
     await timer.advanceTimeAsync(8_000);
     const response = await pending;

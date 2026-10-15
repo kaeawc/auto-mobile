@@ -47,6 +47,30 @@ class PrototypeEventFrameTest {
   }
 
   @Test
+  fun `screen changed frame carries navigation path depth and existing event context`() {
+    val event =
+      PrototypeEvent(
+        42,
+        "panel",
+        4,
+        PrototypeEventKind.SCREEN_CHANGED,
+        "nav",
+        buildJsonObject {
+          put("screen", "detail")
+          put("depth", 2)
+        },
+        mapOf("label" to PrototypeScalar.Text("Kept")),
+        mapOf("pager" to 1),
+        mapOf("nav" to PrototypeStackSnapshot(listOf("home", "detail"))),
+      )
+    val literal =
+      """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":4,"kind":"screen_changed","name":"nav","payload":{"screen":"detail","depth":2},"state":{"label":"Kept"},"pages":{"pager":1},"stacks":{"nav":{"path":["home","detail"],"depth":2}}}"""
+    assertEquals(literal, prototypeEventFrame(event))
+    val decoded = Json.decodeFromString<WebSocketResponse>(literal) as PrototypeEvent
+    assertEquals(event, decoded)
+  }
+
+  @Test
   fun `change frame carries key value current scalars pages and sequence`() {
     val event =
       PrototypeEvent(

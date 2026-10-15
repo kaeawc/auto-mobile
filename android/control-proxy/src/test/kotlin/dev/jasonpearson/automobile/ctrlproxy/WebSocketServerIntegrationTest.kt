@@ -5,6 +5,8 @@ import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestScreenshot
 import dev.jasonpearson.automobile.protocol.SettingsGetResult
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -900,7 +902,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
                 throw RuntimeException("kaboom")
               }
             },
@@ -944,7 +946,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
                 throw RuntimeException("kaboom")
               }
             },
@@ -1044,7 +1046,7 @@ class WebSocketServerIntegrationTest {
                 order.add("flags")
               }
 
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
                 order.add("screenshot")
               }
             },
@@ -1086,7 +1088,9 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
+                val requestId = request.requestId
+
                 testScope.launch {
                   rawSuccessServer.broadcast("""{"type":"screenshot","requestId":"$requestId"}""")
                 }
@@ -1208,7 +1212,9 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
+                val requestId = request.requestId
+
                 testScope.launch {
                   typedSuccessServer.broadcast(
                     SettingsGetResult(
@@ -1355,7 +1361,9 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
+                val requestId = request.requestId
+
                 // Fire-and-forget: the real work runs in a launched coroutine that throws
                 // after
                 // this method (and handleMessage) has already returned.
@@ -1442,7 +1450,9 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(requestId: String?) {
+              override fun requestScreenshot(request: RequestScreenshot) {
+                val requestId = request.requestId
+
                 runnerHolder[0]!!.launch(requestId, "screenshot") {
                   throw RuntimeException("async boom")
                 }
@@ -1542,10 +1552,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override suspend fun requestHierarchy(
-                disableAllFiltering: Boolean,
-                requestId: String?,
-              ) {
+              override suspend fun requestHierarchy(request: RequestHierarchy) {
                 // Mirror production: a terminal reply followed by an unsolicited event.
                 testScope.launch {
                   hierarchyServer.broadcastWithPerfSync { reply }

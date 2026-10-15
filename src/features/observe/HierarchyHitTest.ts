@@ -28,7 +28,7 @@ export function previewHierarchyHitTest(
   observation: ObserveResult,
   platform: BootedDevice["platform"],
 ) {
-  const point = resolveTapAtCoordinates(options, observation, platform);
+  const point = resolveTapAtCoordinates(options, observation, platform, "hitTest");
   if ("error" in point) {
     throw new ActionableError(point.error);
   }

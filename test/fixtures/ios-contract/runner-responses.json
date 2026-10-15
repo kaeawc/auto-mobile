@@ -1213,7 +1213,6 @@
     "reset_permissions_result",
     "rotate_result",
     "screenshot",
-    "screenshot_error",
     "sdk_capabilities_result",
     "sdk_trigger_result",
     "select_all_result",

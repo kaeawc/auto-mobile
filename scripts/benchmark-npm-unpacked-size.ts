@@ -276,11 +276,20 @@ export function parsePackOutput(stdout: string): {
     throw new Error("npm pack returned empty output");
   }
 
+  // Lifecycle scripts (prepack) may print to stdout ahead of the JSON array.
   let payload: unknown;
-  try {
-    payload = JSON.parse(trimmed);
-  } catch (error) {
-    throw new Error(`Failed to parse npm pack output: ${error}`);
+  let lastError: unknown;
+  for (const match of trimmed.matchAll(/^\[/gm)) {
+    try {
+      payload = JSON.parse(trimmed.slice(match.index));
+      lastError = undefined;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (payload === undefined) {
+    throw new Error(`Failed to parse npm pack output: ${lastError ?? "no JSON array found"}`);
   }
 
   if (!Array.isArray(payload) || payload.length === 0) {

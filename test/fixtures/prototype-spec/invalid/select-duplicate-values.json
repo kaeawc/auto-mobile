@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "select",
+      "testTag": "choice",
+      "stateKey": "choice",
+      "label": "Choice",
+      "options": [
+        {
+          "value": "a",
+          "label": "A"
+        },
+        {
+          "value": "a",
+          "label": "A"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.options[1].value",
+  "expectedMessage": "Duplicate select option value"
+}

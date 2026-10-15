@@ -31,6 +31,7 @@ import {
 } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
+import { getRequestContext } from "../../utils/AbortContext";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
 
@@ -312,7 +313,7 @@ export class InputText extends BaseVisualChange {
     // leave close() deciding to send Back off a cached "IME open" tree after the
     // runner had already hidden the window — navigating the app instead (#5887).
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text);
+    const a11yResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
     assertInputNotAborted(signal);
 
     if (a11yResult.success) {
@@ -397,7 +398,7 @@ export class InputText extends BaseVisualChange {
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
-    const prefixResult = await a11yClient.requestSetText(prefix);
+    const prefixResult = await this.withTextDispatch(() => a11yClient.requestSetText(prefix));
     assertInputNotAborted(signal);
     if (!prefixResult.success) {
       return this.setTextFailure(
@@ -412,7 +413,7 @@ export class InputText extends BaseVisualChange {
     await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
 
     if (suffix.length > 0) {
-      const finalResult = await a11yClient.requestSetText(text);
+      const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -465,7 +466,7 @@ export class InputText extends BaseVisualChange {
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const clearResult = await a11yClient.requestSetText("");
+    const clearResult = await this.withTextDispatch(() => a11yClient.requestSetText(""));
     assertInputNotAborted(signal);
     if (!clearResult.success) {
       return this.setTextFailure(
@@ -483,7 +484,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text);
+      const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -545,7 +546,9 @@ export class InputText extends BaseVisualChange {
       }
 
       targetText += unsupportedRun;
-      const setTextResult = await a11yClient.requestSetText(targetText);
+      const setTextResult = await this.withTextDispatch(() =>
+        a11yClient.requestSetText(targetText),
+      );
       assertInputNotAborted(signal);
       if (!setTextResult.success) {
         return this.setTextFailure(
@@ -989,6 +992,16 @@ export class InputText extends BaseVisualChange {
     return this.androidInputKeyCombinationSupported;
   }
 
+  private async withTextDispatch<T>(command: () => Promise<T>): Promise<T> {
+    const textState = getRequestContext()?.textState;
+    const done = textState?.dispatched();
+    try {
+      return await command();
+    } finally {
+      done?.(true);
+    }
+  }
+
   private async executeKeyEventPlan(
     plan: KeyEventPlan,
     timeoutMs?: number,
@@ -998,12 +1011,14 @@ export class InputText extends BaseVisualChange {
   ): Promise<void> {
     for (const [index, command] of plan.commands.entries()) {
       assertInputNotAborted(signal);
-      await this.adb.execute(command.split(" "), {
-        timeoutMs,
-        noRetry,
-        beforeDispatch: index === 0 ? beforeDispatch : undefined,
-        signal,
-      });
+      await this.withTextDispatch(() =>
+        this.adb.execute(command.split(" "), {
+          timeoutMs,
+          noRetry,
+          beforeDispatch: index === 0 ? beforeDispatch : undefined,
+          signal,
+        }),
+      );
       assertInputNotAborted(signal);
     }
   }
@@ -1128,11 +1143,13 @@ export class InputText extends BaseVisualChange {
         const keys = keyCode.split(" ");
         for (const key of keys) {
           assertInputNotAborted(signal);
-          await this.adb.executeCommand(`shell input keyevent ${key}`);
+          await this.withTextDispatch(() => this.adb.executeCommand(`shell input keyevent ${key}`));
           assertInputNotAborted(signal);
         }
       } else {
-        await this.adb.executeCommand(`shell input keyevent ${keyCode}`);
+        await this.withTextDispatch(() =>
+          this.adb.executeCommand(`shell input keyevent ${keyCode}`),
+        );
         assertInputNotAborted(signal);
       }
     }

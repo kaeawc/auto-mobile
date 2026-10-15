@@ -42,7 +42,7 @@ enum SdkHierarchyProbeDecision: Equatable {
 /// starve `/health`. It holds `Sendable` collaborators and `await`s the ones that are
 /// isolated or async: the `@MainActor` UI domain (`ElementLocating`, `GesturePerforming`,
 /// `HierarchyDebouncing`) and the off-main async SDK clients. The lock-confined
-/// collaborators (`SdkHierarchyCaching`, `FrameContext`, `StorageInspecting`, VoiceOver
+/// collaborators (`SdkHierarchyCaching`, `FrameContext`, VoiceOver
 /// providers) are called synchronously — no `await`.
 ///
 /// vs. the reference this changes:
@@ -81,7 +81,6 @@ final class CommandHandler: CommandHandling {
     let elementLocator: any ElementLocating
     let gesturePerformer: any GesturePerforming
     let perf: any PerfTracking
-    private let storageInspector: (any StorageInspecting)?
     let sdkHierarchyClient: (any SdkHierarchyFetching)?
     let sdkHierarchyCache: (any SdkHierarchyCaching)?
     let sdkDatabaseClient: (any SdkDatabaseFetching)?
@@ -98,7 +97,6 @@ final class CommandHandler: CommandHandling {
         elementLocator: any ElementLocating,
         gesturePerformer: any GesturePerforming,
         perf: any PerfTracking,
-        storageInspector: (any StorageInspecting)? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
@@ -114,7 +112,6 @@ final class CommandHandler: CommandHandling {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
         self.perf = perf
-        self.storageInspector = storageInspector
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkDatabaseClient = sdkDatabaseClient

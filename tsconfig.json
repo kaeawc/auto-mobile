@@ -13,6 +13,12 @@
     "noEmit": false,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src", "test/**/*.typecheck.ts"],
+  "include": [
+    "src",
+    "test/**/*.typecheck.ts",
+    "scripts/ci/attestation/**/*.ts",
+    "scripts/ci/attestation-gate.ts",
+    "scripts/ci/produce-attestations.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

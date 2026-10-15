@@ -33,6 +33,7 @@ import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
+import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
 import * as sessionManager from "../../src/daemon/sessionManager";
 import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
@@ -113,6 +114,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
+  "daemon/proxy/daemonErrors": daemonErrors,
   "daemon/sessionManager": sessionManager,
   "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,

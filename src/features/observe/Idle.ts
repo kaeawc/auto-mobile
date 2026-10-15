@@ -383,6 +383,7 @@ export class Idle {
     prevTotalFrames: number | null,
   ): {
     isStable: boolean;
+    noFrameData?: boolean;
     shouldUpdateLastNonIdleTime: boolean;
     updatedPrevMissedVsync: number | null;
     updatedPrevSlowUiThread: number | null;
@@ -399,6 +400,7 @@ export class Idle {
       );
       return {
         isStable: false,
+        noFrameData: true,
         shouldUpdateLastNonIdleTime: true,
         updatedPrevMissedVsync: prevMissedVsync,
         updatedPrevSlowUiThread: prevSlowUiThread,
@@ -648,6 +650,7 @@ export class Idle {
 
       return {
         isStable: result.isStable,
+        ...(result.noFrameData ? { noFrameData: true } : {}),
         shouldUpdateLastNonIdleTime: result.shouldUpdateLastNonIdleTime,
         updatedPrevMissedVsync: result.updatedPrevMissedVsync,
         updatedPrevSlowUiThread: result.updatedPrevSlowUiThread,

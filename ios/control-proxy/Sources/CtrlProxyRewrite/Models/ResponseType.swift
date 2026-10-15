@@ -6,7 +6,6 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case hierarchyUpdate = "hierarchy_update"
     case setHierarchyPollIntervalResult = "set_hierarchy_poll_interval_result"
     case screenshot
-    case screenshotError = "screenshot_error"
     case tapCoordinatesResult = "tap_coordinates_result"
     case swipeResult = "swipe_result"
     case multiFingerSwipeResult = "multi_finger_swipe_result"

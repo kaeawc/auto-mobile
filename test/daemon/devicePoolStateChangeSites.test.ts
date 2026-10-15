@@ -6,6 +6,7 @@ import { parseSync } from "oxc-parser";
 // resource subscribers. A new un-notified write fails here instead of leaving stale subscribers.
 const POOL_FAMILY_FILES = [
   "src/daemon/devicePool.ts",
+  "src/daemon/deviceReplacement.ts",
   "src/daemon/missingDeviceLiveness.ts",
   "src/daemon/sessionPreservingRecovery.ts",
   "src/daemon/adbServerResetQuarantine.ts",

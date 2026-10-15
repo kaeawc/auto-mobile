@@ -650,7 +650,10 @@ A same-id show with false replaces only that prototype; omitted or true replaces
 See [multiple surfaces (phase 1)](design-docs/plat/android/prototype-ux.md#multiple-surfaces-phase-1).
 
 Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show. Text field options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) similarly require `prototype_text_field_options_v1`; without it nothing is shown.
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
+`onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
+`prototype_gestures_v1`, with the same refusal before uploads or show.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
@@ -757,10 +760,14 @@ Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing prototype schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
-no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
+no screenshot. Nodes include box/row/column/flow/grid (flow/grid require `prototype_flow_grid_v1`), text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.
+`emit.context` resolves named state/item/index/page/data/value bindings and requires
+`prototype_emit_context_v1` (data bindings also require `prototype_data_model_v1`).
+Events return `context`, with `contextTruncated: true` only when the resolved UTF-8 JSON
+exceeds the byte budget; the longest fitting prefix is kept.
 A spec may also carry a `theme` (light/dark mode, a seed colour, per-role colour
 overrides, typography and shapes), per-node `style` and `styleWhen` fields,
 `transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make
@@ -819,6 +826,15 @@ translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
 (`{light, dark}` colour and image pairs, role names in gradient stops and scrims,
 `theme.colors.light` / `theme.colors.dark`) need a device advertising
 `prototype_theme_modes_v1`.
+
+Optional pager `axis` (horizontal default or vertical), `pageSpacing` (dp gap),
+strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
+require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
+are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+Current page is the first fully visible page; page events and navigation bindings
+keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 
 ### Patch (#11675)
 
@@ -968,7 +984,8 @@ and device unbinding clear the corresponding buffers and host status.
 `awaitEvent` requires `id`; it waits for one event in the current session/device/id
 scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`,
 `dismissed`, or `appearance_changed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
-are valid only for `awaitEvent`. An event of a kind this host does not know (a newer device) is
+are valid only for `awaitEvent`.
+Input and state changes (text input, toggles, sliders etc.) arrive as kind `emit` with `eventName` `change` (there is no separate `change` kind), with payload `{key,value}` for one changed key or `{keys,values}` for several. An event of a kind this host does not know (a newer device) is
 logged and skipped: it is never returned, but its sequence still counts toward `lastSequence`. Its `timeoutMs` defaults to 30000 ms and cannot
 exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
 headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
@@ -1644,7 +1661,10 @@ read/write authorization. `getAppPermissions` reports it as `unknown` with
 success with `applied: true`, `verified: false`, and a warning. Verification is
 unavailable from the host without app instrumentation: launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
-insufficient. Physical-device permission limits are unchanged.
+insufficient. Results include `accessLevel` (`readWrite` for Photos and
+`addOnly` for photos-add); an unverified stored Photos grant includes
+`evidence: "storedTccGrant"`. Effective native status still requires app
+instrumentation. Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.
@@ -2925,3 +2945,60 @@ An explicit CLI/env choice applies to that connection only: proxies relay it on
 the connection profile, never restart the shared daemon for it, and never persist it.
 Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).
+
+## Checks
+
+Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
+show and patch results using this feature on older devices. Inputs `textField`, `slider`,
+`checkbox`, `switch`, `radioGroup`, `datePicker` and `timePicker` accept `checks` (1–8 entries)
+and `validateOn: "change" | "blur" | "submit"` (omitted means blur). Each check contains a
+nonempty `message` and exactly one rule. `validateOn` controls error display, never validity.
+The first failing message is displayed.
+
+- `required: true`: trimmed nonempty text, true for checkbox/switch, nonempty selection for
+  radioGroup/datePicker, present number for slider/timePicker.
+- `minLength` / `maxLength`: nonnegative integer UTF-16 lengths, textField only.
+- `min` / `max`: finite numeric inclusive bounds, slider and pickers only. Text fields hold
+  strings and have no numeric subtype. Date state remains YYYY-MM-DD; bounds are UTC epoch
+  milliseconds. Time pickers retain hourKey/minuteKey; checks apply independently to both keys.
+- `format`: textField only, one of email, phone, digits, decimal, url.
+- `pattern`: textField only, the restricted grammar below, at most 128 UTF-16 units.
+
+Empty string, null or missing value passes all rules except required. Whitespace is only empty
+for required. Pattern and format matching use at most 4096 UTF-16 units. Required and length checks inspect the complete value.
+Every validity reference must name declared state with at least one check. Multiple checked
+controls sharing a key must all pass. Numeric/length lower bounds must not exceed upper bounds.
+
+Formats use these exact whole-value expressions (ASCII digits):
+
+- email: `[^\s@]+@[^\s@]+\.[^\s@]+` (Unicode names allowed).
+- phone: optional leading +, then 7–15 characters from ASCII digits, space, hyphen and parentheses;
+  at least seven digits. The leading + is outside the character count. Punctuation need not balance.
+- digits: `[0-9]+`.
+- decimal: `-?[0-9]+(\.[0-9]+)?` (no exponent or leading +).
+- url: `https?://[^\s/?#]+([/?#]\S*)?` (lowercase scheme, Unicode hosts allowed).
+
+Format whitespace follows JavaScript whitespace (including NBSP); no format trims its value.
+Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
+`[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
+CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
+escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
+`? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
+properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
+`\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
+Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
+These exact rules and error substrings are pinned in the language-neutral checks fixtures.
+
+Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
+are valid, including fields whose errors are not yet shown. They compose with all/any/not in
+visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
+`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+whole action list atomically, shows errors on every listed field, and sends
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.

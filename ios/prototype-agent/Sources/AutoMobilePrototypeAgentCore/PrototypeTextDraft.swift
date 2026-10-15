@@ -37,6 +37,6 @@ struct PrototypeTextDraft: Equatable, Sendable {
 /// Refused edits (#11562) and no-ops leave platform controls needing their stored values redrawn.
 enum PrototypeRefusedChange {
     static func leftValuesUnchanged(before: PrototypeSession, after: PrototypeSession) -> Bool {
-        before.state == after.state && before.pages == after.pages
+        before.state == after.state && before.pages == after.pages && before.stacks == after.stacks
     }
 }

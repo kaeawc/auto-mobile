@@ -6,6 +6,7 @@ import android.os.Looper
 import dev.jasonpearson.automobile.ctrlproxy.prototype.FakePrototypeHost
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import org.junit.After
@@ -126,7 +127,9 @@ class CtrlProxyOnDestroyTest {
 
   @Test
   fun `onDestroy dispatches in-flight terminal lift and answers pending ends before quitting without awaiting completion`() {
-    service.requestGestureStart("start", "gesture", 1.0, 2.0)
+    service.requestGestureStart(
+      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
+    )
     service.requestGestureEnd("end-1", "gesture", 3.0, 4.0, false)
     service.requestGestureEnd("end-2", "gesture", 5.0, 6.0, false)
     assertEquals(listOf(Ack("start", true, null)), acks)
@@ -162,7 +165,9 @@ class CtrlProxyOnDestroyTest {
 
   @Test
   fun `onDestroy dispatches terminal lift for a parked continued stroke before quitting`() {
-    service.requestGestureStart("start", "gesture", 1.0, 2.0)
+    service.requestGestureStart(
+      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
+    )
     val press = shadow.gesturesDispatched.single()
     press.callback().onCompleted(press.description())
     assertEquals(1, shadow.gesturesDispatched.size)
@@ -178,7 +183,9 @@ class CtrlProxyOnDestroyTest {
 
   @Test
   fun `onDestroy quits gesture thread and cancels service scope even when real router close throws`() {
-    service.requestGestureStart("start", "gesture", 1.0, 2.0)
+    service.requestGestureStart(
+      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
+    )
     val failure = IllegalStateException("gesture close post failed")
     thread.postFailure = failure
 
@@ -221,7 +228,9 @@ class CtrlProxyOnDestroyTest {
       it.callback().onCompleted(it.description())
       it.callback().onCancelled(it.description())
     }
-    service.requestGestureStart("late-start", "late", 7.0, 8.0)
+    service.requestGestureStart(
+      RequestGestureStart(requestId = "late-start", gestureId = "late", x = 7.0, y = 8.0),
+    )
     service.requestGestureMove("late-move", "gesture", 7.0, 8.0)
     service.requestGestureEnd("late-end", "gesture", 7.0, 8.0, false)
     assertEquals(before, acks)

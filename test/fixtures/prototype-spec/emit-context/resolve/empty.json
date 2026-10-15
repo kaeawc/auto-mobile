@@ -1,0 +1,29 @@
+{
+  "name": "empty",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {}
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {},
+  "data": {},
+  "precedingActions": [],
+  "expected": {
+    "context": {}
+  }
+}

@@ -1,3 +1,4 @@
+import { bindDevice, unbindDevice } from "./deviceBinding";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { throwIfRequestAborted } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -355,8 +356,7 @@ export class ExplicitDeviceBind {
           } else {
             // Looking up an expired owner may itself start its release.
             this.port.assertDeviceCleanupComplete(deviceId);
-            device.sessionId = null;
-            device.status = "idle";
+            unbindDevice(device);
             this.port.notifyDeviceStateChanged(device);
           }
         }
@@ -499,8 +499,7 @@ export class ExplicitDeviceBind {
       platform,
       expectedExistingSessionDeviceId,
     );
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.port.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;

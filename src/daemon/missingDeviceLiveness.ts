@@ -1,3 +1,4 @@
+import { clearDeviceError, markDeviceError } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
@@ -296,7 +297,7 @@ export class MissingDeviceLiveness {
         ) {
           return false;
         }
-        device.status = "error";
+        markDeviceError(device);
         return true;
       });
       if (!claimed) {
@@ -417,7 +418,7 @@ export class MissingDeviceLiveness {
       attemptDeviceLossRecovery: true,
     });
     if (this.pool.getDevices().get(device.id) === device) {
-      device.status = "error";
+      markDeviceError(device);
       this.noteStateChanged(device);
     }
     void eviction.catch((error) => {
@@ -571,7 +572,7 @@ export class MissingDeviceLiveness {
     // An idle preallocation eviction already claimed this entry as error under
     // assignmentMutex; keep it unavailable until its guarded removal completes.
     if (!lockPoolRemoval) {
-      device.status = "idle";
+      clearDeviceError(device);
       this.noteStateChanged(device);
     }
   }

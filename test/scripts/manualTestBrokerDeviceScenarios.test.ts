@@ -12,6 +12,7 @@ import type {
 } from "../../scripts/manual-test/brokerDeviceScenarios";
 import { runBrokerScenarioCli } from "../../scripts/manual-test/broker-scenario";
 import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
+import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -142,7 +143,7 @@ function fixture(clientCount = 2) {
           `serial-${resources.filter((r) => r.state === "active").length}`,
         );
         resources.push({ sessionUuid: result.sessionUuid, state: "active" });
-        names.set(result.sessionUuid!, `native-${count}`);
+        names.set(result.sessionUuid!, exampleSessionBrokerDeviceName(String(count)));
       }
       receipts.set(c.config.requestId, result);
       closed.delete(c.name);
@@ -279,7 +280,11 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
         { session: captured.prepareSession },
         {
           sessionId: captured.prepareSession.sessionUuid,
-          nativeDevice: { name: "old", deviceId: "serial", platform: "ios" },
+          nativeDevice: {
+            name: exampleSessionBrokerDeviceName("old"),
+            deviceId: "serial",
+            platform: "ios",
+          },
         },
       );
     }
@@ -327,7 +332,11 @@ describe("device scenario safety and failure logic with fakes", () => {
       if (kind === "shared-native") {
         f.client.info = async (id) => ({
           sessionId: id,
-          nativeDevice: { name: "shared", deviceId: "shared-serial", platform: "ios" },
+          nativeDevice: {
+            name: exampleSessionBrokerDeviceName("shared"),
+            deviceId: "shared-serial",
+            platform: "ios",
+          },
         });
       }
       if (kind === "wrong-profile") {

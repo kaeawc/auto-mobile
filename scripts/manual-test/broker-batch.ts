@@ -18,6 +18,7 @@ import {
 import {
   assertReleasedAndAbsent,
   BrokerDeviceLedger,
+  BrokerDeviceInfoRefusedError,
   type BrokerLedgerFs,
   type LedgerDevicesView,
 } from "./brokerDeviceLedger";
@@ -250,7 +251,17 @@ async function runUp(
           timeoutMs: 5000,
           label: `Device info ${item.name}`,
         });
-        ledger.info(item.name, { session }, info);
+        try {
+          ledger.info(item.name, { session }, info);
+        } catch (error) {
+          if (error instanceof BrokerDeviceInfoRefusedError) {
+            ledger.record("leaked", {
+              ...ledger.acquired(item.name, { session }),
+              device: error.device,
+            });
+          }
+          throw error;
+        }
       }
       return row.exitCode === 0 && actual === item.expected;
     } catch (error) {

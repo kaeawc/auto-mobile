@@ -33,7 +33,7 @@ import {
 } from "../../src/models/sessionConfig";
 import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
 import { createFrameBrokerDaemonClient, type BrokerDaemonClient } from "./brokerDaemonClient";
-import { BrokerDeviceLedger } from "./brokerDeviceLedger";
+import { BrokerDeviceLedger, BrokerDeviceInfoRefusedError } from "./brokerDeviceLedger";
 import {
   brokerClient,
   brokerSocketPath,
@@ -586,6 +586,11 @@ async function recordReadyBrokerInfo(
     ledger.info(context.name, init, info);
     deps.writeJson(join(context.dir, "info.json"), info);
   } catch (error) {
+    if (error instanceof BrokerDeviceInfoRefusedError) {
+      ledger.record("leaked", { ...grant, device: error.device });
+      deps.log(error.message);
+      return;
+    }
     // Ready grants remain usable; the ledger explicitly marks unverifiable absence on release.
     deps.log(`Native device info unavailable: ${errorMessage(error)}`);
   }

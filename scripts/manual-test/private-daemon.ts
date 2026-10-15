@@ -21,7 +21,10 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
-import { SESSION_BROKER_HOST_CONFIG_ENV } from "../../src/daemon/sessionBroker/hostConfig";
+import {
+  parseSessionBrokerHostConfig,
+  SESSION_BROKER_HOST_CONFIG_ENV,
+} from "../../src/daemon/sessionBroker/hostConfig";
 import {
   BrokerBatchRequestIds,
   parseBrokerBatch,
@@ -105,6 +108,7 @@ const brokerManifestSchema = z
     daemon: z.literal(1),
     hostConfig: z.literal("broker/host-config.json"),
     allowReuse: z.boolean().optional(),
+    maxDevices: z.number().int().min(1).max(4).optional(),
   })
   .strict();
 type BrokerManifest = z.infer<typeof brokerManifestSchema>;
@@ -847,6 +851,21 @@ async function runExistingBatch(
   }
   if (command.op === "start") {
     assertBrokerPaths(batch, deps);
+    if (batch.broker) {
+      const host = parseSessionBrokerHostConfig(
+        JSON.parse(deps.readFile(join(options.batchDir, batch.broker.hostConfig))),
+      );
+      parseBrokerBatch(
+        {
+          schemaVersion: 1,
+          limits: host.limits,
+          defaults: host.defaults,
+          reuseCleanDevices: host.reuseCleanDevices,
+          clients: [],
+        },
+        { maxDevices: batch.broker.maxDevices ?? 2, allowReuse: batch.broker.allowReuse ?? false },
+      );
+    }
     preflightStart(selected, deps);
     await recordHostPreflight(options.batchDir, deps);
     await recordHostBaseline(options.batchDir, deps);
@@ -891,6 +910,7 @@ export async function runPrivateDaemonCommand(
                     daemon: 1,
                     hostConfig: "broker/host-config.json",
                     allowReuse: command.allowReuse ?? false,
+                    maxDevices: command.maxDevices ?? 2,
                   } as const,
                 }
               : {}),

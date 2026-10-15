@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { join } from "node:path";
 import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
+import { BrokerDeviceInfoRefusedError } from "../../scripts/manual-test/brokerDeviceLedger";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import type { HostBaseline } from "../../scripts/manual-test/privateDaemonDevices";
@@ -1120,7 +1121,10 @@ test.each(["protected", "name-only", "serial-reused", "plain-name", "released"])
   "broker view classifies %s conservatively",
   async (kind) => {
     const f = await deviceFixture(kind === "protected" ? ["ambroker-ledger"] : []);
-    const ledger = await addBrokerLedger(f);
+    const ledger = kind === "protected" ? undefined : await addBrokerLedger(f);
+    if (kind === "protected") {
+      await expect(addBrokerLedger(f)).rejects.toBeInstanceOf(BrokerDeviceInfoRefusedError);
+    }
     const name =
       kind === "name-only"
         ? "ambroker-unrecorded"
@@ -1130,7 +1134,7 @@ test.each(["protected", "name-only", "serial-reused", "plain-name", "released"])
             ? "owner-device"
             : "ambroker-ledger";
     if (kind === "released") {
-      ledger.record("released", ledger.devices()[0]);
+      ledger!.record("released", ledger!.devices()[0]);
     }
     inventoryRows(f, [row("emulator-5556", name)]);
     expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);

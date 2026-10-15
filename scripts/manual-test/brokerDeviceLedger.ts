@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
+import { readBrokerProtectedDevices } from "./brokerClientFiles";
 import type { BrokerDaemonClient } from "./brokerDaemonClient";
 import {
   matchesProtection,
@@ -10,7 +11,7 @@ import {
   type DeviceIdentity,
 } from "./privateDaemonDeviceEvidence";
 
-const nativeSchema = z.object({
+export const brokerNativeDeviceSchema = z.object({
   name: z.string().min(1),
   deviceId: z.string().min(1),
   platform: z.enum(["android", "ios"]),
@@ -20,17 +21,17 @@ const grantSchema = z.object({
   requestId: z.string().min(1),
   sessionUuid: z.string().min(1),
 });
-const entrySchema = z.object({
+export const brokerLedgerEntrySchema = z.object({
   batchDir: z.string(),
   client: z.string().regex(/^[a-z0-9-]{1,32}$/),
   requestId: z.string().min(1),
   sessionUuid: z.string().min(1),
   at: z.number().finite(),
   kind: z.enum(["acquired", "info", "released", "absent", "leaked"]),
-  device: nativeSchema.optional(),
+  device: brokerNativeDeviceSchema.optional(),
   absence: z.literal("not-verifiable").optional(),
 });
-export type BrokerLedgerEntry = z.infer<typeof entrySchema>;
+export type BrokerLedgerEntry = z.infer<typeof brokerLedgerEntrySchema>;
 export interface BrokerLedgerFs {
   exists(path: string): boolean;
   readFile(path: string): string;
@@ -41,6 +42,15 @@ export interface BrokerLedgerFs {
 export interface LedgerDevicesView {
   devices: Array<Pick<DeviceIdentity, "name" | "deviceId" | "platform">>;
   daemons: Array<{ alive: boolean; error?: string }>;
+}
+export class BrokerDeviceInfoRefusedError extends Error {
+  constructor(
+    readonly device: z.infer<typeof brokerNativeDeviceSchema>,
+    reason: string,
+  ) {
+    super(`Native device info refused: ${reason}.`);
+    this.name = "BrokerDeviceInfoRefusedError";
+  }
 }
 /** The acquired event durably records a ready init.json.session, including archived attempts. */
 export class BrokerDeviceLedger {
@@ -69,7 +79,7 @@ export class BrokerDeviceLedger {
         throw new Error("Incomplete broker ledger record; refusing ownership inference.");
       }
       for (const line of bytes.split("\n").filter(Boolean)) {
-        const entry = entrySchema.parse(JSON.parse(line));
+        const entry = brokerLedgerEntrySchema.parse(JSON.parse(line));
         if (entry.batchDir !== this.batchDir) {
           throw new Error("Broker ledger belongs to another batch.");
         }
@@ -120,9 +130,25 @@ export class BrokerDeviceLedger {
   }
   info(client: string, init: unknown, info: unknown): BrokerLedgerEntry {
     const { session } = z.object({ session: grantSchema }).parse(init);
-    const binding = z.object({ sessionId: z.string(), nativeDevice: nativeSchema }).parse(info);
+    const binding = z
+      .object({ sessionId: z.string(), nativeDevice: brokerNativeDeviceSchema })
+      .parse(info);
     if (binding.sessionId !== session.sessionUuid) {
       throw new Error("Native device info does not match the ready session.");
+    }
+    if (
+      matchesProtection(
+        binding.nativeDevice,
+        readBrokerProtectedDevices(this.batchDir, this.options.fs),
+      )
+    ) {
+      throw new BrokerDeviceInfoRefusedError(binding.nativeDevice, "protected device");
+    }
+    if (!isSessionBrokerDeviceName(binding.nativeDevice.name)) {
+      throw new BrokerDeviceInfoRefusedError(
+        binding.nativeDevice,
+        "device name is not product-owned",
+      );
     }
     const grant = this.acquired(client, init);
     const previous = this.devices().find((row) => sameGrant(row, grant));
@@ -181,7 +207,7 @@ export class BrokerDeviceLedger {
   }
   private append(input: Omit<BrokerLedgerEntry, "at" | "batchDir">): BrokerLedgerEntry {
     this.reload();
-    const row = entrySchema.parse({
+    const row = brokerLedgerEntrySchema.parse({
       ...input,
       batchDir: this.batchDir,
       at: this.options.timer.now(),

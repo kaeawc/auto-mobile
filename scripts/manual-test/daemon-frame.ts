@@ -5,6 +5,10 @@ import * as daemonConstants from "../../src/daemon/constants";
 import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
 import { substituteFramePlaceholders, type BrokerFrameIdentity } from "./daemonFramePlaceholders";
 import { existsSync, readFileSync } from "node:fs";
+import { z } from "zod";
+import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
+import { matchesProtection } from "./privateDaemonDeviceEvidence";
+import { brokerLedgerEntrySchema, brokerNativeDeviceSchema } from "./brokerDeviceLedger";
 import { Socket } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -30,6 +34,7 @@ import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
 import {
   isBrokerBatch,
   readBrokerClients,
+  readBrokerProtectedDevices,
   readBrokerIdentity,
   resolveBrokerClient,
 } from "./brokerClientFiles";
@@ -553,6 +558,7 @@ function frameGuard(
   params: unknown,
   command: DaemonFrameCommand,
   ownSessionId?: string,
+  binding?: BrokerFrameBinding,
 ): string | undefined {
   if (
     command.brokerBinding &&
@@ -584,6 +590,57 @@ function frameGuard(
         return "Expected lifecycle refusal requires {} or only this client's own sessionUuid; device names and selectors are forbidden.";
       }
       refusalProbe = true;
+    }
+    if (command.brokerBinding && !refusalProbe) {
+      const native = binding?.device;
+      const protectedDevices = binding?.protectedDevices ?? [];
+      if (
+        native &&
+        (matchesProtection(native, protectedDevices) || !isSessionBrokerDeviceName(native.name))
+      ) {
+        return "Protected or non-product native grant refused.";
+      }
+      const matches = (value: unknown, key?: string): boolean => {
+        if (!native) {
+          return false;
+        }
+        if (typeof value === "string") {
+          return (
+            !protectedDevices.includes(value) &&
+            (key === "platform"
+              ? value === native.platform
+              : value === native.deviceId || value === native.name)
+          );
+        }
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return false;
+        }
+        const entries = Object.entries(value);
+        return (
+          entries.some(([field]) => ["name", "deviceId", "avdName", "udid"].includes(field)) &&
+          entries.every(
+            ([field, entry]) =>
+              ["name", "deviceId", "avdName", "udid", "platform"].includes(field) &&
+              matches(entry, field),
+          )
+        );
+      };
+      const inspect = (value: unknown): boolean => {
+        if (Array.isArray(value)) {
+          return value.every(inspect);
+        }
+        if (!value || typeof value !== "object") {
+          return true;
+        }
+        return Object.entries(value).every(([key, entry]) =>
+          ["deviceId", "device", "selector", "avdName", "udid", "deviceName"].includes(key)
+            ? matches(entry)
+            : inspect(entry),
+        );
+      };
+      if (!inspect(tool?.arguments)) {
+        return "Explicit device names and selectors must equal this client's recorded native grant; unknown or protected devices are refused.";
+      }
     }
     const refusal = deviceStartGuardRefusal(tool?.name ?? "", tool?.arguments, {
       // The strict probe shape above contains no native target or selector.
@@ -617,6 +674,8 @@ interface BrokerFrameBinding {
   existingSessionId?: string;
   clients: Map<string, string>;
   frameToken?: string;
+  device?: z.infer<typeof brokerNativeDeviceSchema>;
+  protectedDevices?: string[];
 }
 async function brokerKeeper(
   binding: BrokerFrameBinding,
@@ -739,9 +798,10 @@ function userFramesRefusal(
   frames: UserFrame[],
   command: DaemonFrameCommand,
   ownSessionId?: string,
+  binding?: BrokerFrameBinding,
 ): string | undefined {
   for (const frame of frames) {
-    const refusal = frameGuard(frame.method, frame.params, command, ownSessionId);
+    const refusal = frameGuard(frame.method, frame.params, command, ownSessionId, binding);
     if (refusal) {
       return refusal;
     }
@@ -793,7 +853,45 @@ function readFrameBinding(
     if (!sessionId) {
       throw new Error("Client binding requires a recorded ready grant in init.json.");
     }
-    binding = { ...identity, existingSessionId: sessionId, clients };
+    const infoPath = join(client.dir, "info.json");
+    let device: BrokerFrameBinding["device"];
+    if (deps.exists(infoPath)) {
+      const info = z
+        .object({ sessionId: z.literal(sessionId), nativeDevice: brokerNativeDeviceSchema })
+        .parse(JSON.parse(deps.readFile(infoPath)));
+      device = info.nativeDevice;
+    }
+    const ledgerPath = join(batch!, "evidence/ledger.jsonl");
+    if (deps.exists(ledgerPath)) {
+      const bytes = deps.readFile(ledgerPath);
+      if (bytes && !bytes.endsWith("\n")) {
+        throw new Error("Incomplete broker ledger record.");
+      }
+      for (const line of bytes.split("\n").filter(Boolean)) {
+        const row = brokerLedgerEntrySchema.parse(JSON.parse(line));
+        if (row.batchDir !== resolve(batch!)) {
+          throw new Error("Broker ledger belongs to another batch.");
+        }
+        if (
+          row.client === name &&
+          row.requestId === identity.config.requestId &&
+          row.sessionUuid === sessionId &&
+          row.kind === "info"
+        ) {
+          if (device && JSON.stringify(device) !== JSON.stringify(row.device)) {
+            throw new Error("Conflicting native device info.");
+          }
+          device = row.device;
+        }
+      }
+    }
+    binding = {
+      ...identity,
+      existingSessionId: sessionId,
+      clients,
+      device,
+      protectedDevices: readBrokerProtectedDevices(batch!, deps),
+    };
   } else {
     if (!source.endsWith("request.json")) {
       throw new Error("--broker-binding requires a batch client name or path to request.json.");
@@ -876,7 +974,7 @@ function prepareUserFrames(
       ...frame,
       params: substituteFramePlaceholders(frame.params, planned),
     }));
-    const error = userFramesRefusal(guardedFrames, command, planned?.sessionId);
+    const error = userFramesRefusal(guardedFrames, command, planned?.sessionId, binding);
     return error ? { error } : { frames, binding };
   } catch (error) {
     deps.err(`Invalid JSON/config/placeholders: ${errorMessage(error)}`);
@@ -1035,6 +1133,52 @@ export async function runDaemonFrame(
     deps.err(target.error);
     return 2;
   }
+  // Control sockets can use a short auxiliary root, so also recover the batch from daemon state paths.
+  if (command.brokerBinding) {
+    try {
+      const candidates = [
+        deps.env.MT_BATCH,
+        dirname(dirname(target.socket)),
+        ...[
+          "AUTOMOBILE_DAEMON_PID_FILE_PATH",
+          "AUTOMOBILE_DATA_DIR",
+          "AUTOMOBILE_COORDINATION_DIR",
+        ].map((key) => (deps.env[key] ? dirname(dirname(deps.env[key]!)) : undefined)),
+      ];
+      let batch: string | undefined;
+      for (const candidate of candidates) {
+        if (!candidate) {
+          continue;
+        }
+        let path = resolve(candidate);
+        while (true) {
+          if (isBrokerBatch(path, deps)) {
+            batch = path;
+            break;
+          }
+          const parent = dirname(path);
+          if (parent === path) {
+            break;
+          }
+          path = parent;
+        }
+        if (batch) {
+          break;
+        }
+      }
+      if (batch) {
+        if (command.brokerBinding.endsWith("request.json") && !deps.env.MT_BATCH) {
+          throw new Error(
+            "Untracked broker batch acquisition refused; use --broker-binding <client> from the batch wrapper.",
+          );
+        }
+        deps = { ...deps, env: { ...deps.env, MT_BATCH: batch } };
+      }
+    } catch (error) {
+      deps.err(errorMessage(error));
+      return 2;
+    }
+  }
   const prepared = prepareUserFrames(command, deps, secrets);
   if ("error" in prepared) {
     deps.err(prepared.error);
@@ -1078,7 +1222,7 @@ export async function runDaemonFrame(
         }));
       }
     }
-    const refusal = userFramesRefusal(frames, command, ownSessionId);
+    const refusal = userFramesRefusal(frames, command, ownSessionId, prepared.binding);
     if (refusal) {
       deps.err(refusal);
       return 2;

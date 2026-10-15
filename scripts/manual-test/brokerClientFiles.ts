@@ -45,6 +45,20 @@ export function isBrokerBatch(
       .broker !== undefined
   );
 }
+/** Read protection policy at use time so edited batch evidence cannot grant protected devices. */
+export function readBrokerProtectedDevices(
+  batch: string,
+  deps: Pick<BrokerClientFileDeps, "exists" | "readFile">,
+): string[] {
+  const path = join(batch, "batch.json");
+  return deps.exists(path)
+    ? (z
+        .object({
+          options: z.object({ protectedDevices: z.array(z.string()).optional() }).optional(),
+        })
+        .parse(JSON.parse(deps.readFile(path))).options?.protectedDevices ?? [])
+    : [];
+}
 export function readBrokerClients(
   batch: string | undefined,
   deps: Pick<BrokerClientFileDeps, "readFile">,

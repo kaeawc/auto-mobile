@@ -521,3 +521,18 @@ test.each(["pending", "wrong-session", "wrong-request"])(
     );
   },
 );
+
+test("up reports refused native info and records a leak without granting ledger ownership", async () => {
+  const f = fixture();
+  f.broker.infoResults[0] = {
+    sessionId: "fake-1",
+    nativeDevice: { name: "personal-device", deviceId: "protected", platform: "android" },
+  };
+  expect(await f.run(["up", "--all"])).not.toBe(0);
+  expect(f.logs.join(" ")).toContain("Native device info refused");
+  const ledger = new BrokerDeviceLedger({ batchDir: f.batchDir, fs: f.deps.fs, timer: f.timer });
+  expect(ledger.devices().every((row) => row.device?.name !== "personal-device")).toBe(true);
+  expect(
+    ledger.entries.some((row) => row.kind === "leaked" && row.device?.name === "personal-device"),
+  ).toBe(true);
+});

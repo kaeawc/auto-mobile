@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
   BrokerDeviceLedger,
+  BrokerDeviceInfoRefusedError,
   classifyDevice,
   assertReleasedAndAbsent,
   leakReport,
@@ -320,4 +321,20 @@ test("existing ledger instances see external appends and dedupe ready grants", (
   expect(writer.entries.filter((row) => row.kind === "acquired")).toHaveLength(1);
   writer.record("released", writer.devices()[0]);
   expect(f.ledger.hasEvent(f.ledger.devices()[0], "released")).toBe(true);
+});
+
+test("native info refuses protected or non-product devices without appending anything", () => {
+  for (const [nativeDevice, protectedDevices] of [
+    [{ ...device, name: "personal-device" }, []],
+    [device, [device.deviceId]],
+    [device, [device.name]],
+  ] as const) {
+    const f = fixture();
+    f.files.set("/batch/batch.json", JSON.stringify({ options: { protectedDevices }, broker: {} }));
+    expect(() =>
+      f.ledger.info("phone", f.init, { sessionId: f.init.session.sessionUuid, nativeDevice }),
+    ).toThrow(BrokerDeviceInfoRefusedError);
+    expect(f.appends).toEqual([]);
+    expect(f.ledger.devices()).toEqual([]);
+  }
 });

@@ -1469,3 +1469,25 @@ posixTest(
     expect(f.logs.join(" ")).toContain("Disposable child cleanup failed: child already exited");
   },
 );
+
+posixTest(
+  "up reports refused native info without accepting it or losing the ready grant",
+  async () => {
+    const f = brokerFixture();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.infoResults = [
+      {
+        sessionId: "own-session",
+        nativeDevice: { name: "personal-device", deviceId: "protected", platform: "android" },
+      },
+    ];
+    expect(await f.up()).toBe(0);
+    expect(f.logs.join(" ")).toContain("Native device info refused");
+    const bytes = f.files.get("/batch/evidence/ledger.jsonl")!;
+    expect(bytes).toContain('"kind":"acquired"');
+    expect(bytes).toContain('"kind":"leaked"');
+    expect(bytes).not.toContain('"kind":"info"');
+    expect(f.files.has(join(brokerDir, "info.json"))).toBe(false);
+  },
+);

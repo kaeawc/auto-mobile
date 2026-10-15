@@ -643,6 +643,7 @@ test("broker init persists product configs, client requests and private modes", 
     daemon: 1,
     hostConfig: "broker/host-config.json",
     allowReuse: false,
+    maxDevices: 2,
   });
   expect(read("broker/host-config.json")).toMatchObject({
     contractVersion: 1,
@@ -806,3 +807,79 @@ test("broker init records explicit reuse permission in the broker manifest", asy
     true,
   );
 });
+
+test("broker start revalidates host caps and pooling before host probes or launch", async () => {
+  for (const edit of ["hard-cap", "recorded-cap", "idle-pool", "reuse"]) {
+    const f = brokerFixture();
+    expect(
+      await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--max-devices", "1"]), {
+        ...f.deps,
+        readFile: (path) =>
+          path === "/input/broker-batch.json"
+            ? JSON.stringify({
+                ...brokerBatchInput(),
+                limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+              })
+            : f.deps.readFile(path),
+      }),
+    ).toBe(0);
+    const path = join(options.batchDir, "broker/host-config.json");
+    const host = JSON.parse(f.files.get(path)!);
+    if (edit === "hard-cap") {
+      host.limits.totalDeviceCap = 5;
+    }
+    if (edit === "recorded-cap") {
+      host.limits.totalDeviceCap = 2;
+    }
+    if (edit === "idle-pool") {
+      host.limits.idlePoolCap = 1;
+    }
+    if (edit === "reuse") {
+      host.reuseCleanDevices = true;
+    }
+    f.files.set(path, JSON.stringify(host));
+    f.writes.length = 0;
+    f.captures.length = 0;
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toMatch(/max-devices|idlePoolCap/);
+    expect(f.launches).toEqual([]);
+    expect(f.captures).toEqual([]);
+    expect(f.writes).toEqual([]);
+  }
+});
+
+test("broker start honors explicit reuse permission and the recorded four-device ceiling", async () => {
+  const f = brokerFixture();
+  const input = brokerBatchInput();
+  input.limits = { totalDeviceCap: 4, sessionCap: 4, idlePoolCap: 1 };
+  input.reuseCleanDevices = true;
+  f.files.set("/input/broker-batch.json", JSON.stringify(input));
+  expect(
+    await runPrivateDaemonCommand(
+      parsed([...brokerInitArgs(), "--max-devices", "4", "--allow-reuse"]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(
+    await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(0);
+  expect(f.launches).toHaveLength(2);
+});
+test.each([0, 5, 1.5])(
+  "broker start refuses invalid recorded maxDevices %s",
+  async (maxDevices) => {
+    const f = brokerFixture();
+    expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
+    const path = join(options.batchDir, "batch.json");
+    const manifest = JSON.parse(f.files.get(path)!);
+    manifest.broker.maxDevices = maxDevices;
+    f.files.set(path, JSON.stringify(manifest));
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toContain("maxDevices");
+    expect(f.launches).toEqual([]);
+  },
+);

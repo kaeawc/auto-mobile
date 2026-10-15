@@ -1645,3 +1645,169 @@ posixTest("an isError envelope with an unrelated message never counts as refused
     ),
   ).toBe(2);
 });
+
+const grantedNative = { name: "ambroker-own", deviceId: "emulator-5556", platform: "android" };
+posixTest("broker-bound calls confine every native target to the recorded grant", async () => {
+  for (const args of [
+    { deviceId: "emulator-5554" },
+    { device: { deviceId: "emulator-5554" } },
+    { device: { name: "protected-avd" } },
+    { nested: [{ deviceId: "emulator-5554" }] },
+    { device: { platform: "ios" } },
+    { selector: { platform: "android" } },
+  ]) {
+    const f = batchFixture();
+    f.files.set(
+      join(f.batch, "batch.json"),
+      JSON.stringify({
+        options: { protectedDevices: ["emulator-5554", "protected-avd"] },
+        broker: {},
+      }),
+    );
+    f.files.set(
+      join(f.batch, "sessions/a/info.json"),
+      JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+    );
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          JSON.stringify({
+            name: "observe",
+            arguments: { sessionUuid: "{{ownSessionId}}", ...args },
+          }),
+          "--broker-binding",
+          "a",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.paths).toEqual([]);
+  }
+});
+posixTest("broker-bound calls refuse named devices when native identity is unknown", async () => {
+  const f = batchFixture();
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "tools/call",
+        JSON.stringify({ name: "observe", arguments: { deviceId: "emulator-5556" } }),
+        "--broker-binding",
+        "a",
+      ]),
+      f.deps,
+    ),
+  ).toBe(2);
+  expect(f.paths).toEqual([]);
+});
+posixTest(
+  "broker batch socket and daemon directory refuse untracked bindings without MT_BATCH",
+  async () => {
+    for (const socket of [
+      "/fake/batch/daemon1/d.sock",
+      "/fake/batch/aux/1/d.sock",
+      "/fake/aux/d.sock",
+    ]) {
+      const f = batchFixture();
+      delete f.deps.env.MT_BATCH;
+      f.files.delete(join(f.batch, "broker/clients.json"));
+      f.files.set(join(f.batch, "batch.json"), JSON.stringify({ broker: {} }));
+      f.files.set("/untracked/request.json", JSON.stringify(request));
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "ide/status",
+            "--socket",
+            socket,
+            "--broker-binding",
+            "/untracked/request.json",
+          ]),
+          f.deps,
+        ),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+      expect(f.err.join(" ")).toContain("Untracked broker batch acquisition refused");
+    }
+  },
+);
+
+posixTest(
+  "native grant evidence allows only its device, including ledger-only bindings",
+  async () => {
+    for (const evidence of ["info", "ledger"]) {
+      const f = batchFixture();
+      if (evidence === "info") {
+        f.files.set(
+          join(f.batch, "sessions/a/info.json"),
+          JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+        );
+      } else {
+        const identity = {
+          batchDir: f.batch,
+          client: "a",
+          requestId: "batch-a-1",
+          sessionUuid: "session-a",
+          at: 0,
+        };
+        f.files.set(
+          join(f.batch, "evidence/ledger.jsonl"),
+          [
+            { ...identity, kind: "acquired" },
+            { ...identity, kind: "info", device: grantedNative },
+          ]
+            .map((row) => JSON.stringify(row) + "\n")
+            .join(""),
+        );
+      }
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "tools/call",
+            JSON.stringify({
+              name: "observe",
+              arguments: {
+                sessionUuid: "{{ownSessionId}}",
+                deviceId: grantedNative.deviceId,
+                device: grantedNative,
+              },
+            }),
+            "--broker-binding",
+            "a",
+          ]),
+          f.deps,
+        ),
+      ).toBe(0);
+    }
+  },
+);
+posixTest(
+  "a protected recorded native grant is refused even without a device override",
+  async () => {
+    const f = batchFixture();
+    f.files.set(
+      join(f.batch, "batch.json"),
+      JSON.stringify({ options: { protectedDevices: [grantedNative.deviceId] }, broker: {} }),
+    );
+    f.files.set(
+      join(f.batch, "sessions/a/info.json"),
+      JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+    );
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"observe","arguments":{"sessionUuid":"{{ownSessionId}}"}}',
+          "--broker-binding",
+          "a",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.paths).toEqual([]);
+  },
+);

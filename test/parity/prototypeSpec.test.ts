@@ -230,3 +230,23 @@ test("non JSON numeric tokens and literal string controls are rejected", () => {
     }
   }
 });
+
+test("menu/select fixtures cover the new capability's two nodes", () => {
+  expect(valid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(["menu-overflow.json", "select-dropdown.json"]),
+  );
+  expect(invalid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining([
+      "menu-no-items.json",
+      "menu-too-many-items.json",
+      "menu-item-unknown-field.json",
+      "menu-divider-with-label.json",
+      "menu-open-state-type.json",
+      "menu-empty-label.json",
+      "select-one-option.json",
+      "select-33-options.json",
+      "select-duplicate-values.json",
+      "select-state-type.json",
+    ]),
+  );
+});

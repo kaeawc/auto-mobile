@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "child": {
+        "type": "text",
+        "text": "Result"
+      }
+    }
+  },
+  "expectedPath": "root.child",
+  "expectedMessage": "Search bar child requires activeKey"
+}

@@ -108,4 +108,46 @@ describe("refused show event ownership", () => {
     expect(client.getPrototypeListenerCount()).toBe(0);
     expect((await call({ action: "status" })).prototypes).toEqual([]);
   });
+  test("emit context refuses before dispatch, names its path, and passes through awaitEvent when supported", async () => {
+    const withContext = {
+      ...spec,
+      root: {
+        ...spec.root,
+        onTap: [{ type: "emit", name: "pick", context: { id: { value: 3 } } }],
+      },
+    };
+    const refused = await call({ action: "show", spec: withContext });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("prototype_emit_context_v1");
+    expect(refused.error).toContain("root.onTap[0].context");
+    expect(client.getPrototypeHistory()).toEqual([]);
+    client.setSupportedCommands(["prototype_emit_context_v1"]);
+    expect((await call({ action: "show", spec: withContext })).success).toBe(true);
+    const pushed = { ...event(1), context: { id: 3 }, contextTruncated: true as const };
+    client.emitPrototypeEvent(pushed);
+    expect((await call({ action: "awaitEvent", id: "panel" })).event).toMatchObject({
+      context: { id: 3 },
+      contextTruncated: true,
+    });
+    expect((await call({ action: "status" })).prototypes?.[0]).toMatchObject({
+      context: { id: 3 },
+      contextTruncated: true,
+    });
+  });
+  test("context data binding also requires the data capability", async () => {
+    client.setSupportedCommands(["prototype_emit_context_v1"]);
+    const refused = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        root: {
+          ...spec.root,
+          onTap: [{ type: "emit", name: "pick", context: { row: { data: "/row" } } }],
+        },
+      },
+    });
+    expect(refused.error).toContain("prototype_data_model_v1");
+    expect(refused.error).toContain("root.onTap[0].context.row");
+    expect(client.getPrototypeHistory()).toEqual([]);
+  });
 });

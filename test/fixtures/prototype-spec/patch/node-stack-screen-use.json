@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "patch-stack",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "column",
+      "children": [{ "type": "text", "id": "nav", "text": "Old" }]
+    }
+  },
+  "ops": [
+    {
+      "op": "replaceNode",
+      "id": "nav",
+      "node": {
+        "type": "stack",
+        "id": "nav",
+        "start": "home",
+        "screens": {
+          "home": { "type": "text", "text": "Home" },
+          "detail \"quoted\"": { "type": "use", "component": "Thing" }
+        }
+      }
+    }
+  ],
+  "stage": "apply",
+  "expectedPath": "ops[0].node.screens[\"detail \\\"quoted\\\"\"].type",
+  "expectedMessage": "Components are not expanded in a patch: inline the node or use show"
+}

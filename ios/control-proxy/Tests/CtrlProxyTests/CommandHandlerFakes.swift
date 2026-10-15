@@ -94,6 +94,7 @@ final class FakeGesturePerformer: GesturePerforming {
     private var keyboardOpen = false
     var keyCalls: [(String, [String])] = []
     var keyError: (any Error)?
+    var doubleTapPoints: [GesturePoint] = []
     var tapCalls = 0
     var tapDurations: [TimeInterval] = []
     var lastTap: (x: Double, y: Double)?
@@ -136,6 +137,10 @@ final class FakeGesturePerformer: GesturePerforming {
 
     func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome {
         try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers), warning: keyWarning)
+    }
+
+    func doubleTap(x: Double, y: Double) throws {
+        doubleTapPoints.append(.init(x: x, y: y))
     }
 
     func tap(x: Double, y: Double, duration: TimeInterval) throws {
@@ -339,6 +344,10 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         selections.append(selection)
         return selection
     }
+
+    var doubleTaps = 0
+
+    func doubleTap(_: GestureCoordinateSelection) throws { doubleTaps += 1 }
 
     func tap(_: GestureCoordinateSelection, duration: TimeInterval) throws {
         tapDurations.append(duration)

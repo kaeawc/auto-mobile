@@ -87,7 +87,7 @@ struct DisplayGestureDelivery<Coordinate> {
 }
 
 /// Taps, single-finger swipes, drags and two-finger pinches use this route. The host sends long
-/// presses as taps with a press duration and double taps as two taps. Other gestures keep their
+/// presses as taps with a press duration and double taps as one runner-side gesture. Other gestures keep their
 /// existing paths.
 @MainActor
 struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
@@ -150,6 +150,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     func deliver(
         start: GesturePoint, end: GesturePoint? = nil, press: TimeInterval, move: TimeInterval = 0,
         hold: TimeInterval = 0, velocity: Double? = nil, forced: TapCoordinateStrategy? = nil,
+        doubleTap: Bool = false,
         beforeAction: (DisplayGestureDelivery<Provider.Coordinate>) -> Void = { _ in }
     )
         throws -> DisplayGestureDelivery<Provider.Coordinate>
@@ -157,7 +158,8 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         var selected = selection(point: start, forced: forced)
         let endSelection = selection(point: end ?? start, forced: forced)
         var fallback: TapCoordinateStrategy?
-        if selected.strategy.targetsDisplay,
+        // Double taps use the same coordinate fallback, never a single synthesized touch.
+        if !doubleTap, selected.strategy.targetsDisplay,
            let displayId = inventory?.target.displayId,
            let startPoint = point(start, selection: selected),
            let endPoint = point(end ?? start, selection: endSelection)
@@ -192,7 +194,11 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             try provider.drag(coordinate, to: endCoordinate, press: press, velocity: velocity, hold: hold)
         } else {
             beforeAction(delivery)
-            try provider.tap(coordinate, duration: press)
+            if doubleTap {
+                try provider.doubleTap(coordinate)
+            } else {
+                try provider.tap(coordinate, duration: press)
+            }
         }
         return delivery
     }

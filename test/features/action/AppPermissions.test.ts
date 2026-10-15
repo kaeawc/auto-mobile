@@ -27,6 +27,7 @@ const iosSimulator: BootedDevice = {
   name: "iPhone 16",
   platform: "ios",
   deviceId: "12345678-1234-1234-1234-123456789ABC",
+  iosVersion: "27.0",
 };
 
 const iosPhysical: BootedDevice = {

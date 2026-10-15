@@ -22,6 +22,7 @@ import { up as addStableDeviceIdentityWriterFence } from "../../src/db/migration
 import { up as addLivenessOwner } from "../../src/db/migrations/2026_09_16_000_device_session_liveness_owner";
 import { up as addLivenessContract } from "../../src/db/migrations/2026_09_16_001_device_session_liveness_contract";
 import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17_000_device_session_liveness_writer_fence";
+import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_000_device_session_activity_seq";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -77,6 +78,7 @@ beforeEach(async () => {
     addLivenessOwner,
     addLivenessContract,
     addLivenessWriterFence,
+    addActivitySequence,
   ]) {
     await migrate(db as Kysely<unknown>);
   }

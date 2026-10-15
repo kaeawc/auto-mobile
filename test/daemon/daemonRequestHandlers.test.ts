@@ -935,14 +935,20 @@ describe("handleDaemonRequest", () => {
       created_at: "2026-09-14T00:00:00.000Z",
       updated_at: "2026-09-14T00:00:00.000Z",
     };
-    const persistence: DeviceSessionPersistence = {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession() {},
-      async recordActivity() {},
-      async markReleased() {},
-    };
+    const persistence: DeviceSessionPersistence = Object.assign(
+      new FakeDeviceSessionPersistence(),
+      {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+    );
     const restartedManager = new SessionManager(fakeTimer, persistence);
     const recoverer: SessionDeviceAssigner = {
       async assignDeviceToSession(recoveredSessionId, _platform, target): Promise<string> {

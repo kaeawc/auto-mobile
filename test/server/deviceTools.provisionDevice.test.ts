@@ -5112,9 +5112,12 @@ describe("provisionDevice handler", () => {
     const releaseFinished = Promise.withResolvers<void>();
     const timer = new FakeTimer();
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.upsertActiveSession = async () => {
+    const upsertActiveSession = persistence.upsertActiveSession.bind(persistence);
+    persistence.upsertActiveSession = async (...args) => {
       activeSessionWriteStarted.resolve();
       await activeSessionWriteFinished.promise;
+      // The delayed write must land before ownership and cancellation can release its row.
+      return await upsertActiveSession(...args);
     };
     persistence.markReleased = async () => {
       releaseStarted.resolve();

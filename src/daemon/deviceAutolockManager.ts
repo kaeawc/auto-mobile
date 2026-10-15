@@ -419,6 +419,7 @@ export class DeviceAutolockManager {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
         lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        activitySeq: session.lastUsedAt,
         expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       try {
@@ -863,6 +864,7 @@ export class DeviceAutolockManager {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
         lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        activitySeq: session.lastUsedAt,
         expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       return "attached";

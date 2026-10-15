@@ -34,11 +34,37 @@ final class PrototypeTapDisambiguatorTests: XCTestCase {
         XCTAssertTrue(resolver.expire(at: 1))
     }
 
-    func testDoubleTapIncludesWindowBoundary() {
+    func testTapAtWindowBoundaryStartsNewPendingSingle() {
         var resolver = PrototypeTapDisambiguator()
         XCTAssertEqual(resolver.tap(at: 0), .deferSingle(deadline: 0.35))
-        XCTAssertEqual(resolver.tap(at: 0.35), .fireDouble)
+        XCTAssertEqual(resolver.tap(at: 0.35), .deferSingle(deadline: 0.35 + 0.35))
+        XCTAssertTrue(resolver.expire(at: 1))
+    }
+
+    func testDoubleTapJustUnderWindowBoundary() {
+        var resolver = PrototypeTapDisambiguator()
+        XCTAssertEqual(resolver.tap(at: 0), .deferSingle(deadline: 0.35))
+        XCTAssertEqual(resolver.tap(at: PrototypeTapDisambiguator.doubleTapWindow.nextDown), .fireDouble)
         XCTAssertFalse(resolver.expire(at: 1))
+    }
+
+    func testFlushClearsPendingSingleExactlyOnce() {
+        var resolver = PrototypeTapDisambiguator()
+        XCTAssertEqual(resolver.tap(at: 0), .deferSingle(deadline: 0.35))
+        XCTAssertTrue(resolver.flush())
+        XCTAssertFalse(resolver.flush())
+    }
+
+    func testFlushWithoutPendingSingleReturnsFalse() {
+        var resolver = PrototypeTapDisambiguator()
+        XCTAssertFalse(resolver.flush())
+    }
+
+    func testTapAfterFlushStartsNewPendingSingle() {
+        var resolver = PrototypeTapDisambiguator()
+        XCTAssertEqual(resolver.tap(at: 0), .deferSingle(deadline: 0.35))
+        XCTAssertTrue(resolver.flush())
+        XCTAssertEqual(resolver.tap(at: 0.1), .deferSingle(deadline: 0.1 + 0.35))
     }
 
     func testWindowCanBeInjected() {

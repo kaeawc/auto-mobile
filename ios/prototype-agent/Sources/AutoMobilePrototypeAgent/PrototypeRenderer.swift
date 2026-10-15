@@ -1094,7 +1094,7 @@ private struct TapModifier: ViewModifier {
                     return
                 }
                 guard !Task.isCancelled else { return }
-                if tapResolver.disambiguator.expire(at: ProcessInfo.processInfo.systemUptime) {
+                if tapResolver.disambiguator.flush() {
                     tapResolver.pendingTask = nil
                     model.activate(.node(node))
                 }

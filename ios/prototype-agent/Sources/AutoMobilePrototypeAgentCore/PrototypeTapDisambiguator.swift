@@ -17,7 +17,7 @@ struct PrototypeTapDisambiguator {
     }
 
     mutating func tap(at now: TimeInterval) -> Decision {
-        if let pendingSince, now - pendingSince <= window {
+        if let pendingSince, now - pendingSince < window {
             self.pendingSince = nil
             return .fireDouble
         }
@@ -29,6 +29,12 @@ struct PrototypeTapDisambiguator {
     mutating func expire(at now: TimeInterval) -> Bool {
         guard let pendingSince, now - pendingSince >= window else { return false }
         self.pendingSince = nil
+        return true
+    }
+
+    mutating func flush() -> Bool {
+        guard pendingSince != nil else { return false }
+        pendingSince = nil
         return true
     }
 }

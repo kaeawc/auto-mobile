@@ -47,6 +47,7 @@ export interface EmulatorLossIncident {
     signal: NodeJS.Signals | null;
   };
   outputTail?: string;
+  outputUnavailable?: "adopted";
   lastAdbState?: string;
   session?: EmulatorLossSessionSnapshot;
   replacementDeviceId?: string;
@@ -63,6 +64,7 @@ export interface OpenEmulatorLossIncidentInput {
   detectionPath: EmulatorLossDetectionPath;
   processExit?: EmulatorLossIncident["processExit"];
   outputTail?: string;
+  outputUnavailable?: "adopted";
   lastAdbState?: string;
   session?: EmulatorLossSessionSnapshot;
   recoveryPolicy: DeviceRecoveryPolicy;
@@ -119,6 +121,9 @@ export class InMemoryEmulatorLossIncidentStore implements EmulatorLossIncidentSt
       detectionPath: input.detectionPath,
       ...(input.processExit ? { processExit: { ...input.processExit } } : {}),
       ...(input.outputTail ? { outputTail: input.outputTail } : {}),
+      ...(input.outputUnavailable === "adopted"
+        ? { outputUnavailable: input.outputUnavailable }
+        : {}),
       ...(input.lastAdbState ? { lastAdbState: input.lastAdbState } : {}),
       ...(input.session ? { session: { ...input.session } } : {}),
       recovery: {

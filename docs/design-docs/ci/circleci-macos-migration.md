@@ -31,7 +31,7 @@ needs a login.
 ### Xcode 26.5 / 26.6 images
 
 Both exist and are current (not deprecated) on the
-[Xcode image list](https://circleci.com/docs/guides/execution-managed/using-macos/#supported-xcode-versions):
+[Xcode image list](https://circleci.com/docs/guides/execution-managed/using-macos/):
 
 | `xcode:` tag | Xcode build   | Image macOS      | iOS runtime | Manifest                                                                                |
 | ------------ | ------------- | ---------------- | ----------- | --------------------------------------------------------------------------------------- |

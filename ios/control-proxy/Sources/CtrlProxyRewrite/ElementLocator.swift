@@ -154,7 +154,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// `catchingObjCException` for protocol methods that cannot propagate errors: a caught
         /// `NSException` is logged and `fallback` returned. Under `@MainActor` the reference's
         /// `main.sync` thread-hop is gone (we already run on main); only the XCUITest
-        /// `NSException` guard `runOnMainThreadNonThrowing` also provided remains necessary.
+        /// `NSException` guard remains necessary.
         func catchingObjCExceptionNonThrowing<T>(_ block: () -> T, fallback: T) -> T {
             do {
                 return try catchingObjCException(block)

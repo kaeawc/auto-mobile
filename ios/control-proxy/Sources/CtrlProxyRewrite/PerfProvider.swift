@@ -70,17 +70,6 @@ final class PerfProvider: PerfTracking {
 
     func parallel(_ name: String) { start(name) }
 
-    func independentRoot(_ name: String) {
-        guard let id = Self.activeScopeID else { return }
-        let now = timeProvider.currentTimeMillis()
-        shared.withLock { state in
-            guard var scope = state.scopes[id] else { return }
-            closeOpenIntervals(&scope, at: now, into: &state.completed)
-            start(name, at: now, in: &scope)
-            state.scopes[id] = scope
-        }
-    }
-
     private func start(_ name: String) {
         guard let id = Self.activeScopeID else { return }
         let now = timeProvider.currentTimeMillis()

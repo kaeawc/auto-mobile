@@ -840,37 +840,6 @@ describe("decodeCtrlProxyMessage", () => {
 });
 
 /**
- * Parse every `case` rawValue from the Swift `ResponseType: String` enum.
- *
- * Swift String-enum semantics: a case without an explicit `= "..."` uses the
- * case name itself as its rawValue (e.g. `case screenshot` → "screenshot"), so
- * we fall back to the identifier when no string literal is present.
- */
-function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
-  const lines = swiftSource.split("\n");
-  // Tolerate extra protocol conformances after `String` (e.g. `String, Sendable`), which the
-  // rewrite's `ResponseType.swift` declares — `[^{]*` spans them up to the opening brace.
-  const startIdx = lines.findIndex((line) =>
-    /enum\s+ResponseType\s*:\s*String\b[^{]*\{/.test(line),
-  );
-  if (startIdx < 0) {
-    throw new Error("Could not locate `enum ResponseType: String` in ResponseType.swift");
-  }
-  const rawValues: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() === "}") {
-      break; // end of the (brace-flat) enum body
-    }
-    const match = line.match(/^\s*case\s+([A-Za-z0-9_]+)(?:\s*=\s*"([^"]+)")?/);
-    if (match) {
-      rawValues.push(match[2] ?? match[1]);
-    }
-  }
-  return rawValues;
-}
-
-/**
  * A rawValue is "explicitly decoded" when a dedicated decoder
  * reshapes it into a fresh result object. The default branch, by contrast,
  * resolves the message verbatim (`result === message` by identity), so identity
@@ -934,14 +903,12 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
 ];
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
-  const swiftSource = readFileSync(
-    join(
-      import.meta.dir,
-      "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/ResponseType.swift",
+  const { responseTypes: rawValues } = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../../fixtures/ios-contract/runner-responses.json"),
+      "utf8",
     ),
-    "utf8",
-  );
-  const rawValues = parseSwiftResponseTypeRawValues(swiftSource);
+  ) as { responseTypes: string[] };
 
   // Response types the daemon deliberately does NOT reshape: they reach the
   // decoder's default verbatim-resolve branch on purpose because no client

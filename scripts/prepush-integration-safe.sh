@@ -14,7 +14,7 @@
 # directory it would be created in) resolves under ~/.auto-mobile or
 # /tmp/auto-mobile-daemon-*.
 #
-#   bash scripts/prepush-integration-safe.sh
+#   bash scripts/prepush-integration-safe.sh [safe-test-path ...]
 #
 # Environment:
 #   AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE  Override the tier list (tests).
@@ -89,6 +89,22 @@ safe_files=()
 while IFS= read -r path; do
   safe_files+=("$path")
 done < <(integration_tier_paths "$tier_file" safe)
+
+if [[ "$#" -gt 0 ]]; then
+  requested_files=()
+  for requested in "$@"; do
+    found=0
+    for safe in ${safe_files[@]+"${safe_files[@]}"}; do
+      if [[ "$requested" == "$safe" ]]; then found=1; break; fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      echo "Not in safe integration tier: $requested" >&2
+      exit 2
+    fi
+    requested_files+=("$requested")
+  done
+  safe_files=("${requested_files[@]}")
+fi
 
 if [[ "${#safe_files[@]}" -eq 0 ]]; then
   echo "No safe integration files listed in ${tier_file}." >&2

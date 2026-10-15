@@ -155,7 +155,62 @@ export function createFrameBrokerDaemonClient(options: {
       }
       return receipt;
     },
-    info: (sessionId) => result("daemon/sessionInfo", { sessionId }),
+    info: async (sessionId) => {
+      const sessionSchema = z
+        .object({
+          sessionId: z.literal(sessionId),
+          assignedDevice: z.string(),
+          platform: z.enum(["android", "ios"]),
+        })
+        .passthrough();
+      const info = sessionSchema.parse(await result("daemon/sessionInfo", { sessionId }));
+      // sessionInfo currently returns only the serial/UDID. Resolve its name through the
+      // same daemon inventory used by the batch devices view, never a native host probe.
+      const envelope = z
+        .object({
+          isError: z.boolean().optional(),
+          structuredContent: z.unknown().optional(),
+          content: z.array(z.object({ type: z.string(), text: z.string().optional() })).optional(),
+        })
+        .parse(await result("tools/call", { name: "listDevices", arguments: {} }));
+      if (envelope.isError) {
+        throw new Error("Broker native device inventory refused.");
+      }
+      const payload =
+        envelope.structuredContent ??
+        JSON.parse(envelope.content?.find((item) => item.type === "text")?.text ?? "null");
+      const inventory = z
+        .object({
+          devices: z.array(
+            z.object({
+              name: z.string().min(1),
+              platform: z.enum(["android", "ios"]),
+              runtime: z.object({ deviceId: z.string().nullable() }),
+            }),
+          ),
+        })
+        .parse(payload);
+      const matches = inventory.devices.filter(
+        (device) =>
+          device.runtime.deviceId === info.assignedDevice && device.platform === info.platform,
+      );
+      if (matches.length !== 1) {
+        throw new Error("Broker native device name is missing or ambiguous.");
+      }
+      // Do not bind a recycled serial if release raced the inventory lookup.
+      const current = sessionSchema.parse(await result("daemon/sessionInfo", { sessionId }));
+      if (current.assignedDevice !== info.assignedDevice || current.platform !== info.platform) {
+        throw new Error("Broker native device binding changed during info.");
+      }
+      return {
+        ...info,
+        nativeDevice: {
+          name: matches[0].name,
+          deviceId: info.assignedDevice,
+          platform: info.platform,
+        },
+      };
+    },
     capabilities: async () =>
       z.object({ capabilities: z.array(z.string()) }).parse(await result("daemon/capabilities", {}))
         .capabilities,

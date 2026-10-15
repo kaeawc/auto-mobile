@@ -10,6 +10,33 @@ import {
   type BrokerDaemonClient,
 } from "./brokerDaemonClient";
 import type { ProxySessionCommand, ProxySessionDeps } from "./proxy-session";
+import { BrokerDeviceLedger } from "./brokerDeviceLedger";
+
+function deviceLedger(context: BrokerClientFiles, deps: ProxySessionDeps): BrokerDeviceLedger {
+  return new BrokerDeviceLedger({ batchDir: context.batch, fs: deps, timer: deps.timer });
+}
+function readyLedger(context: BrokerClientFiles, deps: ProxySessionDeps): BrokerDeviceLedger {
+  const ledger = deviceLedger(context, deps);
+  const init = JSON.parse(deps.readFile(join(context.dir, "init.json")));
+  const { config } = readBrokerIdentity(context, deps);
+  z.object({ session: z.object({ requestId: z.literal(config.requestId) }) }).parse(init);
+  ledger.acquired(context.name, init);
+  return ledger;
+}
+function recordBrokerRelease(context: BrokerClientFiles, deps: ProxySessionDeps): void {
+  const ledger = readyLedger(context, deps);
+  const { config } = readBrokerIdentity(context, deps);
+  const grant = ledger.entries.find(
+    (entry) =>
+      entry.kind === "acquired" &&
+      entry.client === context.name &&
+      entry.requestId === config.requestId,
+  )!;
+  const device = ledger.devices().find((entry) => entry.sessionUuid === grant.sessionUuid) ?? grant;
+  if (!ledger.hasEvent(device, "released")) {
+    ledger.record("released", device);
+  }
+}
 
 /** batch.json records canonical socket paths, independent of which wrapper invoked us. */
 export function brokerSocketPath(deps: ProxySessionDeps): string {
@@ -72,6 +99,9 @@ export async function closeBrokerSession(
     timer: deps.timer,
     requireReleased: true,
   });
+  if (release.sessionUuid !== grantedSession(context, deps)) {
+    throw new Error("Close release status session mismatch.");
+  }
   const path = join(context.dir, "closed.json");
   // The driver publishes closed.json just after its close response. Join that publication
   // before adding the receipt, so the driver's write cannot overwrite release evidence.
@@ -89,6 +119,7 @@ export async function closeBrokerSession(
   );
   const closed = z.record(z.unknown()).parse(JSON.parse(deps.readFile(path)));
   deps.writeJson(path, { ...closed, release });
+  recordBrokerRelease(context, deps);
 }
 export async function runBrokerLifecycle(
   command: ProxySessionCommand,
@@ -125,6 +156,11 @@ export async function runBrokerLifecycle(
   if (command.op === "info") {
     const info = await client.info(sessionUuid);
     deps.writeJson(join(context.dir, "info.json"), info);
+    readyLedger(context, deps).info(
+      context.name,
+      JSON.parse(deps.readFile(join(context.dir, "init.json"))),
+      info,
+    );
     await deps.flush(`${JSON.stringify(info)}\n`);
     return 0;
   }
@@ -139,14 +175,26 @@ export async function runBrokerLifecycle(
           requestId: config.requestId,
           token,
           timer: deps.timer,
+          requireReleased: true,
           timeoutMs: Math.max(1, deadline - deps.timer.now()),
         });
-        return { ...result, cleanupPending: status.cleanupPending, status };
+        if (status.sessionUuid !== sessionUuid) {
+          throw new Error("Release status session mismatch.");
+        }
+        return {
+          ...result,
+          outcome: "released" as const,
+          cleanupPending: status.cleanupPending,
+          status,
+        };
       }
       return result;
     },
     { timer: deps.timer, timeoutMs: BROKER_CLEANUP_TIMEOUT_MS, label: "Broker release" },
   );
+  if (receipt.outcome === "released") {
+    recordBrokerRelease(context, deps);
+  }
   await deps.flush(`${JSON.stringify(receipt)}\n`);
   return receipt.outcome === "unknown_session" ? 1 : 0;
 }

@@ -1067,3 +1067,110 @@ test.each(["booting", "booted", "shutting-down"])(
     expect(document(f).devices).toHaveLength(1);
   },
 );
+
+async function addBrokerLedger(f: Awaited<ReturnType<typeof deviceFixture>>) {
+  const { BrokerDeviceLedger } = await import("../../scripts/manual-test/brokerDeviceLedger");
+  f.files.set(join(options.batchDir, "broker/clients.json"), "{}");
+  const ledger = new BrokerDeviceLedger({
+    batchDir: options.batchDir,
+    timer: f.deps.timer,
+    fs: {
+      exists: f.deps.exists,
+      readFile: f.deps.readFile,
+      mkdir: () => {},
+      appendFile: (path, text) => f.files.set(path, (f.files.get(path) ?? "") + text),
+    },
+  });
+  ledger.info(
+    "phone",
+    { session: { outcome: "ready", requestId: "batch-phone-1", sessionUuid: "session" } },
+    {
+      sessionId: "session",
+      nativeDevice: { name: "ambroker-ledger", deviceId: "emulator-5556", platform: "android" },
+    },
+  );
+  return ledger;
+}
+
+test.each([undefined, "broker_session", "future_hold"])(
+  "broker ledger shows the client and refuses shutdown with heldBy %s",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    await addBrokerLedger(f);
+    inventoryRows(f, [
+      { ...row("emulator-5556", "ambroker-ledger"), runtime: { ...row().runtime, heldBy } },
+    ]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0]).toMatchObject({
+      classification: "allowed",
+      client: "phone",
+      sessionUuid: "session",
+      provenance: "broker-owned",
+    });
+    expect(f.captures).toEqual([]);
+    for (const flags of [[], ["--device", "emulator-5556"]]) {
+      expect(await runPrivateDaemonCommand(command("shutdown-devices", ...flags), f.deps)).toBe(1);
+      expect(document(f).results[0].outcome).toBe("broker-held");
+    }
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+
+test.each(["protected", "name-only", "serial-reused", "plain-name", "released"])(
+  "broker view classifies %s conservatively",
+  async (kind) => {
+    const f = await deviceFixture(kind === "protected" ? ["ambroker-ledger"] : []);
+    const ledger = await addBrokerLedger(f);
+    const name =
+      kind === "name-only"
+        ? "ambroker-unrecorded"
+        : kind === "serial-reused"
+          ? "ambroker-successor"
+          : kind === "plain-name"
+            ? "owner-device"
+            : "ambroker-ledger";
+    if (kind === "released") {
+      ledger.record("released", ledger.devices()[0]);
+    }
+    inventoryRows(f, [row("emulator-5556", name)]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0].classification).toBe(
+      kind === "protected" ? "protected" : "foreign",
+    );
+    expect(document(f).devices[0].client).toBeUndefined();
+    expect(
+      await runPrivateDaemonCommand(
+        command("shutdown-devices", "--device", "emulator-5556"),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+
+test("devices --ledger reads evidence with no socket, host probe or write", async () => {
+  const f = await deviceFixture();
+  const ledger = await addBrokerLedger(f);
+  const writes = f.writes.length;
+  expect(await runPrivateDaemonCommand(command("devices", "--ledger"), f.deps)).toBe(0);
+  expect(document(f).ledger).toEqual(ledger.entries);
+  expect(f.frames).toEqual([]);
+  expect(f.captures).toEqual([]);
+  expect(f.writes.length).toBe(writes);
+});
+
+test("protection wins over conflicting broker inventory identities", async () => {
+  const f = await deviceFixture(["protected-name"]);
+  await addBrokerLedger(f);
+  inventoryRows(f, [
+    row("emulator-5556", "ambroker-ledger"),
+    row("emulator-5556", "protected-name"),
+  ]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  expect(document(f).devices[0]).toMatchObject({ classification: "protected", protected: true });
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "emulator-5556"), f.deps),
+  ).toBe(1);
+  expect(document(f).results[0].outcome).toBe("protected");
+  expect(killFrames(f)).toEqual([]);
+});

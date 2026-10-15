@@ -27,6 +27,24 @@ export interface BrokerClientFiles {
   initial: SessionConfig;
   batchId: string;
 }
+/** The manifest remains authoritative if the client table is missing or damaged. */
+export function isBrokerBatch(
+  batch: string | undefined,
+  deps: Pick<BrokerClientFileDeps, "exists" | "readFile">,
+): boolean {
+  if (!batch) {
+    return false;
+  }
+  if (deps.exists(join(batch, "broker/clients.json"))) {
+    return true;
+  }
+  const manifest = join(batch, "batch.json");
+  return (
+    deps.exists(manifest) &&
+    z.object({ broker: z.unknown().optional() }).parse(JSON.parse(deps.readFile(manifest)))
+      .broker !== undefined
+  );
+}
 export function readBrokerClients(
   batch: string | undefined,
   deps: Pick<BrokerClientFileDeps, "readFile">,

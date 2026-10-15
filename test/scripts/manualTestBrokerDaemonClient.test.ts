@@ -75,7 +75,24 @@ test("frame client uses exact daemon methods, fresh connections, tokens and budg
     { success: true, result: released },
     { success: true, result: released },
     { success: true, result: { sessionUuid: "session", outcome: "released" } },
-    { success: true, result: { assignedDevice: { id: "native" } } },
+    {
+      success: true,
+      result: { sessionId: "session", assignedDevice: "native", platform: "android" },
+    },
+    {
+      success: true,
+      result: {
+        structuredContent: {
+          devices: [
+            { name: "ambroker-device", platform: "android", runtime: { deviceId: "native" } },
+          ],
+        },
+      },
+    },
+    {
+      success: true,
+      result: { sessionId: "session", assignedDevice: "native", platform: "android" },
+    },
   );
   expect(await f.client.capabilities()).toEqual(["session-broker/v1"]);
   expect(await f.client.status("request", "secret")).toEqual(released);
@@ -84,7 +101,12 @@ test("frame client uses exact daemon methods, fresh connections, tokens and budg
     sessionUuid: "session",
     outcome: "released",
   });
-  expect(await f.client.info("session")).toEqual({ assignedDevice: { id: "native" } });
+  expect(await f.client.info("session")).toEqual({
+    sessionId: "session",
+    assignedDevice: "native",
+    platform: "android",
+    nativeDevice: { name: "ambroker-device", deviceId: "native", platform: "android" },
+  });
   expect(f.sockets.map((s) => s.frames[0])).toMatchObject([
     { method: "daemon/capabilities", params: {}, timeoutMs: 5000 },
     {
@@ -102,6 +124,8 @@ test("frame client uses exact daemon methods, fresh connections, tokens and budg
       params: { sessionId: "session", livenessOwnerToken: "secret" },
       timeoutMs: 240000,
     },
+    { method: "daemon/sessionInfo", params: { sessionId: "session" }, timeoutMs: 5000 },
+    { method: "tools/call", params: { name: "listDevices", arguments: {} }, timeoutMs: 5000 },
     { method: "daemon/sessionInfo", params: { sessionId: "session" }, timeoutMs: 5000 },
   ]);
   expect(f.sockets.every((s) => s.destroyed)).toBe(true);
@@ -210,4 +234,63 @@ test("release polling joins pending cleanup and cannot exceed the overall deadli
   expect(await assertion).toBeInstanceOf(Error);
   expect(timer.getPendingTimeoutCount()).toBe(0);
   timer.reset();
+});
+
+test.each(["missing", "ambiguous", "refused", "rebound", "ended"])(
+  "native info refuses %s inventory/binding evidence",
+  async (mode) => {
+    const f = fixture();
+    const info = { sessionId: "session", assignedDevice: "native", platform: "android" };
+    const device = {
+      name: "ambroker-device",
+      platform: "android",
+      runtime: { deviceId: "native" },
+    };
+    f.replies.push(
+      { success: true, result: info },
+      {
+        success: true,
+        result:
+          mode === "refused"
+            ? { isError: true }
+            : {
+                structuredContent: {
+                  devices:
+                    mode === "missing" ? [] : mode === "ambiguous" ? [device, device] : [device],
+                },
+              },
+      },
+      mode === "ended"
+        ? { success: false, error: "Session ended" }
+        : { success: true, result: { ...info, assignedDevice: "recycled" } },
+    );
+    await expect(f.client.info("session")).rejects.toThrow();
+    expect(f.sockets.every((socket) => socket.destroyed)).toBe(true);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
+
+test("native info supports the daemon text envelope and iOS UDID", async () => {
+  const f = fixture();
+  const info = { sessionId: "session", assignedDevice: "udid", platform: "ios" };
+  f.replies.push(
+    { success: true, result: info },
+    {
+      success: true,
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              devices: [{ name: "ambroker-ios", platform: "ios", runtime: { deviceId: "udid" } }],
+            }),
+          },
+        ],
+      },
+    },
+    { success: true, result: info },
+  );
+  expect(await f.client.info("session")).toMatchObject({
+    nativeDevice: { deviceId: "udid", name: "ambroker-ios", platform: "ios" },
+  });
 });

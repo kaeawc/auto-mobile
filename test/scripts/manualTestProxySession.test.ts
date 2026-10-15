@@ -1064,9 +1064,16 @@ posixTest(
       0,
     );
     f.initialize();
-    broker.infoResults = [{ assignedDevice: { id: "native", name: "broker-device" } }];
+    broker.infoResults = [
+      {
+        sessionId: "own-session",
+        assignedDevice: "native",
+        nativeDevice: { deviceId: "native", name: "ambroker-device", platform: "android" },
+      },
+    ];
     expect(await runProxySessionCommand(parsed(["info", "--client", "a-phone"]), f.deps)).toBe(0);
     expect(JSON.parse(f.files.get(join(brokerDir, "info.json"))!)).toEqual(broker.infoResults[0]);
+    expect(f.files.get("/batch/evidence/ledger.jsonl")).toContain('"kind":"info"');
     const token = f.files.get(join(brokerDir, "owner-token"))!;
     expect(broker.calls[0].args).toEqual(["own-session", token]);
     expect(f.logs.join(" ")).not.toContain(token);
@@ -1312,3 +1319,47 @@ posixTest("lifecycle operations require the stored identity and broker-only flag
     parseProxySessionArgs(["info", "--client", "a-phone", "--as-client", "other"]),
   ).toHaveProperty("error");
 });
+
+posixTest.each(["call", "read", "subscribe", "resources"])(
+  "broker batch refuses sessionless --dir %s before publication",
+  async (op) => {
+    const f = brokerFixture();
+    await f.up();
+    const args =
+      op === "call" ? ["observe"] : ["read", "subscribe"].includes(op) ? ["custom:resource"] : [];
+    const before = f.writes.length;
+    expect(await runProxySessionCommand(parsed([op, "--dir", brokerDir, ...args]), f.deps)).toBe(2);
+    expect(f.writes.length).toBe(before);
+    expect(f.logs.join(" ")).toContain("require --client");
+  },
+);
+
+posixTest(
+  "broker info fails closed on missing native identity and never appends an info record",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.infoResults = [{ sessionId: "own-session", assignedDevice: "emulator-5556" }];
+    expect(await runProxySessionCommand(parsed(["info", "--client", "a-phone"]), f.deps)).not.toBe(
+      0,
+    );
+    expect(f.files.get("/batch/evidence/ledger.jsonl") ?? "").not.toContain('"kind":"info"');
+  },
+);
+
+posixTest(
+  "broker manifest still blocks a sessionless call when clients.json is missing",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    f.files.delete("/batch/broker/clients.json");
+    f.files.set("/batch/batch.json", JSON.stringify({ broker: { daemon: 1 } }));
+    const before = f.writes.length;
+    expect(
+      await runProxySessionCommand(parsed(["call", "--dir", brokerDir, "observe"]), f.deps),
+    ).toBe(2);
+    expect(f.writes.length).toBe(before);
+  },
+);

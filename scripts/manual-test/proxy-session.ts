@@ -33,6 +33,7 @@ import {
 } from "../../src/models/sessionConfig";
 import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
 import { createFrameBrokerDaemonClient, type BrokerDaemonClient } from "./brokerDaemonClient";
+import { BrokerDeviceLedger } from "./brokerDeviceLedger";
 import {
   brokerSocketPath,
   closeBrokerSession,
@@ -41,6 +42,7 @@ import {
 } from "./proxySessionLifecycle";
 import {
   archiveBrokerAttempt,
+  isBrokerBatch,
   nextBrokerRequest,
   persistBrokerAttempt,
   readBrokerClients,
@@ -309,6 +311,9 @@ async function startupRefusal(
   command: ProxySessionCommand,
   deps: ProxySessionDeps,
 ): Promise<string | undefined> {
+  if (!command.client && isBrokerBatch(deps.env.MT_BATCH, deps) && !command.all) {
+    return "Broker batches require --client; no sessionless proxy operations.";
+  }
   const env = privateEnv(command, deps);
   const refusal = extraEnvRefusal(command.env) ?? privateHarnessEnvRefusal(env, deps.host);
   if (refusal || (command.op !== "up" && command.op !== "serve")) {
@@ -680,6 +685,18 @@ async function servePrepared(
       session: record(capabilities?.experimental)?.[SESSION_EXPERIMENTAL_CAPABILITY] ?? null,
       daemonSocketAlive: (await deps.probeDaemonSocket(env.AUTOMOBILE_DAEMON_SOCKET_PATH)).alive,
     });
+    if (
+      context &&
+      record(record(capabilities?.experimental)?.[SESSION_EXPERIMENTAL_CAPABILITY])?.outcome ===
+        "ready"
+    ) {
+      const ledger = new BrokerDeviceLedger({
+        batchDir: context.batch,
+        fs: deps,
+        timer: deps.timer,
+      });
+      ledger.acquired(context.name, readJson(join(dir, "init.json"), deps));
+    }
     event("initialized");
     const handle = async (request: Request): Promise<unknown> => {
       const timeout = request.timeoutMs ?? command.timeoutMs;

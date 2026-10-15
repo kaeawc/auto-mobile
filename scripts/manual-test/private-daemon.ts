@@ -127,6 +127,7 @@ interface ParsedValues {
   split: boolean;
   allowReuse: boolean;
   devices: boolean;
+  ledger: boolean;
   protectedDevices: string[];
   deviceSelectors: string[];
   dryRun: boolean;
@@ -274,10 +275,14 @@ function readBooleanFlag(op: string, flag: string, state: ParsedValues): boolean
     state[flag === "--dry-run" ? "dryRun" : "allowReuse"] = true;
     return true;
   }
-  const flags: Record<string, { op: string; key: "split" | "dryRun" | "devices" | "strict" }> = {
+  const flags: Record<
+    string,
+    { op: string; key: "split" | "dryRun" | "devices" | "strict" | "ledger" }
+  > = {
     "--split-adb-coordination": { op: "init", key: "split" },
     "--dry-run": { op: "shutdown-devices", key: "dryRun" },
     "--devices": { op: "status", key: "devices" },
+    "--ledger": { op: "devices", key: "ledger" },
     "--strict": { op: "preflight", key: "strict" },
   };
   const match = flags[flag];
@@ -354,6 +359,7 @@ export function parsePrivateDaemonArgs(
     split: false,
     allowReuse: false,
     devices: false,
+    ledger: false,
     protectedDevices: [],
     deviceSelectors: [],
     dryRun: false,
@@ -428,6 +434,7 @@ function deviceCommand(
     daemon,
     extraFlags: [],
     timeoutMs,
+    ...(op === "devices" ? { ledger: state.ledger } : {}),
     ...(op === "shutdown-devices"
       ? { deviceSelectors: state.deviceSelectors, dryRun: state.dryRun }
       : {}),

@@ -43,6 +43,7 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
     "Wait/request bound (default: devices 30000 ms; shutdown-devices 60000 ms; boot-gate 600000 ms).",
   "--devices":
     "Append inventories using daemon/availableDevices, refreshing ownership and discovery (default: off).",
+  "--ledger": "Read devices ledger evidence only; no socket or host probes (devices only).",
   "--": "Append one-off daemon argv to start or a command to boot-gate (default: none; boot-gate requires a command after --).",
   "--help": "Show this help, also -h or help (default: run command).",
 };
@@ -77,6 +78,7 @@ Broker init renders broker/host-config.json and broker/clients.json (0600). AUTO
 Devices and teardown:
   batch-booted: positive MT_BATCH evidence for this batch; bootedBy daemon<N> comes from MT_DAEMON=P<digits>.
   broker-owned: product naming predicate matches; display only, never authorizes shutdown.
+  Broker batches additionally classify allowed/foreign/protected using ready batch grants and session-info native identities in evidence/ledger.jsonl. Allowed rows include client and sessionUuid; protected always wins. devices --ledger reads that evidence without any probes.
   foreign: process environment read without this batch's marker, regardless of baseline.
   preexisting: no process evidence and ID in baseline; batch-inferred: no process evidence and ID absent from a recorded baseline (every iOS simulator).
   unknown: baseline missing/unavailable without process evidence, or conflicting daemon rows; never stopped.

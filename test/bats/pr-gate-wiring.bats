@@ -73,6 +73,18 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.ios-xcode-build.result"* ]]
 }
 
+@test "iOS fixture changes trigger the Swift check" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-ios")
+    | (.with.filters | from_yaml | .ios[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-contract/**'$'\n'* ]]
+  [[ $'\n'"$output"$'\n' == *$'\n''test/fixtures/ios-ctrlproxy-request-snapshots.json'$'\n'* ]]
+}
+
 @test "ios-build-gate EXCLUDES the simulator-flaky job (keeps the required check deterministic)" {
   block="$(job_block ios-build-gate)"
   # Guard against a vacuous pass: a renamed gate id would make job_block return

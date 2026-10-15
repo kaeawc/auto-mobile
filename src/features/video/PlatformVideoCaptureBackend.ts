@@ -43,6 +43,9 @@ import {
   resolveAndroidRecordingDisplay,
 } from "./AndroidRecordingDisplay";
 
+// screenrecord needs time to finish writing the device file.
+const SCREENRECORD_FINALIZE_SETTLE_MS = 1000;
+
 interface AndroidBackendHandle {
   kind: "android";
   process: TrackedChildProcess;
@@ -408,7 +411,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         // Give screenrecord extra time to finalize the file on device. Even
         // though the process has exited, file writes may still be in progress.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
-        await this.timer.sleep(1000);
+        await this.timer.sleep(SCREENRECORD_FINALIZE_SETTLE_MS);
         retainDeviceFile = !(await this.waitForDeviceFileToFinalize(adb, backendHandle));
         if (retainDeviceFile) {
           throw new ActionableError(

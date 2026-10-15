@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import java.time.Duration
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -65,7 +66,7 @@ class CtrlProxyDragDispatchTest {
   @After fun tearDown() = fixture.close()
 
   @Test
-  fun `default drag dispatches one stroke per phase and reports only final completion`() {
+  fun `default drag dispatches one stroke per phase and reports only final completion`() = runTest {
     drag()
     repeat(2) { index ->
       assertTrue(frames.isEmpty())
@@ -105,7 +106,7 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `instant press completion waits before travel and then succeeds`() {
+  fun `instant press completion waits before travel and then succeeds`() = runTest {
     drag()
     shadow.complete(0L)
     assertTrue(frames.isEmpty())
@@ -123,7 +124,7 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `no hold and zero press variants finish with one lifted pointer`() {
+  fun `no hold and zero press variants finish with one lifted pointer`() = runTest {
     for ((press, hold) in listOf(500L to 0L, 0L to 100L, 0L to 0L)) {
       shadow.attempts.clear()
       frames.clear()
@@ -143,35 +144,38 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `mid chain cancellation dispatches terminating continuation and failed drag result`() {
-    drag()
-    shadow.complete()
-    fixture.advanceDragWait()
-    shadow.cancel()
-    assertReleaseThenFailure()
-  }
+  fun `mid chain cancellation dispatches terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.complete()
+      fixture.advanceDragWait()
+      shadow.cancel()
+      assertReleaseThenFailure()
+    }
 
   @Test
-  fun `mid chain rejected dispatch sends terminating continuation and failed drag result`() {
-    drag()
-    shadow.failureOnAttempt = 2
-    shadow.complete()
-    fixture.advanceDragWait()
-    assertReleaseThenFailure(rejected = true)
-  }
+  fun `mid chain rejected dispatch sends terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.failureOnAttempt = 2
+      shadow.complete()
+      fixture.advanceDragWait()
+      assertReleaseThenFailure(rejected = true)
+    }
 
   @Test
-  fun `mid chain dispatch exception sends terminating continuation and failed drag result`() {
-    drag()
-    shadow.failureOnAttempt = 2
-    shadow.throwOnFailure = true
-    shadow.complete()
-    fixture.advanceDragWait()
-    assertReleaseThenFailure(rejected = true)
-  }
+  fun `mid chain dispatch exception sends terminating continuation and failed drag result`() =
+    runTest {
+      drag()
+      shadow.failureOnAttempt = 2
+      shadow.throwOnFailure = true
+      shadow.complete()
+      fixture.advanceDragWait()
+      assertReleaseThenFailure(rejected = true)
+    }
 
   @Test
-  fun `mid chain timeout sends terminating continuation and failed drag result`() {
+  fun `mid chain timeout sends terminating continuation and failed drag result`() = runTest {
     drag()
     shadow.complete()
     fixture.advanceDragWait()
@@ -180,7 +184,7 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `stale frame context rejects before injecting a pointer`() {
+  fun `stale frame context rejects before injecting a pointer`() = runTest {
     fixture.actions.requestDrag(
       RequestDrag(
         requestId = "stale",
@@ -200,7 +204,7 @@ class CtrlProxyDragDispatchTest {
 
   @Test
   @Config(sdk = [25])
-  fun `pre API 26 keeps a single legacy stroke`() {
+  fun `pre API 26 keeps a single legacy stroke`() = runTest {
     fixture.actions.requestDrag(
       RequestDrag(
         requestId = "legacy",
@@ -222,7 +226,7 @@ class CtrlProxyDragDispatchTest {
     )
   }
 
-  private fun drag(press: Long = 600L, hold: Long = 100L) {
+  private suspend fun drag(press: Long = 600L, hold: Long = 100L) {
     fixture.actions.requestDrag(
       RequestDrag(
         requestId = "drag",

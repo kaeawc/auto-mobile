@@ -723,7 +723,7 @@ class PrototypeControllerTest {
   fun `show same-id show and dismiss dispatch through the real message handler`() = runTest {
     val actions =
       object : NoOpCtrlProxyActions() {
-        override fun showPrototype(
+        override suspend fun showPrototype(
           requestId: String?,
           spec: PrototypeSpec,
           displayId: Int?,
@@ -734,7 +734,7 @@ class PrototypeControllerTest {
           launch { controller.show(requestId, spec, displayId, reset, appearance, replaceOthers) }
         }
 
-        override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
+        override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
           launch { controller.dismiss(requestId, id, all) }
         }
       }

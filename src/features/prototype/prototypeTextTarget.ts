@@ -10,6 +10,9 @@ import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveS
 import type { PrototypeAgentConnections } from "./ios/iosPrototypeTransport";
 import type { PrototypeSpec } from "./prototypeSpec";
 
+/** Three reads preserve the existing prototype text verification retry bound. */
+const PROTOTYPE_TEXT_VERIFY_ATTEMPTS = 3;
+
 export type PrototypeTextReading =
   | { kind: "value"; value: string; source: "state"; stateKey: string; numericValue?: number }
   | { kind: "value"; value: string; source: "field" }
@@ -284,7 +287,7 @@ export async function verifyPrototypeTextTarget(options: {
 }> {
   const { reader, target, text, operation, timer, settleMs, signal } = options;
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < PROTOTYPE_TEXT_VERIFY_ATTEMPTS; attempt++) {
       signal?.throwIfAborted();
       if (attempt > 0) {
         await timer.sleep(settleMs);
@@ -301,7 +304,7 @@ export async function verifyPrototypeTextTarget(options: {
       if (holdsText(reading, text, operation, options.before)) {
         return { success: true };
       }
-      if (attempt === 2) {
+      if (attempt === PROTOTYPE_TEXT_VERIFY_ATTEMPTS - 1) {
         const error =
           reading.source === "state"
             ? `Prototype refused the text: sent ${JSON.stringify(text)} but prototype state key ${JSON.stringify(reading.stateKey)} holds ${JSON.stringify(reading.value)}; the field keeps showing the typed text until editing ends`

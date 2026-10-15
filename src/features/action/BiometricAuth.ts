@@ -20,6 +20,9 @@ import {
 import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
 
+// The biometric prompt needs a brief settle before verification.
+export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
+
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
   modality?: "any" | "fingerprint" | "face";
@@ -615,7 +618,7 @@ export class BiometricAuth extends BaseVisualChange {
         };
       }
 
-      await this.timer.sleep(100);
+      await this.timer.sleep(BIOMETRIC_PROMPT_SETTLE_MS);
 
       const removeResult = await this.adb.executeCommand(`emu finger remove ${fingerprintId}`);
 

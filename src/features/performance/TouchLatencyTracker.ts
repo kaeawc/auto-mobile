@@ -13,6 +13,9 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { calculateMedian } from "../shared/MetricsUtils";
 import { shellQuote } from "../../utils/shellQuote";
 
+// Samples are spaced to avoid overlapping touch measurements.
+const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
+
 /**
  * Result of a touch latency measurement
  */
@@ -508,7 +511,7 @@ export class TouchLatencyTracker {
 
         // Wait between samples to avoid interference
         if (i < sampleCount - 1) {
-          await this.timer.sleep(100);
+          await this.timer.sleep(TOUCH_LATENCY_SAMPLE_INTERVAL_MS);
         }
       }
 

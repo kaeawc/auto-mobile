@@ -252,8 +252,26 @@ export function assertManagedSlotOwnerIdentity(
   compare: LockOwnerGenerationProbe["compare"],
 ): ManagedSlotOwnerIdentityVerdict | undefined {
   const pid = config?.executionOwnerPid;
-  const recorded = config?.executionOwnerStartIdentity;
-  if (pid === undefined || recorded === undefined) {
+  if (pid === undefined) {
+    return undefined;
+  }
+  const verdict = compareExecutionOwnerIdentity(pid, config?.executionOwnerStartIdentity, compare);
+  if (verdict === "different") {
+    throw new ManagedSlotConfigError(
+      "managed_slot_config_invalid",
+      `executionOwnerPid ${pid} no longer names the process described by executionOwnerStartIdentity (the PID was reused)`,
+    );
+  }
+  return verdict;
+}
+
+/** Compares an optional recorded owner identity, trusting PID-only liveness when unavailable. */
+export function compareExecutionOwnerIdentity(
+  pid: number,
+  recorded: string | undefined,
+  compare: LockOwnerGenerationProbe["compare"],
+): ManagedSlotOwnerIdentityVerdict | undefined {
+  if (recorded === undefined) {
     return undefined;
   }
   let verdict: ManagedSlotOwnerIdentityVerdict;
@@ -265,12 +283,6 @@ export function assertManagedSlotOwnerIdentity(
       error,
     );
     return "unknown";
-  }
-  if (verdict === "different") {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
-      `executionOwnerPid ${pid} no longer names the process described by executionOwnerStartIdentity (the PID was reused)`,
-    );
   }
   if (verdict === "unknown") {
     logger.warn(

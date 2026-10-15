@@ -4,7 +4,12 @@ import {
   type SessionDeviceRequirement,
 } from "../devices/sessionRequirements";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import { ActionableError } from "./ActionableError";
+import {
+  compareExecutionOwnerIdentity,
+  type ManagedSlotOwnerIdentityVerdict,
+} from "./managedSlotConfig";
 
 export const SESSION_CONFIG_FLAG = "--session-config";
 export const SESSION_CONFIG_ENV = "AUTOMOBILE_SESSION_CONFIG";
@@ -18,6 +23,8 @@ export interface SessionConfig {
   preparationTimeoutMs?: number;
   idleTimeoutMs?: number;
   executionOwnerPid?: number;
+  /** Proxy-only process start token; never forwarded to the daemon. */
+  executionOwnerStartIdentity?: string;
 }
 
 export class SessionConfigError extends ActionableError {
@@ -37,8 +44,17 @@ const schema = z
     preparationTimeoutMs: z.number().int().positive().optional(),
     idleTimeoutMs: z.number().int().min(120_000).max(3_600_000).optional(),
     executionOwnerPid: z.number().int().positive().optional(),
+    executionOwnerStartIdentity: z.string().min(1).max(256).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (config) =>
+      config.executionOwnerStartIdentity === undefined || config.executionOwnerPid !== undefined,
+    {
+      message: "executionOwnerStartIdentity requires executionOwnerPid",
+      path: ["executionOwnerStartIdentity"],
+    },
+  );
 
 /** Versioned launcher input: device intent and execution identity, with no allocation controls. */
 export function parseSessionConfig(input: unknown): SessionConfig {
@@ -116,6 +132,43 @@ export function assertSessionOwnerRunning(
   if (ownerPid !== undefined && !isProcessRunning(ownerPid)) {
     throw new SessionConfigError(`executionOwnerPid ${ownerPid} is not a running process`);
   }
+}
+
+/** Refuses a supervising PID that now belongs to a different process. */
+export function assertSessionOwnerIdentity(
+  config: SessionConfig | undefined,
+  compare: LockOwnerGenerationProbe["compare"],
+): ManagedSlotOwnerIdentityVerdict | undefined {
+  const pid = config?.executionOwnerPid;
+  if (pid === undefined) {
+    return undefined;
+  }
+  const verdict = compareExecutionOwnerIdentity(pid, config?.executionOwnerStartIdentity, compare);
+  if (verdict === "different") {
+    throw new SessionConfigError(
+      `executionOwnerPid ${pid} no longer names the process described by executionOwnerStartIdentity (the PID was reused)`,
+    );
+  }
+  return verdict;
+}
+
+/** Validates the execution owner before capturing the generation watched by the proxy. */
+export function resolveSessionOwnerGenerationToken(
+  config: SessionConfig | undefined,
+  ports: {
+    isProcessRunning: (pid: number) => boolean;
+    probe: LockOwnerGenerationProbe;
+  },
+): string | undefined {
+  const pid = config?.executionOwnerPid;
+  if (pid === undefined) {
+    return undefined;
+  }
+  assertSessionOwnerRunning(config, ports.isProcessRunning);
+  const verdict = assertSessionOwnerIdentity(config, (ownerPid, recorded) =>
+    ports.probe.compare(ownerPid, recorded),
+  );
+  return verdict === "same" ? config?.executionOwnerStartIdentity : ports.probe.current(pid);
 }
 
 export function daemonSupportsSessionBroker(capabilities: readonly string[]): boolean {

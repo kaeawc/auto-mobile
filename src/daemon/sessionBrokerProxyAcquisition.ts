@@ -245,12 +245,15 @@ async function prepareThenRecover(
 ): Promise<SessionBrokerResult> {
   let reply: unknown;
   try {
+    // The runner's start identity is proxy-only; older daemons reject unknown config keys.
+    const { executionOwnerStartIdentity: _executionOwnerStartIdentity, ...daemonConfig } = config;
+    void _executionOwnerStartIdentity;
     reply = await ports.callDaemonMethod(
       DAEMON_PREPARE_SESSION_METHOD,
       {
         // The broker fingerprints the complete config. Keep it byte-for-value stable across a
         // lost reply or process relaunch; only this RPC's wait is shortened for status recovery.
-        config,
+        config: daemonConfig,
         livenessOwnerToken: ports.livenessOwnerToken,
       },
       { timeoutMs: prepareCallBudgetMs, signal },

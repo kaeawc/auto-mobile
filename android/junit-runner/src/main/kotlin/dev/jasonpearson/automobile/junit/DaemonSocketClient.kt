@@ -235,7 +235,10 @@ internal data class DaemonForwardedFlag(
   val cliFlag: String,
 )
 
-/** Configure with a JVM property (e.g. `-Dautomobile.daemon.dismiss.keyboard.after.input=true`) or its environment variable. */
+/**
+ * Configure with a JVM property (e.g. `-Dautomobile.daemon.dismiss.keyboard.after.input=true`) or
+ * its environment variable.
+ */
 internal val DAEMON_FORWARDED_FLAGS =
   listOf(
     DaemonForwardedFlag(

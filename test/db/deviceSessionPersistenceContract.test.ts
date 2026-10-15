@@ -133,7 +133,9 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       state: "active" | "released" | "missing";
     }) => {
       const persistence = await create();
-      if (state !== "missing") await persistence.upsertActiveSession(record());
+      if (state !== "missing") {
+        await persistence.upsertActiveSession(record());
+      }
       if (state === "released") {
         await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
       }
@@ -158,7 +160,9 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     "recordRestartRecoveryActivity: %s",
     async (state: string) => {
       const persistence = await create();
-      if (state !== "missing") await persistence.upsertActiveSession(record());
+      if (state !== "missing") {
+        await persistence.upsertActiveSession(record());
+      }
       if (state !== "missing" && state !== "active") {
         await persistence.markReleased(SESSION, "released", 2_000, state);
       }
@@ -225,7 +229,9 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       ["active", null],
     ] as const) {
       await persistence.upsertActiveSession(record({ sessionUuid }));
-      if (reason) await persistence.markReleased(sessionUuid, "released", 2_000, reason);
+      if (reason) {
+        await persistence.markReleased(sessionUuid, "released", 2_000, reason);
+      }
     }
     expect(
       (await persistence.listRecoverableSessions(3_000)).map(

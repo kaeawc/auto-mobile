@@ -8,7 +8,6 @@ import {
 } from "../../src/daemon/constants";
 import { isDaemonShuttingDownToolResult } from "../../src/daemon/daemonShutdownOutcome";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";

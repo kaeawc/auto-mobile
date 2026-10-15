@@ -89,6 +89,7 @@ import {
 } from "./client";
 import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
+import { carryToolFailureMark } from "../utils/toolFailureSignal";
 import { z } from "zod";
 import {
   SOCKET_PATH,
@@ -391,10 +392,10 @@ function withResumedNotice(
   ) {
     return result;
   }
-  return {
+  return carryToolFailureMark(result, {
     ...result,
     content: [...result.content, { type: "text", text: JSON.stringify(notice) }],
-  };
+  });
 }
 
 /** A live session the daemon reports this proxy's stable token owns (#10990). */

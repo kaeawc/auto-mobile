@@ -19,7 +19,7 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { TextRequestState } from "../../../src/features/action/textTransportTimeout";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
@@ -210,6 +210,126 @@ describe("InputText.execute", () => {
       transport.mockRestore();
     },
   );
+
+  test.each([
+    ["eventLast", "a ", "", false],
+    ["eventLast", "a ", "a ", false],
+    ["eventAll", "a", "", false],
+    ["eventAll", "a", "a", true],
+    ["eventAll", "a🙂", "a🙂", false],
+  ] as const)(
+    "%s text %j marks setText(%j) until settled",
+    async (mode, text, dispatchedText, dismissKeyboard) => {
+      fakeTimer = new FakeTimer();
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeA11yService as unknown as AndroidCtrlProxyClient,
+      );
+      const state = new TextRequestState();
+      const entered = Promise.withResolvers<void>();
+      const reply = Promise.withResolvers<void>();
+      const setText = fakeA11yService.requestSetText.bind(fakeA11yService);
+      let pendingAtDispatch = false;
+      const transport = spyOn(fakeA11yService, "requestSetText").mockImplementation(
+        async (value, options) => {
+          if (value === dispatchedText) {
+            pendingAtDispatch = state.hasPending();
+            entered.resolve();
+            await reply.promise;
+          }
+          return setText(value, options);
+        },
+      );
+      const input = new InputText(androidDevice, fakeAdb, () => ({
+        close: async () => ({ success: true, action: "close" }),
+      }));
+      wireFakes(input);
+      const result = runWithAbortSignal(
+        undefined,
+        () => input.execute(text, undefined, dismissKeyboard, mode),
+        { textState: state },
+      );
+      try {
+        await settleByFakeEvents(fakeTimer, entered.promise, { description: "setText dispatch" });
+        expect(pendingAtDispatch).toBe(true);
+        expect(state.hasPending()).toBe(true);
+        let settled = false;
+        const waiter = state.settled().then(() => {
+          settled = true;
+        });
+        await drainMicrotasks(5);
+        expect(settled).toBe(false);
+        reply.resolve();
+        await waiter;
+        expect(settled).toBe(true);
+        expect(
+          await settleByFakeEvents(fakeTimer, result, { description: "text result" }),
+        ).toMatchObject({
+          success: true,
+          method: mode,
+        });
+        expect(state.hasPending()).toBe(false);
+      } finally {
+        reply.resolve();
+        await settleByFakeEvents(fakeTimer, result, { description: "text cleanup" });
+        transport.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    ["next", "KEYCODE_TAB"],
+    ["previous", "KEYCODE_SHIFT_LEFT"],
+    ["previous", "KEYCODE_TAB"],
+  ] as const)("IME %s marks %s until settled", async (imeAction, key) => {
+    fakeTimer = new FakeTimer();
+    serverConfig.setEventAllMarkers([]);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
+    );
+    const state = new TextRequestState();
+    const entered = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<void>();
+    const execute = fakeAdb.executeCommand.bind(fakeAdb);
+    let pendingAtDispatch = false;
+    const transport = spyOn(fakeAdb, "executeCommand").mockImplementation(async (command) => {
+      if (command === `shell input keyevent ${key}`) {
+        pendingAtDispatch = state.hasPending();
+        entered.resolve();
+        await reply.promise;
+      }
+      return execute(command);
+    });
+    const input = new InputText(androidDevice, fakeAdb);
+    wireFakes(input);
+    const result = runWithAbortSignal(undefined, () => input.execute("hi", imeAction), {
+      textState: state,
+    });
+    try {
+      await settleByFakeEvents(fakeTimer, entered.promise, { description: "IME dispatch" });
+      expect(pendingAtDispatch).toBe(true);
+      expect(state.hasPending()).toBe(true);
+      let settled = false;
+      const waiter = state.settled().then(() => {
+        settled = true;
+      });
+      await drainMicrotasks(5);
+      expect(settled).toBe(false);
+      reply.resolve();
+      await waiter;
+      expect(settled).toBe(true);
+      expect(
+        await settleByFakeEvents(fakeTimer, result, { description: "IME result" }),
+      ).toMatchObject({
+        success: true,
+        imeAction,
+      });
+      expect(state.hasPending()).toBe(false);
+    } finally {
+      reply.resolve();
+      await settleByFakeEvents(fakeTimer, result, { description: "IME cleanup" });
+      transport.mockRestore();
+    }
+  });
 
   test.each(["a11y", "eventAll"] as const)(
     "%s works without a request text state",

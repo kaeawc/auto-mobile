@@ -398,7 +398,7 @@ export class InputText extends BaseVisualChange {
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
-    const prefixResult = await a11yClient.requestSetText(prefix);
+    const prefixResult = await this.withTextDispatch(() => a11yClient.requestSetText(prefix));
     assertInputNotAborted(signal);
     if (!prefixResult.success) {
       return this.setTextFailure(
@@ -413,7 +413,7 @@ export class InputText extends BaseVisualChange {
     await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
 
     if (suffix.length > 0) {
-      const finalResult = await a11yClient.requestSetText(text);
+      const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -466,7 +466,7 @@ export class InputText extends BaseVisualChange {
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const clearResult = await a11yClient.requestSetText("");
+    const clearResult = await this.withTextDispatch(() => a11yClient.requestSetText(""));
     assertInputNotAborted(signal);
     if (!clearResult.success) {
       return this.setTextFailure(
@@ -484,7 +484,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text);
+      const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -546,7 +546,9 @@ export class InputText extends BaseVisualChange {
       }
 
       targetText += unsupportedRun;
-      const setTextResult = await a11yClient.requestSetText(targetText);
+      const setTextResult = await this.withTextDispatch(() =>
+        a11yClient.requestSetText(targetText),
+      );
       assertInputNotAborted(signal);
       if (!setTextResult.success) {
         return this.setTextFailure(
@@ -1141,11 +1143,13 @@ export class InputText extends BaseVisualChange {
         const keys = keyCode.split(" ");
         for (const key of keys) {
           assertInputNotAborted(signal);
-          await this.adb.executeCommand(`shell input keyevent ${key}`);
+          await this.withTextDispatch(() => this.adb.executeCommand(`shell input keyevent ${key}`));
           assertInputNotAborted(signal);
         }
       } else {
-        await this.adb.executeCommand(`shell input keyevent ${keyCode}`);
+        await this.withTextDispatch(() =>
+          this.adb.executeCommand(`shell input keyevent ${keyCode}`),
+        );
         assertInputNotAborted(signal);
       }
     }

@@ -55,6 +55,11 @@ export class TextRequestState {
     return this.pending > 0;
   }
 
+  /**
+   * Resolves the first time pending reaches zero, per dispatched command rather
+   * than per tool. The daemon hold is bounded by the in-flight command plus the
+   * tool's own abort checks.
+   */
   settled(): Promise<void> {
     if (!this.hasPending()) {
       return Promise.resolve();

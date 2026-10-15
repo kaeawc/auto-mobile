@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
@@ -10,6 +9,8 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
+let socketCounter = 0;
+
 /**
  * #12393: a client cancel of a `tools/call` that already dispatched to the device must keep the
  * per-device forward key held until the tool settles (bounded by the request deadline), exactly as
@@ -18,7 +19,7 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
  */
 function createServer(timer: FakeTimer): UnixSocketServer {
   return new UnixSocketServer(
-    join(tmpdir(), `cancel-dispatch-hold-${randomUUID()}.sock`),
+    join(tmpdir(), `cancel-dispatch-hold-${++socketCounter}.sock`),
     "http://localhost:0/mcp",
     {
       isInitialized: () => true,

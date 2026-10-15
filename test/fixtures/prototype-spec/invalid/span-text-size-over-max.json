@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "span-size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "bounded",
+          "style": {
+            "textSize": 1001
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].style.textSize",
+  "expectedMessage": "Invalid number value"
+}

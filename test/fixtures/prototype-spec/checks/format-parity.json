@@ -1,0 +1,402 @@
+[
+  {
+    "format": "email",
+    "value": "a@b.co",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "user@example.com",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "a+b@x.org",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "x.y@a.b",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "é@例.子",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "😀@a.b",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "a@b.c.d",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "a_b@localhost.test",
+    "matches": true
+  },
+  {
+    "format": "email",
+    "value": "abc",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "@a.b",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a@b",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a@@b.c",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a b@c.d",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a@b. c",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a@b.c\n",
+    "matches": false
+  },
+  {
+    "format": "email",
+    "value": "a\n@b.c",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "1234567",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "+1234567",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "123456789012345",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "123-4567",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "(123)4567",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "123 4567",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "+1 (234)567890",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "12345678",
+    "matches": true
+  },
+  {
+    "format": "phone",
+    "value": "123456",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "１２３４５６７",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "١٢٣٤٥٦٧",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "1234567890123456",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "++1234567",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "123abc4567",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "1234567\n",
+    "matches": false
+  },
+  {
+    "format": "phone",
+    "value": "1------2",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "0",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "123",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "0123",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "999999",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "123456789012345",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "42",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "100",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "777",
+    "matches": true
+  },
+  {
+    "format": "digits",
+    "value": "-1",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "1.2",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "１２３",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "١٢٣",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "1 2",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "+1",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "1\n",
+    "matches": false
+  },
+  {
+    "format": "digits",
+    "value": "abc",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "0",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "-0",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "123",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "-123",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "1.0",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "-12.34",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "00.10",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": "99999",
+    "matches": true
+  },
+  {
+    "format": "decimal",
+    "value": ".1",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "1.",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "+1",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "1e2",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "１２.３",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "١.٢",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "1\n",
+    "matches": false
+  },
+  {
+    "format": "decimal",
+    "value": "--1",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "http://a",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "https://example.com",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "http://a/b",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "https://a?b=c",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "https://a#x",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "https://例.子/路径",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "http://localhost:80",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "https://a/b?q=😀#x",
+    "matches": true
+  },
+  {
+    "format": "url",
+    "value": "ftp://a",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "HTTP://a",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "https://",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "http:///a",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "https://a b",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "https://a/ x",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "https://a\n",
+    "matches": false
+  },
+  {
+    "format": "url",
+    "value": "a.com",
+    "matches": false
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "patch-stack",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": { "type": "text", "id": "label", "text": "Home" },
+        "detail": { "type": "text", "id": "label", "text": "Detail" }
+      }
+    }
+  },
+  "ops": [
+    { "op": "replaceNode", "id": "label", "node": { "type": "text", "id": "label", "text": "New" } }
+  ],
+  "stage": "apply",
+  "expectedPath": "ops[0].id",
+  "expectedMessage": "Node id is not unique"
+}

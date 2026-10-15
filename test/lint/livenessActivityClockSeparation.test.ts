@@ -160,11 +160,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
   // #11162: the veto's start and bound are judged against session-clock request deadlines.
   "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
-  "src/daemon/devicePool.ts": [
-    "DevicePool.recoveryAssignmentError",
-    "DevicePool.recoveryNow",
+  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/deviceAllocation.ts": [
     // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
-    "DevicePool.assignmentRetryPolicy",
+    "DeviceAllocation.assignmentRetryPolicy",
   ],
 };
 
@@ -282,6 +281,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.boundSessionUuidAt": {
+    writes: 1,
+    reason:
+      "Delegation: the setter forwards the caller's existing activity-clock value to " +
+      "ProxySessionState without reading the clock or changing when callers write it.",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
     writes: 1,
     reason:
@@ -376,23 +381,23 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "PooledDevice LRU order seeded for a newly discovered device, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.assignDeviceToBoundSession": {
+  "src/daemon/explicitDeviceBind.ts ExplicitDeviceBind.assignDeviceToBoundSession": {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.claimSelectedDeviceForSession": {
+  "src/daemon/deviceAllocation.ts DeviceAllocation.claimSelectedDeviceForSession": {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.adoptSystemUiAnrReplacement": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.adoptSystemUiAnrReplacement": {
     writes: 1,
     reason: "PooledDevice LRU order carried to a SystemUI-ANR replacement device.",
   },
-  "src/daemon/devicePool.ts DevicePool.replaceStoppedDeviceForSystemUiAnr": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.replaceStoppedDeviceForSystemUiAnr": {
     writes: 1,
     reason: "PooledDevice LRU order carried to a SystemUI-ANR replacement device.",
   },
-  "src/daemon/devicePool.ts DevicePool.restoreSystemUiAnrRecoverySession": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.restoreSystemUiAnrRecoverySession": {
     writes: 1,
     reason: "PooledDevice LRU order on SystemUI-ANR recovery.",
   },

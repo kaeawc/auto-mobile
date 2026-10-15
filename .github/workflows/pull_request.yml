@@ -326,6 +326,8 @@ jobs:
               # the Kotlin DesktopWireFixtureCompositionTest (#10669), so a
               # regenerated fixture must re-run the client side of the contract.
               - 'test/fixtures/desktop-wire/**'
+              # Replayed by the protocol serializer descriptor contract test.
+              - 'test/fixtures/android-contract/**'
               # The emulator jobs are exactly what this composite action drives,
               # so an edit to it must exercise them rather than skip them. #4199
               # rewired this action and only ran the emulator jobs incidentally,
@@ -372,6 +374,8 @@ jobs:
             ios:
               - 'ios/**'
               - 'scripts/ios/**'
+              - 'test/fixtures/ios-contract/**'
+              - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
               - '.swiftformat'
               - '.swiftlint.yml'
 

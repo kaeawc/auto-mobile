@@ -387,7 +387,7 @@ JSON
 JSON
 
   for message in \
-    "2026-10-05T02:44:15.5935830Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:1792: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed: caught error: \"gestureFailed(\"Forward delete unavailable: could not verify the caret position; use text replacement instead\")\"" \
+    "2026-10-05T02:44:15.5935830Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:1792: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed: caught error: \"gestureFailed(\"Forward delete unavailable: could not verify the caret position; use text replacement instead\")\"" \
     "2026-10-05T03:49:57.4071890Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:354: error: -[CtrlProxyUITests.HierarchyIntegrationTests testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree] : failed - Element 'secure-field' did not gain keyboard focus" \
     "runner time budget exhausted at caret probe" \
     "Timed out while launching application via Xcode"; do

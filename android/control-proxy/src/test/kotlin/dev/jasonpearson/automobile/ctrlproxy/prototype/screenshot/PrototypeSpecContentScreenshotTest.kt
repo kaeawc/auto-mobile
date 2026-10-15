@@ -47,17 +47,26 @@ class PrototypeSpecContentScreenshotTest {
     val OPEN = JsonPrimitive(true)
   }
 
-  @Test fun flowBasic() = prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
+  // Pending: #12395 added these cases (and changed material_slider_chip_card's render) without
+  // Linux baselines; record them with the Linux workflow, commit the PNGs, then drop pending.
+  @Test
+  fun flowBasic() =
+    prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"), pending = true)
 
   @Test
   fun flowMaxLinesRepeat() =
-    prototypeScreenshotTest("flow_max_lines_repeat", validPrototypeFixture("flow-max-lines-repeat"))
+    prototypeScreenshotTest(
+      "flow_max_lines_repeat",
+      validPrototypeFixture("flow-max-lines-repeat"),
+      pending = true,
+    )
 
   @Test
   fun gridFixedColumnsSpan() =
     prototypeScreenshotTest(
       "grid_fixed_columns_span",
       validPrototypeFixture("grid-fixed-columns-span"),
+      pending = true,
     )
 
   @Test
@@ -65,6 +74,7 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "grid_adaptive_min_width",
       validPrototypeFixture("grid-adaptive-min-width"),
+      pending = true,
     )
 
   // Pending until the Linux recording workflow produces these new pager-option baselines.
@@ -175,6 +185,7 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "material_slider_chip_card",
       validPrototypeFixture("material-slider-chip-card"),
+      pending = true,
     )
 
   /**

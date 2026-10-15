@@ -60,6 +60,18 @@ describe("displayConfigSchema", () => {
     expect(displayConfigSchema.safeParse({ density: 72 }).success).toBe(true);
   });
 
+  test("bounds numeric density to the supported Android range", () => {
+    expect(displayConfigSchema.safeParse({ density: 100000 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: 1281 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: 1280 }).success).toBe(true);
+    expect(displayConfigSchema.safeParse({ density: 72 }).success).toBe(true);
+    expect(displayConfigSchema.safeParse({ density: 71 }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: Number.NaN }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ density: Number.POSITIVE_INFINITY }).success).toBe(
+      false,
+    );
+  });
+
   // The advertised JSON Schema must repeat the reset-exclusivity refinement
   // (issue #6303 review: "Encode reset exclusivity in the public schema"), so
   // a generated tool client can reject an invalid request before dispatch,
@@ -135,6 +147,31 @@ describe("displayConfig handler", () => {
       expect(client.getCommandCalls().map((call) => call.command)).toContain(
         "shell settings put system font_scale 1.3",
       );
+    } finally {
+      create.mockRestore();
+    }
+  });
+  test("rejects an excessive density without dispatching wm density", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell settings get system font_scale", "1.0\n");
+    client.setCommandResult("shell wm density", "Physical density: 440\n");
+    client.setCommandResult("shell cmd uimode night", "Night mode: no\n");
+    const create = spyOn(defaultAdbClientFactory, "create").mockImplementation((target) =>
+      adbFactory.create(target),
+    );
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
+        density: 100000,
+      });
+      expect(response.isError).toBe(true);
+      expect(
+        adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .map((call) => call.command),
+      ).not.toContain("shell wm density 100000");
     } finally {
       create.mockRestore();
     }

@@ -6,7 +6,7 @@
  * `type` discriminator but NOT a renamed field *inside* a command payload: renaming
  * `disableAllFiltering` on the TS side compiles cleanly and only fails at runtime
  * on-device, when the typed Swift payload struct (under
- * `ios/control-proxy/Sources/CtrlProxyRewrite/Models/`) decodes the wrong field.
+ * `ios/control-proxy/Sources/CtrlProxy/Models/`) decodes the wrong field.
  *
  * This suite is one half of a two-sided guard around a shared JSON snapshot fixture,
  * `test/fixtures/ios-ctrlproxy-request-snapshots.json`:
@@ -35,9 +35,11 @@
  * all the field names live — is built by the production `buildNetworkMockRules`.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
@@ -119,6 +121,7 @@ interface SnapshotSpec {
    * throw unless the response reports success, so those specs provide a matching shape.
    */
   resolveWith?: unknown;
+  fireAndForget?: boolean;
 }
 
 /**
@@ -127,7 +130,99 @@ interface SnapshotSpec {
  * (fractional coordinates prove the iOS no-rounding path; no two coordinate
  * fields share a value, so a swapped field is caught by value, not just name).
  */
+// These runner commands are declared by the host but have no production TS builder.
+// Remove an entry when its builder lands: the disjointness test prevents stale exemptions.
+const HOST_NEVER_SENDS = new Set([
+  "get_current_focus",
+  "get_traversal_order",
+  "request_two_finger_swipe",
+  "set_network_fault_rules",
+]);
+
+async function withClient(
+  h: Harness,
+  invoke: (client: IOSCtrlProxyClient) => unknown,
+): Promise<unknown> {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "snapshot-device", platform: "ios", name: "fixture" },
+    8765,
+    () => {
+      throw new Error("snapshot must never open a socket");
+    },
+    h.context.timer,
+  );
+  const context = spyOn(client, "createDelegateContext").mockReturnValue(h.context);
+  const gate = spyOn(client, "sdkCapabilityGate").mockResolvedValue(null);
+  const send = spyOn(client, "sendMessage").mockImplementation((data) => {
+    h.sent.push(data);
+    return true;
+  });
+  try {
+    return await invoke(client);
+  } finally {
+    context.mockRestore();
+    gate.mockRestore();
+    send.mockRestore();
+  }
+}
+
 const SNAPSHOT_SPECS: SnapshotSpec[] = [
+  {
+    name: "get_sdk_capabilities",
+    builder: "IOSCtrlProxyClient.requestSdkCapabilities",
+    invoke: (h) => withClient(h, (client) => client["requestSdkCapabilities"](-1)),
+  },
+  {
+    name: "request_activate_accessibility_link",
+    builder: "CtrlProxyVoiceOver.requestActivateAccessibilityLink",
+    invoke: (h) =>
+      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink("Details", 2, "owner-42"),
+  },
+  {
+    name: "request_magic_tap",
+    builder: "CtrlProxyVoiceOver.requestMagicTap",
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),
+  },
+  {
+    name: "request_sdk_trigger",
+    builder: "requestSdkTrigger",
+    invoke: (h) =>
+      requestSdkTrigger(h.context, {
+        module: "callkit",
+        trigger: "incoming",
+        payload: { caller: "fixture" },
+      }),
+  },
+  {
+    name: "set_hierarchy_poll_interval",
+    builder: "IOSCtrlProxyClient.refreshObservationStreamHierarchyCadence",
+    invoke: (h) => withClient(h, (client) => client.refreshObservationStreamHierarchyCadence(275)),
+    fireAndForget: true,
+  },
+  {
+    name: "set_network_error_simulation",
+    builder: "IOSCtrlProxyClient.setNetworkErrorSimulation",
+    invoke: (h) =>
+      withClient(h, (client) =>
+        client.setNetworkErrorSimulation({
+          enabled: true,
+          errorType: "timeout",
+          limit: 3,
+          expiresAtEpochMs: 1700000000000,
+          remainingMs: 2500,
+        }),
+      ),
+  },
+  {
+    name: "set_voiceover_state",
+    builder: "CtrlProxyVoiceOver.requestSetVoiceOverEnabled",
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestSetVoiceOverEnabled(true),
+  },
+  {
+    name: "storage_capabilities",
+    builder: "CtrlProxyDatabase.storageCapabilities",
+    invoke: (h) => new CtrlProxyDatabase(h.context).storageCapabilities("com.example.app"),
+  },
   {
     name: "request_hierarchy",
     builder: "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=true)",
@@ -485,10 +580,12 @@ async function captureWire(spec: SnapshotSpec): Promise<Record<string, unknown>>
   }
   expect(h.sent.length).toBe(1);
   const wire = JSON.parse(h.sent[0]) as Record<string, unknown>;
-  h.requestManager.resolve(
-    wire.requestId as string,
-    spec.resolveWith ?? { success: true, totalTimeMs: 1 },
-  );
+  if (!spec.fireAndForget) {
+    h.requestManager.resolve(
+      wire.requestId as string,
+      spec.resolveWith ?? { success: true, totalTimeMs: 1 },
+    );
+  }
   await promise;
   return wire;
 }
@@ -503,7 +600,8 @@ function normalizeRequestId(wire: Record<string, unknown>): Record<string, unkno
 async function captureAllSnapshots(): Promise<Map<string, Record<string, unknown>>> {
   const captured = new Map<string, Record<string, unknown>>();
   for (const spec of SNAPSHOT_SPECS) {
-    captured.set(spec.name, normalizeRequestId(await captureWire(spec)));
+    const wire = await captureWire(spec);
+    captured.set(spec.name, spec.fireAndForget ? wire : normalizeRequestId(wire));
   }
   // Sent without a requestId (fire-and-forget sync on reconnect) — not normalized.
   captured.set("set_network_mock_rules", buildNetworkMockRulesSnapshot());
@@ -517,8 +615,9 @@ function builderDoc(name: string): string {
   );
 }
 
+let committedFixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as FixtureFile;
 function loadFixture(): FixtureFile {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as FixtureFile;
+  return committedFixture;
 }
 
 describe("iOS control-proxy — request snapshot fixture matches live TS builders", () => {
@@ -536,6 +635,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
         })),
       };
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(updated, null, 2)}\n`);
+      committedFixture = updated;
     }
 
     const fixture = loadFixture();
@@ -558,6 +658,21 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
   test("every fixture wire type is a known RequestType rawValue", () => {
     for (const snapshot of loadFixture().snapshots) {
       expect(IOS_KNOWN_REQUEST_TYPE_SET.has(snapshot.wire.type as string)).toBe(true);
+    }
+  });
+
+  test("fixture covers every host-sent RequestType", () => {
+    const covered = new Set(loadFixture().snapshots.map((s) => s.wire.type));
+    expect([...covered].sort()).toEqual(
+      [...IOS_KNOWN_REQUEST_TYPE_SET].filter((type) => !HOST_NEVER_SENDS.has(type)).sort(),
+    );
+  });
+
+  test("host-never-sends exemptions are known and absent from the fixture", () => {
+    const covered = new Set(loadFixture().snapshots.map((s) => s.wire.type));
+    for (const type of HOST_NEVER_SENDS) {
+      expect(IOS_KNOWN_REQUEST_TYPE_SET.has(type)).toBe(true);
+      expect(covered.has(type)).toBe(false);
     }
   });
 

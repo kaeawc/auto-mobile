@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
@@ -73,6 +76,15 @@ fun AudioPlayerComponent(
 
   // Update player ready state
   LaunchedEffect(player) { isPlayerReady = player != null }
+
+  val lifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(lifecycleOwner, viewModel) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_STOP) viewModel.onHostStopped()
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+  }
 
   // Cleanup player on disposal
   DisposableEffect(Unit) {

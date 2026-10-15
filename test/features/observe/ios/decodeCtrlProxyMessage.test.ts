@@ -159,7 +159,7 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("hierarchy failure preserves the Swift runner error envelope", () => {
     // Built from WebSocketResponse.error in
-    // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+    // ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift; no data.
     const message = msg({
       type: "hierarchy_update",
       success: false,
@@ -840,37 +840,6 @@ describe("decodeCtrlProxyMessage", () => {
 });
 
 /**
- * Parse every `case` rawValue from the Swift `ResponseType: String` enum.
- *
- * Swift String-enum semantics: a case without an explicit `= "..."` uses the
- * case name itself as its rawValue (e.g. `case screenshot` → "screenshot"), so
- * we fall back to the identifier when no string literal is present.
- */
-function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
-  const lines = swiftSource.split("\n");
-  // Tolerate extra protocol conformances after `String` (e.g. `String, Sendable`), which the
-  // rewrite's `ResponseType.swift` declares — `[^{]*` spans them up to the opening brace.
-  const startIdx = lines.findIndex((line) =>
-    /enum\s+ResponseType\s*:\s*String\b[^{]*\{/.test(line),
-  );
-  if (startIdx < 0) {
-    throw new Error("Could not locate `enum ResponseType: String` in ResponseType.swift");
-  }
-  const rawValues: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim() === "}") {
-      break; // end of the (brace-flat) enum body
-    }
-    const match = line.match(/^\s*case\s+([A-Za-z0-9_]+)(?:\s*=\s*"([^"]+)")?/);
-    if (match) {
-      rawValues.push(match[2] ?? match[1]);
-    }
-  }
-  return rawValues;
-}
-
-/**
  * A rawValue is "explicitly decoded" when a dedicated decoder
  * reshapes it into a fresh result object. The default branch, by contrast,
  * resolves the message verbatim (`result === message` by identity), so identity
@@ -934,14 +903,12 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
 ];
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
-  const swiftSource = readFileSync(
-    join(
-      import.meta.dir,
-      "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/ResponseType.swift",
+  const { responseTypes: rawValues } = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../../fixtures/ios-contract/runner-responses.json"),
+      "utf8",
     ),
-    "utf8",
-  );
-  const rawValues = parseSwiftResponseTypeRawValues(swiftSource);
+  ) as { responseTypes: string[] };
 
   // Response types the daemon deliberately does NOT reshape: they reach the
   // decoder's default verbatim-resolve branch on purpose because no client
@@ -949,21 +916,19 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
   // here — per the spec we do not assert on their absence from the switch,
   // only subtract them so the genuinely-unhandled residue is isolated.
   //   1. set_hierarchy_poll_interval_result — poll-interval ack
-  //   2. screenshot_error                   — error push, handled client-side
-  //   3. current_focus_result               — focus push, no awaiter
-  //   4. traversal_order_result             — traversal push, no awaiter
-  //   5. connected                          — connection handshake push
+  //   2. current_focus_result               — focus push, no awaiter
+  //   3. traversal_order_result             — traversal push, no awaiter
+  //   4. connected                          — connection handshake push
   //   (set_network_mock_rules_result is now decoded: it carries rejectedMockIds, #10101)
   const FIRE_AND_FORGET_EXCUSES = [
     "set_hierarchy_poll_interval_result",
-    "screenshot_error",
     "current_focus_result",
     "traversal_order_result",
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 51 rawValues", () => {
-    expect(rawValues.length).toBe(51);
+  test("Swift ResponseType declares exactly 50 rawValues", () => {
+    expect(rawValues.length).toBe(50);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -1027,7 +992,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     readFileSync(
       join(
         import.meta.dir,
-        "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift",
+        "../../../../ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift",
       ),
       "utf8",
     ),

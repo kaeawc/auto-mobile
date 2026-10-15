@@ -25,10 +25,9 @@
  *
  * Only absolute instants are converted; durations (`session_timeout_ms`, ...) are frame-free. The
  * #11129 guards keep working: the row generation is not a time, and the stale-write guard
- * (`last_used_at_ms` only moves forward) compares stamps from the same daemon, converted with the
- * same offset unless a wall step falls between two writes. A backward step there makes the newer
- * write read as stale and leaves the row's later, pre-step lease in place until the converted
- * activity passes it, so the row errs toward keeping a session, by at most the step.
+ * compares the raw session-clock activity sequence (#11497), which never steps backward within
+ * this daemon/session. Wall stamps remain display/recovery instants; a wall step cannot reject
+ * newer activity or let a delayed older write replace its lease.
  */
 
 import type { DeviceSession, DeviceSessionStatus } from "../db/types";
@@ -154,6 +153,7 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     return this.inner.upsertActiveSession(
       {
         ...record,
+        activitySeq: record.activitySeq ?? record.lastUsedAtMs,
         createdAtMs: this.store(record.sessionUuid, "created", record.createdAtMs),
         lastUsedAtMs: this.store(record.sessionUuid, "lastUsed", record.lastUsedAtMs),
         expiresAtMs: this.store(record.sessionUuid, "expires", record.expiresAtMs),
@@ -183,6 +183,7 @@ class SessionClockPersistence implements DeviceSessionPersistence {
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
     return this.inner.recordActivity(sessionUuid, {
       ...update,
+      activitySeq: update.activitySeq ?? update.lastUsedAtMs,
       lastUsedAtMs: this.store(sessionUuid, "lastUsed", update.lastUsedAtMs),
       expiresAtMs: this.store(sessionUuid, "expires", update.expiresAtMs),
     });

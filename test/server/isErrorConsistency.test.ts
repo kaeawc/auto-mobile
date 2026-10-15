@@ -14,26 +14,14 @@
  * review).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  postNotificationHandler,
-  resetPostNotificationFactory,
-  setPostNotificationFactory,
-} from "../../src/server/notificationTools";
+import { createPostNotificationHandler } from "../../src/server/notificationTools";
 import {
   resetAppPermissionsFactory,
   setAppPermissionsFactory,
   setAppPermissionsHandler,
 } from "../../src/server/appTools";
-import {
-  navigateToHandler,
-  resetNavigateToFactory,
-  setNavigateToFactory,
-} from "../../src/server/navigationTools";
-import {
-  resetSetUIStateFactory,
-  setSetUIStateFactory,
-  setUIStateHandler,
-} from "../../src/server/formTools";
+import { createNavigateToHandler } from "../../src/server/navigationTools";
+import { createSetUIStateHandler } from "../../src/server/formTools";
 import type { BootedDevice } from "../../src/models";
 
 const androidDevice: BootedDevice = {
@@ -44,18 +32,16 @@ const androidDevice: BootedDevice = {
 
 describe("isError consistency (#6251)", () => {
   describe("postNotification", () => {
-    afterEach(() => {
-      resetPostNotificationFactory();
-    });
-
     test("receiver-reported failure sets isError: true", async () => {
-      setPostNotificationFactory(() => ({
-        execute: async () => ({
-          success: false,
-          supported: true,
-          error: "SDK notification receiver reported a failure",
+      const postNotificationHandler = createPostNotificationHandler({
+        postNotificationFactory: () => ({
+          execute: async () => ({
+            success: false,
+            supported: true,
+            error: "SDK notification receiver reported a failure",
+          }),
         }),
-      }));
+      });
 
       const response = await postNotificationHandler(androidDevice, {
         title: "T",
@@ -69,13 +55,15 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("delivered notification stays isError: false", async () => {
-      setPostNotificationFactory(() => ({
-        execute: async () => ({
-          success: true,
-          supported: true,
-          method: "sdk",
+      const postNotificationHandler = createPostNotificationHandler({
+        postNotificationFactory: () => ({
+          execute: async () => ({
+            success: true,
+            supported: true,
+            method: "sdk",
+          }),
         }),
-      }));
+      });
 
       const response = await postNotificationHandler(androidDevice, {
         title: "T",
@@ -199,20 +187,18 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("navigateTo", () => {
-    afterEach(() => {
-      resetNavigateToFactory();
-    });
-
     test("failed navigation sets isError: true", async () => {
-      setNavigateToFactory(() => ({
-        execute: async () => ({
-          success: false,
-          error: "No path to target screen",
-          currentScreen: "Home",
-          targetScreen: "Settings",
-          stepsExecuted: 0,
+      const navigateToHandler = createNavigateToHandler({
+        navigateToFactory: () => ({
+          execute: async () => ({
+            success: false,
+            error: "No path to target screen",
+            currentScreen: "Home",
+            targetScreen: "Settings",
+            stepsExecuted: 0,
+          }),
         }),
-      }));
+      });
 
       const response = await navigateToHandler(androidDevice, {
         targetScreen: "Settings",
@@ -225,15 +211,17 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("successful navigation stays isError: false", async () => {
-      setNavigateToFactory(() => ({
-        execute: async () => ({
-          success: true,
-          message: "Navigated to Settings",
-          currentScreen: "Settings",
-          targetScreen: "Settings",
-          stepsExecuted: 2,
+      const navigateToHandler = createNavigateToHandler({
+        navigateToFactory: () => ({
+          execute: async () => ({
+            success: true,
+            message: "Navigated to Settings",
+            currentScreen: "Settings",
+            targetScreen: "Settings",
+            stepsExecuted: 2,
+          }),
         }),
-      }));
+      });
 
       const response = await navigateToHandler(androidDevice, {
         targetScreen: "Settings",
@@ -245,32 +233,30 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("setUIState", () => {
-    afterEach(() => {
-      resetSetUIStateFactory();
-    });
-
     test("all fields failing sets isError: true", async () => {
-      setSetUIStateFactory(() => ({
-        execute: async () => ({
-          success: false,
-          fields: [
-            {
-              selector: { text: "Username" },
-              success: false,
-              attempts: 3,
-              error: "Element not found",
-            },
-            {
-              selector: { text: "Password" },
-              success: false,
-              attempts: 3,
-              error: "Element not found",
-            },
-          ],
-          totalAttempts: 6,
-          error: "Some fields could not be set",
+      const setUIStateHandler = createSetUIStateHandler({
+        setUIStateFactory: () => ({
+          execute: async () => ({
+            success: false,
+            fields: [
+              {
+                selector: { text: "Username" },
+                success: false,
+                attempts: 3,
+                error: "Element not found",
+              },
+              {
+                selector: { text: "Password" },
+                success: false,
+                attempts: 3,
+                error: "Element not found",
+              },
+            ],
+            totalAttempts: 6,
+            error: "Some fields could not be set",
+          }),
         }),
-      }));
+      });
 
       const response = await setUIStateHandler(androidDevice, {
         fields: [
@@ -283,27 +269,29 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("genuine partial success (some fields ok) stays isError: false with per-field status", async () => {
-      setSetUIStateFactory(() => ({
-        execute: async () => ({
-          success: false,
-          fields: [
-            {
-              selector: { text: "Username" },
-              success: true,
-              attempts: 1,
-              verified: true,
-            },
-            {
-              selector: { text: "Password" },
-              success: false,
-              attempts: 3,
-              error: "Element not found",
-            },
-          ],
-          totalAttempts: 4,
-          error: "Some fields could not be set",
+      const setUIStateHandler = createSetUIStateHandler({
+        setUIStateFactory: () => ({
+          execute: async () => ({
+            success: false,
+            fields: [
+              {
+                selector: { text: "Username" },
+                success: true,
+                attempts: 1,
+                verified: true,
+              },
+              {
+                selector: { text: "Password" },
+                success: false,
+                attempts: 3,
+                error: "Element not found",
+              },
+            ],
+            totalAttempts: 4,
+            error: "Some fields could not be set",
+          }),
         }),
-      }));
+      });
 
       const response = await setUIStateHandler(androidDevice, {
         fields: [
@@ -321,20 +309,22 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("full success stays isError: false", async () => {
-      setSetUIStateFactory(() => ({
-        execute: async () => ({
-          success: true,
-          fields: [
-            {
-              selector: { text: "Username" },
-              success: true,
-              attempts: 1,
-              verified: true,
-            },
-          ],
-          totalAttempts: 1,
+      const setUIStateHandler = createSetUIStateHandler({
+        setUIStateFactory: () => ({
+          execute: async () => ({
+            success: true,
+            fields: [
+              {
+                selector: { text: "Username" },
+                success: true,
+                attempts: 1,
+                verified: true,
+              },
+            ],
+            totalAttempts: 1,
+          }),
         }),
-      }));
+      });
 
       const response = await setUIStateHandler(androidDevice, {
         fields: [{ selector: { text: "Username" }, value: "alice" }],

@@ -1,12 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerEmulatorLossIncidentResources,
-  resetEmulatorLossIncidentReaderForTesting,
-  setEmulatorLossIncidentReaderForTesting,
+  type EmulatorLossIncidentResourceDependencies,
 } from "../../src/server/emulatorLossIncidentResources";
 import { EMULATOR_LOSS_INCIDENT_RESOURCE_URIS } from "../../src/server/emulatorLossIncidentResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { EmulatorLossIncident } from "../../src/daemon/emulatorLossIncident";
+
+let deps: EmulatorLossIncidentResourceDependencies = {};
+function useEmulatorLossIncidentReaderForTesting(
+  value: EmulatorLossIncidentResourceDependencies["reader"] | null,
+): void {
+  deps = { ...deps, reader: value ?? undefined };
+  registerEmulatorLossIncidentResources(deps);
+}
+function clearEmulatorLossIncidentReaderForTesting(): void {
+  deps = { ...deps, reader: undefined };
+}
 
 const incident: EmulatorLossIncident = {
   id: "emulator-loss-1",
@@ -23,16 +33,16 @@ const incident: EmulatorLossIncident = {
 
 describe("emulatorLossIncidentResources", () => {
   beforeEach(() => {
-    registerEmulatorLossIncidentResources();
+    registerEmulatorLossIncidentResources(deps);
   });
 
   afterEach(() => {
     ResourceRegistry.clearResources();
-    resetEmulatorLossIncidentReaderForTesting();
+    clearEmulatorLossIncidentReaderForTesting();
   });
 
   test("lists persisted incidents through a stable resource URI", async () => {
-    setEmulatorLossIncidentReaderForTesting({
+    useEmulatorLossIncidentReaderForTesting({
       list: async () => [incident],
     });
     const resource = ResourceRegistry.getResource(EMULATOR_LOSS_INCIDENT_RESOURCE_URIS.ARCHIVE);

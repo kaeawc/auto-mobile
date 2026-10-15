@@ -285,13 +285,14 @@ export interface A11ySetTextResult extends BaseResult {
 }
 
 /** IME action result from accessibility service */
-export type A11yImeActionResult = ActionTimingResult;
+export type A11yImeActionResult = Omit<ActionTimingResult, "action"> & { action?: string };
 
 /** Select all result from accessibility service */
 export type A11ySelectAllResult = BaseResult;
 
 /** Accessibility action result */
-export type A11yActionResult = ActionTimingResult & {
+export type A11yActionResult = Omit<ActionTimingResult, "action"> & {
+  action?: string;
   /** The request was sent to the runner. */
   dispatched?: boolean;
   /** The runner replied, including an explicit refusal. False after a lost reply. */

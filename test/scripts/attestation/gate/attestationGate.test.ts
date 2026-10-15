@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, mock, spyOn, test } from "bun:test";
+import { join } from "node:path";
 import { logger } from "../../../../src/utils/logger";
 import {
   runAttestationGate,
@@ -335,7 +336,7 @@ test("CLI resolves arguments and environment without process access", () => {
   const env = { RUNNER_TEMP: "/runner", GITHUB_REPOSITORY: "owner/repo" };
   expect(resolveCliOptions([], env)).toEqual({
     tier: 1,
-    record: "/runner/attestation-shadow.jsonl",
+    record: join("/runner", "attestation-shadow.jsonl"),
     repo: "owner/repo",
     commitSha: "",
   });

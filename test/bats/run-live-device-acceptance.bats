@@ -324,3 +324,33 @@ run_harness() {
   [[ "${output}" == *"--ios-same-name-sibling-uuid must differ"* ]]
   [ ! -f "${COMMAND_LOG}" ]
 }
+
+@test "broker lane forwards batch options once without building or requiring full targets" {
+  run env AUTOMOBILE_ACCEPTANCE_LIVE=1 PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+    --scenario broker --broker-batch /private/broker-batch --clients a,b,c \
+    --max-devices 2 --allow-crash --only parallel-acquire,capacity-refusal-and-replay \
+    --confirm-live --test-owned-devices
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${COMMAND_LOG}")" == *"--scenario broker --broker-batch /private/broker-batch --max-devices 2 --clients a,b,c --only parallel-acquire,capacity-refusal-and-replay --allow-crash --confirm-live --test-owned-devices"* ]]
+  [[ "$(cat "${COMMAND_LOG}")" != *"run build"* ]]
+  [ ! -e "${TEST_REPO}/scratch" ]
+}
+
+@test "broker lane refuses missing batch, excessive caps and missing live confirmations" {
+  for args in "--scenario broker" "--scenario broker --broker-batch /batch --max-devices 5" "--scenario broker --broker-batch /batch"; do
+    # Intentional word splitting: these are trusted fixed argument vectors.
+    # shellcheck disable=SC2086
+    run env PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" $args
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "${COMMAND_LOG}" ]
+}
+
+@test "broker dry-run forwards a plan without build, key creation or evidence directories" {
+  run env PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
+    --scenario broker --broker-batch /batch --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${COMMAND_LOG}")" == *"--scenario broker --broker-batch /batch --max-devices 2 --dry-run"* ]]
+  [ ! -e "${TEST_REPO}/scratch" ]
+  [ ! -e "${TEST_REPO}/dist" ]
+}

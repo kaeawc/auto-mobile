@@ -107,11 +107,13 @@ export async function closeBrokerSession(
     token,
     timer: deps.timer,
     requireReleased: !refused,
+    allowFailed: true,
   });
   if (
     refused
       ? release.outcome !== "failed" || release.sessionUuid !== null
-      : release.sessionUuid !== grantedSession(context, deps)
+      : release.sessionUuid !== grantedSession(context, deps) ||
+        !["released", "failed"].includes(release.outcome)
   ) {
     throw new Error("Close release status session mismatch.");
   }

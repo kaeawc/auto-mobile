@@ -16,6 +16,7 @@ export interface BrokerResourceSample {
   state: string;
 }
 /** Proxy operations retain the original connection; observe must not silently reconnect/acquire. */
+export type BrokerResourceSamples = readonly BrokerResourceSample[] | { unavailable: string };
 export interface BrokerDeviceScenarioOps {
   totalDeviceCap: number;
   acquire(
@@ -30,7 +31,8 @@ export interface BrokerDeviceScenarioOps {
   close(client: BrokerScenarioClient): Promise<void>;
   devicesView(): Promise<LedgerDevicesView>;
   /** Authoritative resource ledger sample, including destroying/destroyed rows. */
-  resources(): Promise<readonly BrokerResourceSample[]>;
+  resources(): Promise<BrokerResourceSamples>;
+  tools?(client: BrokerScenarioClient): Promise<readonly unknown[]>;
 }
 function ops(ctx: BrokerScenarioContext): BrokerDeviceScenarioOps {
   assert(ctx.deviceOps, "Device scenario requires injected proxy-session operations.");
@@ -112,6 +114,17 @@ async function poll<T>(
 async function sample(ctx: BrokerScenarioContext) {
   return ctx.record("resource-ledger", {}, () => ops(ctx).resources());
 }
+function resourceRows(
+  ctx: BrokerScenarioContext,
+  samples: BrokerResourceSamples,
+  assertion: string,
+) {
+  if ("unavailable" in samples) {
+    ctx.assertions?.push({ assertion, status: "not-verifiable", reason: samples.unavailable });
+    return undefined;
+  }
+  return samples;
+}
 async function absent(ctx: BrokerScenarioContext, result: SessionBrokerResult) {
   const row = ctx.ledger.devices().find((entry) => entry.sessionUuid === result.sessionUuid);
   assert(row?.device, "Native absence requires a ready ledger binding.");
@@ -120,15 +133,18 @@ async function absent(ctx: BrokerScenarioContext, result: SessionBrokerResult) {
     "Native destruction",
     async () => {
       const view = await ctx.record("devices", {}, () => ops(ctx).devicesView());
-      const resources = await sample(ctx);
+      const resources = resourceRows(ctx, await sample(ctx), "resource destruction");
       return (
         view.daemons.length > 0 &&
         view.daemons.every((d) => d.alive && !d.error) &&
         !view.devices.some(
           (d) => d.platform === row.device!.platform && d.name === row.device!.name,
         ) &&
-        resources.some((r) => r.sessionUuid === result.sessionUuid && r.state === "destroyed") &&
-        !resources.some((r) => r.sessionUuid === result.sessionUuid && r.state !== "destroyed")
+        (resources === undefined ||
+          (resources.some((r) => r.sessionUuid === result.sessionUuid && r.state === "destroyed") &&
+            !resources.some(
+              (r) => r.sessionUuid === result.sessionUuid && r.state !== "destroyed",
+            )))
       );
     },
     Boolean,
@@ -310,7 +326,10 @@ async function restart(ctx: BrokerScenarioContext) {
     ctx.ledger.devices().find((r) => r.sessionUuid === uuid(grant))!,
   );
   const check = async () => {
-    const resources = await sample(ctx);
+    const resources = resourceRows(ctx, await sample(ctx), "restart resource handoff");
+    if (!resources) {
+      return;
+    }
     for (const grant of grants) {
       assert(
         !resources.some(
@@ -403,7 +422,10 @@ async function timeout(ctx: BrokerScenarioContext) {
     ctx,
     "Preparation timeout capacity",
     () => sample(ctx),
-    (resources) => resources.every((r) => r.state === "destroyed"),
+    (samples) =>
+      resourceRows(ctx, samples, "timeout resource cleanup")?.every(
+        (r) => r.state === "destroyed",
+      ) ?? true,
   );
   await ops(ctx).close(c);
   const control = successor(ctx, c);
@@ -423,6 +445,36 @@ async function timeout(ctx: BrokerScenarioContext) {
   assert.equal(refused.cleanupPending, false);
   assert.deepEqual(await status(ctx, control), refused);
 }
+async function capacity(ctx: BrokerScenarioContext) {
+  const cap = ops(ctx).totalDeviceCap;
+  assert(ctx.clients.length > cap, "Capacity refusal requires capacity + 1 batch clients.");
+  const winners = ctx.clients.slice(0, cap);
+  const grants = await acquireTogether(ctx, winners);
+  grants.forEach(uuid);
+  const refused = ctx.clients[cap];
+  const refusal = await acquire(ctx, refused);
+  assert.equal(refusal.outcome, "failed");
+  assert.equal(refusal.failure?.code, "capacity_exhausted");
+  assert.equal(refusal.cleanupPending, false);
+  assert.equal(refusal.sessionUuid, null);
+  resourceRows(ctx, await sample(ctx), "capacity refusal resource allocation");
+  assert(ops(ctx).tools, "Capacity refusal requires proxy tools/list.");
+  assert.deepEqual(
+    await ctx.record("tools/list", { client: refused.name }, () => ops(ctx).tools!(refused)),
+    [],
+  );
+  assert(!ctx.ledger.entries.some((r) => r.requestId === refusal.requestId));
+  for (const [i, c] of winners.entries()) {
+    await release(ctx, c, grants[i]);
+  }
+  await ops(ctx).close(refused);
+  assert.deepEqual(await acquire(ctx, refused, false, true), refusal);
+  await ops(ctx).close(refused);
+  const next = successor(ctx, refused);
+  const ready = await acquire(ctx, next);
+  await observe(ctx, next);
+  await release(ctx, next, ready);
+}
 const entry = (name: string, capacity: number, run: BrokerScenario["run"]): BrokerScenario => ({
   name,
   class: "device",
@@ -432,6 +484,7 @@ const entry = (name: string, capacity: number, run: BrokerScenario["run"]): Brok
 });
 export const brokerDeviceScenarios: readonly BrokerScenario[] = [
   entry("parallel-acquire", 2, parallel),
+  entry("capacity-refusal-and-replay", 1, capacity),
   entry("release-destroy-verification", 1, releaseDestroy),
   entry("owner-death-and-abandon", 1, ownerAbandon),
   entry("daemon-restart-with-live-sessions", 1, restart),

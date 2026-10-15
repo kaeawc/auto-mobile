@@ -42,6 +42,11 @@ total_timeout_seconds=1200
 platform_timeout_seconds=540
 termination_grace_seconds=2
 scenario="full"
+broker_batch=""
+broker_clients=""
+broker_max_devices=2
+broker_only=""
+allow_crash=false
 confirm_live=false
 test_owned_devices=false
 dry_run=false
@@ -61,7 +66,11 @@ Usage:
     --ios-min-os-version <minimum-os> --ios-max-os-version <maximum-os> \
     --ownership-manifest <path> --operator-key-file <path> \
     [--create-operator-key] [--record-ownership-manifest] \
-    [--scenario <full>] [--dry-run]
+    [--scenario <full|broker>] [--dry-run]
+
+Broker lane: --scenario broker --broker-batch <private-batch> [--clients a,b]
+  [--max-devices <1..4>] [--only <scenario,...>] [--allow-crash]
+  with the same live confirmation gates. Dry-run prints the plan and writes nothing.
 
 The full scenario stops, boots, provisions/adopts, restarts, and
 reacquires only the two explicit targets. It is never PR CI. --test-owned-devices
@@ -132,11 +141,15 @@ while [[ "$#" -gt 0 ]]; do
       record_ownership_manifest=true
       shift
       ;;
+    --allow-crash)
+      allow_crash=true
+      shift
+      ;;
     --dry-run)
       dry_run=true
       shift
       ;;
-    --android-avd-name | --android-sibling-avd-name | --android-duplicate-serial | --android-runtime | --android-device-type | --android-memory-mb | --android-cpu-cores | --android-min-os-version | --android-max-os-version | --ios-simulator-name | --ios-simulator-uuid | --ios-same-name-sibling-uuid | --ios-runtime | --ios-device-type | --ios-min-os-version | --ios-max-os-version | --evidence-dir | --ownership-manifest | --operator-key-file | --total-timeout-seconds | --platform-timeout-seconds | --scenario)
+    --android-avd-name | --android-sibling-avd-name | --android-duplicate-serial | --android-runtime | --android-device-type | --android-memory-mb | --android-cpu-cores | --android-min-os-version | --android-max-os-version | --ios-simulator-name | --ios-simulator-uuid | --ios-same-name-sibling-uuid | --ios-runtime | --ios-device-type | --ios-min-os-version | --ios-max-os-version | --evidence-dir | --ownership-manifest | --operator-key-file | --total-timeout-seconds | --platform-timeout-seconds | --scenario | --broker-batch | --clients | --max-devices | --only)
       require_value "$1" "${2:-}"
       case "$1" in
         --android-avd-name) android_avd_name="$2" ;;
@@ -161,6 +174,10 @@ while [[ "$#" -gt 0 ]]; do
         --total-timeout-seconds) total_timeout_seconds="$2" ;;
         --platform-timeout-seconds) platform_timeout_seconds="$2" ;;
         --scenario) scenario="$2" ;;
+        --broker-batch) broker_batch="$2" ;;
+        --clients) broker_clients="$2" ;;
+        --max-devices) broker_max_devices="$2" ;;
+        --only) broker_only="$2" ;;
       esac
       shift 2
       ;;
@@ -176,15 +193,40 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-require_positive_integer "--total-timeout-seconds" "${total_timeout_seconds}"
-require_positive_integer "--platform-timeout-seconds" "${platform_timeout_seconds}"
-require_positive_integer "--android-memory-mb" "${android_memory_mb}"
-require_positive_integer "--android-cpu-cores" "${android_cpu_cores}"
-case "${scenario}" in full) ;; *)
+case "${scenario}" in full | broker) ;; *)
   echo "error: unsupported --scenario: ${scenario}" >&2
   exit 2
   ;;
 esac
+if [[ "${scenario}" == broker ]]; then
+  if [[ -z "${broker_batch}" ]]; then
+    echo "error: --scenario broker requires --broker-batch." >&2
+    exit 2
+  fi
+  if ! [[ "${broker_max_devices}" =~ ^[1-4]$ ]]; then
+    echo "error: --max-devices must be an integer from 1 to 4." >&2
+    exit 2
+  fi
+  if [[ "${dry_run}" != true && ("${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != 1) ]]; then
+    echo "error: live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1." >&2
+    exit 2
+  fi
+  broker_args=(scripts/live-device-acceptance.ts --scenario broker --broker-batch "${broker_batch}" --max-devices "${broker_max_devices}")
+  [[ -z "${broker_clients}" ]] || broker_args+=(--clients "${broker_clients}")
+  [[ -z "${broker_only}" ]] || broker_args+=(--only "${broker_only}")
+  [[ "${allow_crash}" != true ]] || broker_args+=(--allow-crash)
+  [[ "${confirm_live}" != true ]] || broker_args+=(--confirm-live)
+  [[ "${test_owned_devices}" != true ]] || broker_args+=(--test-owned-devices)
+  [[ "${dry_run}" != true ]] || broker_args+=(--dry-run)
+  # The batch already binds its built server. Do not rebuild, source env.sh, or touch resident state.
+  cd "${REPO_ROOT}"
+  exec bun "${broker_args[@]}"
+fi
+
+require_positive_integer "--total-timeout-seconds" "${total_timeout_seconds}"
+require_positive_integer "--platform-timeout-seconds" "${platform_timeout_seconds}"
+require_positive_integer "--android-memory-mb" "${android_memory_mb}"
+require_positive_integer "--android-cpu-cores" "${android_cpu_cores}"
 
 if [[ "${dry_run}" != true && "${record_ownership_manifest}" != true && ("${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != "1") ]]; then
   echo "error: live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1." >&2

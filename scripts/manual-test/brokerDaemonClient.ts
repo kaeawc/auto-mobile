@@ -36,7 +36,7 @@ const releaseSchema = z.object({
   sessionUuid: z.string(),
   outcome: z.enum(["released", "cleanup_pending", "unknown_session"]),
 });
-function parseResult(value: unknown, requestId: string): SessionBrokerResult {
+export function parseBrokerResult(value: unknown, requestId: string): SessionBrokerResult {
   // The product owns the profile schema; this adapter validates the broker envelope.
   const result = value as Partial<SessionBrokerResult> | null | undefined;
   if (
@@ -131,10 +131,10 @@ export function createFrameBrokerDaemonClient(options: {
       if (!response.success) {
         throw new Error(response.error ?? "Broker status refused.");
       }
-      return parseResult(response.result, requestId);
+      return parseBrokerResult(response.result, requestId);
     },
     abandon: async (requestId, livenessOwnerToken) =>
-      parseResult(
+      parseBrokerResult(
         await result(
           "daemon/abandonSessionRequest",
           { requestId, livenessOwnerToken },
@@ -224,6 +224,7 @@ export async function waitForBrokerRelease(options: {
   token: string;
   timer: Timer;
   requireReleased?: boolean;
+  allowFailed?: boolean;
   timeoutMs?: number;
 }): Promise<SessionBrokerResult> {
   const timeoutMs = options.timeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS;
@@ -235,7 +236,9 @@ export async function waitForBrokerRelease(options: {
         if (
           status &&
           !status.cleanupPending &&
-          (!options.requireReleased || status.outcome === "released")
+          (!options.requireReleased ||
+            status.outcome === "released" ||
+            (options.allowFailed && status.outcome === "failed"))
         ) {
           return status;
         }

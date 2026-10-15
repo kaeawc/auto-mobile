@@ -15,7 +15,7 @@ export function brokerScenarioHelp(): string {
 Fake scenarios use an isolated in-memory SessionBroker with no devices or daemon.
 Evidence: <MT_BATCH or --batch-dir>/evidence/<scenario>/summary.json.
 Device scenarios require --device and an already-running private broker batch.
-Device execution requires an installed private-batch context adapter with proxy operations and authoritative resource-ledger samples.
+Device execution uses owned proxies; unavailable resource-state assertions are marked not-verifiable.
 --device selects the device variant when a fake scenario has the same name.
 --crash is restricted to daemon-restart-with-live-sessions; --max-devices defaults to 2 (hard maximum 4).`;
 }
@@ -84,6 +84,23 @@ export async function runBrokerScenarioCli(
     log("Set MT_BATCH or --batch-dir for scenario evidence.");
     return 2;
   }
+  if (scenario.class === "device" && !seen.has("--device")) {
+    log("Device scenarios require --device.");
+    return 2;
+  }
+  if (seen.has("--dry-run")) {
+    log(
+      JSON.stringify({
+        name,
+        class: scenario.class,
+        batchDir: resolve(batchDir),
+        dryRun: true,
+        maxDevices,
+        crash: seen.has("--crash"),
+      }),
+    );
+    return 0;
+  }
   return executeScenario(
     scenario,
     resolve(batchDir),
@@ -116,7 +133,14 @@ async function executeScenario(
   };
   const harness =
     scenario.class === "device"
-      ? await (deviceContext ?? scenario.createContext)?.(batchDir, evidence)
+      ? await (
+          deviceContext ??
+          scenario.createContext ??
+          ((directory, fs) =>
+            import("./brokerLiveAdapter").then((module) =>
+              module.createBrokerLiveContext(directory, fs, { maxDevices: options.maxDevices }),
+            ))
+        )(batchDir, evidence)
       : await (
           await import("../../test/helpers/fakeBrokerScenarioContext")
         ).createFakeBrokerScenarioContext(scenario, batchDir, evidence);
@@ -125,7 +149,19 @@ async function executeScenario(
     return 2;
   }
   try {
-    const summary = await runBrokerScenario(scenario, harness.context, options);
+    const context = harness.context;
+    const capacity = context.deviceOps?.totalDeviceCap;
+    const selected =
+      scenario.class === "device" && capacity !== undefined
+        ? {
+            ...context,
+            clients: context.clients.slice(
+              0,
+              scenario.name === "capacity-refusal-and-replay" ? capacity + 1 : capacity,
+            ),
+          }
+        : context;
+    const summary = await runBrokerScenario(scenario, selected, options);
     log(JSON.stringify(summary, null, 2));
     return summary.outcome === "failed" ? 1 : 0;
   } finally {

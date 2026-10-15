@@ -797,7 +797,7 @@ posixTest(
       for (const input of [
         ["call", "observe"],
         ["read", "custom:resource"],
-        ["tools"],
+        ...(outcome === "failed" ? [] : [["tools"]]),
         ["resources"],
         ["subscribe", "custom:resource"],
       ]) {
@@ -1178,6 +1178,18 @@ posixTest(
             ],
       );
     }
+  },
+);
+posixTest(
+  "failed broker initialize can list advertised tools without acquiring a device",
+  async () => {
+    const f = brokerFixture("failed");
+    await f.up();
+    f.files.set(join(brokerDir, "out", "request-2.json"), '{"ok":true,"result":{"tools":[]}}');
+    expect(await runProxySessionCommand(parsed(["tools", "--client", "a-phone"]), f.deps)).toBe(0);
+    expect(JSON.parse(f.files.get(join(brokerDir, "in", "request-2.json"))!)).toMatchObject({
+      op: "tools",
+    });
   },
 );
 posixTest("broker close waits for released status and records driver close evidence", async () => {

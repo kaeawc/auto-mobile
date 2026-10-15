@@ -58,6 +58,7 @@ export interface BrokerScenarioContext {
   privateDaemon?: PrivateDaemonControl;
   maxDevices?: number;
   crash?: boolean;
+  assertions?: Array<{ assertion: string; status: "not-verifiable"; reason: string }>;
   record<T>(operation: string, request: unknown, action: () => Promise<T>): Promise<T>;
 }
 export interface BrokerScenario {
@@ -421,8 +422,9 @@ export interface BrokerScenarioSummary {
   }>;
   ledgerDeltas: unknown[];
   deviceOnlyAssertions: readonly string[];
+  assertions?: BrokerScenarioContext["assertions"];
 }
-/** All I/O is injected; even failures and dry runs produce a redacted summary. */
+/** All I/O is injected; dry runs return a redacted summary without writing evidence. */
 export async function runBrokerScenario(
   scenario: BrokerScenario,
   context: BrokerScenarioContext,
@@ -440,10 +442,12 @@ export async function runBrokerScenario(
     requests: [],
     ledgerDeltas: [],
     deviceOnlyAssertions: scenario.deviceOnlyAssertions,
+    assertions: [],
   };
   let running = false;
   const ctx: BrokerScenarioContext = {
     ...context,
+    assertions: summary.assertions,
     maxDevices: options.maxDevices ?? context.maxDevices ?? 2,
     crash: options.crash ?? context.crash ?? false,
     record: async (operation, request, action) => {
@@ -485,15 +489,17 @@ export async function runBrokerScenario(
         !ctx.crash || scenario.name === "daemon-restart-with-live-sessions",
         "--crash requires daemon-restart-with-live-sessions.",
       );
-      assert(
-        await ctx.preflight(),
-        "Device scenarios require an already-running private broker batch (preflight).",
-      );
-      assert(await ctx.probe(), "Private broker capability probe failed.");
-      assert(
-        (await ctx.daemonClient.capabilities()).includes("session-broker/v1"),
-        "Private daemon lacks session-broker/v1.",
-      );
+      if (!options.dryRun) {
+        assert(
+          await ctx.preflight(),
+          "Device scenarios require an already-running private broker batch (preflight).",
+        );
+        assert(await ctx.probe(), "Private broker capability probe failed.");
+        assert(
+          (await ctx.daemonClient.capabilities()).includes("session-broker/v1"),
+          "Private daemon lacks session-broker/v1.",
+        );
+      }
     }
     if (!options.dryRun) {
       if (scenario.class === "device" && ctx.deviceOps) {
@@ -553,8 +559,10 @@ export async function runBrokerScenario(
     // Registry names may contain # but are trusted; a caller-supplied name never becomes a path.
     assert(/^[a-z0-9#-]+$/.test(scenario.name), "Unsafe scenario evidence name.");
     const directory = join(ctx.batchDir, "evidence", scenario.name);
-    ctx.fs.mkdir(directory);
-    ctx.fs.writeFile(join(directory, "summary.json"), `${text}\n`);
+    if (!options.dryRun) {
+      ctx.fs.mkdir(directory);
+      ctx.fs.writeFile(join(directory, "summary.json"), `${text}\n`);
+    }
     return JSON.parse(text) as BrokerScenarioSummary;
   }
 }

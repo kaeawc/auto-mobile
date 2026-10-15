@@ -534,7 +534,7 @@ function olderManifestMessage(
     ? `batch.json was written by an older harness (missing ${[...missing].join(", ")}); create a new batch with init`
     : undefined;
 }
-function readPrivateBatch(batchDir: string, deps: PrivateDaemonCliDeps): PrivateBatch {
+export function readPrivateBatch(batchDir: string, deps: PrivateDaemonCliDeps): PrivateBatch {
   validateBatchPath(batchDir, deps);
   const manifest = manifestSchema.parse(JSON.parse(deps.readFile(join(batchDir, "batch.json"))));
   const options = manifest.options;

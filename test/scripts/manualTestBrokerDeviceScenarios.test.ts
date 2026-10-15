@@ -20,7 +20,7 @@ import captured from "../fixtures/session-broker/fake-lifecycle.json";
 
 const scenarios = brokerScenarios.filter((s) => s.class === "device");
 /** Logic tests only: scripted proxy, identity and native views do not prove device behavior. */
-function fixture() {
+function fixture(clientCount = 2) {
   const timer = new FakeTimer();
   const files = new Map<string, string>();
   const fs = {
@@ -34,20 +34,22 @@ function fixture() {
       files.set(path, text);
     },
   };
-  const clients: BrokerScenarioClient[] = [0, 1].map((i) => ({
-    name: `client-${i}`,
-    token: `secret-${i}`,
-    config: {
-      contractVersion: 1,
-      requestId: `request-${i}`,
-      device: {
-        schemaVersion: 1,
-        platform: "ios",
-        hardware: { kind: "archetype", archetype: "phone" },
-        os: { kind: "major", major: 27 },
+  const clients: BrokerScenarioClient[] = Array.from({ length: clientCount }, (_, i) => i).map(
+    (i) => ({
+      name: `client-${i}`,
+      token: `secret-${i}`,
+      config: {
+        contractVersion: 1,
+        requestId: `request-${i}`,
+        device: {
+          schemaVersion: 1,
+          platform: "ios",
+          hardware: { kind: "archetype", archetype: "phone" },
+          os: { kind: "major", major: 27 },
+        },
       },
-    },
-  }));
+    }),
+  );
   const client = new FakeBrokerDaemonClient();
   const receipts = new Map<string, SessionBrokerResult>();
   const resources: BrokerResourceSample[] = [];
@@ -96,6 +98,7 @@ function fixture() {
   client.abandon = async (id) => end(id, "session_request_abandoned");
   const deviceOps: BrokerDeviceScenarioOps = {
     totalDeviceCap: 2,
+    tools: async () => [],
     bootGate: async (name, permits, action) => {
       calls.push(`permit:${name}:${permits}`);
       permitted = true;
@@ -126,6 +129,8 @@ function fixture() {
         result = fail(c, "capability_disabled");
       } else if (c.config.preparationTimeoutMs === 1) {
         result = fail(c, "timeout", true);
+      } else if (resources.filter((r) => r.state === "active").length >= 2) {
+        result = fail(c, "capacity_exhausted");
       } else {
         result = {
           ...structuredClone(captured.prepareSession),
@@ -218,7 +223,7 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
   test.each(scenarios)(
     "$name runs only through injected operations and writes redacted evidence",
     async (scenario) => {
-      const f = fixture();
+      const f = fixture(scenario.name === "capacity-refusal-and-replay" ? 3 : 2);
       const summary = await runBrokerScenario(scenario, f.context, { device: true });
       expect(summary.error).toBeUndefined();
       expect(summary.outcome).toBe("passed");
@@ -305,7 +310,7 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
     ).toBe(true);
     expect(f.calls).not.toContain("start");
   });
-  test("dry-run probes without acquiring, signalling or closing proxies", async () => {
+  test("dry-run avoids probes, evidence writes, acquiring, signalling and closing proxies", async () => {
     const f = fixture();
     expect(
       (await runBrokerScenario(scenarios[0], f.context, { device: true, dryRun: true })).outcome,

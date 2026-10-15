@@ -3,7 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
@@ -24,6 +24,8 @@ import {
   recordOwnershipManifest,
   runCoordinateOrientationCheck,
   runAcceptanceMatrix,
+  runBrokerAcceptance,
+  type BrokerAcceptanceArgs,
   runTapAtMultiDeviceRefusalCheck,
   runTapAtReliabilityLoop,
   normalizeMcpTransportDiagnostic,
@@ -35,6 +37,10 @@ import {
   type MatrixDependencies,
   type McpSessionClient,
 } from "../../scripts/live-device-acceptance";
+
+import { createFakeBrokerScenarioContext } from "../helpers/fakeBrokerScenarioContext";
+import { createFakeBrokerDaemon } from "../helpers/fakeBrokerDaemon";
+import { stableStringify } from "../../src/utils/stableStringify";
 
 interface ToolCall {
   owner: string;
@@ -3376,5 +3382,257 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         platform === "android" ? "Android screenshot raster" : "iOS Simulator framebuffer",
       );
     }
+  });
+});
+
+describe("private broker acceptance lane", () => {
+  const brokerBatchDir = resolve("/private-batch");
+  function brokerArgs(extra: string[] = []): BrokerAcceptanceArgs {
+    const args = parseArgs(["--scenario", "broker", "--broker-batch", brokerBatchDir, ...extra]);
+    if (args.scenario !== "broker") {
+      throw new Error("Expected broker arguments");
+    }
+    return args;
+  }
+  beforeAll(async () => {
+    const host = await createFakeBrokerDaemon();
+    await host.close();
+  });
+  async function laneFixture() {
+    const files = new Map<string, string>();
+    const fs = {
+      mkdir: () => {},
+      writeFile: (path: string, text: string) => {
+        files.set(path, text);
+      },
+    };
+    const harness = await createFakeBrokerScenarioContext(
+      {
+        name: "acceptance",
+        class: "fake",
+        capacity: 2,
+        deviceOnlyAssertions: [],
+        run: async () => {},
+      },
+      brokerBatchDir,
+      fs,
+    );
+    const context = harness.context;
+    let stops = 0,
+      starts = 0,
+      crashes = 0,
+      permits = 0;
+    context.preflight = async () => true;
+    context.probe = async () => true;
+    context.privateDaemon = {
+      stop: async () => {
+        stops++;
+      },
+      start: async () => {
+        starts++;
+      },
+      crash: async () => {
+        crashes++;
+        throw new Error("simulated recorded-pid crash boundary");
+      },
+    };
+    context.deviceOps = {
+      totalDeviceCap: 2,
+      bootGate: async (_name, _cap, action) => {
+        permits++;
+        return action();
+      },
+      acquire: async (c, options) => {
+        if (!options.resume) {
+          c.config = { ...c.config, requestId: context.ids.next() };
+        }
+        return harness.host.prepare(c.config, c.token);
+      },
+      observe: async (c) => {
+        const status = await context.daemonClient.status(c.config.requestId, c.token);
+        if (status?.outcome !== "ready") {
+          throw new Error("broker_session_ended");
+        }
+        await harness.host.controls.tool("observe", status.sessionUuid!);
+      },
+      close: async () => {},
+      ownerKill: async () => {
+        throw new Error("unexpected owner kill");
+      },
+      proxyClosed: async () => false,
+      tools: async (c) =>
+        harness.host.controls.tools(
+          (await context.daemonClient.status(c.config.requestId, c.token))!,
+        ),
+      devicesView: harness.host.controls.inventory,
+      resources: async () => ({ unavailable: "No read-only broker resource-state RPC" }),
+    };
+    const key = Buffer.alloc(32, 7);
+    const dependencies = {
+      env: { AUTOMOBILE_ACCEPTANCE_LIVE: "1" },
+      createContext: async () => ({ context, close: async () => {} }),
+      evidence: { key, binding: { buildId: "fake", batch: "private" }, write: fs.writeFile },
+    };
+    return {
+      files,
+      key,
+      dependencies,
+      context,
+      counters: () => ({ stops, starts, crashes, permits }),
+      close: harness.close,
+    };
+  }
+  test("runs the four live scenario contracts sequentially and signs one redacted broker evidence file", async () => {
+    const f = await laneFixture();
+    try {
+      const args = brokerArgs(["--confirm-live", "--test-owned-devices"]);
+      await runBrokerAcceptance(args, f.dependencies);
+      const bytes = f.files.get(args.evidencePath)!;
+      const evidence = JSON.parse(bytes);
+      expect(evidence).toMatchObject({
+        schemaVersion: 11,
+        scenario: "broker",
+        outcome: { passed: true },
+      });
+      expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual([
+        "parallel-acquire",
+        "release-destroy-verification",
+        "capacity-refusal-and-replay",
+        "daemon-restart-with-live-sessions",
+      ]);
+      expect(f.counters()).toMatchObject({ stops: 1, starts: 1, crashes: 0 });
+      expect(f.counters().permits).toBeGreaterThan(4);
+      expect(bytes).not.toContain("private-token-");
+      const { mac, ...authentication } = evidence.authentication;
+      expect(mac).toBe(
+        createHmac("sha256", f.key)
+          .update(stableStringify({ ...evidence, authentication }))
+          .digest("hex"),
+      );
+      expect(
+        evidence.scenarios.some((s: { assertions: unknown[] }) => s.assertions.length > 0),
+      ).toBe(true);
+      expect(
+        f.context.ledger
+          .devices()
+          .every(
+            (d) =>
+              f.context.ledger.hasEvent(d, "released") && f.context.ledger.hasEvent(d, "absent"),
+          ),
+      ).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+  test("crash opt-in adds a separate restart variant and a failed boundary cannot yield passing evidence", async () => {
+    const f = await laneFixture();
+    try {
+      await expect(
+        runBrokerAcceptance(
+          brokerArgs([
+            "--confirm-live",
+            "--test-owned-devices",
+            "--only",
+            "daemon-restart-with-live-sessions",
+            "--allow-crash",
+          ]),
+          f.dependencies,
+        ),
+      ).rejects.toThrow("Broker acceptance failed");
+      expect(f.counters()).toMatchObject({ stops: 1, starts: 1, crashes: 1 });
+      const evidence = JSON.parse(
+        [...f.files.entries()].find(([path]) => path.includes("acceptance-broker-"))![1],
+      );
+      expect(evidence.outcome.passed).toBe(false);
+      expect(evidence.steps.at(-1)).toMatchObject({
+        name: "daemon-restart-with-live-sessions-crash",
+        passed: false,
+      });
+    } finally {
+      await f.close();
+    }
+  });
+  test("parses platform-agnostic broker options without requiring full targets or keys", () => {
+    const args = brokerArgs([
+      "--clients",
+      "a,b",
+      "--max-devices",
+      "4",
+      "--allow-crash",
+      "--only",
+      "parallel-acquire",
+      "--confirm-live",
+      "--test-owned-devices",
+    ]);
+    expect(args).toMatchObject({
+      scenario: "broker",
+      clients: ["a", "b"],
+      maxDevices: 4,
+      allowCrash: true,
+      only: ["parallel-acquire"],
+      confirmLive: true,
+      testOwnedDevices: true,
+    });
+    expect(brokerArgs().maxDevices).toBe(2);
+  });
+  test.each(["0", "5", "2.5", "2oops", "NaN"])("refuses invalid max-devices %s", (cap) => {
+    expect(() => brokerArgs(["--max-devices", cap])).toThrow("hard cap 4");
+  });
+  test("rejects missing batch, unknown scenarios, malformed client selection and duplicate flags", () => {
+    expect(() => parseArgs(["--scenario", "broker"])).toThrow("broker-batch");
+    for (const flags of [
+      ["--only", "full"],
+      ["--clients", "a,a"],
+      ["--clients", "../a"],
+      ["--allow-crash", "--allow-crash"],
+      ["--max-devices"],
+    ]) {
+      expect(() => brokerArgs(flags)).toThrow();
+    }
+  });
+  test("requires every live confirmation before creating a context or touching evidence", async () => {
+    for (const flags of [[], ["--confirm-live"], ["--test-owned-devices"]]) {
+      await expect(
+        runBrokerAcceptance(brokerArgs(flags), {
+          env: { AUTOMOBILE_ACCEPTANCE_LIVE: "1" },
+          createContext: async () => {
+            throw new Error("must not touch host");
+          },
+        }),
+      ).rejects.toThrow("live mutation requires");
+    }
+    await expect(
+      runBrokerAcceptance(brokerArgs(["--confirm-live", "--test-owned-devices"]), { env: {} }),
+    ).rejects.toThrow("AUTOMOBILE_ACCEPTANCE_LIVE");
+  });
+  test("dry-run prints graceful and opted-in crash plans without host I/O", async () => {
+    const logs: string[] = [];
+    const result = await runBrokerAcceptance(brokerArgs(["--dry-run", "--allow-crash"]), {
+      log: (text) => {
+        logs.push(text);
+      },
+      env: {},
+      createContext: async () => {
+        throw new Error("must not construct context");
+      },
+      evidence: {
+        key: Buffer.alloc(32),
+        binding: {},
+        write: () => {
+          throw new Error("must not write");
+        },
+      },
+    });
+    expect(result.dryRun).toBe(true);
+    expect(JSON.parse(logs[0]).plan.filter((p: { crash: boolean }) => p.crash)).toEqual([
+      { name: "daemon-restart-with-live-sessions", crash: true },
+    ]);
+    logs.length = 0;
+    await runBrokerAcceptance(brokerArgs(["--dry-run"]), {
+      log: (text) => {
+        logs.push(text);
+      },
+    });
+    expect(JSON.parse(logs[0]).plan.every((p: { crash: boolean }) => !p.crash)).toBe(true);
   });
 });

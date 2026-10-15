@@ -431,6 +431,16 @@ function brokerRequestRefusal(
   session: Record<string, unknown> | undefined,
   deps: ProxySessionDeps,
 ): string | undefined {
+  // Closing and inspecting advertised tools do not operate a device or acquire a session.
+  if (
+    request.op === "close" ||
+    (request.op === "tools" &&
+      session?.outcome === "failed" &&
+      session.sessionUuid === null &&
+      driverAlive(context.dir, deps))
+  ) {
+    return undefined;
+  }
   if (
     session?.outcome !== "ready" ||
     typeof session.sessionUuid !== "string" ||

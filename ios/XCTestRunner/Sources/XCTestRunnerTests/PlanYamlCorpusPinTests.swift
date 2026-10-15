@@ -1,8 +1,9 @@
 import Foundation
 import XCTest
 @testable import XCTestRunner
+import Yams
 
-/// Issue #11889, pass 1: capture only the current scanners' observable behavior.
+/// Issue #11889: pin metadata and scalar semantics against the original scanner corpus.
 /// Driver capture (run before the ordinary assertion run):
 /// PLAN_CORPUS_CAPTURE_PATH="$PWD/Sources/XCTestRunnerTests/Resources/PlanCorpus/golden.json" \
 ///   swift test --filter PlanYamlCorpusPinTests
@@ -52,12 +53,13 @@ final class PlanYamlCorpusPinTests: XCTestCase {
     private struct Corpus: Sendable {
         let actual: [String: Golden]
         let expected: [String: Golden]
+        let semanticSubstitutions: [String: [String: Bool]]
     }
 
     private static let capturePath = ProcessInfo.processInfo.environment["PLAN_CORPUS_CAPTURE_PATH"]
 
     // One immutable Sendable snapshot, initialized in class setup (outside timed test bodies).
-    // This loads each resource once and runs the pure scanners once; the table-driven assertions
+    // This loads each resource and compares parsed substitution trees once; the table-driven assertions
     // below only compare values, keeping their bodies within the 15 ms budget.
     private static let corpus: Result<Corpus, Error> = Result { try loadCorpus() }
 
@@ -110,14 +112,19 @@ final class PlanYamlCorpusPinTests: XCTestCase {
         }
     }
 
-    /// Deliberately separate: pass 2 may change YAML spelling while preserving its meaning.
-    /// Only this test should need to switch from exact emitted text to semantic comparison.
-    func testSubstitutionExactTextMatchesGoldens() throws {
+    func testSubstitutionSemanticsMatchGoldens() throws {
         let corpus = try assertionCorpus()
         for name in corpus.actual.keys.sorted() {
             let actual = try XCTUnwrap(corpus.actual[name])
             let expected = try XCTUnwrap(corpus.expected[name], "Missing golden: \(name)")
-            XCTAssertEqual(actual.substitutions, expected.substitutions, name)
+            XCTAssertEqual(Set(actual.substitutions.keys), Set(expected.substitutions.keys), name)
+            for label in expected.substitutions.keys.sorted() {
+                let new = try XCTUnwrap(actual.substitutions[label])
+                let old = try XCTUnwrap(expected.substitutions[label])
+                XCTAssertEqual(new.parameters, old.parameters, "\(name): \(label)")
+                XCTAssertEqual(new.output.error, old.output.error, "\(name): \(label)")
+                XCTAssertEqual(corpus.semanticSubstitutions[name]?[label], true, "\(name): \(label)")
+            }
         }
     }
 
@@ -173,7 +180,22 @@ final class PlanYamlCorpusPinTests: XCTestCase {
         } else {
             expected = [:]
         }
-        return Corpus(actual: actual, expected: expected)
+        // Yams nodes contain mutable reference tags and are not Sendable. Compare them locally
+        // during setup and store only Sendable results; timed tests never parse the corpus again.
+        var semanticSubstitutions: [String: [String: Bool]] = [:]
+        for (name, golden) in expected {
+            var results: [String: Bool] = [:]
+            for (label, substitution) in golden.substitutions {
+                let new = actual[name]?.substitutions[label]?.output
+                if let oldText = substitution.output.value, let newText = new?.value {
+                    results[label] = try Yams.compose(yaml: newText) == Yams.compose(yaml: oldText)
+                } else {
+                    results[label] = new?.error == substitution.output.error
+                }
+            }
+            semanticSubstitutions[name] = results
+        }
+        return Corpus(actual: actual, expected: expected, semanticSubstitutions: semanticSubstitutions)
     }
 
     private static func substitute(_ yaml: String, parameters: [String: String]) -> Substitution {

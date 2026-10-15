@@ -19,12 +19,16 @@ let package = Package(
     dependencies: [
         // Pinned to an exact released tag for hermetic, reproducible CI builds.
         .package(url: "https://github.com/steipete/Tachikoma.git", exact: "1.0.0"),
+        // Parses plan YAML in XCTestRunner (metadata, secret keys, parameter substitution) instead of
+        // hand-rolled line scanners (#11889). Pinned to an exact tag like Tachikoma.
+        .package(url: "https://github.com/jpsim/Yams.git", exact: "6.2.2"),
     ],
     targets: [
         .target(
             name: "XCTestRunner",
             dependencies: [
                 .product(name: "Tachikoma", package: "Tachikoma"),
+                .product(name: "Yams", package: "Yams"),
             ]
         ),
         // Shared test doubles. NOT a dependency of the `.library` product, so the shipped module stays

@@ -1,3 +1,4 @@
+import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
 import {
@@ -6490,6 +6491,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...prototypePatchReplyFields(message),
         ...prototypeSavedReplyFields(message),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
+        ...(parsePrototypeStacks(message.stacks)
+          ? { stacks: parsePrototypeStacks(message.stacks) }
+          : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),

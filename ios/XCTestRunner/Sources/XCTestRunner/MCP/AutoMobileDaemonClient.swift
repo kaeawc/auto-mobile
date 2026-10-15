@@ -104,23 +104,26 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         async throws -> MCPToolResponse
     {
         // Params cross the gate suspension as Data, not an untyped dictionary.
-        let params = try encodeParams(["name": name, "arguments": arguments])
+        let params = try MCPJSONRPCHelpers.encodeParams(
+            ["name": name, "arguments": arguments],
+            failureMessage: "Failed to encode daemon request"
+        )
         return try await callTool(name: name, params: params, timeout: timeout)
     }
 
     private func callTool(name: String, params: Data, timeout: TimeInterval) async throws -> MCPToolResponse {
         PerfTimer.log("DaemonClient.callTool START: name=\(name)")
         let result = try await sendRequest(method: "tools/call", params: params, timeout: timeout)
-        let text = try extractTextContent(from: result)
+        let text = try MCPJSONRPCHelpers.extractTextContent(from: result)
         PerfTimer.log("DaemonClient.callTool END: name=\(name), responseLength=\(text.count)")
         return MCPToolResponse(text: text)
     }
 
     public func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
-        let params = try encodeParams(["uri": uri])
+        let params = try MCPJSONRPCHelpers.encodeParams(["uri": uri], failureMessage: "Failed to encode daemon request")
         PerfTimer.log("DaemonClient.readResource START: uri=\(uri)")
         let result = try await sendRequest(method: "resources/read", params: params, timeout: timeout)
-        let text = try extractResourceTextContent(from: result)
+        let text = try MCPJSONRPCHelpers.extractResourceTextContent(from: result)
         PerfTimer.log("DaemonClient.readResource END: uri=\(uri), responseLength=\(text.count)")
         return MCPResourceResponse(text: text)
     }
@@ -133,17 +136,6 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
             return connection
         }
         connection?.cancel()
-    }
-
-    private func encodeParams(_ params: [String: Any]) throws -> Data {
-        // Foundation can raise an Objective-C exception for unsupported values, outside Swift's
-        // throws mechanism. Validate first so encoding failure remains a recoverable client error.
-        guard JSONSerialization.isValidJSONObject(params),
-              let data = try? JSONSerialization.data(withJSONObject: params)
-        else {
-            throw MCPClientError.requestFailed("Failed to encode daemon request")
-        }
-        return data
     }
 
     /// Factory creation does no I/O. Publishing before connect lets resetSession interrupt even the
@@ -264,29 +256,5 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         if let value = value as? String { return value }
         if let value = value as? NSNumber { return value.stringValue }
         return nil
-    }
-
-    private func extractTextContent(from result: [String: Any]) throws -> String {
-        guard let content = result["content"] as? [[String: Any]] else {
-            throw MCPClientError.invalidResponse("Missing content array")
-        }
-        for item in content {
-            if let type = item["type"] as? String, type == "text",
-               let text = item["text"] as? String
-            {
-                return text
-            }
-        }
-        throw MCPClientError.invalidResponse("Missing text content")
-    }
-
-    private func extractResourceTextContent(from result: [String: Any]) throws -> String {
-        guard let contents = result["contents"] as? [[String: Any]], let first = contents.first else {
-            throw MCPClientError.invalidResponse("Missing resource contents")
-        }
-        if let text = first["text"] as? String {
-            return text
-        }
-        throw MCPClientError.invalidResponse("Missing resource text content")
     }
 }

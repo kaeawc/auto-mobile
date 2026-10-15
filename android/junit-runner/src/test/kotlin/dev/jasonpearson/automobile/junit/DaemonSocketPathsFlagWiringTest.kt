@@ -16,6 +16,9 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.no.ui.perf.mode",
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
+      "automobile.daemon.no.include.not.important.views",
+      "automobile.daemon.no.report.view.ids",
+      "automobile.daemon.no.retrieve.interactive.windows",
       "automobile.daemon.package.version",
       "automobile.daemon.startup.timeout.ms",
     )
@@ -134,6 +137,85 @@ class DaemonSocketPathsFlagWiringTest {
       "should contain --no-waitfor-polling-overhead",
       command.contains("--no-waitfor-polling-overhead"),
     )
+  }
+
+  @Test
+  fun `buildDaemonStartCommand forwards each enabled flag independently`() {
+    val flagPairs =
+      listOf(
+        "automobile.daemon.dismiss.keyboard.after.input" to "--dismiss-keyboard-after-input",
+        "automobile.daemon.no.ui.perf.mode" to "--no-ui-perf-mode",
+        "automobile.daemon.no.navigation.screenshots" to "--no-navigation-screenshots",
+        "automobile.daemon.no.waitfor.polling.overhead" to "--no-waitfor-polling-overhead",
+        "automobile.daemon.no.include.not.important.views" to "--no-include-not-important-views",
+        "automobile.daemon.no.report.view.ids" to "--no-report-view-ids",
+        "automobile.daemon.no.retrieve.interactive.windows" to "--no-retrieve-interactive-windows",
+      )
+    val allFlags = flagPairs.map { it.second }
+
+    flagPairs.forEach { (property, flag) ->
+      flagProperties.forEach { System.clearProperty(it) }
+      SystemPropertyCache.clear()
+      System.setProperty(property, "true")
+      SystemPropertyCache.clear()
+
+      val command = DaemonSocketPaths.buildDaemonStartCommand()
+
+      assertEquals(listOf(flag), command.filter { it in allFlags })
+    }
+  }
+
+  @Test
+  fun `boolean flag property parses false and uppercase TRUE`() {
+    val property = "automobile.daemon.no.ui.perf.mode"
+    System.setProperty(property, "false")
+    SystemPropertyCache.clear()
+    assertFalse(DaemonSocketPaths.buildDaemonStartCommand().contains("--no-ui-perf-mode"))
+
+    System.setProperty(property, "TRUE")
+    SystemPropertyCache.clear()
+    assertTrue(DaemonSocketPaths.buildDaemonStartCommand().contains("--no-ui-perf-mode"))
+  }
+
+  @Test
+  fun `buildDaemonStartCommand appends all seven flags in order`() {
+    val expectedFlags =
+      listOf(
+        "--dismiss-keyboard-after-input",
+        "--no-ui-perf-mode",
+        "--no-navigation-screenshots",
+        "--no-waitfor-polling-overhead",
+        "--no-include-not-important-views",
+        "--no-report-view-ids",
+        "--no-retrieve-interactive-windows",
+      )
+    flagProperties.take(7).forEach { System.setProperty(it, "true") }
+    SystemPropertyCache.clear()
+
+    val command = DaemonSocketPaths.buildDaemonStartCommand()
+
+    assertEquals(expectedFlags, command.takeLast(7))
+  }
+
+  @Test
+  fun `buildDaemonRestartCommand forwards all seven flags`() {
+    val expectedFlags =
+      listOf(
+        "--dismiss-keyboard-after-input",
+        "--no-ui-perf-mode",
+        "--no-navigation-screenshots",
+        "--no-waitfor-polling-overhead",
+        "--no-include-not-important-views",
+        "--no-report-view-ids",
+        "--no-retrieve-interactive-windows",
+      )
+    flagProperties.take(7).forEach { System.setProperty(it, "true") }
+    SystemPropertyCache.clear()
+
+    val command = DaemonSocketPaths.buildDaemonRestartCommand()
+
+    assertEquals(expectedFlags, command.takeLast(7))
+    assertTrue(command.contains("restart"))
   }
 
   @Test

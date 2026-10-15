@@ -2,7 +2,19 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 @Serializable
 data class PrototypeOffset(
@@ -46,6 +58,7 @@ data class PrototypeCondition(
   val any: List<PrototypeCondition>? = null,
   val not: PrototypeCondition? = null,
   val data: String? = null,
+  val valid: PrototypeValidityKeys? = null,
 )
 
 @Serializable
@@ -128,6 +141,7 @@ data class PrototypeStyle(
   val alignment: String? = null,
   val arrangement: String? = null,
   val spacing: Double? = null,
+  val runSpacing: Double? = null,
   val textSize: Double? = null,
   val fontWeight: Int? = null,
   val color: PrototypeModeValue? = null,
@@ -263,6 +277,8 @@ data class PrototypeFloatingPlacement(
 data class PrototypeEmitAction(
   val name: String,
   val payload: JsonElement? = null,
+  val context: Map<String, EmitContextBinding>? = null,
+  val requireValid: List<String>? = null,
 ) : PrototypeAction()
 
 @SerialName("setPage")
@@ -271,6 +287,22 @@ data class PrototypeSetPageAction(
   val pager: String,
   val page: PrototypePageTarget,
 ) : PrototypeAction()
+
+@SerialName("push")
+@Serializable
+data class PrototypePushAction(val stack: String, val screen: String) : PrototypeAction()
+
+@SerialName("pop")
+@Serializable
+data class PrototypePopAction(val stack: String) : PrototypeAction()
+
+@SerialName("popToRoot")
+@Serializable
+data class PrototypePopToRootAction(val stack: String) : PrototypeAction()
+
+@SerialName("replace")
+@Serializable
+data class PrototypeReplaceAction(val stack: String, val screen: String) : PrototypeAction()
 
 @SerialName("setState")
 @Serializable
@@ -300,12 +332,19 @@ sealed class PrototypeNode {
   /** The node's accessible label; replaces the label derived from its text, icon or kind. */
   abstract val contentDescription: String?
   abstract val onTap: List<PrototypeAction>?
+  open val onLongPress: List<PrototypeAction>?
+    get() = null
+
+  open val onDoubleTap: List<PrototypeAction>?
+    get() = null
+
   abstract val style: PrototypeStyle?
   abstract val styleWhen: List<PrototypeStyleWhen>?
   abstract val visibleWhen: PrototypeCondition?
   /** `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit; absent is fade + expand. */
   abstract val transition: String?
   abstract val anchor: PrototypeAnchor?
+  abstract val span: Int?
   abstract val safeAreaPadding: PrototypeSafeAreaPadding?
 }
 
@@ -316,12 +355,15 @@ data class PrototypeBoxNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
 ) : PrototypeNode()
@@ -333,12 +375,15 @@ data class PrototypeRowNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
 ) : PrototypeNode()
@@ -350,12 +395,91 @@ data class PrototypeColumnNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+) : PrototypeNode()
+
+@SerialName("flow")
+@Serializable
+data class PrototypeFlowNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+  val maxLines: Int? = null,
+) : PrototypeNode()
+
+/** Fixed column count or adaptive minimum cell width in dp; preserves the untagged wire union. */
+@Serializable(with = PrototypeGridColumnsSerializer::class)
+sealed class PrototypeGridColumns {
+  data class Fixed(val count: Int) : PrototypeGridColumns()
+
+  data class Adaptive(val minWidth: Double) : PrototypeGridColumns()
+}
+
+object PrototypeGridColumnsSerializer :
+  PrototypeJsonValueSerializer<PrototypeGridColumns>("PrototypeGridColumns") {
+  override fun fromJson(value: JsonElement): PrototypeGridColumns {
+    if (value is JsonPrimitive && !value.isString) {
+      val count = value.doubleOrNull
+      if (
+        count != null &&
+          count.isFinite() &&
+          count >= 1 &&
+          count <= Int.MAX_VALUE &&
+          count % 1.0 == 0.0
+      ) {
+        return PrototypeGridColumns.Fixed(count.toInt())
+      }
+    }
+    if (value is JsonObject && value.keys == setOf("minWidth")) {
+      val width = (value["minWidth"] as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull
+      if (width != null && width.isFinite() && width > 0)
+        return PrototypeGridColumns.Adaptive(width)
+    }
+    throw kotlinx.serialization.SerializationException("Expected grid columns")
+  }
+
+  override fun toJson(value: PrototypeGridColumns): JsonElement =
+    when (value) {
+      is PrototypeGridColumns.Fixed -> JsonPrimitive(value.count)
+      is PrototypeGridColumns.Adaptive -> buildJsonObject { put("minWidth", value.minWidth) }
+    }
+}
+
+@SerialName("grid")
+@Serializable
+data class PrototypeGridNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val columns: PrototypeGridColumns,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
 ) : PrototypeNode()
@@ -367,14 +491,43 @@ data class PrototypeTextNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
-  val text: String,
+  override val span: Int? = null,
+  val text: String? = null,
+  val spans: List<PrototypeTextSpan>? = null,
 ) : PrototypeNode()
+
+@Serializable
+data class PrototypeTextSpan(
+  val text: String,
+  val style: PrototypeTextSpanStyle? = null,
+  val onTap: List<PrototypeAction>? = null,
+)
+
+@Serializable
+data class PrototypeTextSpanStyle(
+  val color: PrototypeModeValue? = null,
+  val fontWeight: Int? = null,
+  val fontStyle: String? = null,
+  val textDecoration: String? = null,
+  val textSize: Double? = null,
+  val letterSpacing: Double? = null,
+  val fontFamily: PrototypeFontFamily? = null,
+  val background: PrototypeModeValue? = null,
+)
+
+/**
+ * The displayed text, with each authored text field resolved by the same caller-supplied binder.
+ */
+fun prototypePlainText(node: PrototypeTextNode, resolve: (String) -> String = { it }): String =
+  node.spans?.joinToString("") { resolve(it.text) } ?: node.text?.let(resolve).orEmpty()
 
 @SerialName("image")
 @Serializable
@@ -383,12 +536,15 @@ data class PrototypeImageNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
   val asset: PrototypeModeValue,
   val contentScale: String = "fit",
@@ -401,12 +557,15 @@ data class PrototypeIconNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,
@@ -425,6 +584,7 @@ data class PrototypeSpacerNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
 ) : PrototypeNode()
 
 @SerialName("textField")
@@ -440,8 +600,45 @@ data class PrototypeTextFieldNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val placeholder: String? = null,
+  val label: String? = null,
+  val variant: String? = null,
+  val supportingText: String? = null,
+  val keyboardType: String? = null,
+  val secure: Boolean? = null,
+  val multiline: Boolean? = null,
+  val minLines: Int? = null,
+  val maxLines: Int? = null,
+  val maxLength: Int? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
+) : PrototypeNode()
+
+@SerialName("searchBar")
+@Serializable
+data class PrototypeSearchBarNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val stateKey: String,
+  val placeholder: String? = null,
+  val leadingIcon: String? = null,
+  val trailingActions: List<PrototypeAppBarAction>? = null,
+  val activeKey: String? = null,
+  val variant: String? = null,
+  val onSubmit: List<PrototypeAction>? = null,
+  val child: PrototypeNode? = null,
 ) : PrototypeNode()
 
 @SerialName("switch")
@@ -457,8 +654,12 @@ data class PrototypeSwitchNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val label: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("checkbox")
@@ -474,8 +675,12 @@ data class PrototypeCheckboxNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val label: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("button")
@@ -491,9 +696,11 @@ data class PrototypeButtonNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @Serializable data class PrototypeRadioOption(val value: String, val label: String)
@@ -511,8 +718,80 @@ data class PrototypeRadioGroupNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
+) : PrototypeNode()
+
+@SerialName("select")
+@Serializable
+data class PrototypeSelectNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val stateKey: String,
+  val options: List<PrototypeRadioOption>,
+  val label: String? = null,
+) : PrototypeNode()
+
+/** Menu entries have no discriminator; only a divider carries `type`. */
+@Serializable(with = PrototypeMenuItemSerializer::class) sealed class PrototypeMenuItem
+
+@Serializable
+data class PrototypeMenuEntry(
+  val label: String,
+  val icon: String? = null,
+  val trailingText: String? = null,
+  val enabled: Boolean? = null,
+  val onTap: List<PrototypeAction>? = null,
+) : PrototypeMenuItem()
+
+data object PrototypeMenuDivider : PrototypeMenuItem()
+
+object PrototypeMenuItemSerializer :
+  PrototypeJsonValueSerializer<PrototypeMenuItem>("PrototypeMenuItem") {
+  override fun fromJson(value: JsonElement): PrototypeMenuItem {
+    if (value is JsonObject && value["type"] == JsonPrimitive("divider")) {
+      require(value.keys == setOf("type")) { "Unknown property" }
+      return PrototypeMenuDivider
+    }
+    return PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeMenuEntry>(value)
+  }
+
+  override fun toJson(value: PrototypeMenuItem): JsonElement =
+    when (value) {
+      is PrototypeMenuEntry -> PrototypeSpecValidator.json.encodeToJsonElement(value)
+      PrototypeMenuDivider -> buildJsonObject { put("type", "divider") }
+    }
+}
+
+@SerialName("menu")
+@Serializable
+data class PrototypeMenuNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val openWhen: PrototypeSheetCondition,
+  val items: List<PrototypeMenuItem>,
 ) : PrototypeNode()
 
 /** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
@@ -543,10 +822,12 @@ data class PrototypeListItemNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val headline: String,
   val supporting: String? = null,
   val leadingIcon: String? = null,
   val trailing: PrototypeListItemTrailing? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @SerialName("slider")
@@ -562,11 +843,15 @@ data class PrototypeSliderNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val label: String? = null,
   val min: Double,
   val max: Double,
   val step: Double? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("chip")
@@ -582,9 +867,11 @@ data class PrototypeChipNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val label: String,
   val variant: String? = null,
   val stateKey: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @SerialName("card")
@@ -594,12 +881,15 @@ data class PrototypeCardNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val variant: String = "filled",
   val children: List<PrototypeNode>,
 ) : PrototypeNode()
@@ -630,8 +920,10 @@ data class PrototypeIconButtonNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val icon: String,
   val variant: String = "standard",
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 /** A floating action button; a `label` makes it an extended FAB, which has no `size`. */
@@ -648,9 +940,11 @@ data class PrototypeFabNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 /** A single-select Material segmented button bound to a string state key, like a `radioGroup`. */
@@ -667,6 +961,7 @@ data class PrototypeSegmentedButtonNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
 ) : PrototypeNode()
@@ -685,6 +980,7 @@ data class PrototypeTopAppBarNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val title: String,
   val variant: String = "small",
   val navigationIcon: PrototypeAppBarAction? = null,
@@ -705,6 +1001,7 @@ data class PrototypeDividerNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val orientation: String = "horizontal",
 ) : PrototypeNode()
 
@@ -722,6 +1019,7 @@ data class PrototypeBadgeNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val text: String? = null,
 ) : PrototypeNode()
 
@@ -742,6 +1040,7 @@ data class PrototypeProgressNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val variant: String = "linear",
   val stateKey: String? = null,
   val max: Double? = null,
@@ -764,6 +1063,7 @@ data class PrototypeDialogNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val openWhen: PrototypeSheetCondition,
   val title: String? = null,
   val text: String? = null,
@@ -791,6 +1091,7 @@ data class PrototypeSnackbarNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
   val action: PrototypeDialogButton? = null,
@@ -811,9 +1112,13 @@ data class PrototypeTimePickerNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val hourKey: String,
   val minuteKey: String,
   val is24Hour: Boolean? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 /** A Material date picker bound to a `YYYY-MM-DD` string state key. */
@@ -830,7 +1135,11 @@ data class PrototypeDatePickerNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val stateKey: String,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("scroll")
@@ -846,6 +1155,7 @@ data class PrototypeScrollNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val axis: String = "vertical",
   val child: PrototypeNode,
 ) : PrototypeNode()
@@ -863,7 +1173,32 @@ data class PrototypePagerNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val children: List<PrototypeNode>,
+  val axis: String? = null,
+  val pageSpacing: Double? = null,
+  val peek: PrototypePagerPeek? = null,
+  val pageSize: PrototypePagerPageSize? = null,
+) : PrototypeNode()
+
+@Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
+
+@SerialName("stack")
+@Serializable
+data class PrototypeStackNode(
+  override val id: String,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val start: String,
+  val screens: Map<String, PrototypeNode>,
 ) : PrototypeNode()
 
 @SerialName("tabBar")
@@ -879,6 +1214,7 @@ data class PrototypeTabBarNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -898,6 +1234,7 @@ data class PrototypeBottomNavNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -916,6 +1253,7 @@ data class PrototypeBottomSheetNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
   val child: PrototypeNode,
   val openWhen: PrototypeSheetCondition,
   val detents: List<PrototypeDetent>,
@@ -1022,3 +1360,103 @@ data class PrototypeSpec(
   val motion: String? = null,
   val data: JsonObject? = null,
 )
+
+@Serializable
+enum class PrototypeValidateOn {
+  @SerialName("change") CHANGE,
+  @SerialName("blur") BLUR,
+  @SerialName("submit") SUBMIT,
+}
+
+@Serializable
+enum class PrototypeCheckFormat {
+  @SerialName("email") EMAIL,
+  @SerialName("phone") PHONE,
+  @SerialName("digits") DIGITS,
+  @SerialName("decimal") DECIMAL,
+  @SerialName("url") URL,
+}
+
+/** The untagged wire union preserves the authored check kind and message. */
+@Serializable(with = PrototypeCheckSerializer::class)
+sealed class PrototypeCheck {
+  abstract val message: String
+
+  data class Required(override val message: String, val required: Boolean = true) : PrototypeCheck()
+
+  data class MinLength(val minLength: Double, override val message: String) : PrototypeCheck()
+
+  data class MaxLength(val maxLength: Double, override val message: String) : PrototypeCheck()
+
+  data class Min(val min: Double, override val message: String) : PrototypeCheck()
+
+  data class Max(val max: Double, override val message: String) : PrototypeCheck()
+
+  data class Format(val format: PrototypeCheckFormat, override val message: String) :
+    PrototypeCheck()
+
+  data class Pattern(val pattern: String, override val message: String) : PrototypeCheck()
+}
+
+object PrototypeCheckSerializer : PrototypeJsonValueSerializer<PrototypeCheck>("PrototypeCheck") {
+  override fun fromJson(value: JsonElement): PrototypeCheck {
+    val data = value.jsonObject
+    val message = data.getValue("message").jsonPrimitive.content
+    val kind = data.keys.single { it != "message" }
+    val operand = data.getValue(kind).jsonPrimitive
+    return when (kind) {
+      "required" -> PrototypeCheck.Required(message, operand.boolean)
+      "minLength" -> PrototypeCheck.MinLength(operand.double, message)
+      "maxLength" -> PrototypeCheck.MaxLength(operand.double, message)
+      "min" -> PrototypeCheck.Min(operand.double, message)
+      "max" -> PrototypeCheck.Max(operand.double, message)
+      "format" ->
+        PrototypeCheck.Format(PrototypeSpecValidator.json.decodeFromJsonElement(operand), message)
+      "pattern" -> PrototypeCheck.Pattern(operand.content, message)
+      else -> throw kotlinx.serialization.SerializationException("Unknown check kind")
+    }
+  }
+
+  override fun toJson(value: PrototypeCheck): JsonElement = buildJsonObject {
+    put("message", value.message)
+    when (value) {
+      is PrototypeCheck.Required -> put("required", value.required)
+      is PrototypeCheck.MinLength -> put("minLength", value.minLength)
+      is PrototypeCheck.MaxLength -> put("maxLength", value.maxLength)
+      is PrototypeCheck.Min -> put("min", value.min)
+      is PrototypeCheck.Max -> put("max", value.max)
+      is PrototypeCheck.Format ->
+        put("format", PrototypeSpecValidator.json.encodeToJsonElement(value.format))
+      is PrototypeCheck.Pattern -> put("pattern", value.pattern)
+    }
+  }
+}
+
+/** A single checked key or an authored list; round trips retain the selected wire form. */
+@Serializable(with = PrototypeValidityKeysSerializer::class)
+sealed class PrototypeValidityKeys {
+  data class Single(val key: String) : PrototypeValidityKeys()
+
+  data class Multiple(val keys: List<String>) : PrototypeValidityKeys()
+
+  fun keys(): List<String> =
+    when (this) {
+      is Single -> listOf(key)
+      is Multiple -> keys
+    }
+}
+
+object PrototypeValidityKeysSerializer :
+  PrototypeJsonValueSerializer<PrototypeValidityKeys>("PrototypeValidityKeys") {
+  override fun fromJson(value: JsonElement): PrototypeValidityKeys =
+    when (value) {
+      is JsonArray -> PrototypeValidityKeys.Multiple(value.map { it.jsonPrimitive.content })
+      else -> PrototypeValidityKeys.Single(value.jsonPrimitive.content)
+    }
+
+  override fun toJson(value: PrototypeValidityKeys): JsonElement =
+    when (value) {
+      is PrototypeValidityKeys.Single -> JsonPrimitive(value.key)
+      is PrototypeValidityKeys.Multiple -> JsonArray(value.keys.map(::JsonPrimitive))
+    }
+}

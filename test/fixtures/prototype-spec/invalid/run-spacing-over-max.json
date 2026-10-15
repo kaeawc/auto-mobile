@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "flow",
+      "children": [],
+      "style": {
+        "runSpacing": 10001
+      }
+    }
+  },
+  "expectedPath": "root.style.runSpacing",
+  "expectedMessage": "Invalid number value"
+}

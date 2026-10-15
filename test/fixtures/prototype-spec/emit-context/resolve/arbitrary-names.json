@@ -1,0 +1,43 @@
+{
+  "name": "arbitrary-names",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "__proto__": {
+              "value": 3
+            },
+            "name.with spaces": {
+              "value": true
+            },
+            "é": {
+              "value": null
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {},
+  "data": {},
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "__proto__": 3,
+      "name.with spaces": true,
+      "é": null
+    }
+  }
+}

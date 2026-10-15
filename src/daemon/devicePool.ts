@@ -10,6 +10,11 @@ import {
   type PoolStatusBucket,
 } from "./deviceHold";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
+import {
+  DeviceAllocation,
+  type AllocationDiscoverySnapshots,
+  type AssignableIdleDeviceSelection,
+} from "./deviceAllocation";
 import { ExplicitDeviceBind, type ExplicitBindOptions } from "./explicitDeviceBind";
 import { DeviceReplacement } from "./deviceReplacement";
 import {
@@ -298,7 +303,7 @@ export class DevicePoolError extends Error {
   }
 }
 
-function refreshFailureContext(failure: string | Error | undefined): string {
+export function refreshFailureContext(failure: string | Error | undefined): string {
   const reason =
     failure instanceof DevicePoolError
       ? failure.refreshFailure
@@ -550,7 +555,7 @@ function identityEvidenceFields(
   };
 }
 
-interface RollbackAssignment {
+export interface RollbackAssignment {
   deviceId: string;
   session: Session;
 }
@@ -567,7 +572,7 @@ export interface ShutdownIdentityReservation {
   releaseSession: (() => void) | undefined;
 }
 
-const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+export const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
 /** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
@@ -608,18 +613,6 @@ export interface TargetDeviceValidationOptions {
   unavailableMessage: string;
   readinessReservationOwners?: ReadonlySet<symbol>;
   snapshot: TargetDeviceDiscoverySnapshot;
-}
-
-interface AllocationDiscoverySnapshots {
-  capturedEntries: ReadonlySet<PooledDevice>;
-  iosLiveness?: IosLivenessSnapshot;
-  androidPresence?: BootedDeviceDiscovery;
-}
-
-interface AssignableIdleDeviceSelection {
-  device?: PooledDevice;
-  livenessUnknown: boolean;
-  snapshotStale: boolean;
 }
 
 interface DeviceDisconnectSessionReleaser {
@@ -940,6 +933,7 @@ export class DevicePool {
   private readonly deviceReservations = this.createDeviceReservations();
   private readonly deviceReplacement = this.createDeviceReplacement();
   private readonly explicitDeviceBind = this.createExplicitDeviceBind();
+  private readonly deviceAllocation = this.createDeviceAllocation();
 
   /** Kept under its pre-extraction name; owned by DeviceReservations (test internals read it). */
   private get restartReadiness(): ReadonlySet<unknown> {
@@ -1395,6 +1389,123 @@ export class DevicePool {
     return new ConnectionOwnership({
       foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
       getDevice: (deviceId) => this.devices.get(deviceId),
+    });
+  }
+
+  private createDeviceAllocation(): DeviceAllocation {
+    // Field initialization precedes dependency setup; defer reads until allocation use.
+    const pool = this;
+    return new DeviceAllocation({
+      get DEVICE_WAIT_TIMEOUT_MS() {
+        return pool.DEVICE_WAIT_TIMEOUT_MS;
+      },
+      get DEVICE_WAIT_INTERVAL_MS() {
+        return pool.DEVICE_WAIT_INTERVAL_MS;
+      },
+      get RECOVERY_RESPONSE_MARGIN_MS() {
+        return pool.RECOVERY_RESPONSE_MARGIN_MS;
+      },
+      get retryExecutor() {
+        return pool.retryExecutor;
+      },
+      get emulatorLossIncidentStore() {
+        return pool.emulatorLossIncidentStore;
+      },
+      get emulatorLossLedger() {
+        return pool.emulatorLossLedger;
+      },
+      get managedSlotExclusion() {
+        return pool.managedSlotExclusion;
+      },
+      get devices() {
+        return pool.devices;
+      },
+      get idleDeviceReaper() {
+        return pool.idleDeviceReaper;
+      },
+      get timer() {
+        return pool.timer;
+      },
+      get assignmentMutex() {
+        return pool.assignmentMutex;
+      },
+      get allocationRefresh() {
+        return pool.allocationRefresh;
+      },
+      get recoveryRetryRefresh() {
+        return pool.recoveryRetryRefresh;
+      },
+      get runtimeIdentity() {
+        return pool.runtimeIdentity;
+      },
+      get sessionManager() {
+        return pool.sessionManager;
+      },
+      get lastReleasedDeviceId() {
+        return pool.lastReleasedDeviceId;
+      },
+      recoveryNow: () => this.recoveryNow(),
+      recoveryAssignmentError: (sessionId, target, incident) =>
+        this.recoveryAssignmentError(sessionId, target, incident),
+      getStatsForPlatform: (platform, live) => this.getStatsForPlatform(platform, live),
+      recoveryFailure: (sessionId, target, refreshCompleteness) =>
+        this.recoveryFailure(sessionId, target, refreshCompleteness),
+      releaseRehydrationReservation: (sessionId, terminal) =>
+        this.releaseRehydrationReservation(sessionId, terminal),
+      getDevicesMatchingRecoveryTarget: (target) => this.getDevicesMatchingRecoveryTarget(target),
+      tracksForeignOwnership: (platform) => this.tracksForeignOwnership(platform),
+      getGenericallyAllocatableDevices: (platform) =>
+        this.getGenericallyAllocatableDevices(platform),
+      hasPendingAndroidRecovery: (platform) => this.hasPendingAndroidRecovery(platform),
+      foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
+      isDrivenByForeignDaemon: (device) => this.isDrivenByForeignDaemon(device),
+      publishDeviceClaim: (deviceId) => this.publishDeviceClaim(deviceId),
+      rollbackAssignments: (assignments, releaseReason) =>
+        this.rollbackAssignments(assignments, releaseReason),
+      refreshForeignOwnership: (requireCurrent) => this.refreshForeignOwnership(requireCurrent),
+      countForeignDrivenDevices: (platform) => this.countForeignDrivenDevices(platform),
+      getUnownedDevicesMatchingCriteria: (criteria) =>
+        this.getUnownedDevicesMatchingCriteria(criteria),
+      hasPendingAndroidRecoveryMatching: (criteria) =>
+        this.hasPendingAndroidRecoveryMatching(criteria),
+      shouldValidatePooledDevicePresence: (device) =>
+        this.shouldValidatePooledDevicePresence(device),
+      takeFreshPresenceDiscovery: (platform) => this.takeFreshPresenceDiscovery(platform),
+      assertHealthyAllocationPossible: (candidates, selected) =>
+        this.assertHealthyAllocationPossible(candidates, selected),
+      countBusyDevices: (candidates) => this.countBusyDevices(candidates),
+      shouldWaitForDevice: (busyDevices, pendingRecovery) =>
+        this.shouldWaitForDevice(busyDevices, pendingRecovery),
+      refreshDevicesInternal: (assignmentLockHeld) =>
+        this.refreshDevicesInternal(assignmentLockHeld),
+      isPooledEntryCurrent: (device) => this.isPooledEntryCurrent(device),
+      isReservedForAssignment: (device, forSessionId) =>
+        this.isReservedForAssignment(device, forSessionId),
+      ensurePooledDevicePresentForUse: (
+        device,
+        deferRecovery,
+        assignmentLockHeld,
+        idleEviction,
+        discovery,
+      ) =>
+        this.ensurePooledDevicePresentForUse(
+          device,
+          deferRecovery,
+          assignmentLockHeld,
+          idleEviction,
+          discovery,
+        ),
+      getDeviceHealthMarker: (deviceId) => this.getDeviceHealthMarker(deviceId),
+      unhealthyDevicesError: (devices) => this.unhealthyDevicesError(devices),
+      snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
+      nextLastUsedAt: () => this.nextLastUsedAt(),
+      createSessionOrRestore: (device, snapshot, createSession) =>
+        this.createSessionOrRestore(device, snapshot, createSession),
+      stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
+      restoreSessionAssignment: (device, snapshot) =>
+        this.restoreSessionAssignment(device, snapshot),
+      notifyDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
+      isPotentialAllocationSupply: (device) => this.isPotentialAllocationSupply(device),
     });
   }
 
@@ -5212,240 +5323,12 @@ export class DevicePool {
     return this.deviceAutoStart.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
   }
 
-  /**
-   * Assign a device to a session
-   *
-   * Called when a new session is created or when a session needs to pick a device.
-   * Returns the device ID assigned to the session.
-   *
-   * Uses mutex to ensure atomic device assignment and prevent race conditions
-   * when multiple tests run in parallel.
-   *
-   * Automatically refreshes device pool if empty, handling race conditions during
-   * daemon startup where device discovery may not have completed.
-   *
-   * When all devices are busy, waits with timeout for a device to become available.
-   * This enables parallel test execution with limited devices.
-   */
-  async assignDeviceToSession(
+  assignDeviceToSession(
     sessionId: string,
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    const assignmentSignal = recoveryTarget ? getAbortSignal() : undefined;
-    const recoveryDeadline = recoveryTarget?.restartRecoveryDeadlineMs;
-    const timeoutMs =
-      recoveryDeadline === undefined
-        ? this.DEVICE_WAIT_TIMEOUT_MS
-        : Math.max(0, recoveryDeadline - this.recoveryNow());
-    // Include the deadline attempt: attempt one runs immediately, before any sleep.
-    const maxAttempts = Math.max(
-      1,
-      Math.ceil(timeoutMs / this.DEVICE_WAIT_INTERVAL_MS) +
-        (recoveryDeadline === undefined ? 0 : 1),
-    );
-    let firstAttemptLogged = false;
-    let refreshFailure: string | undefined;
-    let lossIncident: EmulatorLossIncident | undefined;
-    recoveryTarget?.onRecoveryWait?.({
-      responseMarginMs: this.RECOVERY_RESPONSE_MARGIN_MS,
-      restartDeadlineMs: recoveryTarget.restartRecoveryDeadlineMs,
-      timeoutError: () => this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident),
-    });
-
-    const result = await this.retryExecutor.execute(
-      async (attempt) => {
-        // Ordinary allocation must capture candidates before yielding to release/readiness.
-        if (recoveryTarget) {
-          lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
-        }
-        // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(
-          sessionId,
-          platform,
-          recoveryTarget,
-          lossIncident !== undefined,
-        );
-        if (assignResult.refreshCompleted) {
-          refreshFailure = assignResult.refreshFailure;
-        }
-
-        if (assignResult.success) {
-          if (attempt > 1) {
-            logger.info(
-              `Device ${assignResult.deviceId} assigned to session ${sessionId} ` +
-                `after ${attempt} attempts`,
-            );
-          }
-          return assignResult.deviceId!;
-        }
-
-        if (recoveryTarget) {
-          lossIncident = await this.checkRecoveryAssignmentFailure(
-            sessionId,
-            recoveryTarget,
-            assignResult.refreshCompleteness,
-            lossIncident,
-          );
-        }
-
-        // No device available - check if we should wait or fail
-        if (assignResult.livenessUnknown) {
-          throw new DevicePoolError(
-            `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
-            false,
-          );
-        }
-        if (assignResult.shouldWait) {
-          // Devices exist but are busy - throw retryable error
-          if (!firstAttemptLogged) {
-            firstAttemptLogged = true;
-            logger.info(
-              `All ${assignResult.totalDevices} devices busy, ` +
-                `session ${sessionId} waiting for availability (timeout: ${timeoutMs / 1000}s)...`,
-            );
-          }
-          throw new DevicePoolError("All devices busy", true, refreshFailure);
-        } else {
-          // No devices at all - fail immediately with non-retryable error
-          const stats = this.getStatsForPlatform(platform);
-          throw new DevicePoolError(
-            `No devices in pool to assign to session ${sessionId}.\n` +
-              `Device pool status:\n` +
-              `  Total devices: ${stats.total}\n` +
-              `  Idle: ${stats.idle}\n` +
-              `  Assigned: ${stats.assigned}\n` +
-              `  Error: ${stats.error}\n\n` +
-              `Suggestions:\n` +
-              `  - Start an emulator or connect a physical device\n` +
-              `  - Check device pool status: auto-mobile --cli listDevices\n` +
-              `  - Verify device tooling is working for the selected platform`,
-            false,
-          );
-        }
-      },
-      this.assignmentRetryPolicy(maxAttempts, assignmentSignal, recoveryDeadline),
-    );
-
-    if (!result.success) {
-      this.throwSessionAssignmentFailure({
-        sessionId,
-        platform,
-        recoveryTarget,
-        error: result.error,
-        attempts: result.attempts,
-        timeoutMs,
-        lossIncident,
-      });
-    }
-
-    return result.value!;
-  }
-
-  /**
-   * How `assignDeviceToSession` waits for a busy pool: retry retryable pool errors every wait
-   * interval, and for a restart recovery only until its deadline. The deadline derives from session
-   * stamps, so both the wait and the retry gate read the session clock a wall-clock step does not
-   * move (#11105, #11162).
-   */
-  private assignmentRetryPolicy(
-    maxAttempts: number,
-    signal: AbortSignal | undefined,
-    recoveryDeadline: number | undefined,
-  ): NonNullable<Parameters<RetryExecutor["execute"]>[1]> {
-    return {
-      maxAttempts,
-      signal,
-      delays: () =>
-        Math.min(
-          this.DEVICE_WAIT_INTERVAL_MS,
-          recoveryDeadline === undefined
-            ? this.DEVICE_WAIT_INTERVAL_MS
-            : Math.max(0, recoveryDeadline - this.recoveryNow()),
-        ),
-      shouldRetry: (error) =>
-        error instanceof DevicePoolError &&
-        error.isRetryable &&
-        (recoveryDeadline === undefined || this.recoveryNow() < recoveryDeadline),
-    };
-  }
-
-  private throwSessionAssignmentFailure({
-    sessionId,
-    platform,
-    recoveryTarget,
-    error,
-    attempts,
-    timeoutMs,
-    lossIncident,
-  }: {
-    sessionId: string;
-    platform?: Platform;
-    recoveryTarget?: SessionRecoveryTarget;
-    error?: Error;
-    attempts: number;
-    timeoutMs: number;
-    lossIncident?: EmulatorLossIncident;
-  }): never {
-    if (recoveryTarget && error instanceof DevicePoolError) {
-      throw this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident);
-    }
-    // Check if it was a non-retryable error (no devices)
-    if (error instanceof DevicePoolError && !error.isRetryable) {
-      throw new ActionableError(error.message);
-    }
-    if (error && !(error instanceof DevicePoolError && error.isRetryable)) {
-      throw error;
-    }
-    // Timeout case - all attempts exhausted
-    const stats = this.getStatsForPlatform(platform);
-    throw new ActionableError(
-      `Timed out waiting for device after ${Math.round(timeoutMs / 1000)}s (${attempts} attempts).\n` +
-        refreshFailureContext(error) +
-        `Session: ${sessionId}\n` +
-        `Device pool status:\n` +
-        `  Total devices: ${stats.total}\n` +
-        `  Idle: ${stats.idle}\n` +
-        `  Assigned: ${stats.assigned}\n` +
-        `  Error: ${stats.error}\n\n` +
-        `Suggestions:\n` +
-        `  - Reduce parallel test count to match available devices\n` +
-        `  - Start additional emulators or connect more physical devices\n` +
-        `  - Check if tests are properly releasing devices after completion`,
-    );
-  }
-
-  private async checkRecoveryAssignmentFailure(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-    refreshCompleteness: DiscoveryCompleteness | undefined,
-    incident: EmulatorLossIncident | undefined,
-  ): Promise<EmulatorLossIncident | undefined> {
-    // Loss can settle while discovery is in flight. Re-read diagnostics before
-    // deciding whether this attempt should report pending.
-    incident ??= await this.settledRecoveryLossIncident(sessionId, target);
-    const failure = this.recoveryFailure(sessionId, target, refreshCompleteness);
-    // Duplicate exact identities stay terminal. Serial reuse means absence during
-    // a restart handoff, including its absent-target answer after expiry.
-    if (failure instanceof SessionRecoveryIdentityLossError) {
-      // Persisted-only terminalization does not notify the live-session release listener.
-      this.releaseRehydrationReservation(sessionId, true);
-      throw failure;
-    }
-    // Reading diagnostics or discovery can cross the restart deadline. Only
-    // recoveryFailure may decide absence once that window closes.
-    if (
-      incident &&
-      target.restartRecoveryDeadlineMs !== undefined &&
-      this.recoveryNow() < target.restartRecoveryDeadlineMs &&
-      this.getDevicesMatchingRecoveryTarget(target).length === 0
-    ) {
-      throw this.recoveryAssignmentError(sessionId, target, incident);
-    }
-    if (failure) {
-      throw failure;
-    }
-    return incident;
+    return this.deviceAllocation.assignDeviceToSession(sessionId, platform, recoveryTarget);
   }
 
   /**
@@ -5497,44 +5380,7 @@ export class DevicePool {
     );
   }
 
-  private async settledRecoveryLossIncident(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-  ): Promise<EmulatorLossIncident | undefined> {
-    if (
-      target.platform !== "android" ||
-      target.restartRecoveryDeadlineMs === undefined ||
-      this.recoveryNow() >= target.restartRecoveryDeadlineMs
-    ) {
-      return undefined;
-    }
-    try {
-      const incident = (await this.emulatorLossIncidentStore.list()).find(
-        (candidate) =>
-          candidate.session?.sessionUuid === sessionId &&
-          candidate.deviceId === target.deviceId &&
-          (candidate.detectionPath !== "serial-reuse" ||
-            candidate.session.state === "awaiting-device") &&
-          (candidate.avdName === undefined || candidate.avdName === target.stableDeviceId),
-      );
-      return incident &&
-        !this.emulatorLossLedger.emulatorLossRecoverySettlements.has(incident.id) &&
-        (incident.recovery.outcome === "not-attempted" || incident.recovery.outcome === "exhausted")
-        ? incident
-        : undefined;
-    } catch (error) {
-      // Diagnostics failure must not replace the bounded recovery error.
-      logger.warn("[DevicePool] Failed to read recovery loss incident", error);
-      return undefined;
-    }
-  }
-
-  /**
-   * Try to assign a device to a session (single attempt)
-   *
-   * Returns success status and whether caller should wait and retry.
-   */
-  private async tryAssignDevice(
+  private tryAssignDevice(
     sessionId: string,
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
@@ -5550,162 +5396,19 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    if (!recoveryTarget && this.managedSlotExclusion) {
-      // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
-      await this.managedSlotExclusion.refresh({ requireCurrent: true });
-    }
-    if (!recoveryTarget && this.tracksForeignOwnership(platform)) {
-      return this.tryAssignUnclaimedDevice(sessionId, platform);
-    }
-    if (!recoveryTarget) {
-      // A pool built without ownership tracking (tests) publishes no claims.
-      return this.tryAssignFrom(
-        sessionId,
-        () => this.getGenericallyAllocatableDevices(platform),
-        "platform pool empty",
-        () => this.hasPendingAndroidRecovery(platform),
-      );
-    }
-    const ownership = this.foreignOwnershipFor(recoveryTarget.platform);
-    if (ownership) {
-      await this.assertRecoveryTargetNotForeignOwned(sessionId, recoveryTarget, ownership);
-    }
-    const result = await this.tryAssignFrom(
+    return this.deviceAllocation.tryAssignDevice(
       sessionId,
-      () => this.getDevicesMatchingRecoveryTarget(recoveryTarget),
-      "recovery target pool empty",
-      () => this.hasPendingAndroidRecovery(platform),
+      platform,
       recoveryTarget,
       settledRecoveryLoss,
     );
-    if (ownership && result.success && result.deviceId !== undefined && result.session) {
-      await this.claimRecoveredDevice(
-        sessionId,
-        recoveryTarget,
-        ownership,
-        result.deviceId,
-        result.session,
-      );
-    }
-    return result;
   }
 
-  /**
-   * A restarted daemon must not rehydrate a session onto a device another live daemon took over
-   * while it was down (#11076): both would drive it. The persisted session is terminal then.
-   */
-  private async assertRecoveryTargetNotForeignOwned(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-    ownership: ForeignDeviceOwnership,
-  ): Promise<void> {
-    const idle = this.getDevicesMatchingRecoveryTarget(target).filter(
-      (device) => device.sessionId === null,
-    );
-    if (idle.length === 0) {
-      return;
-    }
-    await ownership.refresh(idle.map((device) => device.id));
-    const foreign = idle.find((device) => this.isDrivenByForeignDaemon(device));
-    if (foreign) {
-      throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
-        deviceId: foreign.id,
-        ownerPid: ownership.foreignOwnerPid(foreign.id),
-      });
-    }
-  }
-
-  /**
-   * Publish this daemon's claim on the device recovery just rebound. When another live daemon's
-   * claim won the race, give the device back and terminalize the session (#11076).
-   */
-  private async claimRecoveredDevice(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-    ownership: ForeignDeviceOwnership,
-    deviceId: string,
-    session: Session,
-  ): Promise<void> {
-    if (await this.publishDeviceClaim(deviceId)) {
-      return;
-    }
-    logger.warn(
-      `[DevicePool] Another AutoMobile process claims ${deviceId}; rolling back recovery of session ${sessionId}`,
-    );
-    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
-    throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
-      deviceId,
-      ownerPid: ownership.foreignOwnerPid(deviceId),
-    });
-  }
-
-  /**
-   * Single-device attempt (#10709): skip devices another live daemon drives, and publish this
-   * daemon's claim on the assigned device so other daemons see the session before any CtrlProxy
-   * forward exists. While only other daemons' devices are left, wait as for a busy device.
-   */
-  private async tryAssignUnclaimedDevice(
+  private tryAssignUnownedDevice(
     sessionId: string,
     platform?: Platform,
   ): ReturnType<DevicePool["tryAssignDevice"]> {
-    await this.refreshForeignOwnership();
-    const result = await this.tryAssignUnownedDevice(sessionId, platform);
-    if (
-      !result.success &&
-      !result.shouldWait &&
-      !result.livenessUnknown &&
-      this.countForeignDrivenDevices(platform) > 0
-    ) {
-      return { ...result, shouldWait: true };
-    }
-    return result;
-  }
-
-  /** Platform multi-device attempt: like tryAssignDevice, minus devices other daemons drive. */
-  private async tryAssignUnownedDevice(
-    sessionId: string,
-    platform?: Platform,
-  ): ReturnType<DevicePool["tryAssignDevice"]> {
-    return this.claimAssignedDevice(
-      sessionId,
-      await this.tryAssignFrom(
-        sessionId,
-        () =>
-          this.getGenericallyAllocatableDevices(platform).filter(
-            (device) => !this.isDrivenByForeignDaemon(device),
-          ),
-        "platform pool empty",
-        () => this.hasPendingAndroidRecovery(platform),
-      ),
-    );
-  }
-
-  /**
-   * Publish this daemon's claim on an Android device multi-device allocation just assigned, so
-   * another daemon's allocation sees it before any CtrlProxy forward exists. When another daemon
-   * claimed it first and still uses it, give the device back and wait like a busy device.
-   */
-  private async claimAssignedDevice(
-    sessionId: string,
-    result: Awaited<ReturnType<DevicePool["tryAssignFrom"]>>,
-  ): Promise<Awaited<ReturnType<DevicePool["tryAssignFrom"]>>> {
-    const deviceId = result.deviceId;
-    if (
-      !result.success ||
-      deviceId === undefined ||
-      !result.session ||
-      !this.foreignOwnershipFor(this.devices.get(deviceId)?.platform)
-    ) {
-      return result;
-    }
-    if (await this.publishDeviceClaim(deviceId)) {
-      return result;
-    }
-    logger.info(
-      `[DevicePool] Another AutoMobile process claimed ${deviceId} first; releasing it from session ${sessionId}`,
-    );
-    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session: result.session }]]));
-    return { ...result, success: false, deviceId: undefined, session: undefined, shouldWait: true };
+    return this.deviceAllocation.tryAssignUnownedDevice(sessionId, platform);
   }
 
   /**
@@ -5912,16 +5615,15 @@ export class DevicePool {
     assignments: Map<string, string>,
     assignmentsToRollback: Map<string, RollbackAssignment>,
   ): void {
-    assignments.set(request.sessionId, result.deviceId!);
-    if (result.session) {
-      assignmentsToRollback.set(request.sessionId, {
-        deviceId: result.deviceId!,
-        session: result.session,
-      });
-    }
+    return this.deviceAllocation.recordCriteriaAssignment(
+      request,
+      result,
+      assignments,
+      assignmentsToRollback,
+    );
   }
 
-  private async tryAssignDeviceWithCriteria(
+  private tryAssignDeviceWithCriteria(
     sessionId: string,
     criteria?: DeviceAllocationCriteria,
   ): Promise<{
@@ -5935,29 +5637,10 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.claimAssignedDevice(
-      sessionId,
-      await this.tryAssignFrom(
-        sessionId,
-        () => this.getUnownedDevicesMatchingCriteria(criteria),
-        "criteria pool empty",
-        () => this.hasPendingAndroidRecoveryMatching(criteria),
-      ),
-    );
+    return this.deviceAllocation.tryAssignDeviceWithCriteria(sessionId, criteria);
   }
 
-  /**
-   * Shared single-attempt assignment body for platform- and criteria-based
-   * allocation. Parameterized only by how candidate devices are selected and
-   * the label used when the candidate pool is empty.
-   *
-   * Selection order: prefer the most recently released device for reuse, then
-   * fall back to the least-recently-used idle device for load distribution.
-   *
-   * @param emptyCandidatePoolReason label logged when candidates exist in the
-   *   pool overall but none match this selector (the `totalDevices === 0` case)
-   */
-  private async tryAssignFrom(
+  private tryAssignFrom(
     sessionId: string,
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
@@ -5975,192 +5658,14 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    let livenessUnknown = false;
-    let refreshCompleteness: DiscoveryCompleteness | undefined;
-    let refreshFailure: string | undefined;
-    let refreshCompleted = false;
-    let refreshed = false;
-    let refreshInconclusive = false;
-    let staleRetries = 0;
-
-    while (true) {
-      throwIfRequestAborted();
-      const candidatesBeforeDiscovery = selectCandidates();
-      // Only entries idle before discovery may be judged by this pass. A newly
-      // released, added or replaced entry needs its own fresh snapshot.
-      const capturedEntries = new Set(
-        candidatesBeforeDiscovery.filter((device) => device.status === "idle"),
-      );
-      const [iosLiveness, androidPresence] = await raceWithDeadline(
-        () =>
-          Promise.all([
-            candidatesBeforeDiscovery.some(
-              (device) => device.status === "idle" && device.platform === "ios",
-            )
-              ? this.idleDeviceReaper.getIosLivenessSnapshot()
-              : undefined,
-            candidatesBeforeDiscovery.some(
-              (device) =>
-                device.status === "idle" && this.shouldValidatePooledDevicePresence(device),
-            )
-              ? this.takeFreshPresenceDiscovery("android")
-              : undefined,
-          ]),
-        { timer: this.timer, signal: getAbortSignal(), label: "Device allocation discovery" },
-      );
-      const snapshots = { capturedEntries, iosLiveness, androidPresence };
-
-      // Platform snapshots and refresh discovery are outside this boundary.
-      // In-memory validation and short local DB/incident-ledger writes stay inside.
-      // Shared identity reconciliation retains its bounded unreadable-AVD retries:
-      // splitting its confirmed-identity/quarantine transition needs its own fence.
-      const result = await this.assignmentMutex.runExclusive(async () => {
-        throwIfRequestAborted();
-        let candidates = selectCandidates();
-        let selection = await this.selectAssignableIdleDevice(candidates, snapshots, sessionId);
-        let device = selection.device;
-        let snapshotStale = selection.snapshotStale;
-        livenessUnknown ||= selection.livenessUnknown;
-        candidates = selectCandidates();
-
-        // Selection can await local persistence, and release does not take this
-        // mutex. Revalidate after that await; skip invalid entries without I/O.
-        while (device && !this.isCurrentIdleDeviceAssignable(device, sessionId)) {
-          snapshotStale = true;
-          candidates = candidates.filter((candidate) => candidate !== device);
-          selection = await this.selectAssignableIdleDevice(candidates, snapshots, sessionId);
-          device = selection.device;
-          livenessUnknown ||= selection.livenessUnknown;
-        }
-
-        if (device) {
-          const totalDevices = selectCandidates().length;
-          // No await between the final validation above and claim's field writes.
-          const assignment = await this.claimSelectedDeviceForSession(
-            sessionId,
-            device,
-            recoveryTarget,
-          );
-          logger.info(`Assigned device ${device.id} to session ${sessionId}`);
-          return {
-            success: true,
-            deviceId: assignment.deviceId,
-            session: assignment.session,
-            shouldWait: false,
-            totalDevices,
-            shouldRefresh: false,
-            snapshotStale,
-          };
-        }
-
-        candidates = selectCandidates();
-        const totalDevices = candidates.length;
-        this.assertHealthyAllocationPossible(candidates, device);
-        const busyDevices = this.countBusyDevices(candidates);
-        const shouldRefresh =
-          !refreshed && (this.devices.size === 0 || totalDevices === 0 || busyDevices === 0);
-        if (shouldRefresh) {
-          const refreshReason =
-            this.devices.size === 0
-              ? "empty pool"
-              : totalDevices === 0
-                ? emptyCandidatePoolReason
-                : "no idle usable devices";
-          logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
-        }
-        return {
-          success: false,
-          shouldWait: this.shouldWaitForDevice(busyDevices, hasPendingRecovery()),
-          totalDevices,
-          livenessUnknown,
-          refreshCompleteness,
-          shouldRefresh,
-          snapshotStale,
-        };
-      });
-      const { shouldRefresh, snapshotStale, ...assignment } = result;
-      if (assignment.success) {
-        return { ...assignment, refreshCompleteness, refreshFailure, refreshCompleted };
-      }
-      if (shouldRefresh) {
-        refreshed = true;
-        // Allocation waiters share discovery outside the mutex. The shared task
-        // must not inherit one caller's cancellation; each waiter can stop alone.
-        const refreshResult = await this.allocationRefresh.run(
-          "allocation",
-          () => this.refreshForAllocation(recoveryTarget, settledRecoveryLoss),
-          getAbortSignal(),
-        );
-        refreshCompleteness = refreshResult.completeness;
-        refreshFailure = refreshResult.failure;
-        // Discarded discovery is neither a failure nor a successful refresh.
-        refreshCompleted = refreshFailure !== undefined || refreshCompleteness !== undefined;
-        // A background refresh can still supersede this flight. Its discarded
-        // result (or failed discovery) cannot establish authoritative absence,
-        // including for exact recovery targets; let the public retry bound it.
-        refreshInconclusive = refreshCompleteness === undefined;
-        continue;
-      }
-      if (refreshInconclusive) {
-        return {
-          ...assignment,
-          shouldWait: true,
-          refreshCompleteness,
-          refreshFailure,
-          refreshCompleted,
-        };
-      }
-      if (!snapshotStale) {
-        return { ...assignment, refreshCompleteness, refreshFailure, refreshCompleted };
-      }
-      if (staleRetries++ >= ALLOCATION_SNAPSHOT_STALE_RETRIES) {
-        // Let the existing allocation timeout/retry loop bound sustained churn.
-        return {
-          ...assignment,
-          shouldWait: true,
-          refreshCompleteness,
-          refreshFailure,
-          refreshCompleted,
-        };
-      }
-    }
-  }
-
-  private refreshForAllocation(
-    target: SessionRecoveryTarget | undefined,
-    settledRecoveryLoss: boolean,
-  ): Promise<DevicePoolRefreshResult> {
-    return runWithAbortSignal(undefined, () =>
-      target
-        ? this.refreshForRecoveryRetry(target, settledRecoveryLoss)
-        : this.refreshDevicesInternal(false),
+    return this.deviceAllocation.tryAssignFrom(
+      sessionId,
+      selectCandidates,
+      emptyCandidatePoolReason,
+      hasPendingRecovery,
+      recoveryTarget,
+      settledRecoveryLoss,
     );
-  }
-
-  private async refreshForRecoveryRetry(
-    target: SessionRecoveryTarget,
-    settledRecoveryLoss: boolean,
-  ): Promise<DevicePoolRefreshResult> {
-    if (
-      target.restartRecoveryDeadlineMs === undefined ||
-      this.recoveryNow() >= target.restartRecoveryDeadlineMs
-    ) {
-      return this.refreshDevicesInternal(false);
-    }
-    // Pool-wide, not per session: multiple recovering sessions must not each
-    // spend a miss against the same bystander. Ordinary refreshes are not cached
-    // here, so the first recovery retry still discovers after the loss.
-    // Only the settled-loss fast pending error enables cache reuse. Unsettled
-    // recovery retains its existing in-call polling and caller deadlines.
-    const recent = settledRecoveryLoss ? this.recoveryRetryRefresh.get("allocation") : undefined;
-    if (recent) {
-      return recent;
-    }
-    const result = await this.refreshDevicesInternal(false);
-    // Cache even inconclusive results to bound retries during discovery failure.
-    // SingleFlight owns this task independently of each caller's cancellation.
-    this.recoveryRetryRefresh.set("allocation", result);
-    return result;
   }
 
   /**
@@ -6175,152 +5680,31 @@ export class DevicePool {
     return this.devices.get(device.id) === device;
   }
 
-  // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
   private isCurrentIdleDeviceAssignable(device: PooledDevice, forSessionId?: string): boolean {
-    return (
-      this.isPooledEntryCurrent(device) &&
-      device.sessionId === null &&
-      this.selectIdleDevice([device], forSessionId) === device &&
-      this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
-    );
+    return this.deviceAllocation.isCurrentIdleDeviceAssignable(device, forSessionId);
   }
 
-  private async selectAssignableIdleDevice(
+  private selectAssignableIdleDevice(
     candidates: PooledDevice[],
     { capturedEntries, iosLiveness, androidPresence }: AllocationDiscoverySnapshots,
     forSessionId?: string,
   ): Promise<AssignableIdleDeviceSelection> {
-    let device = this.selectIdleDevice(candidates, forSessionId);
-    let livenessUnknown = false;
-    let snapshotStale = [...capturedEntries].some(
-      (entry) =>
-        !this.isPooledEntryCurrent(entry) ||
-        entry.status !== "idle" ||
-        entry.sessionId !== null ||
-        this.isReservedForAssignment(entry, forSessionId),
+    return this.deviceAllocation.selectAssignableIdleDevice(
+      candidates,
+      { capturedEntries, iosLiveness, androidPresence },
+      forSessionId,
     );
-    // One fresh Android sweep per pass (#6546), now taken outside the mutex.
-    // Entry identity fences older snapshots from newer pool incarnations (#8130).
-    while (device) {
-      const skippedDeviceId = device.id;
-      if (!capturedEntries.has(device)) {
-        snapshotStale = true;
-      } else if (!this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)) {
-        // Quarantined serial identity is not assignable, even if it is present.
-      } else if (!this.isCurrentIdleDeviceAssignable(device, forSessionId)) {
-        snapshotStale = true;
-      } else if (this.shouldValidatePooledDevicePresence(device)) {
-        if (!androidPresence) {
-          // An entry that became idle after discovery needs a fresh pass.
-          snapshotStale = true;
-        } else if (!androidPresence.devices.some((booted) => booted.deviceId === skippedDeviceId)) {
-          // Pre-lock absence may already be stale on this same entry. Skip it;
-          // fenced refresh/monitor miss thresholds alone own missing eviction.
-          snapshotStale = true;
-        } else if (
-          await this.ensurePooledDevicePresentForUse(device, true, true, false, androidPresence)
-        ) {
-          return { device, livenessUnknown, snapshotStale };
-        } else {
-          // Reconciliation may have removed or replaced this captured entry.
-          // A replacement needs its own pass before it can be handed out.
-          snapshotStale ||= !this.isPooledEntryCurrent(device);
-        }
-      } else {
-        const status = this.idleDeviceReaper.getIdleDeviceLivenessStatus(device, iosLiveness);
-        if (status === "assignable") {
-          return { device, livenessUnknown, snapshotStale };
-        }
-        if (status === "stale") {
-          // As with Android, absence before the lock cannot retire this entry.
-          snapshotStale = true;
-        } else {
-          livenessUnknown = true;
-          logger.warn(
-            `[DevicePool] Cannot assign idle iOS ${this.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-              "its iOS liveness discovery source failed",
-          );
-        }
-      }
-      candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
-      device = this.selectIdleDevice(candidates, forSessionId);
-    }
-    return { livenessUnknown, snapshotStale };
-  }
-
-  private async claimSelectedDeviceForSession(
-    sessionId: string,
-    device: PooledDevice,
-    recoveryTarget?: SessionRecoveryTarget,
-  ): Promise<{ deviceId: string; session?: Session }> {
-    // Recovery deadline cancellation must fence the claim's synchronous field writes.
-    if (recoveryTarget) {
-      throwIfRequestAborted();
-    }
-    if (this.getDeviceHealthMarker(device.id)) {
-      throw this.unhealthyDevicesError([device]);
-    }
-    const existingSession = this.sessionManager.getSession(sessionId);
-    const assignmentSnapshot = this.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
-    device.lastUsedAt = this.nextLastUsedAt();
-    device.assignmentCount++;
-    device.errorCount = 0;
-    if (recoveryTarget?.persistenceMetadata?.autolockEnabled) {
-      device.autolockSessionId = sessionId;
-    }
-    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.sessionManager.createSession(
-        sessionId,
-        device.id,
-        device.platform,
-        recoveryTarget?.liveness?.sessionTimeoutMs,
-        recoveryTarget?.liveness?.heartbeatTimeoutMs,
-        this.stableDeviceIdFor(device),
-        recoveryTarget?.liveness,
-        recoveryTarget?.initialOwnership,
-      ),
-    );
-    if (session.assignedDevice !== device.id) {
-      this.restoreSessionAssignment(device, assignmentSnapshot);
-      return { deviceId: session.assignedDevice };
-    }
-    this.notifyDeviceStateChanged(device);
-    return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
   private isIdleDeviceEligible(device: PooledDevice, forSessionId?: string): boolean {
-    return (
-      device.status === "idle" &&
-      this.isPotentialAllocationSupply(device) &&
-      !this.isReservedForAssignment(device, forSessionId)
-    );
+    return this.deviceAllocation.isIdleDeviceEligible(device, forSessionId);
   }
 
   private selectIdleDevice(
     candidates: PooledDevice[],
     forSessionId?: string,
   ): PooledDevice | undefined {
-    // Find idle devices and prefer most recently released for reuse
-    const idleDevices = candidates.filter((device) =>
-      this.isIdleDeviceEligible(device, forSessionId),
-    );
-    if (idleDevices.length === 0) {
-      return undefined;
-    }
-
-    if (this.lastReleasedDeviceId) {
-      const lastReleased = idleDevices.find((d) => d.id === this.lastReleasedDeviceId);
-      if (lastReleased) {
-        return lastReleased;
-      }
-    }
-
-    // Sort by lastUsedAt (ascending) to get least recently used device.
-    // This provides better load distribution across devices.
-    idleDevices.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-    return idleDevices[0];
+    return this.deviceAllocation.selectIdleDevice(candidates, forSessionId);
   }
 
   private getDevicesMatchingAnyRequest(requests: DeviceAllocationRequest[]): PooledDevice[] {

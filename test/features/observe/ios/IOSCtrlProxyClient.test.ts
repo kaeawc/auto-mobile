@@ -1642,7 +1642,7 @@ describe("IOSCtrlProxyClient", function () {
         const pending = client.getLatestHierarchy(true, 1000);
         const request = await waitForMessageType(socket, "request_hierarchy");
         // Built from WebSocketResponse.error in
-        // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+        // ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift; no data.
         const message = {
           type: "hierarchy_update",
           requestId: request.requestId,
@@ -1724,7 +1724,7 @@ describe("IOSCtrlProxyClient", function () {
             expect(timer.getPendingTimeouts()).toContain(1000);
           }
           // Built from WebSocketResponse.error in
-          // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+          // ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift; no data.
           const message = {
             type: "hierarchy_update",
             requestId,

@@ -62,7 +62,7 @@ regression when it is not.
 `Package.swift` (tools 6.3, platforms iOS 17 / macOS 15). As of Phase 7E the per-target-language-mode
 scheme is gone with the reference — `CtrlProxyRewrite` is the sole implementation:
 
-- `CtrlProxyRewrite` (`Sources/CtrlProxyRewrite/`) + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests`
+- `CtrlProxyRewrite` (`Sources/CtrlProxy/`) + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests`
   → all `.swiftLanguageMode(.v6)`. `CtrlProxyRewriteTests` is now a single-module suite (196 tests).
 - **Historical:** the reference `CtrlProxy` + `CtrlProxyTests` targets were pinned `.v5` as a
   behavioral oracle during the migration and were retired in Phase 7E (§5).

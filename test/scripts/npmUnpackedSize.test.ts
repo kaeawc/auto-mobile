@@ -219,3 +219,11 @@ test("trimmed cap follows measured bytes plus 3 MiB rounded up and rejects lost 
     }).passed,
   ).toBe(false);
 });
+
+test("parses npm pack JSON preceded by lifecycle stdout noise", () => {
+  const files = [{ path: "dist/src/index.js", size: 10, mode: 493 }];
+  const json = JSON.stringify([{ name: "p", version: "1", unpackedSize: 20, files }], null, 2);
+  const parsed = parsePackOutput(`/home/runner/work/dist/build-info.json\n${json}\n`);
+  expect(parsed.name).toBe("p");
+  expect(parsed.unpackedBytes).toBe(20);
+});

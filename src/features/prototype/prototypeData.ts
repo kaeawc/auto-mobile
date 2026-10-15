@@ -1,6 +1,11 @@
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { PROTOTYPE_DATA_MODEL_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_DATA_MODEL_CAPABILITY,
+  PROTOTYPE_MENUS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
 import { mapBindableFields, record, renderScalar, STATE_KEY, type Raw } from "./prototypeTemplate";
+import { expandPrototypeComponents } from "./prototypeComponents";
 
 /** RFC 6901 pointers relative to data; the whole-document empty pointer is excluded. */
 export function isPrototypeDataPointer(value: unknown): value is string {
@@ -227,11 +232,15 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     fields.add(`${path}.repeat.key`);
   }
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "emitBinding" && typeof record(value)?.data === "string") {
+      fields.add(fieldPath);
+    }
     if (kind === "text" && typeof value === "string" && prototypeDataPlaceholders(value).length) {
       fields.add(fieldPath);
     }
     return value;
   });
+  conditionFields(node.enabledWhen, `${path}.enabledWhen`, fields);
   conditionFields(node.visibleWhen, `${path}.visibleWhen`, fields);
   if (Array.isArray(node.styleWhen)) {
     node.styleWhen.forEach((entry, index) =>
@@ -242,20 +251,36 @@ function usesAtNode(node: Raw, path: string): Set<string> {
 }
 
 function nodeFields(value: unknown, path: string): string[] {
-  const node = record(value);
-  if (!node) {
-    return [];
+  const result: string[] = [];
+  const pending: ({ node: unknown; path: string } | { field: string })[] = [{ node: value, path }];
+  while (pending.length) {
+    const task = pending.pop()!;
+    if ("field" in task) {
+      result.push(task.field);
+      continue;
+    }
+    const { path } = task;
+    const node = record(task.node);
+    if (!node) {
+      continue;
+    }
+    const fields = usesAtNode(node, path);
+    const children = prototypeNodeChildren(node);
+    const next: typeof pending = [];
+    for (const [key, child] of Object.entries(node)) {
+      if (["child", "children", "screens"].includes(key)) {
+        next.push(
+          ...children
+            .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))
+            .map((entry) => ({ node: entry.value, path: `${path}${entry.suffix}` })),
+        );
+      } else {
+        next.push(...documentFields(child, `${path}.${key}`, fields).map((field) => ({ field })));
+      }
+    }
+    pending.push(...next.reverse());
   }
-  const fields = usesAtNode(node, path);
-  return Object.entries(node).flatMap(([key, child]) => {
-    if (key === "child") {
-      return nodeFields(child, `${path}.child`);
-    }
-    if (key === "children" && Array.isArray(child)) {
-      return child.flatMap((entry, index) => nodeFields(entry, `${path}.children[${index}]`));
-    }
-    return documentFields(child, `${path}.${key}`, fields);
-  });
+  return result;
 }
 
 /** Selects usage paths in authored field order, with child nodes visited depth-first. */
@@ -277,10 +302,29 @@ function documentFields(value: unknown, path: string, fields: Set<string>): stri
 }
 
 export function prototypeDataModelFields(spec: unknown): string[] {
-  const object = record(spec);
-  return object
-    ? [...(Object.hasOwn(object, "data") ? ["data"] : []), ...nodeFields(object.root, "root")]
-    : [];
+  const expansion = expandPrototypeComponents(spec);
+  const object = record(expansion.success ? expansion.spec : spec);
+  if (!object) {
+    return [];
+  }
+  const fields = [
+    ...(Object.hasOwn(object, "data") ? ["data"] : []),
+    ...prototypeSpecNodeRoots(object).flatMap(({ node, path }) => nodeFields(node, path)),
+  ];
+  const definitions =
+    expansion.success && expansion.expanded
+      ? prototypeSpecNodeRoots(spec)
+          .filter(({ path }) => path !== "root")
+          .flatMap(({ node, path }) => nodeFields(node, path))
+      : [];
+  // Retain device paths for existing expanded uses; append previously unvisited definitions.
+  return [
+    ...fields,
+    ...definitions.filter(
+      (field) =>
+        !fields.some((at) => expansion.success && expansion.locate(at).endsWith(` → ${field}`)),
+    ),
+  ];
 }
 
 export function prototypeDataModelUnsupportedMessage(
@@ -294,4 +338,41 @@ export function prototypeDataModelUnsupportedMessage(
       ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
       : "Update the connected CtrlProxy";
   return `The ${device} does not advertise ${PROTOTYPE_DATA_MODEL_CAPABILITY}, so it cannot resolve the data binding at ${fields[0]}${more}: a top-level data object, repeat.items {path}, repeat.key, {data: pointer} conditions and {data:/pointer} text placeholders. Nothing was shown. ${update}, or inline the content as literal repeat.items, state keys and literal text.`;
+}
+
+/** Only node positions count: opaque action payloads may also contain a type field. */
+export function prototypeMenuFields(spec: unknown): string[] {
+  const fields: string[] = [];
+  const pending = prototypeSpecNodeRoots(spec).reverse();
+  while (pending.length) {
+    const { node: value, path } = pending.pop()!;
+    const node = record(value);
+    if (!node) {
+      continue;
+    }
+    if (node.type === "menu" || node.type === "select") {
+      fields.push(path);
+    }
+    // Preserve the existing child-before-children order on mixed containers too.
+    const children = prototypeNodeChildren(node).sort(
+      (left, right) => Number(right.suffix === ".child") - Number(left.suffix === ".child"),
+    );
+    for (const child of children.reverse()) {
+      pending.push({ node: child.value, path: `${path}${child.suffix}` });
+    }
+  }
+  return fields;
+}
+
+export function prototypeMenusUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
+  const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
+  const update =
+    platform === "ios"
+      ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
+      : "Update the connected CtrlProxy";
+  return `The ${device} does not advertise ${PROTOTYPE_MENUS_CAPABILITY}, so it cannot render the menu or select at ${fields[0]}${more}. Nothing was shown. ${update}, or replace menu/select with buttons and radioGroup.`;
 }

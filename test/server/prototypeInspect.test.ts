@@ -128,6 +128,17 @@ describe("prototype inspect (#10494)", () => {
     expect(client.getInspectCount()).toBe(1);
   });
 
+  test("inspect, status and awaitEvent preserve stack navigation snapshots", async () => {
+    const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+    client.setInspectReply({ success: true, prototypes: [{ ...reported(1), stacks }] }, [
+      event(1, "screen_changed", "nav", { stacks, payload: { screen: "detail", depth: 2 } }),
+    ]);
+    expect((await call({ action: "inspect" })).prototypes).toMatchObject([{ stacks }]);
+    expect((await call({ action: "status" })).prototypes).toMatchObject([{ stacks }]);
+    expect(
+      (await call({ action: "awaitEvent", id: "proto", kind: "screen_changed" })).event,
+    ).toMatchObject({ stacks, name: "nav", payload: { screen: "detail", depth: 2 } });
+  });
   test("events the device buffered offline are delivered to awaitEvent in order", async () => {
     client.setInspectReply({ success: true, prototypes: [reported(3)] }, [
       event(1, "emit", "tap"),

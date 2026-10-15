@@ -13,7 +13,8 @@ import org.junit.Test
  * What this proves: no regex *literal* in `control-proxy/src/main` or `protocol/src/main` contains
  * a construct from [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]` literals, a `]` opening a
  * character class, `&&` class intersection, lookbehind, named groups, `\h \H \R \X \N`), and no
- * pattern is built from a non-literal or templated string that this scan could not inspect.
+ * pattern is built from a non-literal or templated string that this scan could not inspect, except
+ * the explicitly reviewed parser-validated compilation in PrototypeCheckPattern.
  *
  * What this does NOT prove: JVM tests cannot run ICU. The checker is a hand-written approximation
  * of the known JVM-vs-ICU divergences, not ICU itself, so a pattern it accepts could still fail on
@@ -126,11 +127,23 @@ class IcuRegexCompatibilityTest {
       """
         .trimIndent()
     val sites = RegexLiteralScanner.scan(source, "Fake.kt")
-    assertEquals(
-      listOf("\\{x\\}", "[a-z]+", "^\\d{2}", "a}", null, null),
-      sites.map { it.pattern },
-    )
+    assertEquals(listOf("\\{x\\}", "[a-z]+", "^\\d{2}", "a}", null, null), sites.map { it.pattern })
     assertEquals(listOf(1, 2, 3, 4, 5, 6), sites.map { it.line })
+  }
+
+  @Test
+  fun `scanner exempts only the validated portable user pattern compilation`() {
+    val path =
+      "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt"
+    val guarded =
+      "if (!parse(pattern).ok) return false\n    return Pattern.compile(source(pattern)).matcher(value).matches()"
+    assertTrue(RegexLiteralScanner.scan(guarded, path).isEmpty())
+    assertEquals(1, RegexLiteralScanner.scan(guarded, "Other.kt").size)
+    assertEquals(1, RegexLiteralScanner.scan(guarded.substringAfter('\n'), path).size)
+    assertEquals(
+      1,
+      RegexLiteralScanner.scan(guarded.replace("source(pattern)", "pattern"), path).size,
+    )
   }
 
   private fun mainSourceFiles(): List<File> {
@@ -162,7 +175,11 @@ data class RegexSite(val location: String, val line: Int, val pattern: String?, 
 
 /**
  * Finds `Regex(<literal>)`, `Pattern.compile(<literal>)` and `<literal>.toRegex()` in Kotlin
- * source, skipping comments, and reports non-literal or templated arguments as unreadable.
+ * source, skipping comments, and reports non-literal or templated arguments as unreadable. The sole
+ * dynamic exception is PrototypeCheckPattern's immediately parser-validated call through
+ * source(pattern): its restricted grammar rejects ICU-incompatible constructs, and source escapes
+ * Java class intersections and normalizes character classes, dot and anchors. Protocol fixtures
+ * cover that grammar and translation; raw user patterns and other dynamic calls remain violations.
  */
 object RegexLiteralScanner {
   private val constructors = listOf("Regex(", "Pattern.compile(")
@@ -203,7 +220,15 @@ object RegexLiteralScanner {
     val afterParen = call?.let { i + it.length }
     val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
     val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    if (call != null && !isLiteralArg) {
+    val validatedPortablePattern =
+      call == "Pattern.compile(" &&
+        path.endsWith(
+          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
+        ) &&
+        next != null &&
+        s.startsWith("source(pattern))", next) &&
+        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
+    if (call != null && !isLiteralArg && !validatedPortablePattern) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",

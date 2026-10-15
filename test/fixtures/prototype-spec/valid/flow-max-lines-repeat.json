@@ -1,0 +1,32 @@
+{
+  "id": "flow-grid",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "flow",
+    "maxLines": 1,
+    "repeat": {
+      "items": [
+        {
+          "name": "One"
+        },
+        {
+          "name": "Two"
+        },
+        {
+          "name": "Three"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.name}"
+      }
+    ]
+  }
+}

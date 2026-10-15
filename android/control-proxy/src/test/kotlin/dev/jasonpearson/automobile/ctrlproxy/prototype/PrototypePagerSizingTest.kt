@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
+import dev.jasonpearson.automobile.protocol.PrototypePagerPageSize
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -39,6 +40,23 @@ class PrototypePagerSizingTest {
     assertEquals(
       PrototypePageFill(width = false, height = true),
       prototypePageFill(PrototypeStyle(width = PrototypeDimension.Wrap)),
+    )
+  }
+
+  @Test
+  fun `fixed pages fill only the cross axis`() {
+    val fixed = PrototypePagerPageSize.Dp(120.0)
+    assertEquals(
+      PrototypePageFill(width = false, height = true),
+      prototypePageFill(PrototypeStyle(), pageSize = fixed),
+    )
+    assertEquals(
+      PrototypePageFill(width = true, height = false),
+      prototypePageFill(PrototypeStyle(), axis = "vertical", pageSize = fixed),
+    )
+    assertEquals(
+      PrototypePageFill(width = false, height = false),
+      prototypePageFill(PrototypeStyle(width = PrototypeDimension.Wrap), "vertical", fixed),
     )
   }
 }

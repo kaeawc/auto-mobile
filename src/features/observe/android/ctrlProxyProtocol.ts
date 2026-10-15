@@ -622,6 +622,7 @@ export interface PrototypeResult {
   missingAssets?: string[];
   /** Only the reply to `inspect_prototypes`: the prototypes the device is showing right now. */
   prototypes?: PrototypeStatusEntry[];
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
@@ -637,6 +638,7 @@ export interface PrototypeStatusEntry {
   persistent: boolean;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Highest `prototype_event` sequence the device allocated for this prototype; no rewind. */
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
@@ -665,8 +667,11 @@ export interface PrototypeAssetResult extends PrototypeResult {
 export const PROTOTYPE_EVENT_KINDS = [
   "emit",
   "page_changed",
+  "screen_changed",
   "dismissed",
   "appearance_changed",
+  "change",
+  "validation_failed",
 ] as const;
 export type PrototypeEventKind = (typeof PROTOTYPE_EVENT_KINDS)[number];
 /**
@@ -687,10 +692,17 @@ export interface PrototypeEvent {
    */
   sequence: number;
   kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
+  /** change: current validity for checked state keys. */
+  validity?: Record<string, boolean>;
+  /** validation_failed: failing keys from an atomic requireValid guard. */
+  keys?: string[];
   name: string | null;
   payload: PrototypeJson;
+  context?: Record<string, PrototypeJson>;
+  contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
 }
 
 // =============================================================================
@@ -1096,8 +1108,24 @@ export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
  */
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
+/** Renders text field options; an older device decodes and ignores or misdraws the options. */
+export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_options_v1";
+
+/** In-window menu and select nodes. */
+export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
+
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
+export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
+export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** Editable in-tree search field with active results and submit/trailing actions. */
+export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+
+/** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
+export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
+
+/** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms
@@ -1105,11 +1133,17 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
+export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
+
+/** Renders styled text spans and their independent tap actions. */
+export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
   "prototype_identifier_test_tag_only_v1";
+export const PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY =
+  "prototype_text_field_material_style_v1";
 export const PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY = "prototype_bottom_sheet_drag_v1";
 export const PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY = "prototype_icon_set_material_v1";
 /** iOS draws the canonical SF Symbols table and available filled/outlined icon forms. */
@@ -1170,6 +1204,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
@@ -1968,3 +2003,5 @@ export const ctrlProxyRequests = {
     return { type: "stop_recording" };
   },
 } as const;
+
+export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";

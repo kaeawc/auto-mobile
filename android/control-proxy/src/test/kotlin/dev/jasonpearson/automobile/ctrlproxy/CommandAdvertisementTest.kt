@@ -37,14 +37,24 @@ class CommandAdvertisementTest {
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
       "prototype_theme_modes_v1",
+      "prototype_flow_grid_v1",
+      "prototype_pager_options_v1",
       "prototype_data_model_v1",
+      "prototype_text_field_options_v1",
+      "prototype_gestures_v1",
+      "prototype_search_bar_v1",
+      "prototype_rich_text_v1",
+      "prototype_emit_context_v1",
+      "prototype_checks_v1",
       "prototype_appearance_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
       "prototype_patch_v1",
+      "prototype_stack_v1",
       "prototype_anchor_v1",
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",
+      "prototype_menus_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -72,17 +82,27 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_window_options_v1"))
       assertTrue(commands.contains("prototype_window_chrome_v1"))
       assertTrue(commands.contains("prototype_theme_modes_v1"))
+      assertTrue(commands.contains("prototype_flow_grid_v1"))
+      assertTrue(commands.contains("prototype_pager_options_v1"))
       assertTrue(commands.contains("prototype_data_model_v1"))
+      assertTrue(commands.contains("prototype_text_field_options_v1"))
+      assertTrue(commands.contains("prototype_gestures_v1"))
+      assertTrue(commands.contains("prototype_search_bar_v1"))
+      assertTrue(commands.contains("prototype_rich_text_v1"))
+      assertTrue(commands.contains("prototype_emit_context_v1"))
+      assertTrue(commands.contains("prototype_checks_v1"))
       assertTrue(commands.contains("prototype_appearance_v1"))
       assertTrue(commands.contains("prototype_persistence_replay_v1"))
       assertTrue(commands.contains("prototype_saved_v1"))
       assertTrue(commands.contains("prototype_show_in_place_v1"))
+      assertTrue(commands.contains("prototype_stack_v1"))
       assertTrue(commands.contains("prototype_anchor_v1"))
       assertTrue(commands.contains("inspect_prototypes"))
       assertTrue(commands.contains("patch_prototype"))
       assertTrue(commands.contains("prototype_patch_v1"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("prototype_window_metadata_v1"))
+      assertTrue(commands.contains("prototype_menus_v1"))
       assertTrue(commands.contains("screenshot_hide_prototype_v1"))
       assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
       assertEquals(commands.size, commands.toSet().size)

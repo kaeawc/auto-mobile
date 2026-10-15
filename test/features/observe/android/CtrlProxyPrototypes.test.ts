@@ -1,5 +1,6 @@
 import {
   CtrlProxyPrototypes,
+  decodePrototypeEvent,
   prototypeSavedReplyFields,
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
@@ -1240,6 +1241,65 @@ describe("CtrlProxy patch transport", () => {
 });
 
 const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];
+
+test("decodes screen_changed and tolerates optional stack snapshots", () => {
+  const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+  expect(
+    decodePrototypeEvent(
+      {
+        ...event,
+        kind: "screen_changed",
+        name: "nav",
+        payload: { screen: "detail", depth: 2 },
+        stacks,
+      },
+      "test",
+    ),
+  ).toMatchObject({ kind: "screen_changed", stacks });
+  expect(
+    decodePrototypeEvent(
+      { ...event, stacks: { ...stacks, bad: { path: ["home"], depth: 2 } } },
+      "test",
+    )?.stacks,
+  ).toEqual(stacks);
+  expect(decodePrototypeEvent({ ...event, stacks: {} }, "test")?.stacks).toBeUndefined();
+});
+
+test("show result decoding preserves optional stack snapshots", async () => {
+  const { client, socket, receive } = await harness();
+  const stacks = { nav: { path: ["home"], depth: 1 } };
+  const send = spyOn(socket, "send").mockImplementation((data) => {
+    const message = JSON.parse(String(data));
+    void receive({
+      type: "prototype_result",
+      requestId: message.requestId,
+      timestamp: 42,
+      success: true,
+      stacks,
+    });
+  });
+  try {
+    expect(await client.requestShowPrototype(spec)).toMatchObject({ stacks });
+  } finally {
+    send.mockRestore();
+  }
+});
+
+test("legacy partial handshakes cannot authorize stack navigation", async () => {
+  const { client, socket } = await harness();
+  const send = spyOn(socket, "send");
+  try {
+    await expect(
+      client.requestShowPrototype({
+        ...spec,
+        root: { type: "stack", id: "nav", start: "home", screens: { home: spec.root } },
+      }),
+    ).rejects.toThrow("prototype_stack_v1");
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    send.mockRestore();
+  }
+});
 
 const savedCommands = [
   "full_command_set_v1",

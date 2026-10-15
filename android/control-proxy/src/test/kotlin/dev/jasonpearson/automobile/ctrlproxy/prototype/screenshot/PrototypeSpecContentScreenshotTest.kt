@@ -1,6 +1,24 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeMenuLayers
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeMenuLayers
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelect
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelectOptions
+import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
+import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.PrototypeCheck
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,9 +47,90 @@ class PrototypeSpecContentScreenshotTest {
     val OPEN = JsonPrimitive(true)
   }
 
+  @Test fun flowBasic() = prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
+
+  @Test
+  fun flowMaxLinesRepeat() =
+    prototypeScreenshotTest("flow_max_lines_repeat", validPrototypeFixture("flow-max-lines-repeat"))
+
+  @Test
+  fun gridFixedColumnsSpan() =
+    prototypeScreenshotTest(
+      "grid_fixed_columns_span",
+      validPrototypeFixture("grid-fixed-columns-span"),
+    )
+
+  @Test
+  fun gridAdaptiveMinWidth() =
+    prototypeScreenshotTest(
+      "grid_adaptive_min_width",
+      validPrototypeFixture("grid-adaptive-min-width"),
+    )
+
+  // Pending until the Linux recording workflow produces these new pager-option baselines.
+  @Test fun peekPager() = prototypeScreenshotTest("pager_peek", pagerOptionSpec(0), pending = true)
+
+  @Test
+  fun verticalPager() =
+    prototypeScreenshotTest("pager_vertical", pagerOptionSpec(1), pending = true)
+
+  private fun pagerOptionSpec(index: Int): PrototypeSpec {
+    val spec = validPrototypeFixture("pager-options")
+    val pager = (spec.root as PrototypeColumnNode).children[index] as PrototypePagerNode
+    return spec.copy(
+      root =
+        pager.copy(
+          style =
+            PrototypeStyle(
+              width = PrototypeDimension.Dp(300.0),
+              height = PrototypeDimension.Dp(240.0),
+            ),
+        ),
+    )
+  }
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun inputChecksErrorsLight() = inputChecksErrors("input_checks_errors_light")
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun inputChecksErrorsDark() = inputChecksErrors("input_checks_errors_dark")
+
+  private fun inputChecksErrors(name: String) =
+    prototypeScreenshotTest(name, pending = true) {
+      val fixture = validPrototypeFixture("checks-form")
+      // Compact form fits the window and shows the field, checkbox and switch captions together.
+      val root = fixture.root as PrototypeColumnNode
+      val spec =
+        fixture.copy(
+          root =
+            root.copy(
+              children =
+                root.children.take(5).map { node ->
+                  if (node is PrototypeSliderNode)
+                    node.copy(checks = listOf(PrototypeCheck.Min(10.0, "Choose at least ten")))
+                  else node
+                },
+            ),
+          state = fixture.state.orEmpty() + ("radioGroup" to PrototypeScalar.Text("")),
+        )
+      val model = mapPrototypeSpec(spec, shownErrors = spec.state.orEmpty().keys)
+      renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
+    }
+
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
   // this baseline must be re-recorded by the Linux workflow described above.
   /** Every node type and style token in one fullscreen tree. */
+  // Recorded by the Linux workflow; pending verification until its first golden is committed.
+  @Test
+  fun textFieldOptions() =
+    prototypeScreenshotTest(
+      "text_field_options",
+      validPrototypeFixture("text-field-options"),
+      pending = true,
+    )
+
   @Test
   fun fullscreenAllNodes() =
     prototypeScreenshotTest(
@@ -68,10 +167,7 @@ class PrototypeSpecContentScreenshotTest {
   /** Buttons, checkbox and switch in a row and column layout. */
   @Test
   fun materialControls() =
-    prototypeScreenshotTest(
-      "material_controls",
-      validPrototypeFixture("material-controls"),
-    )
+    prototypeScreenshotTest("material_controls", validPrototypeFixture("material-controls"))
 
   /** Slider, chips and a card. */
   @Test
@@ -96,10 +192,7 @@ class PrototypeSpecContentScreenshotTest {
   /** Radio group, list items, checkbox, switch and icon buttons. */
   @Test
   fun selectionControls() =
-    prototypeScreenshotTest(
-      "selection_controls",
-      validPrototypeFixture("selection-controls"),
-    )
+    prototypeScreenshotTest("selection_controls", validPrototypeFixture("selection-controls"))
 
   /** Colour-role and corner-radius style tokens. */
   @Test
@@ -388,4 +481,39 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
       pending = true,
     )
+
+  /** Pending until the baseline workflow records the new menu and select surfaces. */
+  @Test
+  fun menuOpen() =
+    prototypeScreenshotTest(
+      "menu_open",
+      validPrototypeFixture("menu-overflow", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  @Test
+  fun selectCollapsed() =
+    prototypeScreenshotTest(
+      "select_collapsed",
+      validPrototypeFixture("select-dropdown"),
+      pending = true,
+    )
+
+  @Test
+  fun selectExpanded() =
+    prototypeScreenshotTest("select_expanded", pending = true) {
+      val root = mapPrototypeSpec(validPrototypeFixture("select-dropdown")).root
+      val node = root.children.first()
+      renderComposable("select_expanded") {
+        val layers = remember { PrototypeMenuLayers().apply { expandedSelect = node.identity } }
+        CompositionLocalProvider(LocalPrototypeMenuLayers provides layers) {
+          Box(
+            Modifier.fillMaxSize().onGloballyPositioned { layers.windowBounds = it.boundsInRoot() },
+          ) {
+            RenderPrototypeSelect(node, Modifier)
+            RenderPrototypeSelectOptions(node) {}
+          }
+        }
+      }
+    }
 }

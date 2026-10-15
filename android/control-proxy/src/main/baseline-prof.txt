@@ -1,0 +1,40 @@
+# Hand-authored from CtrlProxy startup and hot paths in the manifest and Kotlin sources.
+# Regenerate from a device Macrobenchmark when a generator exists.
+# Method flags: H = hot, S = startup, P = post-startup; L-only rules cover class loading.
+
+# Accessibility service startup, event handling, and hierarchy traversal (including inner classes).
+Ldev/jasonpearson/automobile/ctrlproxy/CtrlProxy;
+HSPLdev/jasonpearson/automobile/ctrlproxy/CtrlProxy;->**(**)**
+Ldev/jasonpearson/automobile/ctrlproxy/ViewHierarchyExtractor;
+HSPLdev/jasonpearson/automobile/ctrlproxy/ViewHierarchyExtractor**;->**(**)**
+
+# Launcher activity and its top-level Compose UI functions (MainActivityKt on the JVM).
+Ldev/jasonpearson/automobile/ctrlproxy/MainActivity;
+HSLdev/jasonpearson/automobile/ctrlproxy/MainActivity;->**(**)**
+HSLdev/jasonpearson/automobile/ctrlproxy/MainActivityKt;->**(**)**
+Ldev/jasonpearson/automobile/ctrlproxy/AutoMobileDeviceAdminReceiver;
+
+# WebSocket startup and frame delivery; CIO is the engine selected in WebSocketServer.tryStart.
+Ldev/jasonpearson/automobile/ctrlproxy/WebSocketServer;
+HSPLdev/jasonpearson/automobile/ctrlproxy/WebSocketServer**;->**(**)**
+Lio/ktor/server/cio/**;
+HSLio/ktor/server/cio/**;->**(**)**
+HSLio/ktor/server/engine/**;->**(**)**
+HSPLio/ktor/server/websocket/**;->**(**)**
+HSPLio/ktor/websocket/**;->**(**)**
+
+# IME lifecycle, input sessions, and keyboard UI, including nested packages and Compose facades.
+Ldev/jasonpearson/automobile/ctrlproxy/ime/CtrlProxyIme;
+Ldev/jasonpearson/automobile/ctrlproxy/ime/keyboard/ui/**;
+HSPLdev/jasonpearson/automobile/ctrlproxy/ime/**;->**(**)**
+
+# Prototype show, state changes, and pager swipes: DefaultPrototypeHost/PrototypeHostKt,
+# PrototypeController, PrototypeRuntime, PrototypeRenderMapper, PrototypeComponentsKt,
+# PrototypeMotionKt, PrototypePagerSizingKt, and SavedPrototypeActivity.
+Ldev/jasonpearson/automobile/ctrlproxy/prototype/SavedPrototypeActivity;
+Ldev/jasonpearson/automobile/ctrlproxy/prototype/**;
+HSPLdev/jasonpearson/automobile/ctrlproxy/prototype/**;->**(**)**
+
+# Hierarchy and event models, including Kotlin serialization's generated Foo$$serializer classes.
+Ldev/jasonpearson/automobile/ctrlproxy/models/**;
+HSPLdev/jasonpearson/automobile/ctrlproxy/models/**$$serializer;->**(**)**

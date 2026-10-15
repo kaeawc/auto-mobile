@@ -180,3 +180,16 @@ test("the Data guide describes bindings, ownership, reporting, capability and er
   expect(guide).toContain("Repeat placeholder in a data condition operand is not supported");
   expect(guide).toContain("Requires key or data");
 });
+
+test("the authoring guide documents menu/select capability, in-window rendering and row tags", () => {
+  const guide = renderPrototypeGuide();
+  for (const text of [
+    "prototype_menus_v1",
+    "<testTag>.<value>",
+    "<testTag>.<index>",
+    "in-window",
+    "platformNotes",
+  ]) {
+    expect(guide).toContain(text);
+  }
+});

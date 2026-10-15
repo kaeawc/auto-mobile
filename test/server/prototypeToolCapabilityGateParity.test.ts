@@ -18,7 +18,7 @@ const label = { type: "text", id: "label", text: "Hello" };
 const base = {
   id: "parity",
   window: { placement: { type: "fullscreen" } },
-  state: { liked: false },
+  state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
@@ -27,10 +27,65 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
   }),
   prototype_data_model_v1: fixture({ ...label, text: "{data:/x}" }),
+  prototype_text_field_options_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    label: "Liked",
+  }),
+  prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
+  prototype_pager_options_v1: {
+    ...fixture({
+      type: "pager",
+      id: "label",
+      axis: "horizontal",
+      pageSize: "fill",
+      children: [{ type: "spacer" }],
+    }),
+  },
+  prototype_gestures_v1: fixture({
+    ...label,
+    onLongPress: [{ type: "emit", name: "long" }],
+    onDoubleTap: [{ type: "emit", name: "double" }],
+  }),
+  prototype_search_bar_v1: fixture({
+    type: "searchBar",
+    id: "label",
+    stateKey: "query",
+    activeKey: "active",
+    child: label,
+  }),
+  prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
+  prototype_menus_v1: fixture({
+    type: "menu",
+    id: "label",
+    openWhen: { key: "liked", equals: true },
+    items: [{ label: "Open" }],
+  }),
+  prototype_stack_v1: fixture({
+    id: "label",
+    type: "stack",
+    start: "home",
+    screens: { home: { type: "text", text: "Home" } },
+  }),
+  prototype_emit_context_v1: fixture({
+    ...label,
+    onTap: [{ type: "emit", name: "pick", context: { id: { state: "liked" } } }],
+  }),
+  prototype_checks_v1: fixture({
+    type: "button",
+    id: "label",
+    label: "Save",
+    enabledWhen: { key: "liked", equals: true },
+  }),
 };
-function fixture(root: typeof label & Record<string, unknown>) {
+function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
-    minimalSpec: { ...base, root: { ...base.root, children: [root] } },
+    minimalSpec: {
+      ...base,
+      state: base.state,
+      root: { ...base.root, children: [root] },
+    },
     ops: [{ op: "replaceNode", id: "label", node: root }],
   };
 }
@@ -53,7 +108,12 @@ function setup() {
   agent = new FakePrototypeAgentClient({
     agentVersion: "test",
     protocolVersion: 1,
-    capabilities: [...FAKE_PROTOTYPE_AGENT_CAPABILITIES, "prototype_patch_v1"],
+    capabilities: [
+      ...FAKE_PROTOTYPE_AGENT_CAPABILITIES.filter(
+        (capability) => capability !== "prototype_text_field_options_v1",
+      ),
+      "prototype_patch_v1",
+    ],
   });
   store = new InMemoryPrototypeStatusStore(timer);
   unsubscribe = registerPrototypeTools({
@@ -117,7 +177,10 @@ test.each(cases)(
     expect((await show(device, base)).success).toBe(true);
     const before = store.shownSpecs.read(device.deviceId, base.id);
     const sent = agent.requests.length;
-    expect(await patch(device, ops)).toEqual({ success: false, error: refusedShow.error });
+    const refusedPatch = await patch(device, ops);
+    expect(refusedPatch.success).toBe(false);
+    expect(refusedPatch.error).toContain(capability);
+    expect(refusedPatch.error).toBe(refusedShow.error);
     expect(requests(device)).toEqual([]);
     expect(proxy.getPrototypeHistory()).toHaveLength(device.platform === "android" ? 1 : 0);
     expect(agent.requests).toHaveLength(sent);

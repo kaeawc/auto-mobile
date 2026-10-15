@@ -3628,6 +3628,7 @@ jobs:
           echo "Swift cache hit: ${{ steps.cache-webrtc-spm.outputs.cache-hit }}"
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version || true
           (cd ios/screen-capture && swift package resolve)
           SECONDS=0
           (cd ios/screen-capture && swift build)

@@ -55,27 +55,40 @@ enum PrototypeStateValidator {
     private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onLongPress ?? []
+        actions += node.onDoubleTap ?? []
+        actions += node.onSubmit ?? []
+        actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
+        actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
         actions += (node.actions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.confirm?.onTap ?? []
         actions += node.dismiss?.onTap ?? []
         actions += node.action?.onTap ?? []
+        actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
         node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
         if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
+        node.screens?.values.forEach { collect($0, nodes: &nodes, actions: &actions) }
     }
 
     // MARK: Binding rules
 
     private static func bindingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
         if let message = componentError(node, state) { return message }
-        guard let key = node.stateKey else { return nil }
+        guard let key = node.stateKey else {
+            return node.type == "searchBar" ? "Text field requires a string state key" : nil
+        }
         let stored = state[key]
         switch node.type {
-        case "textField":
-            return stored?.stringValue == nil ? "Text field requires a string state key" : nil
+        case "textField", "searchBar":
+            if stored?.stringValue == nil { return "Text field requires a string state key" }
+            if node.type == "searchBar", let activeKey = node.activeKey, state[activeKey]?.boolValue == nil {
+                return "Search bar requires a boolean active key"
+            }
+            return nil
         case "switch", "checkbox":
             return stored?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
-        case "radioGroup", "segmentedButton":
+        case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
         case "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
@@ -148,11 +161,18 @@ enum PrototypeStateValidator {
     }
 
     private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        let name = node.type == "segmentedButton" ? "Segmented button" : "Radio group"
+        let name = node.type == "select" ? "Select" : node
+            .type == "segmentedButton" ? "Segmented button" : "Radio group"
         guard stored?.stringValue != nil else { return "\(name) requires a string state key" }
         var values = Set<String>()
-        for option in node.options ?? [] where !values.insert(option.value).inserted {
-            return "Duplicate radio option value"
+        var selectValues = Set<[UInt16]>()
+        for option in node.options ?? [] {
+            let inserted = node.type == "select"
+                ? selectValues.insert(Array(option.value.utf16)).inserted
+                : values.insert(option.value).inserted
+            if !inserted {
+                return node.type == "select" ? "Duplicate select option value" : "Duplicate radio option value"
+            }
         }
         return nil
     }
@@ -181,7 +201,7 @@ enum PrototypeStateValidator {
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
     private static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
-        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar"]
+        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
     }
@@ -210,7 +230,7 @@ extension Condition {
     var key: String? {
         switch self {
         case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
-        case .all, .any, .not: nil
+        case .all, .any, .not, .valid: nil
         }
     }
 }

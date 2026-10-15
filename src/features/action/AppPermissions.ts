@@ -93,6 +93,8 @@ export interface AppPermissionStateResult {
   source: "androidRuntime" | "iosTcc";
   verified?: boolean;
   reason?: string;
+  accessLevel?: "readWrite" | "addOnly";
+  evidence?: "storedTccGrant";
   authValue?: number;
   raw?: Record<string, string | number | boolean | null>;
 }
@@ -454,6 +456,8 @@ export class AppPermissions {
         source: "iosTcc",
         ...(permission.verified === undefined ? {} : { verified: permission.verified }),
         ...(permission.reason === undefined ? {} : { reason: permission.reason }),
+        ...(permission.accessLevel === undefined ? {} : { accessLevel: permission.accessLevel }),
+        ...(permission.evidence === undefined ? {} : { evidence: permission.evidence }),
         ...(permission.authValue === undefined ? {} : { authValue: permission.authValue }),
         ...(permission.raw ? { raw: permission.raw } : {}),
       })),

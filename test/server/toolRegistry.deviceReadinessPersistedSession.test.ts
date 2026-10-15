@@ -1,3 +1,4 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
@@ -90,15 +91,21 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     // Auto-advance drives recurring intervals as fast as the event loop allows,
     // which can expire this 60-second session during a slower coverage run.
     const persisted = nonTerminalPersisted(sessionUuid, androidA.deviceId);
-    daemonSessionManager = new SessionManager(timer, {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession(): Promise<void> {},
-      async recordActivity(): Promise<void> {},
-      async markReleased(): Promise<void> {},
-      async markStaleActiveSessionsExpired(): Promise<void> {},
-    });
+    daemonSessionManager = new SessionManager(
+      timer,
+      Object.assign(new FakeDeviceSessionPersistence(), {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+    );
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(
@@ -207,7 +214,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       await incidents.completeRecovery(incident.id, "not-attempted");
       const originalRow = { ...persisted };
       await expect(call(120_000)).rejects.toThrow("180 seconds remaining");
-      expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
+      expect(await persistence.getSession(persisted.session_uuid)).toEqual(originalRow);
       timer.advanceTime(240_000);
       const error = await call(deadline).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(TerminalSessionError);
@@ -215,7 +222,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
         release: { releaseReason: "restart-recovery-timeout", terminal: true },
       });
       // Pool-less admission answers without writing.
-      expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
+      expect(await persistence.getSession(persisted.session_uuid)).toEqual(originalRow);
       manager.bootedDevices = [androidA];
       await pool.addDevice(androidA);
       await expect(call(360_000)).rejects.toThrow(TerminalSessionError);
@@ -230,7 +237,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       await drainUntilQuiescent(timer);
       timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
       expect(String(await request)).toContain("recovery reason: target-absent");
-      expect(await persistence.getSession?.(persisted.session_uuid)).toMatchObject({
+      expect(await persistence.getSession(persisted.session_uuid)).toMatchObject({
         release_reason: "identity-recovery-target-absent",
       });
       await expect(call(deadline)).rejects.toThrow(TerminalSessionError);
@@ -321,7 +328,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     expect(payload.error).not.toHaveProperty("incidentId");
     expect(timer.now()).toBe(2_500);
     expect(timer.getPendingTimeouts()).toEqual([]);
-    expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
+    expect(await persistence.getSession(persisted.session_uuid)).toEqual(originalRow);
   });
 
   test("registry restart recovery without a deadline retains the restart recovery window", async () => {
@@ -358,7 +365,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       expect(targets[1]).not.toBe(targets[0]);
       expect(targets[0]?.requestDeadlineMs).toBeUndefined();
       expect(targets[0]?.onRecoveryWait).toBeFunction();
-      expect(await persistence.getSession?.(persisted.session_uuid)).not.toHaveProperty(
+      expect(await persistence.getSession(persisted.session_uuid)).not.toHaveProperty(
         "requestDeadlineMs",
       );
       const expectedEnd =

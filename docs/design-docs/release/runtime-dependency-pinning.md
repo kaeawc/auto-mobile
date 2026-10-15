@@ -20,10 +20,11 @@ resolvable. A fixed release must resolve a fixed graph.
 **only** the image backends it loads from `node_modules` at runtime — the `jimp`
 family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
 `@img/sharp-*` binaries). One more package is a runtime dependency without being
-in that bundle: **`kysely`**. The DB migration `.ts` files are copied verbatim
-into `dist/` and loaded from disk at runtime (via `AUTOMOBILE_MIGRATIONS_DIR`),
-and each imports `kysely`'s `sql` tag — so `kysely` is the fourth runtime root
-even though it is not `import()`-ed from the bundle.
+in that bundle: **`kysely`**. Migrations are bundled through static imports.
+`kysely` is kept as a runtime root conservatively: `kysely` is bundled, but an
+`AUTOMOBILE_MIGRATIONS_DIR` override loads raw migrations that import `kysely`'s
+`sql` tag, and such a folder resolves it from its own location. Dropping the root
+is a separate runtime-graph change.
 
 The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
 bundled into `dist/`, while the exact root package is also published so every
@@ -60,9 +61,11 @@ small `bundledDependencies` set for the conflicting Jimp paths:
 The selected bundle adds about 17 MiB to the package. Source maps no longer embed
 sources by default; opt out for local debugging with
 `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`.
-The unpacked-size guard assumes trimming is enabled: 21 MiB (22,020,096 bytes).
+The unpacked-size guard assumes trimming is enabled: 22.5 MiB (23,592,960 bytes).
 On 2026-10-05, staged `npm pack --dry-run --json` measured 18,345,761 trimmed
-bytes; adding 3 MiB and rounding up to a whole MiB sets the cap (#9571).
+bytes; adding 3 MiB and rounding up to a whole MiB set a 21 MiB cap (#9571). #12457
+raised it to 22.5 MiB after the static migration bundle (#12449) added about
+0.2 MB; the trimmed pack now measures 22,369,648 bytes.
 The same staging copy measured 23,838,787 bytes untrimmed for reference. It used
 the worktree's existing `dist/`, schemas, package metadata, README, pack hooks,
 and complete bundled dependency closure; the worktree's `node_modules` was untouched.

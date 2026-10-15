@@ -99,7 +99,7 @@ for (const booted of [android, ios]) {
           releaseReason: reason,
           terminal: true,
         });
-        expect(await persistence.getSession?.(sessionId)).toMatchObject({ release_reason: reason });
+        expect(await persistence.getSession(sessionId)).toMatchObject({ release_reason: reason });
         expect(finishIncident).toHaveBeenCalledWith(incidentId, "not-attempted");
         // A later loss probe has no release to join and still cannot start recovery.
         expect(await pool.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device)).toBe(

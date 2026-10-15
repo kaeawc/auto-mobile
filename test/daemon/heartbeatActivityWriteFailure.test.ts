@@ -131,7 +131,7 @@ describe("heartbeat activity writes (#11079)", () => {
 
     // One retry stored the row; the heartbeat after it had nothing to write.
     expect(persistence.writes).toHaveLength(2);
-    expect((await persistence.getSession?.(SESSION))?.has_received_heartbeat).toBe(1);
+    expect((await persistence.getSession(SESSION))?.has_received_heartbeat).toBe(1);
   });
 
   test("a write stuck behind a busy lock is not stacked by later heartbeats", async () => {

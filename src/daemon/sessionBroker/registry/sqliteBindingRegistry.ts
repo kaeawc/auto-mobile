@@ -19,7 +19,7 @@ import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
 import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
-import { migrateBindingRegistry } from "./bindingRegistryMigrations";
+import { migrateBindingRegistry, assertBindingRegistryCurrent } from "./bindingRegistryMigrations";
 import {
   type BindingResourceSnapshot,
   isBindingJournalPhaseOpen,
@@ -383,6 +383,8 @@ export interface OpenSqliteBindingRegistryOptions extends SqliteBindingRegistryO
   /** Defaults to {@link defaultBindingRegistryPath}. `:memory:` gives a private in-memory registry. */
   dbPath?: string;
   legacyDeviceRetirement?: Pick<LegacySlotDeviceRetirement, "retire">;
+  /** Readers only observe a current schema; they must never run migrations. */
+  migrate?: boolean;
 }
 
 /**
@@ -478,13 +480,17 @@ export async function openSqliteBindingRegistry(
     }),
   });
   try {
-    await migrateBindingRegistry(
-      db,
-      dbPath,
-      () =>
-        options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
-        Promise.resolve(),
-    );
+    if (options.migrate === false) {
+      await assertBindingRegistryCurrent(db, dbPath);
+    } else {
+      await migrateBindingRegistry(
+        db,
+        dbPath,
+        () =>
+          options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
+          Promise.resolve(),
+      );
+    }
   } catch (error) {
     await db.destroy();
     if (classifySqliteError(error) === "retryable") {

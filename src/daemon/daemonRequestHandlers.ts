@@ -210,7 +210,7 @@ export interface DaemonStateAccess {
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
-    /** {@link getStats} after refreshing slot and foreign-daemon ownership (#11305). */
+    /** {@link getStats} after refreshing broker and foreign-daemon ownership (#11305). */
     getRefreshedStats?(): Promise<DevicePoolStats>;
     /** {@link getRefreshedStats} plus the live device ids it counted (#11568). */
     getRefreshedInventory?(): Promise<{

@@ -9,6 +9,8 @@ import { SESSION_BROKER_SCOPE } from "../../../../src/daemon/sessionBroker/hostC
 import { BROKER_BINDING_ROLE } from "../../../../src/daemon/sessionBroker/persistedIdentity";
 import { computeBindingScopeKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import {
+  assertBindingRegistryCurrent,
+  BindingRegistryUpgradePendingError,
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
@@ -365,7 +367,7 @@ describe("retiring the captured slot registry", () => {
       const { sqlite, db } = harness(at007);
       try {
         if (kind !== "assignment") {
-          sqlite.exec("UPDATE slot_assignments SET stable_device_id = NULL");
+          sqlite.exec("UPDATE slot_assignments SET stable_device_id = NULL, device_name = NULL");
         }
         if (kind !== "journal") {
           sqlite.exec("UPDATE slot_journal SET phase = 'committed'");
@@ -387,7 +389,7 @@ describe("retiring the captured slot registry", () => {
     const { sqlite, db } = harness(at007);
     try {
       sqlite.exec(
-        "UPDATE slot_assignments SET stable_device_id = NULL; UPDATE slot_journal SET phase = 'committed'; DELETE FROM slot_free_devices",
+        "UPDATE slot_assignments SET stable_device_id = NULL, device_name = NULL; UPDATE slot_journal SET phase = 'committed'; DELETE FROM slot_free_devices",
       );
       await migrateBindingRegistry(db, ":memory:");
       clean(sqlite);
@@ -396,6 +398,84 @@ describe("retiring the captured slot registry", () => {
       await db.destroy();
     }
   });
+  test.each(["amslot-name-only", "Personal phone"])(
+    "name-only legacy assignment %s cannot bypass retirement",
+    async (name) => {
+      const { sqlite, db } = harness(at007);
+      try {
+        sqlite.exec(
+          "UPDATE slot_assignments SET stable_device_id = NULL, device_name = NULL; DELETE FROM slot_free_devices; UPDATE slot_journal SET phase = 'committed'",
+        );
+        sqlite.run("UPDATE slot_assignments SET device_name = ? WHERE slot_index = 0", [name]);
+        const before = domain(sqlite);
+        await expect(retirement008.up(db)).rejects.toThrow("must be retired first");
+        const run = retirement(db);
+        if (name.startsWith("amslot-")) {
+          await run.upgrade();
+          expect(run.devices.inspected[0]).toMatchObject({ stableId: null, name });
+          expect(run.devices.stopped).toEqual([name]);
+          clean(sqlite);
+        } else {
+          await expect(run.upgrade()).rejects.toThrow("non-product");
+          expect(run.devices.stopped).toEqual([]);
+          expect(domain(sqlite)).toEqual(before);
+        }
+      } finally {
+        await db.destroy();
+      }
+    },
+  );
+
+  test("native inspection and stop run without a transaction; changed rows prevent deletion", async () => {
+    const { sqlite, db } = harness(at007);
+    try {
+      const devices = new FakeStopper();
+      const inspect = devices.inspect.bind(devices);
+      const stop = devices.stop.bind(devices);
+      let nativeCalls = 0;
+      const assertOutsideTransaction = () => {
+        // A fake peer write via BEGIN would fail if retirement still held a transaction.
+        sqlite.exec("BEGIN IMMEDIATE; ROLLBACK");
+        nativeCalls++;
+      };
+      devices.inspect = async (target) => {
+        assertOutsideTransaction();
+        return inspect(target);
+      };
+      devices.stop = async (device) => {
+        assertOutsideTransaction();
+        await stop(device);
+        sqlite.exec("UPDATE slot_assignments SET generation = generation + 1");
+      };
+      const run = retirement(db, { devices });
+      await expect(run.upgrade()).rejects.toThrow("rows changed");
+      expect(nativeCalls).toBeGreaterThan(0);
+      expect(rows(sqlite, "slot_assignments")).toHaveLength(2);
+      expect(rows(sqlite, "slot_free_devices")).toHaveLength(2);
+      expect(applied(sqlite)).toBe(false);
+      await run.upgrade();
+      clean(sqlite);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("an exclusion reader never migrates pending 008, then observes a completed retirement", async () => {
+    const { sqlite, db } = harness(at007);
+    try {
+      const before = domain(sqlite);
+      await expect(assertBindingRegistryCurrent(db, ":memory:")).rejects.toBeInstanceOf(
+        BindingRegistryUpgradePendingError,
+      );
+      expect(domain(sqlite)).toEqual(before);
+      await retirement(db).upgrade();
+      await assertBindingRegistryCurrent(db, ":memory:");
+      clean(sqlite);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   test("fresh DB migrates without any native calls", async () => {
     const sqlite = new Database(":memory:");
     const db = new Kysely<unknown>({ dialect: new BunSqliteDialect({ database: sqlite }) });
@@ -492,7 +572,7 @@ test("008 retains the empty private broker scope byte-for-byte", async () => {
   const { sqlite, db } = harness(at007);
   try {
     sqlite.exec(
-      "UPDATE slot_assignments SET stable_device_id = NULL; UPDATE slot_journal SET phase = 'committed'; DELETE FROM slot_free_devices",
+      "UPDATE slot_assignments SET stable_device_id = NULL, device_name = NULL; UPDATE slot_journal SET phase = 'committed'; DELETE FROM slot_free_devices",
     );
     sqlite.run("UPDATE slot_scopes SET scope_key = ? WHERE state = 'valid'", [BROKER_SCOPE]);
     const before = sqlite.query("SELECT * FROM slot_scopes WHERE scope_key = ?").get(BROKER_SCOPE);

@@ -326,6 +326,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import {
+  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   prepareBindingRegistryForStartup,
 } from "./sessionBroker/registry/legacySlotDeviceRetirement";
@@ -617,7 +618,7 @@ export interface DaemonStartHost {
   bindControlSocket(): Promise<UnixSocketServer>;
   /** Auxiliary sockets, device monitors, the PID file and the health check. */
   startServicesAfterSocketBind(): Promise<void>;
-  /** Navigation retention, forwarding-lease idle release, the orphan watchdog and slot reclaim. */
+  /** Navigation retention, forwarding-lease idle release, the orphan watchdog and broker reclaim. */
   startMaintenanceMonitors(): void;
 }
 
@@ -1007,7 +1008,7 @@ export class Daemon {
 
   /**
    * Owner liveness as this daemon judges it, shared by the registry, the settlement watcher and the
-   * scope reset so they never disagree. A live execution's slot is in use while this daemon holds
+   * scope reset so they never disagree. A live execution's binding is in use while this daemon holds
    * its session, even when the recorded owner is a previous daemon that died with a restart
    * (#11275); a record this daemon wrote is judged by its session alone (#11339).
    */
@@ -1116,17 +1117,23 @@ export class Daemon {
     this.sessionManager.setReleaseDeviceHold((id) =>
       this.managedExecutionReowner?.releaseDeviceHold(id),
     );
-    // Registry retirement/recovery is awaited during startup before exposing the daemon socket.
+    // Broker startup awaits registry retirement; local startup upgrades after exposing its socket.
   }
 
-  private openBindingRegistry(): Promise<SqliteBindingRegistry> {
+  private backgroundRegistryUpgrade: BackgroundBindingRegistryUpgrade | undefined;
+
+  private openBindingRegistry(signal?: AbortSignal): Promise<SqliteBindingRegistry> {
     if (this.bindingRegistry) {
       return this.bindingRegistry;
     }
     const opening = openSqliteBindingRegistry({
+      // Rehydration may open here before startup reaches the socket: only brokers may upgrade
+      // in that window. Local daemons retry from the post-bind background upgrade instead.
+      migrate: this.sessionBrokerConfigPath !== undefined || this.socketBindCommitted,
       timer: this.timer,
       isExecOwnerLive: this.bindingOwnerLiveness(),
       legacyDeviceRetirement: new LegacySlotDeviceRetirement({
+        signal,
         timer: this.timer,
         // Persisted legacy owners must be checked by process even before session rehydration.
         isOwnerLive: defaultBindingExecOwnerLiveness,
@@ -1153,7 +1160,7 @@ export class Daemon {
       }),
     });
     this.bindingRegistry = opening;
-    // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
+    // Restart-time recovery (#11242): broker bindings left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
       (registry) => {
@@ -1184,6 +1191,8 @@ export class Daemon {
 
   /** Stop the drain's settlement watchers and close the binding registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
+    await this.backgroundRegistryUpgrade?.close();
+    this.backgroundRegistryUpgrade = undefined;
     await this.sessionBrokerService?.close();
     this.sessionBrokerService = undefined;
     DaemonState.getInstance().setSessionBrokerService(undefined);
@@ -1847,12 +1856,14 @@ export class Daemon {
         }),
       );
 
-      // Retire old ownership before discovery or rehydration can adopt a legacy runtime.
-      await prepareBindingRegistryForStartup({
-        brokerConfigured: this.sessionBrokerConfigPath !== undefined,
-        registryExists: bindingRegistryFileExists(),
-        open: () => this.openBindingRegistry(),
-      });
+      // Broker recovery needs the upgraded schema before admitting any sessions.
+      if (this.sessionBrokerConfigPath !== undefined) {
+        await prepareBindingRegistryForStartup({
+          brokerConfigured: true,
+          registryExists: bindingRegistryFileExists(),
+          open: () => this.openBindingRegistry(),
+        });
+      }
 
       await this.startHost.startHttpIngress();
 
@@ -1904,6 +1915,12 @@ export class Daemon {
       throw error;
     }
     logger.info("Unix socket server started");
+    if (!this.sessionBrokerConfigPath && bindingRegistryFileExists()) {
+      this.backgroundRegistryUpgrade ??= new BackgroundBindingRegistryUpgrade((signal) =>
+        this.openBindingRegistry(signal),
+      );
+      this.backgroundRegistryUpgrade.start();
+    }
   }
 
   private async startHttpIngress(): Promise<void> {
@@ -3207,7 +3224,7 @@ export class Daemon {
         error instanceof DeviceAssignedToBindingError ||
         error instanceof DeviceOwnedByOtherDaemonError
       ) {
-        // A slot or another daemon holds the device: an expected verdict, so the read is
+        // A broker binding or another daemon holds the device: an expected verdict, so the read is
         // downgraded to connect-only rather than refused.
         logger.debug(`[Daemon] observation of ${deviceId} is read-only: ${errorMessage(error)}`);
       } else {

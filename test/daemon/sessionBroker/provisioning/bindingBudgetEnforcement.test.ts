@@ -284,7 +284,11 @@ describe("binding total-resource enforcement on SQLite", () => {
   );
 
   test("an unrelated orphan fills the budget and cannot be evicted", async () => {
-    inventory.devices.push({ platform: "android", deviceId: "amslot-other", name: "amslot-other" });
+    inventory.devices.push({
+      platform: "android",
+      deviceId: "ambroker-other",
+      name: "ambroker-other",
+    });
     const result = await make().reconcile(await request());
     expect(result).toMatchObject({
       outcome: "failed",

@@ -193,25 +193,30 @@ describe("binding total-resource budget", () => {
   }
 
   test.each(["amslot-", "ambroker-"])(
-    "%s inventory orphans on both platforms still consume the native budget",
+    "%s leftover image at cap one only charges broker orphans",
     async (prefix) => {
-      inventory.devices = [
-        { platform: "android", name: `${prefix}upgrade-0-g1-nonce`, isRunning: false },
-        {
-          platform: "ios",
-          name: `${prefix}upgrade-1-g1-nonce`,
-          deviceId: "SIM-UPGRADE",
-          isRunning: false,
+      inventory.devices = [{ platform: "android", name: `${prefix}leftover`, isRunning: false }];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: prefix === "amslot-" ? "admitted" : "exhausted",
+        usage: {
+          total: prefix === "amslot-" ? 1 : 2,
+          orphaned: prefix === "amslot-" ? 0 : 1,
+          preparing: 1,
         },
-        { platform: "ios", name: "amslotx", deviceId: "SIM-USER", isRunning: false },
-      ];
-      const entry = await creation("ambroker-new-0-g1-nonce");
-      expect(await budget(2).admitCreation({ journalEntryId: entry.id })).toMatchObject({
-        kind: "exhausted",
-        usage: { total: 3, orphaned: 2, preparing: 1 },
       });
     },
   );
+
+  test("legacy images named by registry commitments still consume the cap", async () => {
+    await assignBindingDevice(registry, "android", "amslot-kept", "old");
+    inventory.devices = [{ platform: "android", name: "amslot-kept", isRunning: false }];
+    const entry = await creation("ambroker-new");
+    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "exhausted",
+      usage: { total: 2, assignedIdle: 1, preparing: 1, orphaned: 0 },
+    });
+  });
 
   test("no limit admits without ever reading the registry", async () => {
     const admission = new RegistryBindingResourceBudget({
@@ -331,7 +336,7 @@ describe("binding total-resource budget", () => {
   test("exhaustion exposes assigned idle rows and orphan while retained stays empty", async () => {
     await assignBindingDevice(registry, "android", "idle-a", "a");
     await assignBindingDevice(registry, "ios", "idle-b", "b");
-    inventory.devices.push({ platform: "android", name: "amslot-orphan", deviceId: "orphan-id" });
+    inventory.devices.push({ platform: "android", name: "ambroker-orphan", deviceId: "orphan-id" });
     const mine = await creation("amslot-new");
     const result = await budget(2).admitCreation({ journalEntryId: mine.id });
     expect(result).toMatchObject({
@@ -350,7 +355,7 @@ describe("binding total-resource budget", () => {
       { platform: "android", stableDeviceId: "idle-a", kind: "assigned_idle" },
       { platform: "ios", stableDeviceId: "idle-b", kind: "assigned_idle" },
       { platform: "android", stableDeviceId: "amslot-new", kind: "preparing" },
-      { platform: "android", stableDeviceId: "amslot-orphan", kind: "orphaned" },
+      { platform: "android", stableDeviceId: "ambroker-orphan", kind: "orphaned" },
     ]);
   });
 
@@ -476,7 +481,7 @@ describe("binding total-resource budget", () => {
         list: async (platform) =>
           platform === "ios"
             ? { complete: false, devices: [], toolchain: "not_installed" }
-            : { complete: true, devices: [{ platform: "android", name: "amslot-orphan" }] },
+            : { complete: true, devices: [{ platform: "android", name: "ambroker-orphan" }] },
       },
     });
     const entry = await creation("amslot-new");

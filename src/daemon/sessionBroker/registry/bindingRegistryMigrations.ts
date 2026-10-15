@@ -54,6 +54,25 @@ async function assertSupportedRegistrySchema<DB>(db: Kysely<DB>, dbPath: string)
   }
 }
 
+/** Exclusion readers cannot perform an upgrade or bypass legacy retirement. */
+export class BindingRegistryUpgradePendingError extends ActionableError {}
+
+export async function assertBindingRegistryCurrent<DB>(
+  db: Kysely<DB>,
+  dbPath: string,
+): Promise<void> {
+  await assertSupportedRegistrySchema(db, dbPath);
+  const migrations = await new Migrator({
+    db,
+    provider: bindingRegistryMigrationProvider,
+  }).getMigrations();
+  if (migrations.some((migration) => migration.executedAt === undefined)) {
+    throw new BindingRegistryUpgradePendingError(
+      "Binding registry upgrade pending; exclusion will retry after retirement",
+    );
+  }
+}
+
 /**
  * Probe with reads only: Kysely's getMigrations does not create missing bookkeeping tables, and
  * reports their migrations as unexecuted. A migrated WAL registry can open behind a peer writer.

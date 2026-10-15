@@ -22,7 +22,7 @@ export interface LegacySlotSnapshot {
   owners: readonly BindingProcessIdentity[];
 }
 
-/** The store holds a write transaction through verification; peers cannot acquire/rebind meanwhile. */
+/** Snapshot without a write lock; remove re-reads and compares atomically before deleting. */
 export interface LegacySlotRetirementStore {
   withLegacyRows(
     operation: (snapshot: LegacySlotSnapshot, remove: () => Promise<void>) => Promise<void>,
@@ -40,6 +40,7 @@ export interface LegacySlotRetirementOptions {
   isOwnerLive: BindingExecOwnerLiveness;
   timer: Timer;
   timeoutMs?: number;
+  signal?: AbortSignal;
   warn?: typeof logger.warn;
 }
 
@@ -49,9 +50,12 @@ export class LegacySlotDeviceRetirement {
   async retire(store: LegacySlotRetirementStore): Promise<void> {
     const { timer, devices, isOwnerLive } = this.options;
     const controller = new AbortController();
+    const signal = this.options.signal
+      ? AbortSignal.any([controller.signal, this.options.signal])
+      : controller.signal;
     try {
       await store.withLegacyRows(async (snapshot, remove) => {
-        // Race INSIDE the transaction: timeout rolls it back, even if a native call settles late.
+        // The deadline covers native work; a losing promise can never reach remove().
         await raceWithDeadline(
           async () => {
             this.assertOwnersDead(snapshot, isOwnerLive);
@@ -59,10 +63,10 @@ export class LegacySlotDeviceRetirement {
               snapshot.devices.map((target) => [JSON.stringify(target), target]),
             );
             for (const target of unique.values()) {
-              controller.signal.throwIfAborted();
+              signal.throwIfAborted();
               this.assertOwnersDead(snapshot, isOwnerLive);
-              const device = await devices.inspect(target, controller.signal);
-              controller.signal.throwIfAborted();
+              const device = await devices.inspect(target, signal);
+              signal.throwIfAborted();
               if (!device) {
                 continue; // Complete inventory confirmed absence, including interrupted creations.
               }
@@ -78,9 +82,9 @@ export class LegacySlotDeviceRetirement {
               }
               if (device.isRunning) {
                 this.assertOwnersDead(snapshot, isOwnerLive);
-                await devices.stop(device, controller.signal);
-                controller.signal.throwIfAborted();
-                const after = await devices.inspect(target, controller.signal);
+                await devices.stop(device, signal);
+                signal.throwIfAborted();
+                const after = await devices.inspect(target, signal);
                 if (after && (after.isRunning || after.isRunningStateKnown === false)) {
                   throw new ActionableError(
                     `Shutdown of legacy device '${device.name}' is unconfirmed`,
@@ -88,19 +92,20 @@ export class LegacySlotDeviceRetirement {
                 }
               }
             }
-            controller.signal.throwIfAborted();
+            signal.throwIfAborted();
             this.assertOwnersDead(snapshot, isOwnerLive);
           },
           {
             timer,
+            signal,
             timeoutMs: this.options.timeoutMs ?? 30_000,
             label: "Legacy slot device retirement",
             onTimeout: () => controller.abort(),
           },
         );
         // Only the joined, successful verification path can touch SQL. A losing native promise
-        // may settle late, but it can never run cleanup after this transaction has rolled back.
-        controller.signal.throwIfAborted();
+        // may settle late, but it can never run cleanup after timeout or shutdown.
+        signal.throwIfAborted();
         await remove();
       });
     } catch (error) {
@@ -150,5 +155,29 @@ export async function prepareBindingRegistryForStartup(options: {
         "Session broker cannot start until legacy slot retirement and registry upgrade complete",
       );
     }
+  }
+}
+
+/** One best-effort post-listener upgrade, cancelled and joined by the registry shutdown stage. */
+export class BackgroundBindingRegistryUpgrade {
+  private readonly controller = new AbortController();
+  private task: Promise<void> | undefined;
+
+  constructor(private readonly open: (signal: AbortSignal) => Promise<unknown>) {}
+
+  start(): void {
+    if (this.controller.signal.aborted) {
+      return;
+    }
+    this.task ??= prepareBindingRegistryForStartup({
+      brokerConfigured: false,
+      registryExists: true,
+      open: () => this.open(this.controller.signal),
+    });
+  }
+
+  async close(): Promise<void> {
+    this.controller.abort();
+    await this.task;
   }
 }

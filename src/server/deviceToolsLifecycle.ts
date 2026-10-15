@@ -446,7 +446,7 @@ function createDeleteDeviceWorkflow(
         mode: args.force === true ? "serial-only" : "named",
         initialScan: { serials: new Set(), pooledEntries: [] },
       };
-      // Re-check under the lease: a slot may have taken the device since the entry check.
+      // Re-check under the lease: a broker binding may have taken the device since the entry check.
       const resolution =
         (await bindingDeleteRefusal(args, requester)) ?? (await resolveTeardownTarget(context));
       if ("response" in resolution) {
@@ -711,7 +711,7 @@ export function createLifecycleHandlers() {
     const deadlineMs = deps.timer.now() + timeoutMs;
     const stopIdentities: TeardownStopIdentities = new Map();
     // Refuse a broker binding's device before reserving the teardown lease, as killDevice does:
-    // that reservation preempts the slot's in-flight acquisition even when the delete is then
+    // that reservation preempts the broker's in-flight acquisition even when the delete is then
     // refused (#11271). The workflow re-checks under the lease.
     try {
       // Likewise the session-holder refusal (#11274); it needs the resolved target, so it

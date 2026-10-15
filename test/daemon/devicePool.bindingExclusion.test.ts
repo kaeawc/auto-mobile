@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import type { DeviceInfo } from "../../src/models/DeviceInfo";
+import type { BindingRegistry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   RegistryBindingExclusion,
@@ -41,7 +44,10 @@ describe("DevicePool binding exclusion", () => {
   let registry: FakeBindingRegistry;
   let pool: DevicePool;
 
-  const setUp = async (devices: BootedDevice[]) => {
+  const setUp = async (
+    devices: BootedDevice[],
+    open: () => Promise<BindingRegistry> = async () => registry,
+  ) => {
     manager.bootedDevices = devices;
     pool = new DevicePool(
       createDevicePoolDependencies(sessions, "broker-binding-exclusion", {
@@ -49,7 +55,7 @@ describe("DevicePool binding exclusion", () => {
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(open, timer),
       }),
     );
     await pool.initializeWithDevices(devices);
@@ -97,6 +103,42 @@ describe("DevicePool binding exclusion", () => {
       expect(pool.genericAvailability("emulator-5554")).toBe("session_broker");
     },
   );
+
+  test("deferred retirement leaves local allocation and auto-start usable, then re-probes broker rows", async () => {
+    let pending = true;
+    let opens = 0;
+    await setUp([ios("LOCAL")], async () => {
+      opens++;
+      if (pending) {
+        throw new BindingRegistryUpgradePendingError("legacy row still has a live owner");
+      }
+      return registry;
+    });
+    manager.deviceImages = [
+      { platform: "ios", name: "Local image", deviceId: "IMAGE", isRunning: false },
+      { platform: "ios", name: "amslot-leftover", deviceId: "LEGACY", isRunning: false },
+    ];
+    const internals = pool as unknown as {
+      tryAssignDevice(
+        sessionId: string,
+        platform: "ios",
+      ): Promise<{ success: boolean; deviceId?: string }>;
+      getStartableDeviceImageCandidates(platform: "ios"): Promise<DeviceInfo[]>;
+    };
+    expect(await internals.tryAssignDevice("local-session", "ios")).toMatchObject({
+      success: true,
+      deviceId: "LOCAL",
+    });
+    expect(
+      (await internals.getStartableDeviceImageCandidates("ios")).map((image) => image.deviceId),
+    ).toEqual(["IMAGE"]);
+    const before = opens;
+    await assignBindingDevice(registry, "ios", "IMAGE");
+    pending = false;
+    expect(await internals.getStartableDeviceImageCandidates("ios")).toEqual([]);
+    expect(opens).toBeGreaterThan(before);
+    expect([...(await pool.bindingStableIds("ios"))]).toEqual(["IMAGE"]);
+  });
 
   test("generic single-device allocation skips an idle device a binding holds", async () => {
     await assignBindingDevice(registry, "ios", "SIM-SLOT");

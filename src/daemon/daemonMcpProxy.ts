@@ -7495,7 +7495,7 @@ export class DaemonMcpProxy {
   /**
    * Close the connection to the daemon. Stdin EOF waits for received requests' answers before
    * reaching close (#12049); a signal, a stdout write error, or the EOF hard bound still cancels
-   * calls here, before managed execution release. The daemon admits `daemon/releaseExecution`
+   * calls here, before releasing owned sessions and broker grants. Session release is admitted
    * in arrival order on this proxy's socket, behind any call still running there; otherwise
    * release would time out unadmitted and leave the session to owner-disconnect release (#11642).
    * Each caller is answered with a typed `DaemonUnavailableError`, never left waiting. At the

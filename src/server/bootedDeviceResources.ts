@@ -910,7 +910,7 @@ function summarizePoolStatus(
             ?.observationComplete !== true),
     );
   for (const pooled of unknown) {
-    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
+    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or broker-held:
     // #11455), so it is never tallied idle. Assigned/error are the pool's own facts and stay.
     const status = devicePool.poolBucket(pooled.id) ?? "idle";
     if (!listed.has(pooled.id) && status !== "idle") {

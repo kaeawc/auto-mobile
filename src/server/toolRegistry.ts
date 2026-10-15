@@ -1159,7 +1159,7 @@ async function isSessionlessReadTargetHeld(
       error instanceof DeviceAssignedToBindingError ||
       error instanceof DeviceOwnedByOtherDaemonError
     ) {
-      // A slot or another daemon holds the device: an expected verdict, so the read watches it.
+      // A broker binding or another daemon holds the device: an expected verdict, so the read watches it.
       logger.debug(
         `[ToolRegistry] ${toolName} on ${deviceId} is read-only: ${errorMessage(error)}`,
       );
@@ -1815,7 +1815,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // A sessionless read that would land on a held device (its explicit deviceId, or the device
         // readiness would select) watches it through the read-only path: no readiness, pin or
         // settings work on the holder's device (#10830, #10970). The holder may also be a managed
-        // slot or another daemon (#11641). Check the raw id before discovery: a slot may know
+        // broker binding or another daemon (#11641). Check the raw id before discovery: a broker binding may know
         // only the AVD name, and a held serial needs no discovery scan.
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
         // (owner decision 2026-10-12, #11964)
@@ -2866,7 +2866,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
       // A plan run owns the derived label sessions it created and its base session, with one
       // exception: a managed connection's binding session belongs to the connection for its
-      // lifetime (#11421). Its slot set is fixed and a `plan-auto-release` UUID is not reusable,
+      // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
       // so releasing it would strand the connection. A generic connection's base session is
       // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
       if (
@@ -3225,7 +3225,7 @@ async function assertBindingControlAccess(input: {
     ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ?? input.sessionUuid)
     : undefined;
   // An internal call (plan step, nested tool) carries no socket session id: its connection is
-  // recognized by the slot session it runs on (#11397).
+  // recognized by the broker session it runs on (#11397).
   const connectionScopes = daemonState.getBrokerConnectionScopes();
   const connectionRefusal = brokerConnectionControlRefusal({
     binding:

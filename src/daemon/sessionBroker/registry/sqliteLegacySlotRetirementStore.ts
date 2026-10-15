@@ -33,6 +33,7 @@ interface LegacyFreeDevice {
   stop_claimed_by?: string | null;
 }
 interface LegacyJournal {
+  phase: string;
   platform: BindingPlatform;
   binding_stable_device_id: string | null;
   target_json: string;
@@ -52,84 +53,97 @@ export class SqliteLegacySlotRetirementStore<DB> implements LegacySlotRetirement
       return; // Fresh registry or already at 008: no native discovery required.
     }
     const hasJournal = tables.some((table) => table.name === "slot_journal");
-    await this.db.transaction().execute(async (trx) => {
+    const readRows = async (trx: Kysely<DB>) => {
+      const scopes = (await sql`SELECT * FROM slot_scopes ORDER BY scope_key`.execute(trx)).rows;
       const assignments = (
-        await sql<LegacyAssignment>`SELECT * FROM slot_assignments WHERE role <> ${BROKER_BINDING_ROLE}`.execute(
+        await sql<LegacyAssignment>`SELECT * FROM slot_assignments WHERE role <> ${BROKER_BINDING_ROLE} ORDER BY scope_key, slot_index`.execute(
           trx,
         )
       ).rows;
-      const free = (await sql<LegacyFreeDevice>`SELECT * FROM slot_free_devices`.execute(trx)).rows;
+      const free = (
+        await sql<LegacyFreeDevice>`SELECT * FROM slot_free_devices ORDER BY platform, stable_device_id`.execute(
+          trx,
+        )
+      ).rows;
       const journals = hasJournal
         ? (
             await sql<LegacyJournal>`SELECT * FROM slot_journal WHERE ${legacyJournalPredicate}
-        AND phase NOT IN ('committed', 'rolled_back')`.execute(trx)
+        ORDER BY id`.execute(trx)
           ).rows
         : [];
-      const devices: LegacySlotDeviceTarget[] = [];
-      const owners: BindingProcessIdentity[] = [];
-      const owner = (
-        daemonId: string | null | undefined,
-        pid: number | null | undefined,
-        token?: string | null,
-      ) => {
-        if (pid !== null && pid !== undefined) {
-          owners.push({
-            daemonId: daemonId ?? "legacy",
-            pid,
-            processGenerationToken: token ?? null,
-          });
-        }
-      };
-      for (const row of assignments) {
-        if (row.stable_device_id !== null) {
-          devices.push({
-            platform: row.platform,
-            stableId: row.stable_device_id,
-            name: row.device_name,
-          });
-        }
-        owner(row.exec_owner_daemon_id, row.exec_owner_pid, row.exec_owner_process_token);
-        owner(row.settler_daemon_id, row.settler_pid, row.settler_process_token);
-      }
-      for (const row of free) {
-        devices.push({ platform: row.platform, stableId: row.stable_device_id, name: null });
-        owner(
-          row.deletion_owner_daemon_id,
-          row.deletion_owner_pid,
-          row.deletion_owner_process_token,
-        );
-      }
-      for (const row of journals) {
-        owner(row.owner_daemon_id, row.owner_pid, row.owner_process_token);
-        const target = parseJournalTarget(row.target_json);
-        for (const device of [
-          { platform: row.platform, stableId: row.binding_stable_device_id, name: target.oldName },
-          { platform: row.platform, stableId: target.oldStableId, name: target.oldName },
-          {
-            platform: target.newPlatform ?? row.platform,
-            stableId: target.newStableId,
-            name: target.newName,
-          },
-        ]) {
-          if (device.stableId || device.name) {
-            devices.push(device);
-          }
-        }
-      }
       const brokerDevices = (
         await sql<Pick<LegacyAssignment, "platform" | "stable_device_id" | "device_name">>`
-        SELECT platform, stable_device_id, device_name FROM slot_assignments WHERE role = ${BROKER_BINDING_ROLE}`.execute(
+        SELECT * FROM slot_assignments WHERE role = ${BROKER_BINDING_ROLE} ORDER BY scope_key, slot_index`.execute(
           trx,
         )
       ).rows;
-      if (
-        devices.some((target) => brokerDevices.some((broker) => refersToBroker(target, broker)))
-      ) {
-        throw new ActionableError(
-          "Legacy retirement overlaps a broker device; reconcile the duplicate legacy row before retrying",
-        );
+      return { scopes, assignments, free, journals, brokerDevices };
+    };
+    // Native discovery and shutdown must never hold SQLite's write lock.
+    const snapshot = await readRows(this.db);
+    const { assignments, free, journals, brokerDevices } = snapshot;
+    const devices: LegacySlotDeviceTarget[] = [];
+    const owners: BindingProcessIdentity[] = [];
+    const owner = (
+      daemonId: string | null | undefined,
+      pid: number | null | undefined,
+      token?: string | null,
+    ) => {
+      if (pid !== null && pid !== undefined) {
+        owners.push({
+          daemonId: daemonId ?? "legacy",
+          pid,
+          processGenerationToken: token ?? null,
+        });
       }
-      await operation({ devices, owners }, async () => {
+    };
+    for (const row of assignments) {
+      if (row.stable_device_id !== null || row.device_name !== null) {
+        devices.push({
+          platform: row.platform,
+          stableId: row.stable_device_id,
+          name: row.device_name,
+        });
+      }
+      owner(row.exec_owner_daemon_id, row.exec_owner_pid, row.exec_owner_process_token);
+      owner(row.settler_daemon_id, row.settler_pid, row.settler_process_token);
+    }
+    for (const row of free) {
+      devices.push({ platform: row.platform, stableId: row.stable_device_id, name: null });
+      owner(row.deletion_owner_daemon_id, row.deletion_owner_pid, row.deletion_owner_process_token);
+    }
+    for (const row of journals.filter(
+      (entry) => !["committed", "rolled_back"].includes(entry.phase),
+    )) {
+      owner(row.owner_daemon_id, row.owner_pid, row.owner_process_token);
+      const target = parseJournalTarget(row.target_json);
+      for (const device of [
+        { platform: row.platform, stableId: row.binding_stable_device_id, name: target.oldName },
+        { platform: row.platform, stableId: target.oldStableId, name: target.oldName },
+        {
+          platform: target.newPlatform ?? row.platform,
+          stableId: target.newStableId,
+          name: target.newName,
+        },
+      ]) {
+        if (device.stableId || device.name) {
+          devices.push(device);
+        }
+      }
+    }
+    if (devices.some((target) => brokerDevices.some((broker) => refersToBroker(target, broker)))) {
+      throw new ActionableError(
+        "Legacy retirement overlaps a broker device; reconcile the duplicate legacy row before retrying",
+      );
+    }
+    await operation({ devices, owners }, async () => {
+      await this.db.transaction().execute(async (trx) => {
+        // BEGIN IMMEDIATE fences peers only for the compare-and-delete, never native work.
+        if (JSON.stringify(await readRows(trx)) !== JSON.stringify(snapshot)) {
+          throw new ActionableError(
+            "Legacy registry rows changed during retirement; retry daemon startup",
+          );
+        }
         await sql`DELETE FROM slot_free_devices`.execute(trx);
         await deleteLegacyBindingRows(trx, {
           hasJournal,

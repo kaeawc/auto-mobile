@@ -157,7 +157,7 @@ export function assertLifecycleCallerHoldsDevice(input: {
   });
 }
 
-/** Stopped images need only the restart guard; live-holder and slot snapshot checks stay separate. */
+/** Stopped images need only the restart guard; live-holder and broker snapshot checks stay separate. */
 export function assertLifecycleCallerMayStopRestartReservation({
   toolName,
   device,

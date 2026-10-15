@@ -13,7 +13,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   // Check everything before the first write: direct migration must never orphan a native device.
   const unsafe = await sql<{ unsafe: number }>`SELECT
     EXISTS(SELECT 1 FROM slot_assignments WHERE role <> ${BROKER_BINDING_ROLE}
-      AND stable_device_id IS NOT NULL)
+      AND (stable_device_id IS NOT NULL OR device_name IS NOT NULL))
     OR EXISTS(SELECT 1 FROM slot_journal WHERE ${legacyJournalPredicate}
       AND phase NOT IN ('committed', 'rolled_back'))
     OR EXISTS(SELECT 1 FROM slot_free_devices) AS unsafe`.execute(db);

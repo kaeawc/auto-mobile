@@ -1,5 +1,5 @@
 import type { BindingInventory } from "./reconciler";
-import { isProductBrokerDevice } from "../persistedIdentity";
+import { isProductBrokerDevice, LEGACY_DEVICE_NAME_PREFIX } from "../persistedIdentity";
 import { deviceStableId } from "../registry/deviceIdentity";
 import type { DeviceInfo } from "../../../models/index";
 import { ActionableError } from "../../../models/ActionableError";
@@ -246,7 +246,7 @@ function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<
               (id) => id === stableId || id === device.name,
             )),
       );
-    if (!known && !seen.has(key)) {
+    if (!known && !seen.has(key) && !device.name.startsWith(LEGACY_DEVICE_NAME_PREFIX)) {
       charges.push({ category: "orphaned", platform: device.platform, stableDeviceId: stableId });
       seen.add(key);
     }

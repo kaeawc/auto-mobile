@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { logger } from "../../../../src/utils/logger";
+import { BindingRegistryUpgradePendingError } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   currentBindingReconciler,
   bindingRefusal,
@@ -35,6 +37,31 @@ describe("RegistryBindingExclusion", () => {
     opens++;
     return registry;
   };
+
+  test("pending upgrade warns once, remains absent, and re-probes on every refresh", async () => {
+    let pending = true;
+    const exclusion = exclusionOver(async () => {
+      opens++;
+      if (pending) {
+        throw new BindingRegistryUpgradePendingError("retirement refused");
+      }
+      return registry;
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await exclusion.refresh({ requireCurrent: true });
+      await exclusion.refresh({ requireCurrent: true });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(exclusion.lastReadFailed()).toBe(false);
+      expect(opens).toBe(2);
+      pending = false;
+      await assignBindingDevice(registry, "ios", "BROKER");
+      await exclusion.refresh({ requireCurrent: true });
+      expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeDefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   test("holds every assigned device, idle or not, by any of its stable ids", async () => {
     const binding = await assignBindingDevice(registry, "android", "binding-avd");

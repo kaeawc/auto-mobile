@@ -1,3 +1,4 @@
+import { BindingRegistryUpgradePendingError } from "../registry/bindingRegistryMigrations";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -152,6 +153,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
   private readFailed = false;
   private inFlight: Promise<void> | undefined;
   private registry: Promise<BindingRegistry> | undefined;
+  private warnedUpgradePending = false;
 
   constructor(
     private readonly openRegistry: () => Promise<BindingRegistry>,
@@ -255,6 +257,18 @@ export class RegistryBindingExclusion implements BindingExclusion {
     try {
       entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
     } catch (error) {
+      if (error instanceof BindingRegistryUpgradePendingError) {
+        if (!this.warnedUpgradePending) {
+          logger.warn(
+            "[Bindings] Registry upgrade pending; treating exclusion as absent until retirement completes",
+            error,
+          );
+          this.warnedUpgradePending = true;
+        }
+        this.snapshot = { kind: "absent", loadedAtMs: this.timer.now() };
+        this.readFailed = false;
+        return;
+      }
       this.readFailed = true;
       if (this.snapshot?.kind === "loaded") {
         logger.warn(
@@ -298,10 +312,12 @@ let sharedHostRegistry: Promise<BindingRegistry> | undefined;
 export function createDefaultBindingExclusion(timer: Pick<Timer, "now">): BindingExclusion {
   return new RegistryBindingExclusion(
     () => {
-      sharedHostRegistry ??= openSqliteBindingRegistry().catch((error: unknown) => {
-        sharedHostRegistry = undefined;
-        throw error;
-      });
+      sharedHostRegistry ??= openSqliteBindingRegistry({ migrate: false }).catch(
+        (error: unknown) => {
+          sharedHostRegistry = undefined;
+          throw error;
+        },
+      );
       return sharedHostRegistry;
     },
     timer,

@@ -280,7 +280,7 @@ export type PoolStatusBucket = "idle" | "assigned" | "error";
 /**
  * The one per-device classification behind `getStats()`, `getStatsForPlatform`, `listDevices`
  * and the booted resources: every device is in exactly one bucket. An errored device is `error`
- * whatever else holds it; a busy device, or an idle one allocation cannot lend (held by a slot,
+ * whatever else holds it; a busy device, or an idle one allocation cannot lend (held by a broker binding,
  * another daemon, a reservation, or carrying a health marker), is `assigned`; the rest are `idle`.
  */
 export function classifyPoolStatus(
@@ -8533,7 +8533,7 @@ export class DevicePool {
     error: BindingDiscoveryIncompleteError,
   ): void {
     // A failed read cannot revoke a device this session already holds, even if the retained
-    // snapshot predates its slot claim. Current successful reads still judge the registry first.
+    // snapshot predates its broker claim. Current successful reads still judge the registry first.
     if (
       input.requesterSessionUuid &&
       this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid

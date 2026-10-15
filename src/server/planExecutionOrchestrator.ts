@@ -901,7 +901,7 @@ export class PlanExecutionOrchestrator {
     const grantedDevices = new Map<string, string>();
     for (const [label, grantedSessionUuid] of Object.entries(labelToSessionMap)) {
       const grantedSession = sessionManager.getSession(grantedSessionUuid);
-      // The slot serves the label with its own device or not at all: a declared criterion that
+      // The broker grant serves the label with its own device or not at all: a declared criterion that
       // device demonstrably fails is refused instead of silently ignored (#11421).
       if (
         !grantedSession?.assignedDevice ||

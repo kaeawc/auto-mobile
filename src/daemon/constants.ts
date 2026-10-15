@@ -552,12 +552,7 @@ export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 /** Releases a session and frees its device, cancelling its in-flight executions first. */
 export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
 
-/**
- * Ends a broker binding execution (#11177): cancels and drains its in-flight work within a bounded
- * budget, releases the session's live control, and KEEPS the binding's device assignment (the device
- * is never returned to generic allocation). Answers `reusable_for_this_slot` or `cleanup_pending`.
- */
-/** @deprecated Removed socket endpoint; retained only until the step-b2 harness migration. */
+/** @deprecated Removed socket endpoint; broker executions release through daemon/releaseBrokerSession. */
 export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
 
 /**

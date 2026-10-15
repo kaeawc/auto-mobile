@@ -195,7 +195,6 @@ test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/connectionScope.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetEnforcement.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetSinglePlatformHost.test.ts
-test/daemon/sessionBroker/provisioning/bindingExclusion.test.ts
 test/daemon/sessionBroker/provisioning/bindingLateRehydrationReown.test.ts
 test/daemon/sessionBroker/provisioning/bindingRegistrySnapshot.test.ts
 test/daemon/sessionBroker/provisioning/bindingResourceBudget.test.ts

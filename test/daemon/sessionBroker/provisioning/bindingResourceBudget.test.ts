@@ -227,7 +227,7 @@ describe("binding total-resource budget", () => {
     });
   });
 
-  test("ledger counts distinct active, idle, cached, preparing and deleting devices across scopes and platforms", async () => {
+  test("ledger counts distinct active, idle, preparing and deleting devices across scopes and platforms", async () => {
     await assignBindingDevice(registry, "android", "active", "a", "exec");
     await assignBindingDevice(registry, "ios", "idle", "b");
     await creation("amslot-create");
@@ -243,7 +243,6 @@ describe("binding total-resource budget", () => {
       total: 4,
       active: 1,
       assignedIdle: 1,
-      cached: 0,
       preparing: 1,
       deleting: 1,
       orphaned: 0,
@@ -305,7 +304,7 @@ describe("binding total-resource budget", () => {
     });
     expect(await admission.admitCreation({ journalEntryId: mine.id })).toMatchObject({
       kind: "admitted",
-      usage: { total: 2, cached: 0, assignedIdle: 1 },
+      usage: { total: 2, assignedIdle: 1 },
     });
     expect(racing.reads).toEqual(["snapshot"]);
   });
@@ -341,7 +340,6 @@ describe("binding total-resource budget", () => {
         total: 4,
         active: 0,
         assignedIdle: 2,
-        cached: 0,
         preparing: 1,
         deleting: 0,
         orphaned: 1,
@@ -371,7 +369,16 @@ describe("binding total-resource budget", () => {
     },
   );
 
-  test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+  test("zero cap refuses creation with budget evidence", async () => {
+    const mine = await creation("ambroker-new-0-g1-nonce");
+    expect(await budget(0).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "exhausted",
+      limit: 0,
+      usage: { total: 1, preparing: 1 },
+    });
+  });
+
+  test.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
     "invalid limit %s throws ActionableError",
     async (limit) => {
       await expect(budget(limit).admitCreation({ journalEntryId: 1 })).rejects.toBeInstanceOf(
@@ -420,7 +427,7 @@ describe("binding total-resource budget", () => {
       kind: "admitted",
       enforced: false,
     });
-    limit = 0;
+    limit = -1;
     await expect(admission.admitCreation({ journalEntryId: 1 })).rejects.toBeInstanceOf(
       ActionableError,
     );

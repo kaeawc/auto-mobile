@@ -328,6 +328,12 @@ Tests must stub process discovery through the `DaemonProcessFinder` constructor 
 
 ## Session lifetime summary
 
+Broker native-resource admission uses `BindingResourceBudgetPolicy.limit()` wired
+to the same host configuration `limits.totalDeviceCap` as broker admission.
+Each ledger enforces the cap independently; never sum broker reservations and
+native charges for the same device. Omitted means unlimited; zero refuses new
+devices. The native ledger also charges orphaned inventory and unresolved journals.
+
 User-facing statement of the release model (lease and grace, exact idle release,
 `idleReleaseAt` wall clock, one-shot CLI anonymity, terminal-session refusals,
 offline budget, restart recovery): `docs/using/device-ownership.md`. Change it in

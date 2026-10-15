@@ -37,7 +37,6 @@ export interface BindingBudgetEvidence {
     total: number;
     active: number;
     assignedIdle: number;
-    cached: number;
     preparing: number;
     deleting: number;
     orphaned: number;

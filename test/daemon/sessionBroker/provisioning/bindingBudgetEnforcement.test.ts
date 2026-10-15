@@ -237,7 +237,6 @@ describe("binding total-resource enforcement on SQLite", () => {
               total: 2,
               active: 0,
               assignedIdle: 1,
-              cached: 0,
               preparing: 1,
               deleting: 0,
               orphaned: 0,

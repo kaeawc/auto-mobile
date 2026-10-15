@@ -25,7 +25,7 @@ import { warmedTests } from "../../../helpers/warmedTests";
  * orphans) and treats either one failing as "usage unknown". On a host that does not have the
  * Android emulator installed (an iOS-only macOS build host), `emulator -list-avds` fails on every
  * call, so every fresh iOS creation is refused `discovery_incomplete` for as long as
- * AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES is set. Without the limit the same creation only reads the
+ * the broker host config's limits.totalDeviceCap is set. Without the limit creation only reads the
  * requested platform's inventory and succeeds. The iOS side already answers "no simulators" for a
  * host without Xcode tools (`canDiscoverIosLocally`), so only one direction is permanent.
  */

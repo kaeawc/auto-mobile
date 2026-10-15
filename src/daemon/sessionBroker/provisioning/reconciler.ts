@@ -454,7 +454,7 @@ const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>>
   reconcile_in_progress: "Another reconciliation of this binding is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
   binding_budget_exhausted:
-    "Free unused broker resources or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+    "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
   concurrent_modification: "The binding changed concurrently; retry to converge on its new state.",
   readiness_incomplete: "Retry; the device did not reach automation readiness.",

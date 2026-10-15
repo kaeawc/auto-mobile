@@ -1,14 +1,13 @@
 import { warmedTests } from "../../../helpers/warmedTests";
-import { describe, expect, spyOn } from "bun:test";
+import { describe, expect } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
-import {
-  BINDING_MAX_DEVICES_ENV,
-  parseBindingMaxDevices,
-} from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
+import type { BindingResourceBudgetPolicy } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
+import { parseSessionBrokerHostConfig } from "../../../../src/daemon/sessionBroker/hostConfig";
+import { selectAdmission } from "../../../../src/daemon/sessionBroker/admission";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import { logger } from "../../../../src/utils/logger";
+import { androidDefaults } from "../../../devices/sessionRequirements/fixtures";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeInventory, FakeProvisioner, FakeDeleter } from "../registry/fixtures/reconcilerFakes";
@@ -23,7 +22,7 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
   async adoptManagedExecutionLivenessPolicy(): Promise<void> {}
   async releaseSession(): Promise<void> {}
 }
-function wiring(env: NodeJS.ProcessEnv) {
+function wiring(resourceBudgetPolicy?: BindingResourceBudgetPolicy) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer, () => false);
   const inventory = new FakeInventory();
@@ -38,7 +37,7 @@ function wiring(env: NodeJS.ProcessEnv) {
   };
   const handle = createDaemonBrokerDeviceAcquisition({
     registry: async () => registry,
-    env,
+    resourceBudgetPolicy,
     sessions: new NoSessions(),
     owner: () => OWNER,
     timer,
@@ -66,12 +65,12 @@ function wiring(env: NodeJS.ProcessEnv) {
       },
     },
   });
-  const acquire = () =>
+  const acquire = (runnerNamespace = "new") =>
     handle.acquisition.acquire(
       buildBrokerProvisionRequest({
         contractVersion: 1,
         managedHostScope: "host",
-        runnerNamespace: "new",
+        runnerNamespace,
         runnerIncarnation: "inc",
         localBindingCapacity: 1,
         requests: [{ bindingIndex: 0, role: "primary", platform: "android", requestedSpec: SPEC }],
@@ -92,38 +91,18 @@ function wiring(env: NodeJS.ProcessEnv) {
 }
 
 describe("host total-resource limit wiring", () => {
-  let warn: ReturnType<typeof spyOn> | undefined;
-  const test = warmedTests(() => {
-    warn?.mockRestore();
-    warn = undefined;
-  });
-  test.each([undefined, ""])(
-    "unset or empty limit %s adds no ledger reads during creation",
-    async (value) => {
-      const h = wiring(value === undefined ? {} : { [BINDING_MAX_DEVICES_ENV]: value });
+  const test = warmedTests(() => {});
+  test.each([undefined, { limit: () => null }])(
+    "an absent or unlimited policy %s adds no ledger reads during creation",
+    async (policy) => {
+      const h = wiring(policy);
       expect((await h.acquire()).outcome).toBe("ready");
       expect(h.reads()).toBe(0);
       expect(h.provisioner.calls).toHaveLength(1);
     },
   );
-  test.each(["1.5", "0", "-2", "bad", "9007199254740992", " "])(
-    "invalid limit %s warns once and does not enforce",
-    async (value) => {
-      warn = spyOn(logger, "warn").mockImplementation(() => {});
-      const h = wiring({ [BINDING_MAX_DEVICES_ENV]: value });
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain(BINDING_MAX_DEVICES_ENV);
-      expect(warn.mock.calls[0][0]).toContain(JSON.stringify(value));
-      expect((await h.acquire()).outcome).toBe("ready");
-      expect((await h.acquire()).outcome).toBe("ready");
-      expect(h.reads()).toBe(0);
-      expect(warn).toHaveBeenCalledTimes(1);
-    },
-  );
-  test("a configured limit is read once, enforced and budget evidence reaches acquisition", async () => {
-    const env = { [BINDING_MAX_DEVICES_ENV]: "1" };
-    const h = wiring(env);
-    env[BINDING_MAX_DEVICES_ENV] = "100";
+  test("the injected limit is enforced and budget evidence reaches acquisition", async () => {
+    const h = wiring({ limit: () => 1 });
     await assignBindingDevice(h.registry, "android", "amslot-assigned", "assigned");
     expect(await h.acquire()).toMatchObject({
       outcome: "failed",
@@ -140,9 +119,58 @@ describe("host total-resource limit wiring", () => {
     expect(h.provisioner.calls).toEqual([]);
     expect(h.reads()).toBe(2);
   });
-  test("positive safe integers are accepted without a warning", () => {
-    warn = spyOn(logger, "warn").mockImplementation(() => {});
-    expect(parseBindingMaxDevices({ [BINDING_MAX_DEVICES_ENV]: "12" })).toBe(12);
-    expect(warn).not.toHaveBeenCalled();
+  test.each([0, 1, 2, undefined])(
+    "broker cap %s also bounds native creation without double charging",
+    async (totalDeviceCap) => {
+      const config = parseSessionBrokerHostConfig({
+        contractVersion: 1,
+        limits: { totalDeviceCap },
+        defaults: { android: androidDefaults() },
+      });
+      const h = wiring({ limit: () => config.limits.totalDeviceCap ?? null });
+      expect(
+        selectAdmission({ activeOrAcquiringSessions: 0, resources: [] }, config.limits).kind,
+      ).toBe(totalDeviceCap === 0 ? "refuse" : "create");
+      const result = await h.acquire();
+      expect(result.outcome).toBe(totalDeviceCap === 0 ? "failed" : "ready");
+      expect(h.provisioner.calls).toHaveLength(totalDeviceCap === 0 ? 0 : 1);
+      if (totalDeviceCap === 0) {
+        expect(result.bindings[0]?.failure).toMatchObject({
+          code: "binding_budget_exhausted",
+          budget: { limit: 0, usage: { total: 1, preparing: 1 } },
+        });
+      }
+    },
+  );
+  test("the policy is consulted after wiring, before native creation", async () => {
+    let limit: number | null = null;
+    const h = wiring({ limit: () => limit });
+    expect((await h.acquire()).outcome).toBe("ready");
+    limit = 0;
+    expect((await h.acquire("another")).outcome).toBe("failed");
+    expect(h.provisioner.calls).toHaveLength(1);
+  });
+  test("native orphans can refuse creation even when broker admission has room", async () => {
+    const limits = { totalDeviceCap: 1 };
+    const h = wiring({ limit: () => limits.totalDeviceCap });
+    h.inventory.devices = [
+      { platform: "android", name: "ambroker-orphan-0-g1-nonce", isRunning: false },
+    ];
+    expect(selectAdmission({ activeOrAcquiringSessions: 0, resources: [] }, limits)).toEqual({
+      kind: "create",
+    });
+    expect(await h.acquire()).toMatchObject({
+      outcome: "failed",
+      bindings: [
+        {
+          failure: {
+            code: "binding_budget_exhausted",
+            budget: { limit: 1, usage: { total: 2, preparing: 1, orphaned: 1 } },
+          },
+        },
+      ],
+    });
+    expect(h.provisioner.calls).toEqual([]);
+    expect(h.deleter.calls).toEqual([]);
   });
 });

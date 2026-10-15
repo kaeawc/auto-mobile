@@ -1010,8 +1010,7 @@ describe("BindingReconciler", () => {
         usage: {
           total: 2,
           active: 0,
-          assignedIdle: 0,
-          cached: 1,
+          assignedIdle: 1,
           preparing: 1,
           deleting: 0,
           orphaned: 0,
@@ -1043,14 +1042,13 @@ describe("BindingReconciler", () => {
         retryable: true,
         message: "Managed-binding total-resource budget is exhausted.",
         nextAction:
-          "Free unused broker resources or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+          "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
         budget: {
           limit: 1,
           usage: {
             total: 2,
             active: 0,
-            assignedIdle: 0,
-            cached: 1,
+            assignedIdle: 1,
             preparing: 1,
             deleting: 0,
             orphaned: 0,
@@ -1164,8 +1162,7 @@ describe("BindingReconciler", () => {
         usage: {
           total: 2,
           active: 0,
-          assignedIdle: 0,
-          cached: 1,
+          assignedIdle: 1,
           preparing: 1,
           deleting: 0,
           orphaned: 0,

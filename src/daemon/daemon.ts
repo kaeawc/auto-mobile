@@ -104,6 +104,7 @@ import { openSessionBrokerService, type SessionBrokerService } from "./sessionBr
 import {
   readSessionBrokerHostConfig,
   SESSION_BROKER_HOST_CONFIG_ENV,
+  type SessionBrokerHostConfig,
 } from "./sessionBroker/hostConfig";
 import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import {
@@ -764,6 +765,7 @@ export class Daemon {
   private brokerExecutionRelease: BrokerExecutionRelease | undefined;
   private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
   private sessionBrokerService: SessionBrokerService | undefined;
+  private sessionBrokerConfig: SessionBrokerHostConfig | undefined;
   private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
     ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
     : undefined;
@@ -1055,6 +1057,11 @@ export class Daemon {
     });
     const acquisition = createDaemonBrokerDeviceAcquisition({
       registry: () => this.openBindingRegistry(),
+      // The broker and native ledger enforce the same cap independently: reservations are not
+      // added to native usage twice, and unaccounted native devices can still refuse creation.
+      resourceBudgetPolicy: {
+        limit: () => this.sessionBrokerConfig?.limits.totalDeviceCap ?? null,
+      },
       sessions: {
         claimLivenessOwnership: (sessionId, ownerToken) =>
           this.sessionManager.claimLivenessOwnership(sessionId, ownerToken),
@@ -1214,6 +1221,8 @@ export class Daemon {
     }
     const registry = await this.openBindingRegistry();
     const config = await readSessionBrokerHostConfig(this.sessionBrokerConfigPath);
+    // Install before opening the service: startup recovery can provision through acquisition.
+    this.sessionBrokerConfig = config;
     this.sessionBrokerService = await openSessionBrokerService({
       config,
       registry,

@@ -5,7 +5,7 @@
  */
 
 import { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyReason";
-import { RegistryBindingResourceBudget, parseBindingMaxDevices } from "./resourceBudget";
+import { RegistryBindingResourceBudget, type BindingResourceBudgetPolicy } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
 import {
   MultiPlatformDeviceManager,
@@ -63,7 +63,7 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
   registry: () => Promise<BindingRegistry>;
   sessions: BrokerDeviceAcquisitionSessions;
   pool: BindingClaimPool & FreeDeviceBusyPool;
-  env?: NodeJS.ProcessEnv;
+  resourceBudgetPolicy?: BindingResourceBudgetPolicy;
   /** Which sessions this daemon holds as live managed executions (#11275). */
   executions?: LiveExecutionSessions;
   owner: () => BindingProcessIdentity;
@@ -142,7 +142,6 @@ export interface DaemonBrokerDeviceAcquisitionHandle {
 export function createDaemonBrokerDeviceAcquisition(
   options: DaemonBrokerDeviceAcquisitionOptions,
 ): DaemonBrokerDeviceAcquisitionHandle {
-  const limit = parseBindingMaxDevices(options.env);
   const isBusy = (device: DeviceInfo) => freeDeviceBusyReason(options.pool, device);
   const invokeTool = options.invokeTool ?? defaultBindingToolInvoker;
   const reconcilers = new WeakMap<BindingRegistry, BindingReconciler>();
@@ -155,15 +154,14 @@ export function createDaemonBrokerDeviceAcquisition(
       const { deviceManager, androidConfigReader } = tooling;
       const inventory = new DeviceManagerBindingInventory(deviceManager);
       const claims = new PoolBindingDeviceClaims(options.pool, options.executions);
-      const resourceBudget =
-        limit === null
-          ? undefined
-          : new RegistryBindingResourceBudget({
-              registry: async () => registry,
-              policy: { limit: () => limit },
-              inventory,
-              timer: options.timer,
-            });
+      const resourceBudget = options.resourceBudgetPolicy
+        ? new RegistryBindingResourceBudget({
+            registry: async () => registry,
+            policy: options.resourceBudgetPolicy,
+            inventory,
+            timer: options.timer,
+          })
+        : undefined;
       reconciler = new BindingReconciler({
         registry,
         inventory,

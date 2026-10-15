@@ -1,4 +1,3 @@
-import { parseStrictPositiveInteger } from "../../../utils/envNumbers";
 import type { BindingInventory } from "./reconciler";
 import { isProductBrokerDevice } from "../persistedIdentity";
 import { deviceStableId } from "../registry/deviceIdentity";
@@ -19,27 +18,9 @@ import {
   type BindingRegistry,
 } from "../registry/bindingRegistry";
 
-/** Persisted launch environment name kept for upgrade compatibility. */
-export const BINDING_MAX_DEVICES_ENV = "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES";
-
-export function parseBindingMaxDevices(env: NodeJS.ProcessEnv = process.env): number | null {
-  const value = env[BINDING_MAX_DEVICES_ENV];
-  if (value === undefined || value === "") {
-    return null;
-  }
-  const limit = parseStrictPositiveInteger(value);
-  if (limit !== undefined) {
-    return limit;
-  }
-  logger.warn(
-    `[Bindings] Invalid ${BINDING_MAX_DEVICES_ENV}=${JSON.stringify(value)}; total-resource budget is not enforced.`,
-  );
-  return null;
-}
-
-/** Owner-chosen numbers; nothing here has a built-in default except the LRU clock. */
+/** Operator limits supplied by the broker host configuration. */
 export interface BindingResourceBudgetPolicy {
-  /** Max distinct managed devices on this host across platforms and daemons; null = not enforced. */
+  /** Max distinct managed devices across platforms; zero refuses creation, null = not enforced. */
   limit(): number | null;
 }
 
@@ -51,8 +32,6 @@ export interface BindingResourceUsage {
   active: number;
   /** Bound, without an execution session, and not being deleted. */
   assignedIdle: number;
-  /** Free-pool rows in free, stopping or stopped state. */
-  cached: number;
   /** Unbound creation reservations, including anonymous replacement commitments. */
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
@@ -105,9 +84,7 @@ type ChargedEvidence = BindingBudgetEvidence["charged"][number];
 const chargeKindOrder: ChargedEvidence["kind"][] = [
   "assigned_active",
   "assigned_idle",
-  "free",
   "deleting",
-  "deletion_stuck",
   "preparing",
   "orphaned",
 ];
@@ -116,7 +93,6 @@ function chargedEvidence(charges: readonly ResourceCharge[]): ChargedEvidence[] 
   const kindFor: Record<ResourceCharge["category"], ChargedEvidence["kind"]> = {
     active: "assigned_active",
     assignedIdle: "assigned_idle",
-    cached: "free",
     deleting: "deleting",
     preparing: "preparing",
     orphaned: "orphaned",
@@ -292,7 +268,6 @@ function usageOf(charges: readonly ResourceCharge[]): BindingResourceUsage {
     total: charges.length,
     active: 0,
     assignedIdle: 0,
-    cached: 0,
     preparing: 0,
     deleting: 0,
     orphaned: 0,
@@ -372,7 +347,7 @@ interface BudgetDependencies {
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
 }
 
-/** Registry-derived admission with ordered reservations and conditional, bounded LRU eviction. */
+/** Registry-derived admission with ordered reservations and no automatic eviction. */
 export class RegistryBindingResourceBudget implements BindingResourceBudget {
   private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
 
@@ -389,9 +364,9 @@ export class RegistryBindingResourceBudget implements BindingResourceBudget {
     if (limit === null) {
       return { kind: "admitted", enforced: false };
     }
-    if (!Number.isSafeInteger(limit) || limit <= 0) {
+    if (!Number.isSafeInteger(limit) || limit < 0) {
       throw new ActionableError(
-        "Managed-binding total-resource limit must be a positive safe integer or null; correct the budget policy.",
+        "Managed-binding total-resource limit must be a nonnegative safe integer or null; correct the budget policy.",
       );
     }
     try {

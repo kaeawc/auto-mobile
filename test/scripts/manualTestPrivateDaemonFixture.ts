@@ -77,6 +77,9 @@ export function fixture() {
     host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
+      AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES: "999",
+      AUTOMOBILE_SESSION_BROKER_CONFIG: "/inherited/broker.json",
+      AUTOMOBILE_SESSION_CONFIG: "/inherited/session.json",
       AUTOMOBILE_DB_PATH: "/wrong-db",
       KEEP: "kept",
     },

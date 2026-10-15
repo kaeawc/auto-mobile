@@ -30,7 +30,7 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
   "--dry-run": "List shutdown outcomes without stopping devices (default: off).",
   "--strict": "Preflight exits 1 when warnings are present (default: off).",
   "--role": "Boot role matching ^[A-Za-z0-9._-]{1,64}$ (required for boot-gate; no default).",
-  "--max-concurrent": "Boot slots, integer 1–8 (default: 1).",
+  "--max-concurrent": "Boot permits, integer 1–8 (default: 1).",
   "--max-load": "Positive 1-minute load threshold (default: 2 * host CPU count).",
   "--min-interval-ms": "Minimum interval between boot grants, integer >= 0 (default: 30000 ms).",
   "--poll-ms": "Boot-gate polling interval, positive integer (default: 2000 ms).",
@@ -53,7 +53,7 @@ Commands:
   devices   List merged daemon device views with provenance, protection and PID.
   shutdown-devices  Stop only batch-booted unprotected virtual devices through a daemon.
   preflight  Report host power, sleep, lid, load and memory without requiring batch.json.
-  boot-gate  Stagger device boots using shared slots, host load and a minimum interval.
+  boot-gate  Stagger device boots using shared permits, host load and a minimum interval.
 Options (flags are accepted only by their applicable command):
 ${Object.entries(PRIVATE_DAEMON_FLAGS)
   .map(([flag, meaning]) => `  ${flag}  ${meaning}`)
@@ -70,6 +70,7 @@ Android inventory reads the local ADB server socket without launching adb; it ca
 Other derived env: MT_BATCH, MT_DAEMON, MT_SERVER, MT_PORT; AUTOMOBILE_APPEARANCE_SYNC=off; AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0 unless configured.
 Devices and teardown:
   batch-booted: positive MT_BATCH evidence for this batch; bootedBy daemon<N> comes from MT_DAEMON=P<digits>.
+  broker-owned: product naming predicate matches; display only, never authorizes shutdown.
   foreign: process environment read without this batch's marker, regardless of baseline.
   preexisting: no process evidence and ID in baseline; batch-inferred: no process evidence and ID absent from a recorded baseline (every iOS simulator).
   unknown: baseline missing/unavailable without process evidence, or conflicting daemon rows; never stopped.
@@ -77,12 +78,12 @@ Devices and teardown:
   Rows include provenance, optional bootedBy and processAvdName (-avd argument); seenByDaemons is visibility, not boot ownership.
   Protection checks deviceId, name, identity.stableId and processAvdName; unreadable/Unknown (<serial>) names without an AVD name are protected when the protected list is nonempty.
   Default targets have positive evidence only; check batch-inferred devices and name them by exact device ID (serial/UDID) with --device. An ambiguous selector stops nothing (ambiguous); a separate unambiguous selector still applies. foreign/preexisting/unknown are refused even when named.
-  Outcomes: stopped (including device_already_stopped, retaining its message), refused (product code/message), failed/timeout (transport), protected, not-batch-booted, inferred-not-stopped (check and name by device ID with --device), ambiguous (multiple matches; name by device ID), held-by-other-daemon (no frame), not-found, dry-run, daemon-dead (snapshot evidence only).
-  managed_slot targets go through the daemon's refusal; the harness never signals a device process or passes force.
+  Outcomes: stopped (including device_already_stopped, retaining its message), refused (product code/message), failed/timeout (transport), protected, not-batch-booted, inferred-not-stopped (check and name by device ID with --device), ambiguous (multiple matches; name by device ID), held-by-other-daemon (no frame), broker-held (no frame), not-found, dry-run, daemon-dead (snapshot evidence only).
+  broker-held targets (any heldBy value) are refused before sending a stop frame; the harness never signals a device process or passes force.
   Inventory refusal, malformed payload or transport failure produces daemonErrors [{name,error}]; shutdown exits 1 while still stopping healthy targets. devices exits 1 only when no daemon produced an inventory. A socket reply is alive even when unparseable.
   Without inventories, fallback reports unprotected batch-booted/batch-inferred snapshot devices, honors selectors including ambiguity and explicit refusals, and sends nothing.
 stop --wait-ms 0 signals and reports still-alive unless the daemon is already gone.
-boot-gate --min-interval-ms is best-effort when --max-concurrent is above 1. A boot-gate killed by a signal leaves its slot lock to be reclaimed once its PID is gone.
+boot-gate --min-interval-ms is best-effort when --max-concurrent is above 1. A boot-gate killed by a signal leaves its permit lock to be reclaimed once its PID is gone.
 Exit codes: 0 success/status; 1 typed non-success outcome (daemon still alive, a device not stopped, inventory errors, preflight --strict with warnings); 2 usage/guard/I/O or a boot-gate wait deadline; start propagates the product launch command's exit code; boot-gate -- COMMAND exits with the command's code.
 Examples:
   private-daemon init --batch-dir /private/batch --count 2 --base-port 3160 --daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg --tool-call-recording --daemon-env 2:AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=/private/prebuilt

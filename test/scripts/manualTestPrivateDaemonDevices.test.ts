@@ -46,7 +46,7 @@ function row(
       deviceId: id,
       lifecycle: { state: "booted" },
       poolStatus: "idle",
-      heldBy: undefined as "managed_slot" | "other_daemon" | undefined,
+      heldBy: undefined as string | undefined,
     },
   };
 }
@@ -141,6 +141,36 @@ test("F1 positive and negative evidence override baseline; missing evidence uses
     expect(classifyDevice(device, baseline, [], evidence).provenance).toBe(provenance);
   }
 });
+test.each(["ambroker-039fd12f-0-g1-nonce", "amslot-039fd12f-0-g1-nonce"])(
+  "broker name %s is display evidence and never authorizes shutdown",
+  async (name) => {
+    for (const state of ["inferred", "preexisting", "protected", "batch-evidence"]) {
+      const f = await deviceFixture(state === "protected" ? [name] : []);
+      const device = row("sim-broker", name, "ios");
+      inventoryRows(f, [device]);
+      if (state === "preexisting") {
+        f.files.set(baselinePath, JSON.stringify({ android: [], ios: ["sim-broker"] }));
+      }
+      if (state === "batch-evidence") {
+        // Android can supply positive process evidence; naming must still not grant permission.
+        inventoryRows(f, [row("emulator-5556", name)]);
+      }
+      expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+      expect(document(f).devices[0]).toMatchObject({
+        provenance: "broker-owned",
+        protected: state === "protected",
+      });
+      const id = state === "batch-evidence" ? "emulator-5556" : "sim-broker";
+      expect(
+        await runPrivateDaemonCommand(command("shutdown-devices", "--device", id), f.deps),
+      ).toBe(1);
+      expect(document(f).results[0].outcome).toBe(
+        state === "protected" ? "protected" : "not-batch-booted",
+      );
+      expect(killFrames(f)).toEqual([]);
+    }
+  },
+);
 test("F1 default shutdown stops only positive emulator and reports inferred simulator", async () => {
   const f = await deviceFixture();
   inventoryRows(f, [row(), row("sim", "simulator", "ios")]);
@@ -519,41 +549,60 @@ test("F2 fallback still reports unprotected snapshot devices held by another dae
   });
   expect(killFrames(f)).toEqual([]);
 });
-test("F2 another daemon's hold is retained when only the second view exposes it", async () => {
-  const f = await deviceFixture();
-  const request = f.deps.requestSocket;
-  f.deps.requestSocket = async (path, frame) => {
-    if (path === derivePrivateDaemonBatch(options)[1].socketPath) {
-      return {
-        success: true,
-        result: {
-          structuredContent: {
-            devices: [{ ...row(), runtime: { ...row().runtime, heldBy: "other_daemon" } }],
+test.each(["other_daemon", "session_broker", "future_holder", ""])(
+  "F2 second view's hold %s is retained",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    const request = f.deps.requestSocket;
+    f.deps.requestSocket = async (path, frame) => {
+      if (path === derivePrivateDaemonBatch(options)[1].socketPath) {
+        return {
+          success: true,
+          result: {
+            structuredContent: {
+              devices: [{ ...row(), runtime: { ...row().runtime, heldBy } }],
+            },
           },
-        },
-      };
-    }
-    return request(path, frame);
+        };
+      }
+      return request(path, frame);
+    };
+    expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+    expect(document(f).results[0].outcome).toBe(
+      heldBy === "other_daemon" ? "held-by-other-daemon" : "broker-held",
+    );
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+test("F2 unknown snapshot hold is parsed and never suggests stopping by PID", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "future_holder" } }]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.deps.requestSocket = async () => {
+    throw new Error("daemon dead");
   };
   expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
-  expect(document(f).results[0].outcome).toBe("held-by-other-daemon");
+  expect(document(f).results[0]).toMatchObject({ outcome: "broker-held" });
+  expect(document(f).results[0].message).not.toContain("PID");
   expect(killFrames(f)).toEqual([]);
 });
-test("F2 managed-slot inventory reaches the product refusal", async () => {
-  const f = await deviceFixture();
-  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "managed_slot" } }]);
-  const request = f.deps.requestSocket;
-  f.deps.requestSocket = async (path, frame) => {
-    if ((frame.params as { name: string }).name !== "killDevice") {
-      return request(path, frame);
+test.each(["session_broker", "managed_slot", "future_holder", ""])(
+  "F2 any broker hold %s is parsed and refused without a stop frame",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy } }]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0].heldBy).toBe(heldBy);
+    for (const flags of [[], ["--device", "emulator-5556"], ["--dry-run"]]) {
+      expect(await runPrivateDaemonCommand(command("shutdown-devices", ...flags), f.deps)).toBe(1);
+      expect(document(f).results[0]).toMatchObject({
+        outcome: "broker-held",
+        message: expect.stringContaining("broker-held"),
+      });
     }
-    f.frames.push({ path, ...frame });
-    return { success: false, code: "managed_slot", error: "managed slot refused" };
-  };
-  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
-  expect(killFrames(f)).toHaveLength(1);
-  expect(document(f).results[0]).toMatchObject({ outcome: "refused", code: "managed_slot" });
-});
+    expect(killFrames(f)).toEqual([]);
+  },
+);
 test.each([
   ["devices", "inventory refused"],
   ["shutdown-devices", "inventory refused"],

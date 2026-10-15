@@ -168,7 +168,7 @@ const descriptionSchema = z.object({
       state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
     }),
     poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
-    heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
+    heldBy: z.string().optional(),
   }),
 });
 const listSchema = z.object({ devices: z.array(descriptionSchema) });
@@ -272,13 +272,20 @@ const deviceSchema = z.object({
   seenByDaemons: z.array(z.string()),
   pid: z.number().int().positive().nullable(),
   pidReason: z.string().optional(),
-  provenance: z.enum(["batch-booted", "foreign", "preexisting", "batch-inferred", "unknown"]),
+  provenance: z.enum([
+    "broker-owned",
+    "batch-booted",
+    "foreign",
+    "preexisting",
+    "batch-inferred",
+    "unknown",
+  ]),
   bootedBy: z.string().optional(),
   processAvdName: z.string().optional(),
   identity: z.object({ stableId: z.string() }).optional(),
   protected: z.boolean(),
   poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
-  heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
+  heldBy: z.string().optional(),
 });
 type BatchDevice = z.infer<typeof deviceSchema>;
 interface DeviceView {
@@ -336,8 +343,8 @@ function mergeRows(
     if (previous) {
       previous.seenByDaemons.push(name);
       previous.protected ||= matchesProtection({ ...row, deviceId }, protectedDevices);
-      if (row.runtime.heldBy === "other_daemon") {
-        previous.heldBy = "other_daemon";
+      if (row.runtime.heldBy !== undefined && previous.heldBy !== "other_daemon") {
+        previous.heldBy = row.runtime.heldBy;
       }
       // Conflicting identities cannot authorize shutdown from either daemon's label.
       if (identitiesConflict(previous, row)) {
@@ -446,6 +453,7 @@ type DeviceOutcome =
   | "not-batch-booted"
   | "inferred-not-stopped"
   | "held-by-other-daemon"
+  | "broker-held"
   | "ambiguous"
   | "not-found"
   | "dry-run"
@@ -478,6 +486,12 @@ function refusal(
   }
   if (device.heldBy === "other_daemon") {
     return { outcome: "held-by-other-daemon", message: "Device is held by another daemon." };
+  }
+  if (device.heldBy !== undefined) {
+    return {
+      outcome: "broker-held",
+      message: "Device is broker-held; release it through the session broker.",
+    };
   }
   if (!device.isVirtual || !["batch-booted", "batch-inferred"].includes(device.provenance)) {
     return { outcome: "not-batch-booted" };
@@ -676,14 +690,17 @@ async function deadDaemonFallback(
       results.push(resultRow(device, denied));
       continue;
     }
-    if (denied && !["held-by-other-daemon", "inferred-not-stopped"].includes(denied.outcome)) {
+    if (
+      denied &&
+      !["held-by-other-daemon", "broker-held", "inferred-not-stopped"].includes(denied.outcome)
+    ) {
       continue;
     }
     Object.assign(device, await devicePid(device, deps));
     results.push(
       resultRow(
         device,
-        denied?.outcome === "held-by-other-daemon"
+        denied?.outcome === "held-by-other-daemon" || denied?.outcome === "broker-held"
           ? denied
           : {
               outcome: "daemon-dead",

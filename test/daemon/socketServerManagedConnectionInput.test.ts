@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ManagedConnectionBinding } from "../../src/daemon/managedSlots/managedConnectionScope";
+import type { BrokerConnectionBinding } from "../../src/daemon/sessionBroker/connectionScope";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -56,14 +56,14 @@ const SLOT_SESSION = "slot-exec";
 
 let internals: Internals;
 let sockets: FakeSocket[];
-let binding: ManagedConnectionBinding | undefined;
+let binding: BrokerConnectionBinding | undefined;
 let unbound: string[];
 
 function useServer(): void {
   const session = createFakeSession(SLOT_SESSION, androidDevice.deviceId, "android");
   const state = {
     ...createFakeDaemonState(new Map([[SLOT_SESSION, session]])),
-    getManagedConnectionScopes: () => ({
+    getBrokerConnectionScopes: () => ({
       get: (mcpSessionId: string | undefined) => (mcpSessionId ? binding : undefined),
       unbind: (mcpSessionId: string) => {
         unbound.push(mcpSessionId);
@@ -150,7 +150,7 @@ describe("input/* from a managed connection (#11178)", () => {
 
     expect(socket.responses.find((frame) => frame.id === "foreign")).toMatchObject({
       success: false,
-      code: "device_outside_managed_slots",
+      code: "device_outside_broker_grant",
     });
   });
 
@@ -166,82 +166,5 @@ describe("input/* from a managed connection (#11178)", () => {
 
     socket.destroy();
     expect(unbound).toHaveLength(1);
-  });
-});
-
-describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () => {
-  test("a ready acquisition binds the socket session that asked, until that socket closes", async () => {
-    const bound: Array<[string, { scopeKey: string; sessionUuids: string[] }]> = [];
-    const state = {
-      ...createFakeDaemonState(),
-      getManagedSlotAcquisition: () => ({
-        acquire: async () => ({
-          contractVersion: 1 as const,
-          scope: {
-            managedHostScope: "host-a",
-            runnerNamespace: "ns",
-            runnerIncarnation: "inc-1",
-            scopeKey: "scope-a",
-          },
-          outcome: "ready" as const,
-          bindings: [{ sessionUuid: SLOT_SESSION }],
-        }),
-      }),
-      getManagedConnectionScopes: () => ({
-        bind: (
-          mcpSessionId: string,
-          granted: { scopeKey: string; sessionUuids: Iterable<string> },
-        ) => {
-          bound.push([
-            mcpSessionId,
-            { scopeKey: granted.scopeKey, sessionUuids: [...granted.sessionUuids] },
-          ]);
-        },
-        get: () => undefined,
-        unbind: (mcpSessionId: string) => {
-          unbound.push(mcpSessionId);
-        },
-      }),
-    };
-    const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
-    const socket = connect();
-
-    socket.send({
-      id: "acquire",
-      type: "mcp_request",
-      method: "daemon/acquireManagedSlots",
-      params: {
-        config: {
-          contractVersion: 1,
-          managedHostScope: "host-a",
-          runnerNamespace: "ns",
-          runnerIncarnation: "inc-1",
-          localBindingCapacity: 1,
-          requests: [
-            {
-              bindingIndex: 0,
-              role: "app",
-              platform: "android",
-              requestedSpec: {
-                runtime: "system-images;android-35;google_apis;arm64-v8a",
-                deviceType: "pixel_8",
-              },
-            },
-          ],
-        },
-        livenessOwnerToken: "proxy-token",
-      },
-    });
-    await drain();
-
-    expect(socket.responses.find((frame) => frame.id === "acquire")).toMatchObject({
-      success: true,
-    });
-    expect(bound).toHaveLength(1);
-    expect(bound[0]![1]).toEqual({ scopeKey: "scope-a", sessionUuids: [SLOT_SESSION] });
-    socket.destroy();
-    expect(unbound).toEqual([bound[0]![0]]);
   });
 });

@@ -55,7 +55,6 @@ import { stableStringify } from "../../../utils/stableStringify";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
   bindingMatches,
-  isStaleFreeDeviceStopClaim,
   type BindingAssignmentRecord,
   type BindingBindingExpectation,
   type BindingCasFailure,
@@ -456,7 +455,7 @@ const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>>
   reconcile_in_progress: "Another reconciliation of this binding is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
   binding_budget_exhausted:
-    "Reset or release binding scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+    "Free unused broker resources or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
   concurrent_modification: "The binding changed concurrently; retry to converge on its new state.",
   readiness_incomplete: "Retry; the device did not reach automation readiness.",
@@ -493,7 +492,7 @@ export interface BindingReconcileEvidence {
   /** Match verdict for the assigned device, when one was present. */
   assignedMatch?: ManagedSpecMatch;
   assignedMissing?: boolean;
-  adoptedFrom?: "free_pool" | "orphan";
+  adoptedFrom?: "orphan";
   createdName?: string;
   deletedStableId?: string;
   deletion?: unknown;
@@ -1091,11 +1090,6 @@ function casFailure(result: BindingCasFailure, step: string): BindingReconcileFa
       return failure(
         "concurrent_modification",
         `Device is already assigned to binding ${result.holder.bindingIndex} of another scope (${step}).`,
-      );
-    case "free_device_stopping":
-      return failure(
-        "concurrent_modification",
-        `Free-pool device is being shut down for reclaim (${step}); retry once it is stopped.`,
       );
   }
 }
@@ -1763,18 +1757,8 @@ export class BindingReconciler {
   private async findAdoptionCandidate(
     context: ReconcileContext,
     devices: DeviceInfo[],
-  ): Promise<{ device: DeviceInfo; source: "free_pool" | "orphan" } | undefined> {
+  ): Promise<{ device: DeviceInfo; source: "orphan" } | undefined> {
     const { request } = context;
-    const free = new Set(
-      (await this.deps.registry.listFreeDevices())
-        .filter((entry) => entry.platform === request.platform && entry.deletion === null)
-        // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
-        .filter(
-          (entry) =>
-            entry.state !== "stopping" || isStaleFreeDeviceStopClaim(entry, this.deps.timer.now()),
-        )
-        .map((entry) => entry.stableDeviceId),
-    );
     const prefix = bindingDeviceNamePrefix(request.key);
     const hint = request.priorDeviceHint?.stableId;
     const listed = devices
@@ -1787,11 +1771,7 @@ export class BindingReconciler {
           a.stableId.localeCompare(b.stableId),
       );
     for (const { device, stableId } of listed) {
-      const source = free.has(stableId)
-        ? "free_pool"
-        : device.name.startsWith(prefix)
-          ? "orphan"
-          : undefined;
+      const source = device.name.startsWith(prefix) ? "orphan" : undefined;
       if (!source) {
         continue;
       }
@@ -1814,7 +1794,7 @@ export class BindingReconciler {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     device: DeviceInfo,
-    source: "free_pool" | "orphan",
+    source: "orphan",
   ): Promise<ReadyResult> {
     context = { ...context, resolvedSpec: await this.existingSpec(device) };
     const { request } = context;
@@ -1840,7 +1820,7 @@ export class BindingReconciler {
     // A free-pool device is excluded from generic clients, so a session on it is a leftover
     // managed execution; an orphan's is not ours to end.
     const provisioned = await this.provisionExisting(context, device, {
-      releaseStale: source === "free_pool",
+      releaseStale: false,
     });
     return await this.readyOrReleaseOnBusy(provisioned, async () => {
       const ready = await this.deps.registry.updateBindingState(

@@ -9,21 +9,9 @@ import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { BindingBudgetEvidence } from "./acquisitionResult";
 import {
-  isStuckFreeDeviceDeletion,
-  bindingDeletionSkip,
-  uncountedStuckFreeDeviceDeletions,
-  type BindingCacheEvictor,
-  type BindingEvictionCandidate,
-  type BindingEvictionRegistry,
-  type BindingEvictionResult,
-  type BindingEvictionSelector,
-  type BindingEvictionSkip,
-} from "./cacheEviction";
-import {
   isBindingJournalPhaseOpen,
   journalCreationPlatform,
   journalNewStableId,
-  type FreeBindingDeviceRecord,
   type ManagedDeviceEntry,
   type BindingJournalEntry,
   type BindingPlatform,
@@ -80,7 +68,7 @@ export type BindingResourceAdmission =
       enforced: true;
       limit: number;
       usage: BindingResourceUsage;
-      evicted: BindingEvictionCandidate[];
+      evicted: never[];
     }
   | ({ kind: "exhausted" } & BindingBudgetEvidence)
   | { kind: "unknown"; message: string };
@@ -101,8 +89,6 @@ export type BindingResourceRegistry = Pick<BindingRegistry, "snapshotBindingReso
 interface LedgerInput {
   openJournal: readonly BindingJournalEntry[];
   managed: readonly ManagedDeviceEntry[];
-  free?: readonly FreeBindingDeviceRecord[];
-  abandonedScopeKeys?: readonly string[];
   inventory?: readonly DeviceInfo[];
 }
 
@@ -125,11 +111,7 @@ const chargeKindOrder: ChargedEvidence["kind"][] = [
   "orphaned",
 ];
 
-function chargedEvidence(
-  charges: readonly ResourceCharge[],
-  free: readonly FreeBindingDeviceRecord[],
-  uncounted: readonly FreeBindingDeviceRecord[],
-): ChargedEvidence[] {
+function chargedEvidence(charges: readonly ResourceCharge[]): ChargedEvidence[] {
   const kindFor: Record<ResourceCharge["category"], ChargedEvidence["kind"]> = {
     active: "assigned_active",
     assignedIdle: "assigned_idle",
@@ -138,33 +120,18 @@ function chargedEvidence(
     preparing: "preparing",
     orphaned: "orphaned",
   };
-  const rows = charges.map((charge): ChargedEvidence => {
-    const stuck = free.some(
-      (row) =>
-        row.platform === charge.platform &&
-        row.stableDeviceId === charge.stableDeviceId &&
-        isStuckFreeDeviceDeletion(row.deletion),
-    );
-    return {
+  return charges
+    .map((charge) => ({
       platform: charge.platform,
       stableDeviceId: charge.stableDeviceId,
-      kind: stuck ? "deletion_stuck" : kindFor[charge.category],
-    };
-  });
-  rows.push(
-    ...uncounted.map((row): ChargedEvidence => ({
-      platform: row.platform,
-      stableDeviceId: row.stableDeviceId,
-      kind: "deletion_stuck",
-      uncounted: true,
-    })),
-  );
-  return rows.sort(
-    (a, b) =>
-      chargeKindOrder.indexOf(a.kind) - chargeKindOrder.indexOf(b.kind) ||
-      a.platform.localeCompare(b.platform) ||
-      a.stableDeviceId.localeCompare(b.stableDeviceId),
-  );
+      kind: kindFor[charge.category],
+    }))
+    .sort(
+      (a, b) =>
+        chargeKindOrder.indexOf(a.kind) - chargeKindOrder.indexOf(b.kind) ||
+        a.platform.localeCompare(b.platform) ||
+        a.stableDeviceId.localeCompare(b.stableDeviceId),
+    );
 }
 
 function resourceKey(platform: BindingPlatform, stableDeviceId: string): string {
@@ -185,18 +152,7 @@ function creationJournalFor(
 function categoryOf(
   device: ManagedDeviceEntry,
   deleting: ReadonlySet<string>,
-  free: readonly FreeBindingDeviceRecord[],
 ): ResourceCharge["category"] {
-  if (device.holder === "free") {
-    return free.some(
-      (row) =>
-        row.platform === device.platform &&
-        row.stableDeviceId === device.stableDeviceId &&
-        row.deletion !== null,
-    )
-      ? "deleting"
-      : "cached";
-  }
   if (device.scopeState === null) {
     return "preparing";
   }
@@ -209,21 +165,11 @@ function categoryOf(
 function chargeManagedDevice(
   device: ManagedDeviceEntry,
   deleting: ReadonlySet<string>,
-  free: readonly FreeBindingDeviceRecord[],
   journal: readonly BindingJournalEntry[],
-  uncounted: readonly FreeBindingDeviceRecord[],
 ): ResourceCharge[] {
-  if (
-    device.holder === "free" &&
-    uncounted.some(
-      (row) => row.platform === device.platform && row.stableDeviceId === device.stableDeviceId,
-    )
-  ) {
-    return [];
-  }
   return [
     {
-      category: categoryOf(device, deleting, free),
+      category: categoryOf(device, deleting),
       platform: device.platform,
       stableDeviceId: device.stableDeviceId,
       journal: creationJournalFor(device, journal),
@@ -250,10 +196,6 @@ function addPreparingJournalCharge(charges: ResourceCharge[], entry: BindingJour
 
 function resourceCharges(input: LedgerInput): ResourceCharge[] {
   const journal = input.openJournal.filter((entry) => isBindingJournalPhaseOpen(entry.phase));
-  const uncounted = uncountedStuckFreeDeviceDeletions(
-    input.free ?? [],
-    input.managed.filter((device) => device.holder === "binding"),
-  );
   const deleting = new Set(
     journal
       .filter(
@@ -282,16 +224,11 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   );
   const seen = new Set(distinct.keys());
   const charges = [...distinct.values()].flatMap((device) =>
-    chargeManagedDevice(device, deleting, input.free ?? [], journal, uncounted),
+    chargeManagedDevice(device, deleting, journal),
   );
 
   for (const entry of journal) {
-    if (
-      entry.kind === "release" ||
-      (entry.kind === "replace" &&
-        entry.phase === "deleted" &&
-        input.abandonedScopeKeys?.includes(entry.scopeKey))
-    ) {
+    if (entry.kind === "release") {
       continue;
     }
     const newId = journalNewStableId(entry);
@@ -378,7 +315,6 @@ async function readResourceCharges(
 ): Promise<{
   charges: ResourceCharge[];
   charged: ChargedEvidence[];
-  retained: BindingEvictionSkip[];
 }> {
   checkAdmissionBudget(request, timer);
   const snapshot = await registry.snapshotBindingResources();
@@ -396,18 +332,10 @@ async function readResourceCharges(
     }
     devices.push(...listing.devices);
   }
-  const uncounted = uncountedStuckFreeDeviceDeletions(
-    snapshot.free,
-    snapshot.managed.filter((device) => device.holder === "binding"),
-  );
   const charges = resourceCharges({ ...snapshot, inventory: devices });
   return {
     charges,
-    charged: chargedEvidence(charges, snapshot.free, uncounted),
-    retained: snapshot.free.flatMap((row) => {
-      const skip = bindingDeletionSkip(row, uncounted.includes(row));
-      return skip ? [skip] : [];
-    }),
+    charged: chargedEvidence(charges),
   };
 }
 
@@ -437,15 +365,11 @@ function rankedCount(charges: readonly ResourceCharge[], mine: number): number {
 }
 
 interface BudgetDependencies {
-  registry: () => Promise<BindingResourceRegistry & BindingEvictionRegistry>;
+  registry: () => Promise<BindingResourceRegistry>;
   policy: BindingResourceBudgetPolicy;
   inventory: BindingInventory;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-  /** Absent: nothing is ever evicted; a full budget is refused. */
-  eviction?: { selector: BindingEvictionSelector; evictor: BindingCacheEvictor };
 }
-
-type ExhaustedAdmission = Extract<BindingResourceAdmission, { kind: "exhausted" }>;
 
 /** Registry-derived admission with ordered reservations and conditional, bounded LRU eviction. */
 export class RegistryBindingResourceBudget implements BindingResourceBudget {
@@ -492,92 +416,24 @@ export class RegistryBindingResourceBudget implements BindingResourceBudget {
   }
 
   private async admitFromRegistry(
-    registry: BindingResourceRegistry & BindingEvictionRegistry,
+    registry: BindingResourceRegistry,
     limit: number,
     request: { journalEntryId: number; deadlineMs?: number; signal?: AbortSignal },
   ): Promise<BindingResourceAdmission> {
-    const evicted: BindingEvictionCandidate[] = [];
-    const evictionFailures: ExhaustedAdmission["evictionFailures"] = [];
-    const attempted = new Set<string>();
-    let remaining: number | undefined;
-    while (true) {
-      let ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
-      if (rankedCount(ledger.charges, request.journalEntryId) > limit) {
-        // Confirm with a fresh independent snapshot before eviction or refusal.
-        ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
-      }
-      const { charges, charged, retained } = ledger;
-      const usage = usageOf(charges);
-      if (rankedCount(charges, request.journalEntryId) <= limit) {
-        return { kind: "admitted", enforced: true, limit, usage, evicted };
-      }
-      const exhausted: ExhaustedAdmission = {
-        kind: "exhausted",
-        limit,
-        usage,
-        charged,
-        retained,
-        evictionFailures,
-      };
-      // Any counted pending marker commits room until redrive finishes or it becomes stuck.
-      // Evicting beside it either over-frees capacity or deletes cache and still refuses creation.
-      const shortfall = rankedCount(charges, request.journalEntryId) - limit;
-      if (!this.deps.eviction || retained.some((row) => !isStuckFreeDeviceDeletion(row))) {
-        return exhausted;
-      }
-      checkAdmissionBudget(request, this.timer);
-      const selection = await this.deps.eviction.selector.select(registry, {
-        signal: request.signal,
-        deadlineMs: request.deadlineMs,
-      });
-      exhausted.retained = selection.skipped.map(({ uncounted: _uncounted, ...row }) => ({
-        ...row,
-        ...(retained.some(
-          (marker) =>
-            marker.platform === row.platform &&
-            marker.stableDeviceId === row.stableDeviceId &&
-            marker.uncounted,
-        )
-          ? { uncounted: true as const }
-          : {}),
-      }));
-      // One attempt per initially observed free row, then one final read/selection iteration.
-      remaining ??= selection.candidates.length + selection.skipped.length;
-      const untried = selection.candidates.filter(
-        (device) => !attempted.has(resourceKey(device.platform, device.stableDeviceId)),
-      );
-      // Do not destroy cache unless the remaining attempts can make this creation fit.
-      const candidate = untried[0];
-      if (untried.length < shortfall || !candidate || remaining === 0) {
-        return exhausted;
-      }
-      remaining -= 1;
-      checkAdmissionBudget(request, this.timer);
-      attempted.add(resourceKey(candidate.platform, candidate.stableDeviceId));
-      const result = await this.evict(candidate, request);
-      if (result.kind === "absent") {
-        evicted.push(candidate);
-      }
-      if (result.kind === "failed") {
-        evictionFailures.push({
-          platform: candidate.platform,
-          stableDeviceId: candidate.stableDeviceId,
-          message: result.message,
-        });
-      }
+    let ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
+    if (rankedCount(ledger.charges, request.journalEntryId) > limit) {
+      ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
     }
-  }
-
-  private async evict(
-    candidate: BindingEvictionCandidate,
-    options: { signal?: AbortSignal; deadlineMs?: number },
-  ): Promise<BindingEvictionResult> {
-    try {
-      return await this.deps.eviction!.evictor.evict(candidate, options);
-    } catch (error) {
-      options.signal?.throwIfAborted();
-      logger.warn(`[Bindings] Cache deletion remains unconfirmed: ${errorMessage(error)}`, error);
-      return { kind: "failed", message: errorMessage(error) };
-    }
+    const usage = usageOf(ledger.charges);
+    return rankedCount(ledger.charges, request.journalEntryId) <= limit
+      ? { kind: "admitted", enforced: true, limit, usage, evicted: [] }
+      : {
+          kind: "exhausted",
+          limit,
+          usage,
+          charged: ledger.charged,
+          retained: [],
+          evictionFailures: [],
+        };
   }
 }

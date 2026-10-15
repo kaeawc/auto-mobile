@@ -21,7 +21,7 @@ import {
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { RegistryRetryPacing } from "../../../../src/daemon/sessionBroker/registry/registryRetryPacing";
 import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { logger } from "../../../../src/utils/logger";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -36,7 +36,7 @@ import {
 
 const OWNER = { daemonId: "daemon-a", pid: 4242, processGenerationToken: "linux:boot:1" };
 const PEER = { daemonId: "daemon-b", pid: 4300, processGenerationToken: "linux:boot:2" };
-const CONFIG = parseBindingConfig({
+const CONFIG = buildBrokerProvisionRequest({
   contractVersion: 1,
   managedHostScope: "host",
   runnerNamespace: "runner",

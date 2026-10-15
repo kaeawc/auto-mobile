@@ -45,7 +45,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
-import { ManagedExecutionReowner } from "../../src/daemon/managedSlots/managedExecutionReowner";
+import { ManagedExecutionReowner } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {

@@ -53,19 +53,6 @@ describe("RegistryBindingExclusion", () => {
     expect([...exclusion.stableIdsFor("ios")]).toEqual([]);
   });
 
-  test("devices in the managed free pool stay excluded", async () => {
-    const binding = await assignBindingDevice(registry, "ios", "UDID-1");
-    await registry.beginScopeInvalidation(binding.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(binding.scopeKey);
-    const exclusion = exclusionOver(openFake);
-    await exclusion.refresh();
-
-    expect(exclusion.holderOf({ platform: "ios", stableIds: ["UDID-1"] })).toMatchObject({
-      holder: "free",
-      bindingIndex: null,
-    });
-  });
-
   test("a registry never read refuses with a retryable discovery_incomplete, then recovers", async () => {
     let fail = true;
     const exclusion = exclusionOver(async () => {
@@ -249,28 +236,5 @@ describe("binding reconciler bypass (#11173)", () => {
     expect(inside.other).toBeInstanceOf(DeviceAssignedToBindingError);
     expect(currentBindingReconciler()).toBeUndefined();
     expect(refusalFor("mine-avd")).toBeInstanceOf(DeviceAssignedToBindingError);
-  });
-
-  test("a reconciler may adopt from the managed free pool", async () => {
-    const timer = new FakeTimer();
-    const registry = new FakeBindingRegistry(timer);
-    const freed = await assignBindingDevice(registry, "ios", "UDID-FREE", "runner-old");
-    await registry.beginScopeInvalidation(freed.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(freed.scopeKey);
-    const exclusion = new RegistryBindingExclusion(async () => registry, timer);
-    await exclusion.refresh();
-    const refusal = () =>
-      bindingRefusal(exclusion, {
-        action: "provisionDevice",
-        deviceId: "UDID-FREE",
-        device: { platform: "ios", stableIds: ["UDID-FREE"] },
-      });
-
-    expect(refusal()).toBeInstanceOf(DeviceAssignedToBindingError);
-    expect(
-      await runAsBindingReconciler({ scopeKey: "any-scope", bindingIndex: 0 }, async () =>
-        refusal(),
-      ),
-    ).toBeUndefined();
   });
 });

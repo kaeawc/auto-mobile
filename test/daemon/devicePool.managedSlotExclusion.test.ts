@@ -248,16 +248,6 @@ describe("DevicePool binding exclusion", () => {
     expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
   });
 
-  test("a device a reset scope parked in the managed free pool is still excluded", async () => {
-    const binding = await assignBindingDevice(registry, "ios", "SIM-SLOT");
-    await registry.beginScopeInvalidation(binding.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(binding.scopeKey);
-    await setUp([ios("SIM-SLOT")]);
-
-    expect(await assignOne("generic", "ios")).toBeInstanceOf(Error);
-    expect(pool.getDevice("SIM-SLOT")?.sessionId).toBeNull();
-  });
-
   test("auto-start never boots a stopped AVD a binding holds", async () => {
     await assignBindingDevice(registry, "android", "slot-avd");
     await setUp([android("d1")]);

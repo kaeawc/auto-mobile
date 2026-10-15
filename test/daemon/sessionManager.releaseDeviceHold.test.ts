@@ -6,7 +6,7 @@ import {
 import {
   ManagedExecutionReowner,
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
-} from "../../src/daemon/managedSlots/managedExecutionReowner";
+} from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

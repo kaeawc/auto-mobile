@@ -8,11 +8,11 @@ const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
 const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
-export const MANAGED_SLOT_DEVICE_FAMILIES = ["phone", "tablet", "foldable"] as const;
-export type BindingDeviceFamily = (typeof MANAGED_SLOT_DEVICE_FAMILIES)[number];
+export const BINDING_DEVICE_FAMILIES = ["phone", "tablet", "foldable"] as const;
+export type BindingDeviceFamily = (typeof BINDING_DEVICE_FAMILIES)[number];
 
-const managedSlotDeviceFamilySchema = z
-  .enum(MANAGED_SLOT_DEVICE_FAMILIES)
+const bindingDeviceFamilySchema = z
+  .enum(BINDING_DEVICE_FAMILIES)
   .optional()
   .describe("Required device family, independent of the exact model and creation default");
 
@@ -119,7 +119,7 @@ export const iosProvisionDeviceSpecSchema = z
   .superRefine(refineIosSpec);
 
 /**
- * A managed slot's requested Android spec (#11172): the provisionDevice spec with `deviceType`
+ * A broker binding's requested Android spec (#11172): the provisionDevice spec with `deviceType`
  * optional. An omitted field is unconstrained (owner decision Q4): any existing model matches, and
  * a creation uses the reconciler's resolved default.
  */
@@ -127,19 +127,19 @@ export const androidBindingSpecSchema = z
   .object({
     runtime: androidRuntimeSchema,
     deviceType: androidDeviceTypeSchema.optional(),
-    deviceFamily: managedSlotDeviceFamilySchema,
+    deviceFamily: bindingDeviceFamilySchema,
     displayCutout: displayCutoutSchema,
     configuration: androidAvdConfigurationSchema.optional(),
   })
   .strict()
   .superRefine(refineAndroidSpec);
 
-/** A managed slot's requested iOS spec: `deviceType` optional, as for Android (Q4). */
+/** A broker binding's requested iOS spec: `deviceType` optional, as for Android (Q4). */
 export const iosBindingSpecSchema = z
   .object({
     runtime: iosRuntimeSchema,
     deviceType: iosDeviceTypeSchema.optional(),
-    deviceFamily: managedSlotDeviceFamilySchema,
+    deviceFamily: bindingDeviceFamilySchema,
     displayCutout: displayCutoutSchema,
   })
   .strict()

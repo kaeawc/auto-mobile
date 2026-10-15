@@ -14,8 +14,7 @@ import {
   type BrokerDeviceAcquisitionSessions,
 } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { provisionErrorFromPayload } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
-import { bindingsFailedToolResult } from "../../../../src/server/proxyServer";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -181,7 +180,7 @@ describe("externalDevices reaches the acquisition result and its client serializ
       owner: () => ({ daemonId: "daemon-1", pid: 1 }),
       timer,
     });
-    const config = parseBindingConfig({
+    const config = buildBrokerProvisionRequest({
       contractVersion: 1,
       ...SCOPE,
       localBindingCapacity: 1,
@@ -200,14 +199,5 @@ describe("externalDevices reaches the acquisition result and its client serializ
     const wire = JSON.parse(JSON.stringify(result));
     expect(wire.failure.capacity.externalDevices).toEqual(EXTERNAL);
     expect(wire.bindings[0].failure.capacity.externalDevices).toEqual(EXTERNAL);
-  });
-
-  test("the refused tool call carries it in acquisitionFailure", async () => {
-    const result = await failedAcquisition();
-
-    const refused = bindingsFailedToolResult(result, "tapOn");
-    const payload = JSON.parse(refused.content[0].text);
-
-    expect(payload.error.acquisitionFailure.capacity.externalDevices).toEqual(EXTERNAL);
   });
 });

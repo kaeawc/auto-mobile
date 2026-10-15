@@ -8,10 +8,6 @@ import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import {
-  handleDaemonRequest,
-  type DaemonStateAccess,
-} from "../../src/daemon/daemonRequestHandlers";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -44,7 +40,7 @@ import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
-import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotRefusal";
+import * as managedSlotRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
 import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
@@ -73,7 +69,6 @@ import {
   EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
   EXEMPT_REFUSAL_ERROR_CLASSES,
   fixtureDrivenErrorClasses,
-  MANAGED_SLOT_FIXTURE_PREFIX,
   recoveryPendingError,
   shapedRefusalResult,
   PROVISION_DEVICE_FIXTURE_PREFIX,
@@ -81,7 +76,6 @@ import {
   type RefusalSurfaceFixture,
   type RefusalWireResult,
   expectedWireCodes,
-  managedSlotNestedCodes,
   REFUSAL_FIXTURES_DIR,
   REFUSAL_SURFACES_DIR,
   serializeRefusalSurfaceFixture,
@@ -126,7 +120,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/deviceBootService": deviceBoot,
   "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
   "daemon/inputDeviceOwnership": inputOwnership,
-  "daemon/managedSlots/managedSlotRefusal": managedSlotRefusals,
+  "daemon/sessionBroker/connectionRefusal": managedSlotRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
   "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
   "server/planExecutionInProgressRefusal": planLockRefusal,
@@ -734,37 +728,6 @@ beforeAll(async () => {
       await lossHarness.server.close();
       await lossHarness.proxy.close();
     }
-    const state: DaemonStateAccess = {
-      isInitialized: () => true,
-      getSessionManager: () => {
-        throw new Error("Invalid config must not access sessions");
-      },
-      getDevicePool: () => {
-        throw new Error("Invalid config must not access devices");
-      },
-      getDeviceSessionRegistry: () => {
-        throw new Error("Invalid config must not access registry");
-      },
-      getManagedSlotAcquisition: () => ({
-        acquire: async () => {
-          throw new Error("Invalid config must not acquire");
-        },
-      }),
-    };
-    ownedSurfaceFixtures.push({
-      surface: "managed-slots-response",
-      name: "binding_config_invalid",
-      builder: "handleDaemonRequest via handleAcquireManagedSlots",
-      payload: await handleDaemonRequest(
-        {
-          id: "invalid-config",
-          type: "mcp_request",
-          method: "daemon/acquireManagedSlots",
-          params: { config: { contractVersion: 1 }, livenessOwnerToken: "fixture-owner" },
-        },
-        state,
-      ),
-    });
   } finally {
     warn.mockRestore();
     await harness.server.close();
@@ -853,40 +816,6 @@ describe("refusal wire contract", () => {
     expect(deriveDisposition(payload)).toBe("fail");
   });
 
-  test("total-resource refusal is retryable without a retry delay on every budget surface", () => {
-    for (const fixture of fixtures.filter((entry) =>
-      entry.code.includes("binding_budget_exhausted"),
-    )) {
-      const payload = JSON.parse(fixture.result.content[0].text) as {
-        error: { acquisitionFailure: BindingsResult["failure"] };
-      };
-      const failure = payload.error.acquisitionFailure;
-      expect(failure).toMatchObject({ code: "binding_budget_exhausted", retryable: true });
-      expect(failure).not.toHaveProperty("retryAfterMs");
-    }
-    const surface = surfaceFixtures.find(
-      (entry) => entry.name === "binding_budget_exhausted.budget",
-    )!;
-    expect(surfaceFields(surface)).toMatchObject({
-      code: "binding_budget_exhausted",
-      retryable: true,
-      budget: {
-        limit: 2,
-        usage: { orphaned: 0 },
-        retained: [
-          { reason: "deletion_pending", attempts: 2, failedDeletes: 1, lastError: "delete failed" },
-          {
-            reason: "deletion_stuck",
-            attempts: 5,
-            failedDeletes: 3,
-            lastError: "native delete keeps failing",
-          },
-        ],
-      },
-    });
-    expect(surfaceFields(surface)).not.toHaveProperty("retryAfterMs");
-  });
-
   test("committed fixtures equal what the real TypeScript builders emit", () => {
     for (const fixture of fixtures) {
       const path = join(REFUSAL_FIXTURES_DIR, `${fixture.code}.json`);
@@ -914,12 +843,6 @@ describe("refusal wire contract", () => {
         fixtureCodes.includes(code) ||
         fixtureCodes.includes(`${PROVISION_DEVICE_FIXTURE_PREFIX}${code}`);
       expect(present, code).toBe(true);
-    }
-  });
-
-  test("every binding acquisition failure code has a fixture", () => {
-    for (const code of managedSlotNestedCodes()) {
-      expect(fixtureCodes, code).toContain(`${MANAGED_SLOT_FIXTURE_PREFIX}${code}`);
     }
   });
 
@@ -1369,14 +1292,13 @@ describe("refusal wire contract", () => {
         expect.arrayContaining([
           "device_owned_by_other_session",
           "device_outside_bound_session",
-          "device_outside_managed_slots",
+          "device_outside_broker_grant",
           "device_assigned_to_binding",
         ]),
       );
       expect(names("delete-device")).toEqual(
         expect.arrayContaining(["device_owned_by_other_daemon", "discovery_incomplete"]),
       );
-      expect(names("managed-slots-result")).toContain("capacity_exhausted.capacity_external");
     });
   });
 });

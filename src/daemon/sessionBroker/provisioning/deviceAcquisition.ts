@@ -62,12 +62,7 @@ import {
   type BindingProcessIdentity,
   type BindingRegistry,
   type BindingScopeIdentity,
-  type BindingScopeRecord,
 } from "../registry/bindingRegistry";
-import {
-  BINDING_SCOPE_RESET_DEFAULT_WAIT_MS,
-  type BindingScopeResetScopeResult,
-} from "./scopeReset";
 
 export interface BrokerDeviceAcquisitionSessions {
   /** Claim the session's liveness for the caller's owner token. */
@@ -96,15 +91,6 @@ export interface BrokerDeviceAcquisitionDependencies {
   owner: () => BindingProcessIdentity;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   backOutRetryBackoff?: BackoffPolicy;
-  /**
-   * The implicit reset of a superseded incarnation (`BindingScopeReset.resetSupersededScope`, #11174):
-   * waits up to `waitMs` for the old scope's owners and cleanup to settle. Absent, or returning
-   * undefined (no reset wired), the acquisition checks the old scope once without waiting.
-   */
-  resetSupersededScope?: (
-    scope: BindingScopeRecord,
-    waitMs: number,
-  ) => Promise<Pick<BindingScopeResetScopeResult, "outcome" | "pending">> | undefined;
 }
 
 export interface BrokerDeviceAcquireOptions {
@@ -253,7 +239,7 @@ export class BrokerDeviceAcquisition {
     let admission: ScopeAdmission;
     try {
       registry = await this.deps.registry();
-      admission = await this.admitScope(registry, identity, deadlineMs);
+      admission = await this.admitScope(registry, identity);
     } catch (error) {
       if (error instanceof BindingRegistrySchemaUnsupportedError) {
         logger.warn(`[Bindings] Registry schema unsupported: ${errorMessage(error)}`, error);
@@ -350,24 +336,10 @@ export class BrokerDeviceAcquisition {
   private async admitScope(
     registry: BindingRegistry,
     identity: BindingScopeIdentity,
-    deadlineMs: number,
   ): Promise<ScopeAdmission> {
-    let ensured = await registry.ensureScope(identity);
-    if (ensured.kind === "incarnation_conflict") {
-      const pending = await this.retireSupersededScope(registry, ensured.current, deadlineMs);
-      if (pending) {
-        return { kind: "failed", failure: pending };
-      }
-      ensured = await registry.ensureScope(identity);
-    }
+    const ensured = await registry.ensureScope(identity);
     switch (ensured.kind) {
       case "ready":
-        if (ensured.revived) {
-          logger.info(
-            `[Bindings] Revived abandoned scope ${ensured.scope.scopeKey} ` +
-              `(${identity.runnerNamespace}/${identity.runnerIncarnation})`,
-          );
-        }
         return { kind: "ready", scopeKey: ensured.scope.scopeKey, revived: ensured.revived };
       case "scope_invalidated":
         return {
@@ -389,56 +361,6 @@ export class BrokerDeviceAcquisition {
           ),
         };
     }
-  }
-
-  /**
-   * Retire the superseded incarnation through the settle-waiting reset when one is wired (bounded by
-   * the preparation deadline), else with one settle check. Returns the `scope_transition_pending`
-   * failure while the old scope is unsettled, undefined once it is invalidated.
-   */
-  private async retireSupersededScope(
-    registry: BindingRegistry,
-    previous: BindingScopeRecord,
-    deadlineMs: number,
-  ): Promise<BindingsFailure | undefined> {
-    const waitMs = Math.max(
-      0,
-      Math.min(BINDING_SCOPE_RESET_DEFAULT_WAIT_MS, deadlineMs - this.deps.timer.now()),
-    );
-    const reset = await this.deps.resetSupersededScope?.(previous, waitMs);
-    let waiting: { liveOwners: number; settling: number; cleanupPending: number } | undefined;
-    if (reset) {
-      waiting =
-        reset.outcome === "pending"
-          ? {
-              liveOwners: reset.pending?.liveOwners.length ?? 0,
-              settling: reset.pending?.settling.length ?? 0,
-              cleanupPending: reset.pending?.cleanupPending.length ?? 0,
-            }
-          : undefined;
-    } else {
-      await registry.beginScopeInvalidation(previous.scopeKey, "incarnation_reset");
-      const completed = await registry.completeScopeInvalidation(previous.scopeKey);
-      waiting =
-        completed.kind === "pending"
-          ? {
-              liveOwners: completed.liveOwners.length,
-              settling: completed.settling.length,
-              cleanupPending: completed.cleanupPending.length,
-            }
-          : undefined;
-    }
-    if (!waiting) {
-      return undefined;
-    }
-    return acquisitionFailure(
-      "scope_transition_pending",
-      `Runner incarnation '${previous.runnerIncarnation}' of namespace ` +
-        `'${previous.runnerNamespace}' still has ${waiting.liveOwners} live ` +
-        `execution(s), ${waiting.settling} settling and ` +
-        `${waiting.cleanupPending} cleanup-pending binding(s).`,
-      true,
-    );
   }
 
   private async acquireBinding(

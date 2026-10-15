@@ -162,9 +162,9 @@ import {
   type FrameDeviceIdentityPool,
 } from "./frameDeviceIdentity";
 import {
-  managedConnectionControlRefusal,
-  managedConnectionHostMutationRefusal,
-} from "./managedSlots/managedConnectionScope";
+  brokerConnectionControlRefusal,
+  brokerConnectionHostMutationRefusal,
+} from "./sessionBroker/connectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
 
@@ -949,7 +949,7 @@ interface IdeMutationCall {
    * A route refused or cancelled while connecting ends unstamped.
    */
   dispatching(): void;
-  /** The socket session that sent the frame: a managed connection mutates only its slot devices. */
+  /** The socket session that sent the frame: a managed connection mutates only its binding devices. */
   readonly socketSessionId: string | undefined;
 }
 
@@ -1938,7 +1938,7 @@ export class UnixSocketServer {
     this.resourceSubscriptions.delete(sessionId);
     this.clearBoundMcpClientKey(sessionId);
     this.releaseDevicePoolMcpSessionBindings(sessionId);
-    this.daemonState.getManagedConnectionScopes?.().unbind(sessionId);
+    this.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.releaseToolCallRecording(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
@@ -2351,7 +2351,7 @@ export class UnixSocketServer {
     const handler = async (): Promise<DaemonResponse | undefined> => {
       try {
         if (request.method.startsWith("daemon/")) {
-          // The socket's cancellation reaches long daemon methods (managed slot acquisition).
+          // The socket's cancellation reaches long daemon methods (broker binding acquisition).
           const daemonResponse = await handleDaemonRequest(
             request,
             this.daemonState,
@@ -5546,7 +5546,7 @@ export class UnixSocketServer {
         if (!args.key || typeof args.enabled !== "boolean") {
           throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
         }
-        this.assertManagedConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
+        this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
         const updated = await featureFlagService.setFlag(
           args.key as FeatureFlagKey,
           args.enabled,
@@ -5570,7 +5570,7 @@ export class UnixSocketServer {
             "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
           );
         }
-        this.assertManagedConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
+        this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
           requesterSessionUuid: args.sessionUuid,
         });
         await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
@@ -5886,9 +5886,9 @@ export class UnixSocketServer {
    * `ide/*` routes that mutate a device follow device ownership like `input/*` (#10827): a held
    * device accepts them only from its holder (the optional `sessionUuid` param), or when `force`
    * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
-   * except a device a managed slot holds, which only that slot's execution may mutate, `force`
-   * or not (#11178). A socket bound to managed slots mutates only its own slot devices, for its own
-   * slot sessions, `force` or not (#11596).
+   * except a device a broker binding holds, which only that binding's execution may mutate, `force`
+   * or not (#11178). A socket bound to broker bindings mutates only its own binding devices, for its own
+   * binding sessions, `force` or not (#11596).
    *
    * The holder's own mutation is a control call on its session, so it also passes the session
    * admission `input/*` passes (#11486): a suspect, lapsed or idle-expired holder is refused with
@@ -5914,7 +5914,7 @@ export class UnixSocketServer {
       return;
     }
     await this.assertFrameTargetProven(device, action, () => requesterSessionUuid);
-    this.assertManagedConnectionControl(ideMutation?.socketSessionId, action, {
+    this.assertBrokerConnectionControl(ideMutation?.socketSessionId, action, {
       deviceId,
       requesterSessionUuid,
     });
@@ -6095,7 +6095,7 @@ export class UnixSocketServer {
   /**
    * The ONE place a direct frame's discovery rows and `deviceId` become the pool's canonical ids
    * (#11596). Every `input/*` and `ide/*` handler resolves its target through here before any
-   * holder, managed-slot or admission decision. A no-op in direct mode, where there is no pool.
+   * holder, broker binding or admission decision. A no-op in direct mode, where there is no pool.
    */
   private async canonicalFrameDiscovery(
     platform: "android" | "ios",
@@ -8123,30 +8123,30 @@ export class UnixSocketServer {
       bypassAndroidDeviceListCache,
     );
     await this.assertFrameTargetProven(targetDevice, action, requester);
-    this.assertManagedConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
+    this.assertBrokerConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
     this.captureInputTargetOwner(targetDevice);
     return targetDevice;
   }
 
   /**
-   * An `input/*` frame is control: a socket bound to managed slots drives only its own slot devices
+   * An `input/*` frame is control: a socket bound to broker bindings drives only its own binding devices
    * (#11178). Streams and other reads stay open. Generic sockets are unaffected here; their frames
-   * on a slot device are refused by the managed-slot gate in {@link runTrackedDeviceInput}.
+   * on a binding device are refused by the broker binding gate in {@link runTrackedDeviceInput}.
    */
-  private assertManagedConnectionInputTarget(
+  private assertBrokerConnectionInputTarget(
     socketSessionId: string | undefined,
     action: InputTargetAction,
     deviceId: string,
   ): void {
-    this.assertManagedConnectionControl(socketSessionId, action, { deviceId });
+    this.assertBrokerConnectionControl(socketSessionId, action, { deviceId });
   }
 
   /**
    * The one confinement every control frame from a managed connection passes (#11178, #11596): the
-   * device it would act on is one of the connection's slot devices, and the session it names is
-   * one of its slot sessions. A generic (unbound) socket is never refused here.
+   * device it would act on is one of the connection's binding devices, and the session it names is
+   * one of its binding sessions. A generic (unbound) socket is never refused here.
    */
-  private assertManagedConnectionControl(
+  private assertBrokerConnectionControl(
     socketSessionId: string | undefined,
     action: string,
     target: { deviceId?: string; requesterSessionUuid?: string },
@@ -8155,27 +8155,27 @@ export class UnixSocketServer {
       return;
     }
     const sessionManager = this.daemonState.getSessionManager();
-    const refusal = managedConnectionControlRefusal({
-      binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
+    const refusal = brokerConnectionControlRefusal({
+      binding: this.daemonState.getBrokerConnectionScopes?.().get(socketSessionId),
       action,
       deviceId: target.deviceId,
       requesterSessionUuid: target.requesterSessionUuid,
-      slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+      grantedDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
     });
     if (refusal) {
       throw refusal;
     }
   }
 
-  private assertManagedConnectionHostMutation(
+  private assertBrokerConnectionHostMutation(
     socketSessionId: string | undefined,
     action: string,
   ): void {
     if (!this.daemonState.isInitialized()) {
       return;
     }
-    const refusal = managedConnectionHostMutationRefusal({
-      binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
+    const refusal = brokerConnectionHostMutationRefusal({
+      binding: this.daemonState.getBrokerConnectionScopes?.().get(socketSessionId),
       action,
     });
     if (refusal) {
@@ -8407,8 +8407,8 @@ export class UnixSocketServer {
     this.daemonState.getDevicePool().assertDeviceActionable?.(deviceId, purpose);
   }
 
-  /** A managed slot's device, idle or held, takes input only from that slot's execution (#11178). */
-  private async assertInputManagedSlotGate(
+  /** A broker binding's device, idle or held, takes input only from that binding's execution (#11178). */
+  private async assertInputBindingGate(
     toolName: string,
     targetDevice: BootedDevice,
     requester: (() => string | undefined) | undefined,
@@ -8451,7 +8451,7 @@ export class UnixSocketServer {
     const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
     // A held device takes input only from its holder (#10698); checked here, the one funnel every
     // `input/*` handler runs through, before anything reaches the device.
-    await this.assertInputManagedSlotGate(toolName, targetDevice, requester);
+    await this.assertInputBindingGate(toolName, targetDevice, requester);
     assertInputRequesterHoldsDevice({
       action: toolName,
       deviceId: targetDevice.deviceId,

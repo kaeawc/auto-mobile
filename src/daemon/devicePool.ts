@@ -267,7 +267,7 @@ function resolveConsoleBusyRegistry(
  * Error class for device pool operations with retryability flag.
  */
 /**
- * Who, if anyone, keeps generic allocation off a pooled device: a managed slot, another AutoMobile
+ * Who, if anyone, keeps generic allocation off a pooled device: a broker binding, another AutoMobile
  * daemon, or a readiness/shutdown/recovery reservation. Every inventory surface derives its
  * "available" and `poolStatus` from this one answer.
  */
@@ -798,7 +798,7 @@ export interface DevicePoolDependencies {
   /** The same for iOS simulators, claimed by UDID (#10980). */
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
   /**
-   * Devices managed slots hold (#11174, #11178). Generic allocation, auto-start and explicit binds
+   * Devices broker bindings hold (#11174, #11178). Generic allocation, auto-start and explicit binds
    * never lend one, even while it is idle. A directly built pool has none.
    */
   bindingExclusion?: BindingExclusion;
@@ -1725,7 +1725,7 @@ export class DevicePool {
       getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
       getRecoveringAndroidTargets: () => this.getRecoveringAndroidTargets(),
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      isManagedSlotDevice: (device) => this.isManagedSlotDevice(device),
+      isBindingDevice: (device) => this.isBindingDevice(device),
       isPooledAndroidEmulator: (deviceId) => this.isPooledAndroidEmulator(deviceId),
       stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
       restartReservationsForStop: (deviceId, identity, ownerRequester) =>
@@ -3650,7 +3650,7 @@ export class DevicePool {
     let canClaim = true;
     for (const request of this.criteriaMatcher.sortBySpecificity(claims)) {
       const matching = this.getDevicesMatchingCriteria(request.criteria).filter(
-        (candidate) => !this.isManagedSlotDevice(candidate),
+        (candidate) => !this.isBindingDevice(candidate),
       );
       const candidates = matching.filter((candidate) => !this.isDrivenByForeignDaemon(candidate));
       const device = candidates.find(
@@ -4003,7 +4003,7 @@ export class DevicePool {
     return this.deviceAutoStart.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
   }
 
-  /** Suppressed, or held by a managed slot: generic auto-start never boots a slot's device (#11174). */
+  /** Suppressed, or held by a broker binding: generic auto-start never boots a binding's device (#11174). */
   private isExcludedFromAutoStart(image: DeviceInfo): boolean {
     return this.deviceAutoStart.isExcludedFromAutoStart(image);
   }
@@ -5495,9 +5495,9 @@ export class DevicePool {
 
   /**
    * Re-read the ownership facts {@link genericAvailability} and {@link getStats} depend on: the
-   * managed-slot snapshot and which idle devices other daemons drive. Every inventory surface calls
+   * broker binding snapshot and which idle devices other daemons drive. Every inventory surface calls
    * this before reading availability so none answers from a stale or never-loaded snapshot. Throws
-   * {@link ManagedSlotDiscoveryIncompleteError} when the slot registry is unreadable and no snapshot
+   * {@link BindingDiscoveryIncompleteError} when the binding registry is unreadable and no snapshot
    * was ever loaded: callers must not report such devices as free.
    */
   async refreshInventoryOwnership(): Promise<void> {
@@ -6787,7 +6787,7 @@ export class DevicePool {
    * Hold each persisted row's device for that row while daemon restart recovery works through
    * the rows (#11294), so an allocation arriving meanwhile cannot take a device a row is about
    * to recover onto. The reservation is by identity, so it also covers a device discovery has
-   * not listed yet. A device a managed slot holds is not reserved: the slot wins, and the row
+   * not listed yet. A device a broker binding holds is not reserved: the binding wins, and the row
    * recovers or fails through the normal path. When two rows name one device the first keeps it.
    */
   reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
@@ -6824,8 +6824,8 @@ export class DevicePool {
 
   /**
    * The session whose restart recovery `device` is reserved for, if any (#11294). A device a
-   * managed slot holds is never reserved, whenever the slot took it: the slot wins, and the row
-   * recovers or fails (target-busy once the slot's execution is bound) through the normal path.
+   * broker binding holds is never reserved, whenever the binding took it: the binding wins, and the row
+   * recovers or fails (target-busy once the binding's execution is bound) through the normal path.
    */
   private rehydrationReservationHolder(device: PooledDevice): string | undefined {
     return this.deviceReservations.rehydrationReservationHolder(device);
@@ -6835,7 +6835,7 @@ export class DevicePool {
     return this.deviceReservations.isReservedForOtherRehydration(device, forSessionId);
   }
 
-  /** Read-only pre-boot admission, including stopped images; managed slots retain priority. */
+  /** Read-only pre-boot admission, including stopped images; broker bindings retain priority. */
   restartReservationForStart(
     platform: Platform,
     identities: readonly string[],
@@ -7632,7 +7632,7 @@ export class DevicePool {
   }
 
   /** One unknown Android hold for slots not represented by the frame's live session snapshot. */
-  async androidManagedSlotHold(heldDeviceIds: readonly string[]) {
+  async androidBindingHold(heldDeviceIds: readonly string[]) {
     if (!this.bindingExclusion) {
       return undefined;
     }
@@ -8142,7 +8142,7 @@ export class DevicePool {
     return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;
   }
 
-  managedSlotOwnershipGate(sessionId: string): "unconfirmed" | "lost" | undefined {
+  bindingOwnershipGate(sessionId: string): "unconfirmed" | "lost" | undefined {
     return this.managedExecutionOwnership?.()?.ownershipState?.(sessionId);
   }
 
@@ -8317,7 +8317,7 @@ export class DevicePool {
   /** Devices matching `criteria` that no other live daemon drives (mt-0083 D2). */
   private getUnownedDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {
     return this.getDevicesMatchingCriteria(criteria).filter(
-      (device) => !this.isManagedSlotDevice(device) && !this.isDrivenByForeignDaemon(device),
+      (device) => !this.isBindingDevice(device) && !this.isDrivenByForeignDaemon(device),
     );
   }
 
@@ -8331,7 +8331,7 @@ export class DevicePool {
   }
 
   /**
-   * Whether generic allocation may lend `deviceId`, from the last managed-slot snapshot and the
+   * Whether generic allocation may lend `deviceId`, from the last broker binding snapshot and the
    * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free.
    */
   genericAvailability(deviceId: string): GenericAvailability {
@@ -8339,7 +8339,7 @@ export class DevicePool {
     if (!device) {
       return "free";
     }
-    if (this.isManagedSlotDevice(device)) {
+    if (this.isBindingDevice(device)) {
       return "binding";
     }
     if (this.isDrivenByForeignDaemon(device)) {
@@ -8348,16 +8348,14 @@ export class DevicePool {
     return this.isReservedForAssignment(device) ? "reserved" : "free";
   }
 
-  /** A managed slot or another daemon holds the device, so generic allocation never lends it. */
+  /** A broker binding or another daemon holds the device, so generic allocation never lends it. */
   private isHeldOutsideGenericAllocation(device: PooledDevice): boolean {
-    return this.isManagedSlotDevice(device) || this.isDrivenByForeignDaemon(device);
+    return this.isBindingDevice(device) || this.isDrivenByForeignDaemon(device);
   }
 
-  /** Platform devices generic allocation may lend: none a managed slot holds. */
+  /** Platform devices generic allocation may lend: none a broker binding holds. */
   private getGenericallyAllocatableDevices(platform?: Platform): PooledDevice[] {
-    return this.getDevicesByPlatform(platform).filter(
-      (device) => !this.isManagedSlotDevice(device),
-    );
+    return this.getDevicesByPlatform(platform).filter((device) => !this.isBindingDevice(device));
   }
 
   /** Every stable identity the pool knows `deviceId` by, plus any the caller supplies. */
@@ -8380,11 +8378,11 @@ export class DevicePool {
   }
 
   /**
-   * A device a managed slot holds is never generic capacity, idle or not (#11174). An Android
+   * A device a broker binding holds is never generic capacity, idle or not (#11174). An Android
    * emulator whose AVD identity is still unresolved cannot be proven free while any Android device
    * is managed, so it is excluded too: unknown identity never frees an assignment.
    */
-  private isManagedSlotDevice(device: PooledDevice): boolean {
+  private isBindingDevice(device: PooledDevice): boolean {
     const exclusion = this.bindingExclusion;
     if (!exclusion) {
       return false;
@@ -8406,12 +8404,12 @@ export class DevicePool {
   }
 
   /**
-   * The synchronous managed-slot refusal for a device, from the last snapshot: undefined when no
-   * managed slot holds it or the requester is that slot's live execution. For lifecycle re-checks
+   * The synchronous broker binding refusal for a device, from the last snapshot: undefined when no
+   * broker binding holds it or the requester is that binding's live execution. For lifecycle re-checks
    * that run under the assignment mutex; entry points refresh first through
-   * {@link assertNotAssignedToManagedSlot}.
+   * {@link assertNotAssignedToBinding}.
    */
-  managedSlotRefusalFor(input: {
+  bindingRefusalFor(input: {
     action: string;
     deviceId: string;
     platform: Platform;
@@ -8427,9 +8425,9 @@ export class DevicePool {
     if (refusal) {
       return refusal;
     }
-    // The same unresolved-identity rule as isManagedSlotDevice: an idle emulator whose AVD name is
+    // The same unresolved-identity rule as isBindingDevice: an idle emulator whose AVD name is
     // unread cannot be proven free, so a generic caller may not drive it (#11457). Only the
-    // session that already holds it in the pool, or a slot reconciler, passes.
+    // session that already holds it in the pool, or a binding reconciler, passes.
     const device = this.devices.get(input.deviceId);
     if (
       device &&
@@ -8442,7 +8440,7 @@ export class DevicePool {
       return new DeviceAssignedToBindingError(input.action, input.deviceId, {
         platform: device.platform,
         stableDeviceId: input.deviceId,
-        holder: "free",
+        holder: "binding",
         scopeKey: "",
         bindingIndex: null,
         scopeState: null,
@@ -8453,7 +8451,7 @@ export class DevicePool {
   }
 
   /** Whether the exclusion snapshot follows a failed registry read. */
-  managedSlotSnapshotRetainedAfterFailedRead(): boolean {
+  bindingSnapshotRetainedAfterFailedRead(): boolean {
     return this.bindingExclusion?.lastReadFailed?.() ?? false;
   }
 
@@ -8481,8 +8479,8 @@ export class DevicePool {
   }
 
   /**
-   * Refuse a generic caller's control of a device a managed slot holds (#11174, #11178), with a
-   * fresh registry read: `device_assigned_to_managed_slot`, not retryable. Only the slot's own
+   * Refuse a generic caller's control of a device a broker binding holds (#11174, #11178), with a
+   * fresh registry read: `device_assigned_to_binding`, not retryable. Only the binding's own
    * live execution session passes; no force flag overrides it. On a failed read, a session already
    * holding the device in this pool passes first; other sessions get retryable discovery failure
    * when a retained entry refuses them. Plain callers keep the retained fail-closed verdict.
@@ -8501,7 +8499,7 @@ export class DevicePool {
     }
     try {
       await this.bindingExclusion.refresh({ maxAgeMs: input.maxAgeMs, requireCurrent: true });
-      let refusal = this.managedSlotRefusalFor(input);
+      let refusal = this.bindingRefusalFor(input);
       if (
         refusal &&
         input.maxAgeMs &&
@@ -8512,7 +8510,7 @@ export class DevicePool {
         // with a load that starts after this call before refusing a session, so a fresh execution
         // is never refused its own device.
         await this.bindingExclusion.refresh({ fresh: true, requireCurrent: true });
-        refusal = this.managedSlotRefusalFor(input);
+        refusal = this.bindingRefusalFor(input);
       }
       if (refusal) {
         throw refusal;
@@ -8541,7 +8539,7 @@ export class DevicePool {
       this.managedRefFor(input.deviceId, input.platform, input.stableIds),
     );
     if (holder) {
-      const refusal = this.managedSlotRefusalFor(input);
+      const refusal = this.bindingRefusalFor(input);
       if (!refusal) {
         return;
       }
@@ -8554,7 +8552,7 @@ export class DevicePool {
 
   /**
    * Stable ids a selector-based start must skip on `platform` (AVD names, simulator UDIDs): every
-   * device a managed slot holds, read fresh (#11174). Empty when the pool tracks no slots.
+   * device a broker binding holds, read fresh (#11174). Empty when the pool tracks no bindings.
    */
   async bindingStableIds(platform: Platform): Promise<ReadonlySet<string>> {
     if (!this.bindingExclusion) {

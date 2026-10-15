@@ -301,8 +301,8 @@ export function parseInputRequesterSessionUuid(
   return value.trim();
 }
 
-/** The pool's managed-slot gate, optional so older daemon-state fakes keep compiling. */
-export interface ManagedSlotInputGate {
+/** The pool's broker binding gate, optional so older daemon-state fakes keep compiling. */
+export interface BindingInputGate {
   assertNotAssignedToBinding?(input: {
     action: string;
     deviceId: string;
@@ -313,15 +313,15 @@ export interface ManagedSlotInputGate {
 }
 
 /**
- * How stale the managed-slot snapshot may be for a device-driving frame. Input is frequent, and a
- * slot assignment is a rare host-wide event, so frames share one registry read per second.
+ * How stale the broker binding snapshot may be for a device-driving frame. Input is frequent, and a
+ * binding assignment is a rare host-wide event, so frames share one registry read per second.
  */
 export const BINDING_INPUT_SNAPSHOT_MAX_AGE_MS = 1_000;
 
 /**
- * A device a managed slot holds takes input only from that slot's live execution (#11178), even
+ * A device a broker binding holds takes input only from that binding's live execution (#11178), even
  * while idle: no session holds it, so the holder check above would otherwise let any local client
- * drive it. Refuses with `device_assigned_to_managed_slot`; `force` never overrides it.
+ * drive it. Refuses with `device_assigned_to_binding`; `force` never overrides it.
  */
 export async function assertInputNotOnForeignBindingDevice(input: {
   action: string;
@@ -329,7 +329,7 @@ export async function assertInputNotOnForeignBindingDevice(input: {
   platform: "android" | "ios";
   requesterSessionUuid: string | undefined;
   sessionManager: ToolSelectionSessionManager | undefined;
-  gate: ManagedSlotInputGate;
+  gate: BindingInputGate;
 }): Promise<void> {
   const { requesterSessionUuid, sessionManager } = input;
   await input.gate.assertNotAssignedToBinding?.({
@@ -356,7 +356,7 @@ export interface ForeignDaemonClaimGate {
 
 /**
  * How stale the foreign-claim read may be for a sessionless control call. Like
- * {@link MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
+ * {@link BINDING_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
  * cost a status query and a relinquish round trip to a peer daemon, so calls share one per second.
  */
 export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;

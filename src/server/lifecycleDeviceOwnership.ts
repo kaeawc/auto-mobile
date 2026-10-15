@@ -16,7 +16,7 @@ import {
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
 import type { BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 
 /** Remedy text for a refused device lifecycle call (killDevice, deleteDevice). */
 export const LIFECYCLE_TOOL_REMEDY =
@@ -97,8 +97,8 @@ export async function resolveRestartStopIdentity(input: {
  * logged. Unheld devices, and calls with no initialized daemon, are unaffected.
  *
  * Throws `InputDeviceOwnedError` (code `device_owned_by_other_session`), or
- * `DeviceAssignedToManagedSlotError` (code `device_assigned_to_managed_slot`) for a device a
- * managed slot holds, idle or not, unless the requester is that slot's execution (#11174).
+ * `DeviceAssignedToBindingError` (code `device_assigned_to_binding`) for a device a
+ * broker binding holds, idle or not, unless the requester is that binding's execution (#11174).
  */
 export function assertLifecycleCallerHoldsDevice(input: {
   toolName: string;
@@ -118,7 +118,7 @@ export function assertLifecycleCallerHoldsDevice(input: {
   }
   const sessionManager = daemonState.getSessionManager();
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
-  assertNotForeignManagedSlotFromSnapshot(daemonState, input);
+  assertNotForeignBindingFromSnapshot(daemonState, input);
   const pool = daemonState.getDevicePool();
   assertLifecycleCallerMayStopRestartReservation(input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
@@ -310,11 +310,11 @@ async function checkForeignHolder(
 }
 
 /**
- * A managed slot's device, idle or not, stops only for that slot's execution; `force` does not
+ * A broker binding's device, idle or not, stops only for that binding's execution; `force` does not
  * override it (#11174). On a failed read, preserve the entry check's admission of the session
  * already holding this device in the pool; a current snapshot still judges the registry first.
  */
-function assertNotForeignManagedSlotFromSnapshot(
+function assertNotForeignBindingFromSnapshot(
   daemonState: DaemonState,
   input: {
     toolName: string;
@@ -324,9 +324,9 @@ function assertNotForeignManagedSlotFromSnapshot(
   },
 ): void {
   const pool = daemonState.getDevicePool();
-  const gate = managedSlotPoolGate(pool);
+  const gate = bindingPoolGate(pool);
   const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
-  const managedRefusal = gate.managedSlotRefusalFor?.({
+  const managedRefusal = gate.bindingRefusalFor?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
     platform: input.device.platform,
@@ -335,7 +335,7 @@ function assertNotForeignManagedSlotFromSnapshot(
   });
   if (managedRefusal) {
     if (
-      gate.managedSlotSnapshotRetainedAfterFailedRead?.() &&
+      gate.bindingSnapshotRetainedAfterFailedRead?.() &&
       requesterSessionUuid &&
       pool.getDevice(input.device.deviceId)?.sessionId === requesterSessionUuid
     ) {
@@ -360,12 +360,12 @@ function baseRequesterSession(
 }
 
 /**
- * Entry check for a lifecycle tool on a device a managed slot may hold (#11174): refreshes the
- * registry snapshot and refuses any caller but the slot's own execution, idle device or not, with
- * `device_assigned_to_managed_slot`. Covers stopped devices too (deleteDevice of an AVD), which the
+ * Entry check for a lifecycle tool on a device a broker binding may hold (#11174): refreshes the
+ * registry snapshot and refuses any caller but the binding's own execution, idle device or not, with
+ * `device_assigned_to_binding`. Covers stopped devices too (deleteDevice of an AVD), which the
  * session-holder check never sees. Calls with no initialized daemon are unaffected.
  */
-export async function assertLifecycleCallerNotOnForeignManagedSlot(input: {
+export async function assertLifecycleCallerNotOnForeignBinding(input: {
   toolName: string;
   device: { deviceId: string; platform: Platform };
   requester: LifecycleRequester;
@@ -376,7 +376,7 @@ export async function assertLifecycleCallerNotOnForeignManagedSlot(input: {
     return;
   }
   const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
-  await managedSlotPoolGate(daemonState.getDevicePool()).assertNotAssignedToBinding?.({
+  await bindingPoolGate(daemonState.getDevicePool()).assertNotAssignedToBinding?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
     platform: input.device.platform,

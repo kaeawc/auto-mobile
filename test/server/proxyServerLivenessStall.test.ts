@@ -9,17 +9,13 @@ import {
   type LoggingLevel,
 } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-  createProxyMcpServer,
-  livenessHandoverNotificationPayloads,
-} from "../../src/server/proxyServer";
+import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
 import {
   livenessHandoverPayload,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
-import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -209,49 +205,15 @@ describe("proxy server liveness stall reporting", () => {
   });
 
   test.each(["tool", "resource"] as const)(
-    "a managed daemon stall uses automatic reclaim advice on a %s refusal",
-    async (surface) => {
-      const bindings = readyManagedSlotsResult(SESSION);
-      const text = await stalledHandlerAnswer(bindings, surface);
-      const payload = JSON.parse(text);
-      const generic = livenessHandoverPayload(stalled);
-      expect(payload.error.recovery.action).toBe("wait_for_managed_reclaim");
-      expect(payload.error.message).toContain(SESSION);
-      expect(payload.error.message).not.toContain("restart the daemon yourself");
-      expect(payload.error.message).not.toContain("passing its sessionUuid");
-      expect(payload).toEqual({
-        error: {
-          ...generic.error,
-          message: payload.error.message,
-          recovery: { action: "wait_for_managed_reclaim" },
-        },
-      });
-      expect(Object.keys(payload.error)).toEqual(Object.keys(generic.error));
-      expect(payload).toEqual(livenessHandoverNotificationPayloads(stalled, bindings)[0]);
-    },
-  );
-
-  test.each(["tool", "resource"] as const)(
     "generic and non-binding daemon stalls keep their %s refusal byte for byte",
     async (surface) => {
-      for (const bindings of [undefined, readyManagedSlotsResult("other-session")]) {
+      for (const bindings of [undefined]) {
         const text = await stalledHandlerAnswer(bindings, surface);
         expect(JSON.parse(text)).toEqual(livenessHandoverPayload(stalled));
         expect(text).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
       }
     },
   );
-
-  test("a mixed daemon stall scopes managed tool advice to binding sessions", async () => {
-    const other = { ...stalled.sessions[0], sessionUuid: "other-session" };
-    const mixed = { ...stalled, sessions: [other, stalled.sessions[0]] };
-    const bindings = readyManagedSlotsResult(SESSION);
-    const managed = await stalledHandlerAnswer(bindings, "tool", mixed);
-    expect(JSON.parse(managed).error.recovery.action).toBe("wait_for_managed_reclaim");
-    expect(JSON.parse(managed).error.sessions).toEqual(stalled.sessions);
-    const generic = await stalledHandlerAnswer(bindings, "tool", mixed, other.sessionUuid);
-    expect(generic).toBe(JSON.stringify(livenessHandoverPayload(mixed)));
-  });
 
   test("an unresponsive daemon is reported by notification and on the next tool call", async () => {
     const harness = await connectStallingHarness();

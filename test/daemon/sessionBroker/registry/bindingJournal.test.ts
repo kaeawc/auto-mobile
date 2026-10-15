@@ -622,7 +622,6 @@ describe("binding journal redrive", () => {
         settled: [],
         blocked: [],
         skipped: 1,
-        freeDeviceDeletions: [],
       });
 
       deleter.failWith = undefined;
@@ -696,7 +695,6 @@ describe("binding journal redrive", () => {
         settled: [],
         blocked: [],
         skipped: 1,
-        freeDeviceDeletions: [],
       });
 
       liveDaemons.delete("daemon-1");
@@ -737,7 +735,7 @@ describe("binding journal redrive", () => {
         {
           runPass: async () => {
             passes += 1;
-            return { settled: [], blocked: [], skipped: 0, freeDeviceDeletions: [] };
+            return { settled: [], blocked: [], skipped: 0 };
           },
         },
         timer,
@@ -794,7 +792,6 @@ describe("binding journal redrive", () => {
       settled: [],
       blocked: [],
       skipped: 1,
-      freeDeviceDeletions: [],
     });
     expect(deleter.calls).toHaveLength(1);
   });

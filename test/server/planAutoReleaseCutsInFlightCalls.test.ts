@@ -238,7 +238,7 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
   test("a managed slot session survives the plan and its calls are not cut", async () => {
     await acquire();
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind("conn-managed", { scopeKey: "scope-1", sessionUuids: ["base"] });
     const plan = planCall();
     const call = controlCall("control", "base", "device-A");

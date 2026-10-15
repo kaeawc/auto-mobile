@@ -1,9 +1,4 @@
 import {
-  isAbandonedScope,
-  sameFreeDevice,
-  journalNamesFreeDevice,
-  type FreeDeviceIdentity,
-  type BeginFreeDeviceDeletionResult,
   type BindingResourceSnapshot,
   isBindingJournalPhaseOpen,
   journalOwnersEqual,
@@ -28,25 +23,13 @@ import {
   bindingMatches,
   computeBindingScopeKey,
   entersFencingState,
-  isPermanentInvalidationReason,
-  isRevivableScope,
-  lastScopeActivityMs,
-  resolveAbandonmentThresholdMs,
-  type AbandonmentQuery,
-  type BeginScopeInvalidationResult,
   type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
-  type CompleteScopeInvalidationResult,
   type DeviceHolder,
   type EnsureScopeResult,
-  type BeginFreeDeviceStopResult,
-  type FreeDeviceStopClaim,
-  isStaleFreeDeviceStopClaim,
-  type FreeBindingDeviceRecord,
   type InitBindingResult,
   type ManagedDeviceEntry,
-  type MarkScopeAbandonedResult,
   type ReleaseExecutionResult,
   type BindingAssignmentRecord,
   type BindingAssignmentState,
@@ -60,8 +43,6 @@ import {
   type BindingPlatform,
   type BindingRegistry,
   type BindingScopeIdentity,
-  type BindingScopeInvalidationReason,
-  type BindingScopeQuery,
   type BindingScopeRecord,
   type UpdateBindingStateOptions,
   type UpdateBindingStateResult,
@@ -76,7 +57,6 @@ import type { Timer } from "../../src/utils/SystemTimer";
 export class FakeBindingRegistry implements BindingRegistry {
   private readonly scopes = new Map<string, BindingScopeRecord>();
   private readonly assignments = new Map<string, BindingAssignmentRecord>();
-  private readonly free = new Map<string, FreeBindingDeviceRecord>();
   private readonly journal = new Map<number, BindingJournalEntry>();
   private nextJournalId = 1;
   private closed = false;
@@ -102,7 +82,7 @@ export class FakeBindingRegistry implements BindingRegistry {
       existing.lastAcquiredAtMs = nowMs;
       return { kind: "ready", scope: { ...existing }, created: false, revived: false };
     }
-    if (existing && !isRevivableScope(existing)) {
+    if (existing) {
       return { kind: "scope_invalidated", scope: { ...existing } };
     }
     const sameNamespace = [...this.scopes.values()].filter(
@@ -114,20 +94,6 @@ export class FakeBindingRegistry implements BindingRegistry {
     const live = sameNamespace.find((scope) => scope.state !== "invalidated");
     if (live) {
       return { kind: "incarnation_conflict", current: { ...live } };
-    }
-    if (existing) {
-      existing.state = "valid";
-      existing.invalidationReason = null;
-      existing.invalidatingAtMs = null;
-      existing.invalidatedAtMs = null;
-      existing.lastAcquiredAtMs = nowMs;
-      return { kind: "ready", scope: { ...existing }, created: false, revived: true };
-    }
-    for (const superseded of sameNamespace) {
-      if (superseded.invalidationReason === "abandoned") {
-        superseded.invalidationReason = "incarnation_reset";
-        this.releaseBindingsToFreePool(superseded.scopeKey);
-      }
     }
     const scope: BindingScopeRecord = {
       ...identity,
@@ -217,7 +183,6 @@ export class FakeBindingRegistry implements BindingRegistry {
       return checked;
     }
     const platform = assertPlatformChangeAllowed(checked, next);
-    let adoptedFreeDevice: FreeBindingDeviceRecord | null = null;
     if (next.stableDeviceId !== null) {
       const holder = [...this.assignments.values()].find(
         (assignment) =>
@@ -227,19 +192,6 @@ export class FakeBindingRegistry implements BindingRegistry {
       );
       if (holder) {
         return { kind: "device_assigned_elsewhere", holder: copy(holder) };
-      }
-      const freeId = deviceId(platform, next.stableDeviceId);
-      const freed = this.free.get(freeId);
-      if (
-        freed &&
-        (freed.deletion !== null ||
-          (freed.state === "stopping" && !isStaleFreeDeviceStopClaim(freed, this.timer.now())))
-      ) {
-        return { kind: "free_device_stopping" };
-      }
-      if (freed) {
-        this.free.delete(freeId);
-        adoptedFreeDevice = { ...freed };
       }
     }
     const deviceChanged =
@@ -262,7 +214,7 @@ export class FakeBindingRegistry implements BindingRegistry {
       checked.execOwner = null;
     }
     checked.updatedAtMs = this.timer.now();
-    return { kind: "committed", assignment: copy(checked), adoptedFreeDevice };
+    return { kind: "committed", assignment: copy(checked) };
   }
 
   async updateBindingState(
@@ -401,8 +353,7 @@ export class FakeBindingRegistry implements BindingRegistry {
     if (assignment && scope) {
       return { kind: "binding", scope: { ...scope }, assignment: copy(assignment) };
     }
-    const freed = this.free.get(deviceId(platform, stableDeviceId));
-    return freed ? { kind: "free", device: { ...freed } } : null;
+    return null;
   }
 
   async isDeviceAssignedToValidBinding(
@@ -436,314 +387,18 @@ export class FakeBindingRegistry implements BindingRegistry {
         },
       ];
     });
-    const freed = [...this.free.values()].map((device): ManagedDeviceEntry => ({
-      platform: device.platform,
-      stableDeviceId: device.stableDeviceId,
-      holder: "free",
-      scopeKey: device.fromScopeKey,
-      bindingIndex: null,
-      scopeState: null,
-      execSessionUuid: null,
-    }));
-    const entries = [...bound, ...freed];
+    const entries = bound;
     return [...entries, ...journalTargetEntries(await this.listOpenBindingJournal(), entries)];
-  }
-
-  async listFreeDevices(): Promise<FreeBindingDeviceRecord[]> {
-    return [...this.free.values()]
-      .sort((a, b) => a.freedAtMs - b.freedAtMs)
-      .map((device) => structuredClone(device));
-  }
-
-  async beginScopeInvalidation(
-    scopeKey: string,
-    reason: BindingScopeInvalidationReason,
-  ): Promise<BeginScopeInvalidationResult> {
-    const scope = this.scopes.get(scopeKey);
-    if (!scope) {
-      return { kind: "not_found" };
-    }
-    if (scope.state === "valid") {
-      this.markInvalidating(scope, reason);
-      return { kind: "invalidating", scope: { ...scope } };
-    }
-    if (isRevivableScope(scope) && isPermanentInvalidationReason(reason)) {
-      scope.invalidationReason = reason;
-      if (scope.state === "invalidated") {
-        this.releaseBindingsToFreePool(scopeKey);
-      }
-    }
-    return scope.state === "invalidating"
-      ? { kind: "already_invalidating", scope: { ...scope } }
-      : { kind: "already_invalidated", scope: { ...scope } };
-  }
-
-  async completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult> {
-    const scope = this.scopes.get(scopeKey);
-    if (!scope) {
-      return { kind: "not_found" };
-    }
-    if (scope.state === "invalidated") {
-      return { kind: "already_invalidated", scope: { ...scope } };
-    }
-    if (scope.state !== "invalidating") {
-      return { kind: "not_invalidating", scope: { ...scope } };
-    }
-    const assignments = [...this.assignments.values()]
-      .filter((assignment) => assignment.scopeKey === scopeKey)
-      .sort((a, b) => a.bindingIndex - b.bindingIndex);
-    const liveOwners = assignments.filter(
-      (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
-    );
-    const settling = assignments.filter(
-      (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
-    );
-    const cleanupPending = assignments.filter(
-      (assignment) => assignment.state === "cleanup_pending",
-    );
-    const openJournal = [...this.journal.values()]
-      .filter((entry) => entry.scopeKey === scopeKey && isBindingJournalPhaseOpen(entry.phase))
-      .sort((a, b) => a.id - b.id)
-      .map(copyEntry);
-    if (
-      liveOwners.length > 0 ||
-      settling.length > 0 ||
-      cleanupPending.length > 0 ||
-      openJournal.length > 0
-    ) {
-      return {
-        kind: "pending",
-        scope: { ...scope },
-        liveOwners: liveOwners.map(copy),
-        settling: settling.map(copy),
-        cleanupPending: cleanupPending.map(copy),
-        openJournal,
-      };
-    }
-    const nowMs = this.timer.now();
-    // An abandoned scope stays revivable: keep its bindings until the invalidation is permanent.
-    const freedDevices =
-      scope.invalidationReason === "abandoned" ? [] : this.releaseBindingsToFreePool(scopeKey);
-    scope.state = "invalidated";
-    scope.invalidatedAtMs = nowMs;
-    return { kind: "invalidated", scope: { ...scope }, freedDevices };
-  }
-
-  async findAbandonedScopes(query?: AbandonmentQuery): Promise<BindingScopeRecord[]> {
-    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    return [...this.scopes.values()]
-      .filter(
-        (scope) =>
-          scope.state === "valid" &&
-          lastScopeActivityMs(scope) <= cutoffMs &&
-          !this.hasLiveExecOwner(scope.scopeKey),
-      )
-      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b))
-      .map((scope) => ({ ...scope }));
-  }
-
-  async markScopeAbandoned(
-    scopeKey: string,
-    query?: AbandonmentQuery,
-  ): Promise<MarkScopeAbandonedResult> {
-    const thresholdMs = resolveAbandonmentThresholdMs(query);
-    const scope = this.scopes.get(scopeKey);
-    if (!scope) {
-      return { kind: "not_found" };
-    }
-    if (scope.state !== "valid") {
-      return { kind: "not_abandoned", scope: { ...scope }, reason: "not_valid" };
-    }
-    if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
-      return { kind: "not_abandoned", scope: { ...scope }, reason: "recent_acquisition" };
-    }
-    if (this.hasLiveExecOwner(scopeKey)) {
-      return { kind: "not_abandoned", scope: { ...scope }, reason: "live_owner" };
-    }
-    this.markInvalidating(scope, "abandoned");
-    return { kind: "marked", scope: { ...scope } };
-  }
-
-  async findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeBindingDeviceRecord[]> {
-    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    return (await this.listFreeDevices()).filter(
-      (device) =>
-        device.freedAtMs <= cutoffMs && device.state !== "stopped" && device.deletion === null,
-    );
   }
 
   async snapshotBindingResources(): Promise<BindingResourceSnapshot> {
     // Capture every map before yielding; no concurrent mutation can tear the ledger.
-    const free = [...this.free.values()].map((row) => structuredClone(row));
-    const abandonedScopeKeys = [...this.scopes.values()]
-      .filter((scope) => scope.state === "invalidating" && scope.invalidationReason === "abandoned")
-      .map((scope) => scope.scopeKey);
     const openJournal = [...this.journal.values()]
       .filter((entry) => isBindingJournalPhaseOpen(entry.phase))
       .map((entry) => structuredClone(entry));
     const managed = await this.snapshotManagedDevices();
-    return { managed, free, abandonedScopeKeys, openJournal };
+    return { managed, openJournal };
   }
-
-  private deletionRow(row: FreeDeviceIdentity, owner?: BindingJournalOwner) {
-    const current = this.free.get(deviceId(row.platform, row.stableDeviceId));
-    if (!current || !sameFreeDevice(current, row)) {
-      return undefined;
-    }
-    if (owner && (!current.deletion || !journalOwnersEqual(current.deletion.owner, owner))) {
-      return undefined;
-    }
-    return current;
-  }
-
-  async beginFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ): Promise<BeginFreeDeviceDeletionResult> {
-    const current = this.deletionRow(row);
-    if (!current) {
-      return { kind: "not_evictable", reason: "row_moved" };
-    }
-    if (current.deletion || current.state === "stopping") {
-      return { kind: "not_evictable", reason: "deletion_pending_or_stopping" };
-    }
-    if (this.findBound(row.platform, row.stableDeviceId)) {
-      return { kind: "not_evictable", reason: "assigned" };
-    }
-    if (
-      [...this.journal.values()].some(
-        (entry) => isBindingJournalPhaseOpen(entry.phase) && journalNamesFreeDevice(entry, row),
-      )
-    ) {
-      return { kind: "not_evictable", reason: "journal_open" };
-    }
-    current.deletion = {
-      owner: { ...owner },
-      startedAtMs: this.timer.now(),
-      attempts: 0,
-      failedDeletes: 0,
-      lastError: null,
-      nextAttemptAtMs: this.timer.now(),
-    };
-    return { kind: "begun", row: structuredClone(current) };
-  }
-
-  async recordFreeDeviceDeletionAttempt(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
-  ): Promise<boolean> {
-    const current = this.deletionRow(row, owner);
-    if (!current?.deletion) {
-      return false;
-    }
-    current.deletion.attempts += 1;
-    current.deletion.failedDeletes += Number(attempt.nativeDeleteFailed === true);
-    current.deletion.lastError = attempt.error;
-    current.deletion.nextAttemptAtMs = attempt.nextAttemptAtMs;
-    return true;
-  }
-
-  async completeFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ): Promise<boolean> {
-    if (!this.deletionRow(row, owner)) {
-      return false;
-    }
-    this.free.delete(deviceId(row.platform, row.stableDeviceId));
-    return true;
-  }
-
-  async claimFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    expectedOwner: BindingJournalOwner,
-    nextOwner: BindingJournalOwner,
-  ): Promise<boolean> {
-    const current = this.deletionRow(row, expectedOwner);
-    if (!current?.deletion) {
-      return false;
-    }
-    current.deletion.owner = { ...nextOwner };
-    return true;
-  }
-
-  async listFreeDeviceDeletions(): Promise<FreeBindingDeviceRecord[]> {
-    return [...this.free.values()]
-      .filter((row) => row.deletion !== null)
-      .sort((a, b) => a.deletion!.nextAttemptAtMs - b.deletion!.nextAttemptAtMs)
-      .map((row) => structuredClone(row));
-  }
-
-  async beginFreeDeviceStop(
-    claim: FreeDeviceStopClaim,
-    query?: AbandonmentQuery,
-  ): Promise<BeginFreeDeviceStopResult> {
-    const nowMs = this.timer.now();
-    const cutoffMs = nowMs - resolveAbandonmentThresholdMs(query);
-    const row = this.free.get(deviceId(claim.platform, claim.stableDeviceId));
-    if (
-      !row ||
-      row.deletion !== null ||
-      row.freedAtMs !== claim.freedAtMs ||
-      row.freedAtMs > cutoffMs
-    ) {
-      return { kind: "not_reclaimable" };
-    }
-    const claimable =
-      row.state === "free" ||
-      (row.state === "stopping" &&
-        (row.stopClaimedBy === claim.claimedBy || isStaleFreeDeviceStopClaim(row, nowMs)));
-    if (!claimable) {
-      return { kind: "not_reclaimable" };
-    }
-    row.state = "stopping";
-    row.stopClaimedBy = claim.claimedBy;
-    row.stopClaimedAtMs = nowMs;
-    return { kind: "begun" };
-  }
-
-  private heldRow(claim: FreeDeviceStopClaim): FreeBindingDeviceRecord | undefined {
-    const row = this.free.get(deviceId(claim.platform, claim.stableDeviceId));
-    return row &&
-      row.freedAtMs === claim.freedAtMs &&
-      row.state === "stopping" &&
-      row.stopClaimedBy === claim.claimedBy
-      ? row
-      : undefined;
-  }
-
-  async holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    return this.heldRow(claim) !== undefined;
-  }
-
-  async completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    return this.releaseStop(claim, "stopped");
-  }
-
-  async revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    return this.releaseStop(claim, "free");
-  }
-
-  private releaseStop(claim: FreeDeviceStopClaim, next: "free" | "stopped"): boolean {
-    const row = this.heldRow(claim);
-    if (!row) {
-      return false;
-    }
-    row.state = next;
-    row.stopClaimedBy = null;
-    row.stopClaimedAtMs = null;
-    return true;
-  }
-
-  openBindingJournal(
-    key: BindingKey,
-    input: OpenBindingJournalInput & { requireAbandonedScope?: false },
-  ): Promise<Exclude<OpenBindingJournalResult, { kind: "scope_not_abandoned" }>>;
-  openBindingJournal(
-    key: BindingKey,
-    input: OpenBindingJournalInput,
-  ): Promise<OpenBindingJournalResult>;
   async openBindingJournal(
     key: BindingKey,
     input: OpenBindingJournalInput,
@@ -764,12 +419,6 @@ export class FakeBindingRegistry implements BindingRegistry {
     const open = this.findOpenEntry(key);
     if (open) {
       return { kind: "journal_open", entry: copyEntry(open) };
-    }
-    if (input.requireAbandonedScope) {
-      const scope = this.scopes.get(key.scopeKey) ?? null;
-      if (!isAbandonedScope(scope)) {
-        return { kind: "scope_not_abandoned", scope: scope ? { ...scope } : null };
-      }
     }
     const applied = this.applyAssignmentChange(key, input.assignment);
     if ("kind" in applied) {
@@ -875,26 +524,6 @@ export class FakeBindingRegistry implements BindingRegistry {
       .map(copyEntry);
   }
 
-  async findScopes(query: BindingScopeQuery): Promise<BindingScopeRecord[]> {
-    return [...this.scopes.values()]
-      .filter(
-        (scope) =>
-          scope.runnerNamespace === query.runnerNamespace &&
-          scope.runnerIncarnation === query.runnerIncarnation &&
-          (query.managedHostScope === undefined ||
-            scope.managedHostScope === query.managedHostScope),
-      )
-      .sort((a, b) => a.createdAtMs - b.createdAtMs || (a.scopeKey < b.scopeKey ? -1 : 1))
-      .map((scope) => ({ ...scope }));
-  }
-
-  async listAbandonedScopes(): Promise<BindingScopeRecord[]> {
-    return [...this.scopes.values()]
-      .filter((scope) => scope.state === "invalidating" && scope.invalidationReason === "abandoned")
-      .sort((a, b) => (a.invalidatingAtMs ?? 0) - (b.invalidatingAtMs ?? 0))
-      .map((scope) => ({ ...scope }));
-  }
-
   async close(): Promise<void> {
     this.closed = true;
   }
@@ -952,38 +581,6 @@ export class FakeBindingRegistry implements BindingRegistry {
     return current;
   }
 
-  /** Free a scope's bound devices and remove its bindings (a permanent invalidation). */
-  private releaseBindingsToFreePool(scopeKey: string): FreeBindingDeviceRecord[] {
-    const nowMs = this.timer.now();
-    const assignments = [...this.assignments.values()]
-      .filter((assignment) => assignment.scopeKey === scopeKey)
-      .sort((a, b) => a.bindingIndex - b.bindingIndex);
-    const freedDevices = assignments.flatMap((assignment): FreeBindingDeviceRecord[] =>
-      assignment.stableDeviceId === null
-        ? []
-        : [
-            {
-              platform: assignment.platform,
-              stableDeviceId: assignment.stableDeviceId,
-              specFingerprint: assignment.specFingerprint,
-              fromScopeKey: scopeKey,
-              freedAtMs: nowMs,
-              state: "free",
-              stopClaimedBy: null,
-              stopClaimedAtMs: null,
-              deletion: null,
-            },
-          ],
-    );
-    for (const assignment of assignments) {
-      this.assignments.delete(bindingId(assignment));
-    }
-    for (const device of freedDevices) {
-      this.free.set(deviceId(device.platform, device.stableDeviceId), { ...device });
-    }
-    return freedDevices;
-  }
-
   private findBound(
     platform: BindingPlatform,
     stableDeviceId: string,
@@ -1009,23 +606,10 @@ export class FakeBindingRegistry implements BindingRegistry {
       (execOwner === null || !this.isExecOwnerLive(execOwner))
     );
   }
-
-  private markInvalidating(
-    scope: BindingScopeRecord,
-    reason: BindingScopeInvalidationReason,
-  ): void {
-    scope.state = "invalidating";
-    scope.invalidationReason = reason;
-    scope.invalidatingAtMs = this.timer.now();
-  }
 }
 
 function bindingId(key: BindingKey): string {
   return JSON.stringify([key.scopeKey, key.bindingIndex]);
-}
-
-function deviceId(platform: BindingPlatform, stableDeviceId: string): string {
-  return JSON.stringify([platform, stableDeviceId]);
 }
 
 function roundTrip(value: unknown): unknown {

@@ -1,1 +1,1 @@
-export { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
+export { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";

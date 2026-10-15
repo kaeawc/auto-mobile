@@ -17,16 +17,11 @@ export type BindingDispositionName = "created" | "reused" | "adopted" | "replace
  */
 export const BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES = [
   "binding_config_invalid",
-  "contract_unsupported",
   "registry_schema_unsupported",
-  "binding_group_unsupported",
-  "bindings_unsupported",
   "scope_invalidated",
   "scope_transition_pending",
   "execution_policy_failed",
-  "execution_hold_failed",
   "liveness_owner_conflict",
-  "daemon_unavailable",
   "timeout",
   "cancelled",
 ] as const;
@@ -100,11 +95,6 @@ export interface BindingResultEntry {
   device: BindingDeviceEvidence | null;
   /** The fresh session this execution holds on the binding's device (null when the binding failed). */
   sessionUuid: string | null;
-  /**
-   * Set by the proxy's resource once this binding's session was terminally released (#11712).
-   * The idle field is true only for an idle release and absent otherwise.
-   */
-  executionEnded?: { reason: string; idle?: true; nextAction: "relaunch_execution" };
   requestedSpec: unknown;
   resolvedSpec: unknown;
   specFingerprint: { version: number; hash: string } | null;
@@ -132,21 +122,4 @@ export interface BindingsResult {
   bindings: BindingResultEntry[];
   /** Scope- or transport-level failure; per-binding failures sit on the binding entry. */
   failure?: BindingsFailure;
-}
-
-/** The binding of a ready result that holds `sessionUuid` (null when the result has no such binding). */
-export function bindingForSession(
-  result: BindingsResult | undefined,
-  sessionUuid: string,
-): BindingResultEntry | null {
-  return result?.outcome === "ready"
-    ? (result.bindings.find((binding) => binding.sessionUuid === sessionUuid) ?? null)
-    : null;
-}
-
-/** The sessions a ready result asks the proxy to hold. */
-export function bindingSessions(result: BindingsResult): string[] {
-  return result.outcome === "ready"
-    ? result.bindings.flatMap((binding) => (binding.sessionUuid ? [binding.sessionUuid] : []))
-    : [];
 }

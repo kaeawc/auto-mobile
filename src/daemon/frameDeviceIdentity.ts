@@ -21,7 +21,7 @@ export interface FrameDeviceIdentityPool {
   getAllDevices?(): readonly { id: string }[];
   isAndroidTransportAssignable?(device: BootedDevice): boolean;
   androidTransportMayAliasDevice?(transport: BootedDevice, heldDeviceId?: string): boolean;
-  androidManagedSlotHold?(
+  androidBindingHold?(
     heldDeviceIds: readonly string[],
   ): Promise<{ entry?: ManagedDeviceEntry } | undefined>;
 }
@@ -47,7 +47,7 @@ export function canonicalFrameDeviceId(
 
 /**
  * Resolve a direct frame's raw discovery rows and `deviceId` to pooled canonical ids BEFORE any
- * holder, managed-slot or admission decision reads them (#11596): those decisions are keyed on the
+ * holder, broker binding or admission decision reads them (#11596): those decisions are keyed on the
  * canonical id, so a frame naming a held handset by its other transport id would otherwise find no
  * holder. Uses the pool's own fold (`mapAndroidDiscovery` / `resolveAndroidCanonicalId`), as
  * `resourceDeviceResolver.ts` does.
@@ -98,7 +98,7 @@ function hasUnfoldedTransport(
 }
 
 /**
- * An absent held id represents an unknown managed-slot device. Only positive pool evidence
+ * An absent held id represents an unknown broker binding device. Only positive pool evidence
  * distinguishes devices; older pool fakes without the evidence seam report possible aliases.
  */
 export function androidTransportCouldAliasHeldDevice(
@@ -138,7 +138,7 @@ export function frameHeldSessionsFrom(sessionManager: {
  * The one definition of could-alias-a-held-device, shared by direct frames and MCP calls. Sessions
  * represent the device reverse-map holders, including expired and releasing sessions until
  * ownership is removed; unrepresented managed holds share one unknown identity, read through
- * the same one-second snapshot as the input managed-slot gate.
+ * the same one-second snapshot as the input broker binding gate.
  */
 export async function aliasableHeldAndroidDevices(
   pool: FrameDeviceIdentityPool | undefined,
@@ -146,7 +146,7 @@ export async function aliasableHeldAndroidDevices(
   sessions: readonly FrameHeldSession[],
 ) {
   const androidSessions = sessions.filter((session) => session.platform === "android");
-  const managed = await pool?.androidManagedSlotHold?.(
+  const managed = await pool?.androidBindingHold?.(
     androidSessions.flatMap((session) =>
       session.stableDeviceId
         ? [session.assignedDevice, session.stableDeviceId]

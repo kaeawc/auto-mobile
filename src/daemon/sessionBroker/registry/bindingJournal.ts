@@ -14,7 +14,6 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { Timer } from "../../../utils/SystemTimer";
-import { BINDING_DEVICE_NAME_PREFIX } from "../provisioning/reconciler";
 import type {
   BindingDeletionResult,
   BindingDeviceClaims,
@@ -29,9 +28,6 @@ import { deviceStableId } from "./deviceIdentity";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import {
   journalOwnersEqual,
-  journalNamesFreeDevice,
-  sameFreeDevice,
-  type FreeBindingDeviceRecord,
   sameBinding,
   type AdvanceBindingJournalInput,
   type BindingAssignmentRecord,
@@ -284,17 +280,7 @@ export type BindingRedriveResult =
       redriven: BindingJournalRedriveRecord[];
     };
 
-export type FreeDeviceDeletionDriveResult =
-  | { kind: "absent" | "lost" }
-  | { kind: "blocked" | "failed"; message: string };
-
 export interface BindingJournalPassResult {
-  freeDeviceDeletions: Array<{
-    platform: FreeBindingDeviceRecord["platform"];
-    stableDeviceId: string;
-    outcome: FreeDeviceDeletionDriveResult["kind"];
-    message?: string;
-  }>;
   settled: BindingJournalRedriveRecord[];
   blocked: BindingJournalRedriveRecord[];
   /** Entries left to their live owner, in flight here, or not yet due. */
@@ -348,8 +334,6 @@ function keyOf(entry: BindingKey): BindingKey {
 
 export class BindingJournal {
   readonly inFlight: BindingJournalInFlight;
-  /** Shared by eviction and periodic redrive through this journal instance. */
-  private readonly freeDeletionInFlight = new Set<string>();
   private readonly isOwnerLive: BindingJournalOwnerLiveness;
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
@@ -566,7 +550,6 @@ export class BindingJournal {
       settled: [],
       blocked: [],
       skipped: 0,
-      freeDeviceDeletions: [],
     };
     if (signal?.aborted) {
       return pass;
@@ -602,296 +585,7 @@ export class BindingJournal {
         });
       }
     }
-    await this.redriveFreeDeviceDeletions(pass, signal);
     return pass;
-  }
-
-  private async redriveFreeDeviceDeletions(
-    pass: BindingJournalPassResult,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (signal?.aborted) {
-      return;
-    }
-    const rows = await this.deps.registry.listFreeDeviceDeletions();
-    for (let row of rows) {
-      if (signal?.aborted) {
-        break;
-      }
-      if (!this.freeDeletionDue(row)) {
-        continue;
-      }
-      try {
-        const owned = await this.claimFreeDeletionForPass(row);
-        if (!owned) {
-          continue;
-        }
-        row = owned;
-        const result = await this.driveFreeDeviceDeletion(row, { signal, fromPass: true });
-        pass.freeDeviceDeletions.push({
-          platform: row.platform,
-          stableDeviceId: row.stableDeviceId,
-          outcome: result.kind,
-          ...("message" in result ? { message: result.message } : {}),
-        });
-      } catch (error) {
-        if (signal?.aborted) {
-          // Cancellation leaves the durable row for the next pass.
-          logger.debug("[BindingJournal] free-device deletion pass cancelled");
-          break;
-        }
-        logger.warn(
-          `[BindingJournal] free-device deletion redrive failed: ${errorMessage(error)}`,
-          error,
-        );
-        pass.freeDeviceDeletions.push({
-          platform: row.platform,
-          stableDeviceId: row.stableDeviceId,
-          outcome: "failed",
-          message: errorMessage(error),
-        });
-      }
-    }
-  }
-
-  private freeDeletionDue(row: FreeBindingDeviceRecord): boolean {
-    return (
-      row.deletion!.nextAttemptAtMs <= this.deps.timer.now() &&
-      !this.freeDeletionInFlight.has(freeDeletionKey(row))
-    );
-  }
-
-  private async claimFreeDeletionForPass(
-    row: FreeBindingDeviceRecord,
-  ): Promise<FreeBindingDeviceRecord | undefined> {
-    const deletion = row.deletion!;
-    if (journalOwnersEqual(deletion.owner, this.owner)) {
-      return row;
-    }
-    if (this.isOwnerLive(deletion.owner)) {
-      return undefined;
-    }
-    if (!(await this.deps.registry.claimFreeDeviceDeletion(row, deletion.owner, this.owner))) {
-      return undefined;
-    }
-    return { ...row, deletion: { ...deletion, owner: this.owner } };
-  }
-
-  async driveFreeDeviceDeletion(
-    row: FreeBindingDeviceRecord,
-    options: { signal?: AbortSignal; deadlineMs?: number; fromPass?: boolean } = {},
-  ): Promise<FreeDeviceDeletionDriveResult> {
-    const key = freeDeletionKey(row);
-    const pending = options.fromPass
-      ? this.inFlight.hasRemovalForPass(row.platform, row.stableDeviceId, this.deps.timer.now())
-      : this.inFlight.hasRemoval(row.platform, row.stableDeviceId);
-    if (pending) {
-      return { kind: "blocked", message: "removal_in_flight" };
-    }
-    if (this.freeDeletionInFlight.has(key)) {
-      return { kind: "lost" };
-    }
-    this.freeDeletionInFlight.add(key);
-    try {
-      checkCancellation(options.signal);
-      if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
-        return await this.recordFreeDeletionFailure(
-          row,
-          "failed",
-          "preparation_deadline_passed",
-          options.signal,
-        );
-      }
-      return await this.freeDeviceDeletionStep(row, options);
-    } catch (error) {
-      if (error instanceof BindingJournalDriveCancelled) {
-        // Cancelled native work remains journaled; cancellation is not a failed attempt.
-        logger.debug("[BindingJournal] free-device deletion cancelled");
-        throw error.reason;
-      }
-      logger.warn(`[BindingJournal] free-device deletion failed: ${errorMessage(error)}`, error);
-      return await this.recordFreeDeletionFailure(
-        row,
-        "failed",
-        errorMessage(error),
-        options.signal,
-      );
-    } finally {
-      this.freeDeletionInFlight.delete(key);
-    }
-  }
-
-  private async freeDeviceDeletionStep(
-    row: FreeBindingDeviceRecord,
-    options: { signal?: AbortSignal; deadlineMs?: number },
-  ): Promise<FreeDeviceDeletionDriveResult> {
-    const { signal } = options;
-    checkCancellation(signal);
-    const current = (await this.deps.registry.listFreeDeviceDeletions()).find((entry) =>
-      sameFreeDevice(entry, row),
-    );
-    checkCancellation(signal);
-    if (!current?.deletion || !journalOwnersEqual(current.deletion.owner, this.owner)) {
-      return { kind: "lost" };
-    }
-    const deadlineMs = options.deadlineMs ?? this.deps.timer.now() + BINDING_JOURNAL_STEP_BUDGET_MS;
-    const inventory = await this.boundedStage<BindingInventorySnapshot | null>(
-      (stageSignal) => this.deps.inventory.list(row.platform, { signal: stageSignal }),
-      {
-        label: `discovery for free device '${row.stableDeviceId}'`,
-        signal,
-        cancel: signal,
-        timeoutMs: Math.min(
-          this.budgets.discoveryMs,
-          Math.max(0, deadlineMs - this.deps.timer.now()),
-        ),
-      },
-      () => null,
-    );
-    if (!inventory?.complete) {
-      return this.recordFreeDeletionFailure(current, "blocked", "discovery_incomplete", signal);
-    }
-    const device = findByStableId(inventory, row.platform, row.stableDeviceId);
-    if (!device) {
-      const fence = await this.freeDeletionFence(current, signal);
-      if (fence) {
-        return fence;
-      }
-      return this.completeFreeDeletion(current, signal);
-    }
-    if (!device.name.startsWith(BINDING_DEVICE_NAME_PREFIX)) {
-      logger.warn(`[BindingJournal] refusing deletion of non-managed device '${device.name}'`);
-      return this.recordFreeDeletionFailure(current, "blocked", "not_daemon_created", signal);
-    }
-    const reason = await this.freeDeletionHoldReason(device, deadlineMs, signal);
-    if (reason) {
-      return this.recordFreeDeletionFailure(current, "blocked", reason, signal);
-    }
-    return this.deleteFreeDevice(current, device, deadlineMs, options);
-  }
-
-  private async deleteFreeDevice(
-    row: FreeBindingDeviceRecord,
-    device: DeviceInfo,
-    deadlineMs: number,
-    options: { signal?: AbortSignal; deadlineMs?: number },
-  ): Promise<FreeDeviceDeletionDriveResult> {
-    const { signal } = options;
-    if (this.inFlight.removalBlocked(row.platform, row.stableDeviceId)) {
-      return { kind: "blocked", message: "removal_in_flight" };
-    }
-    const fence = await this.freeDeletionFence(row, signal);
-    if (fence) {
-      return fence;
-    }
-    if (this.deps.timer.now() >= deadlineMs) {
-      return this.recordFreeDeletionFailure(row, "failed", "preparation_deadline_passed", signal);
-    }
-    const deletion = await this.deleteDevice(
-      {
-        platform: row.platform,
-        stableId: row.stableDeviceId,
-        name: device.name,
-        deadlineMs,
-        signal,
-      },
-      signal,
-      options.deadlineMs,
-    );
-    return deletion.kind === "absent"
-      ? this.completeFreeDeletion(row, signal)
-      : this.recordFreeDeletionFailure(
-          row,
-          "failed",
-          deletion.message,
-          signal,
-          deletion.nativeDeleteFailed,
-        );
-  }
-
-  /** Selection and claims can yield to an older daemon that ignores deletion markers. */
-  private async freeDeletionFence(
-    row: FreeBindingDeviceRecord,
-    signal?: AbortSignal,
-  ): Promise<FreeDeviceDeletionDriveResult | undefined> {
-    const holder = await this.deps.registry.findDeviceHolder(row.platform, row.stableDeviceId);
-    checkCancellation(signal);
-    if (holder?.kind === "binding") {
-      // Attempt recording is owner-checked: a lost marker returns lost rather than blocked.
-      return this.recordFreeDeletionFailure(row, "blocked", "assigned", signal);
-    }
-    if (
-      holder?.kind !== "free" ||
-      !sameFreeDevice(holder.device, row) ||
-      !holder.device.deletion ||
-      !journalOwnersEqual(holder.device.deletion.owner, this.owner)
-    ) {
-      return { kind: "lost" };
-    }
-    return undefined;
-  }
-
-  private async freeDeletionHoldReason(
-    device: DeviceInfo,
-    deadlineMs: number,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    const journal = await this.deps.registry.listOpenBindingJournal();
-    checkCancellation(signal);
-    if (
-      journal.some((entry) =>
-        journalNamesFreeDevice(entry, {
-          platform: device.platform,
-          stableDeviceId: deviceStableId(device)!,
-          name: device.name,
-        }),
-      )
-    ) {
-      return "journal_open";
-    }
-    if ((this.deps.claims.sessionsOn?.(device) ?? []).length > 0) {
-      return "session_holds_device";
-    }
-    const claim = await this.boundedStage<Awaited<ReturnType<BindingDeviceClaims["describe"]>>>(
-      () => this.deps.claims.describe(device),
-      {
-        label: `claim for free device '${device.name}'`,
-        signal,
-        cancel: signal,
-        timeoutMs: Math.min(this.budgets.claimMs, Math.max(0, deadlineMs - this.deps.timer.now())),
-      },
-      (error) => ({ kind: "unknown", reason: errorMessage(error) }),
-    );
-    if (claim.kind !== "free") {
-      return `claim_${claim.kind}: ${claim.reason}`;
-    }
-    return this.deps.isBusy?.(device);
-  }
-
-  private async completeFreeDeletion(
-    row: FreeBindingDeviceRecord,
-    signal?: AbortSignal,
-  ): Promise<FreeDeviceDeletionDriveResult> {
-    checkCancellation(signal);
-    const completed = await this.deps.registry.completeFreeDeviceDeletion(row, this.owner);
-    checkCancellation(signal);
-    return { kind: completed ? "absent" : "lost" };
-  }
-
-  private async recordFreeDeletionFailure(
-    row: FreeBindingDeviceRecord,
-    kind: "blocked" | "failed",
-    message: string,
-    signal?: AbortSignal,
-    nativeDeleteFailed = false,
-  ): Promise<FreeDeviceDeletionDriveResult> {
-    checkCancellation(signal);
-    const recorded = await this.deps.registry.recordFreeDeviceDeletionAttempt(row, this.owner, {
-      ...this.attemptAfter(row.deletion!, message),
-      nativeDeleteFailed,
-    });
-    checkCancellation(signal);
-    return recorded ? { kind, message } : { kind: "lost" };
   }
 
   /**
@@ -1862,12 +1556,6 @@ export class BindingJournal {
       }
     }
   }
-}
-
-function freeDeletionKey(
-  row: Pick<FreeBindingDeviceRecord, "platform" | "stableDeviceId">,
-): string {
-  return JSON.stringify([row.platform, row.stableDeviceId]);
 }
 
 /** Why an acquisition waits on an entry another live driver holds. */

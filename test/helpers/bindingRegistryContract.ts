@@ -1,10 +1,5 @@
-import {
-  FREE_DEVICE_STOP_CLAIM_STALE_MS,
-  type FreeDeviceStopClaim,
-} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  BINDING_ABANDONED_SCOPE_THRESHOLD_MS,
   BINDING_JOURNAL_TERMINAL_RETENTION_MS,
   computeBindingScopeKey,
   type BindingExecOwner,
@@ -13,9 +8,7 @@ import {
   type BindingRegistry,
   type BindingScopeIdentity,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { BindingScopeReset } from "../../src/daemon/sessionBroker/provisioning/scopeReset";
-import { ManagedExecutionReowner } from "../../src/daemon/managedSlots/managedExecutionReowner";
+import { ManagedExecutionReowner } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { IosSimCapacityGate } from "../../src/features/iosSimFleet/CapacityGate";
 import { IosSimFleetCostCollector } from "../../src/features/iosSimFleet/FleetCostCollector";
@@ -33,7 +26,6 @@ const SCOPE_A1: BindingScopeIdentity = {
   runnerNamespace: "runner-a",
   runnerIncarnation: "boot-1",
 };
-const SCOPE_A2: BindingScopeIdentity = { ...SCOPE_A1, runnerIncarnation: "boot-2" };
 const SCOPE_B1: BindingScopeIdentity = { ...SCOPE_A1, runnerNamespace: "runner-b" };
 
 const SPEC = { apiLevel: 35, deviceProfile: "pixel_8" };
@@ -112,27 +104,6 @@ export function describeBindingRegistryContract(
       expect(second.scope.scopeKey).toBe(computeBindingScopeKey(SCOPE_A1));
       expect(second.scope.lastAcquiredAtMs).toBe(1_005_000);
       expect(second.scope.createdAtMs).toBe(1_000_000);
-    });
-
-    test("a new incarnation conflicts until the old one is invalidated; other namespaces are independent", async () => {
-      const oldKey = await readyScope(SCOPE_A1);
-      expect((await registry.ensureScope(SCOPE_B1)).kind).toBe("ready");
-      const conflict = await registry.ensureScope(SCOPE_A2);
-      expect(conflict).toMatchObject({ kind: "incarnation_conflict" });
-
-      await registry.beginScopeInvalidation(oldKey, "incarnation_reset");
-      expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
-      await registry.completeScopeInvalidation(oldKey);
-      expect(await registry.ensureScope(SCOPE_A2)).toMatchObject({ kind: "ready", created: true });
-      expect((await registry.getScope(computeBindingScopeKey(SCOPE_B1)))?.state).toBe("valid");
-    });
-
-    test("an invalidated incarnation can never be revived or re-initialized", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-      await registry.completeScopeInvalidation(key.scopeKey);
-      expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
-      expect((await registry.initBinding(key, INIT)).kind).toBe("scope_not_valid");
     });
 
     test("concurrent initialization of one binding converges on a single generation-0 row", async () => {
@@ -428,127 +399,6 @@ export function describeBindingRegistryContract(
       ]);
     });
 
-    test("a binding settling under a dead settler does not block scope invalidation; a live one does", async () => {
-      const scopeKey = await readyScope();
-      const key = { scopeKey, bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      livePids.add(300);
-      await registry.updateBindingState(
-        key,
-        { generation: 1, stableDeviceId: "avd-1" },
-        "settling",
-        {
-          settler: { daemonId: "d", pid: 300 },
-        },
-      );
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
-      // A live settler still drives the released work, so the scope is not abandoned.
-      expect(await registry.markScopeAbandoned(scopeKey)).toMatchObject({
-        kind: "not_abandoned",
-        reason: "live_owner",
-      });
-      await registry.beginScopeInvalidation(scopeKey, "operator_reset");
-      const pending = await registry.completeScopeInvalidation(scopeKey);
-      expect(pending).toMatchObject({ kind: "pending", liveOwners: [], cleanupPending: [] });
-      if (pending.kind !== "pending") {
-        throw new Error("expected pending");
-      }
-      expect(pending.settling.map((binding) => binding.bindingIndex)).toEqual([0]);
-
-      livePids.delete(300);
-      expect(await registry.completeScopeInvalidation(scopeKey)).toMatchObject({
-        kind: "invalidated",
-        freedDevices: [{ stableDeviceId: "avd-1" }],
-      });
-    });
-
-    // #11336: `reset-slot-scope --force` abandons a slot stuck settling under a live settler.
-    describe("forced scope reset of a stuck settling slot", () => {
-      const settler = { daemonId: "d", pid: 300 };
-      const releaseTarget = {
-        oldStableId: "avd-1",
-        oldName: "avd-1",
-        newName: null,
-        newStableId: null,
-        requestedSpec: SPEC,
-        resolvedSpec: SPEC,
-        specFingerprint: "fp-avd-1",
-      };
-
-      async function stuckSettling(): Promise<{ scopeKey: string }> {
-        const scopeKey = await readyScope();
-        const key = { scopeKey, bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        livePids.add(300);
-        const expected = { generation: 1, stableDeviceId: "avd-1" };
-        const opened = await registry.openBindingJournal(key, {
-          kind: "release",
-          phase: "intent",
-          owner: settler,
-          target: releaseTarget,
-          assignment: { kind: "state", expected, state: "settling", options: { settler } },
-        });
-        expect(opened.kind).toBe("opened");
-        return { scopeKey };
-      }
-
-      function resetter(): BindingScopeReset {
-        timer.enableAutoAdvance();
-        return new BindingScopeReset({
-          registry: async () => registry,
-          timer,
-          isExecOwnerLive: (owner) => livePids.has(owner.pid),
-        });
-      }
-
-      test("commits the release entry, invalidates and frees the device; without --force it stays pending", async () => {
-        const { scopeKey } = await stuckSettling();
-        const request = { ...SCOPE_A1, waitMs: 0 };
-        const reset = resetter();
-
-        expect((await reset.reset(request)).outcome).toBe("pending");
-        expect((await registry.getAssignment({ scopeKey, bindingIndex: 0 }))?.state).toBe(
-          "settling",
-        );
-
-        // Inside the settlement cap --force is refused with the time remaining (#11539).
-        const early = await reset.reset({ ...request, force: true });
-        expect(early.outcome).toBe("pending");
-        expect(early.scopes[0]?.forceRefusals?.[0]?.reason).toBe("within_settlement_cap");
-        expect(await registry.listFreeDevices()).toEqual([]);
-
-        timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
-        const forced = await reset.reset({ ...request, force: true });
-
-        expect(forced).toMatchObject({
-          outcome: "invalidated",
-          scopes: [{ freedDevices: [{ stableDeviceId: "avd-1" }] }],
-        });
-        expect(await registry.listOpenBindingJournal()).toEqual([]);
-        expect((await registry.listFreeDevices()).map((d) => d.stableDeviceId)).toEqual(["avd-1"]);
-      });
-
-      test("a binding with a live execution owner is still pending under --force", async () => {
-        const scopeKey = await readyScope();
-        const key = { scopeKey, bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        livePids.add(100);
-        await registry.claimExecution(
-          key,
-          { generation: 1, stableDeviceId: "avd-1" },
-          ownerFor(100, "s1"),
-        );
-
-        const result = await resetter().reset({ ...SCOPE_A1, waitMs: 0, force: true });
-
-        expect(result.outcome).toBe("pending");
-        expect(result.scopes[0]?.pending?.liveOwners).toEqual([
-          { bindingIndex: 0, sessionUuid: "s1", pid: 100 },
-        ]);
-        expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe("s1");
-      });
-    });
-
     test("a claim may supersede only the reservation it names", async () => {
       const key = { scopeKey: await readyScope(), bindingIndex: 0 };
       await boundSlot(key, "avd-1");
@@ -566,24 +416,6 @@ export function describeBindingRegistryContract(
           supersedesSessionUuid: "reserve-1",
         }),
       ).toMatchObject({ kind: "claimed", assignment: { execOwner: { sessionUuid: "s1" } } });
-    });
-
-    test("mutations on a missing binding or an invalidating scope are refused", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      const missing = await registry.commitBinding(
-        key,
-        { generation: 0, stableDeviceId: null },
-        readyBinding("avd-1", 1),
-      );
-      expect(missing.kind).toBe("binding_missing");
-      await registry.initBinding(key, INIT);
-      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-      const blocked = await registry.commitBinding(
-        key,
-        { generation: 0, stableDeviceId: null },
-        readyBinding("avd-1", 1),
-      );
-      expect(blocked.kind).toBe("scope_not_valid");
     });
 
     test("execution ownership: claim, live duplicate refused, dead owner taken over, release keeps the binding", async () => {
@@ -699,518 +531,6 @@ export function describeBindingRegistryContract(
       });
     });
 
-    test("read APIs distinguish valid slots, invalidating scopes and the free pool", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      expect(await registry.findDeviceHolder("android", "avd-1")).toMatchObject({
-        kind: "binding",
-        scope: { state: "valid" },
-        assignment: { bindingIndex: 0 },
-      });
-      expect(await registry.findDeviceHolder("android", "unknown")).toBeNull();
-
-      await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset");
-      expect(await registry.isDeviceAssignedToValidBinding("android", "avd-1")).toBe(false);
-      expect(await registry.snapshotManagedDevices()).toEqual([
-        {
-          platform: "android",
-          stableDeviceId: "avd-1",
-          holder: "binding",
-          scopeKey: key.scopeKey,
-          bindingIndex: 0,
-          scopeState: "invalidating",
-          execSessionUuid: null,
-        },
-      ]);
-
-      await registry.completeScopeInvalidation(key.scopeKey);
-      expect(await registry.findDeviceHolder("android", "avd-1")).toMatchObject({
-        kind: "free",
-        device: { fromScopeKey: key.scopeKey, specFingerprint: "fp-avd-1" },
-      });
-      expect(await registry.snapshotManagedDevices()).toEqual([
-        {
-          platform: "android",
-          stableDeviceId: "avd-1",
-          holder: "free",
-          scopeKey: key.scopeKey,
-          bindingIndex: null,
-          scopeState: null,
-          execSessionUuid: null,
-        },
-      ]);
-    });
-
-    test("scope invalidation is idempotent and waits for live owners and pending cleanup", async () => {
-      const scopeKey = await readyScope();
-      const owned = { scopeKey, bindingIndex: 0 };
-      const cleaning = { scopeKey, bindingIndex: 1 };
-      await boundSlot(owned, "avd-1");
-      await boundSlot(cleaning, "avd-2");
-      livePids.add(100);
-      await registry.claimExecution(
-        owned,
-        { generation: 1, stableDeviceId: "avd-1" },
-        ownerFor(100, "s1"),
-      );
-      await registry.updateBindingState(
-        cleaning,
-        { generation: 1, stableDeviceId: "avd-2" },
-        "cleanup_pending",
-      );
-
-      expect((await registry.completeScopeInvalidation(scopeKey)).kind).toBe("not_invalidating");
-      expect((await registry.beginScopeInvalidation(scopeKey, "incarnation_reset")).kind).toBe(
-        "invalidating",
-      );
-      expect((await registry.beginScopeInvalidation(scopeKey, "operator_reset")).kind).toBe(
-        "already_invalidating",
-      );
-      const pending = await registry.completeScopeInvalidation(scopeKey);
-      expect(pending.kind).toBe("pending");
-      if (pending.kind !== "pending") {
-        throw new Error("expected pending");
-      }
-      expect(pending.liveOwners.map((binding) => binding.bindingIndex)).toEqual([0]);
-      expect(pending.cleanupPending.map((binding) => binding.bindingIndex)).toEqual([1]);
-      expect(await registry.listAssignments(scopeKey)).toHaveLength(2);
-      expect((await registry.getScope(scopeKey))?.invalidationReason).toBe("incarnation_reset");
-    });
-
-    test("completing invalidation frees bound devices for managed adoption only", async () => {
-      const oldKey = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(oldKey, "avd-1");
-      await registry.initBinding({ scopeKey: oldKey.scopeKey, bindingIndex: 1 }, INIT);
-      timer.advanceTime(10);
-      await registry.beginScopeInvalidation(oldKey.scopeKey, "incarnation_reset");
-      const done = await registry.completeScopeInvalidation(oldKey.scopeKey);
-      expect(done).toMatchObject({
-        kind: "invalidated",
-        scope: { state: "invalidated", invalidatedAtMs: 1_000_010 },
-        freedDevices: [{ stableDeviceId: "avd-1", freedAtMs: 1_000_010 }],
-      });
-      expect(await registry.listAssignments(oldKey.scopeKey)).toEqual([]);
-      expect((await registry.completeScopeInvalidation(oldKey.scopeKey)).kind).toBe(
-        "already_invalidated",
-      );
-      expect((await registry.beginScopeInvalidation(oldKey.scopeKey, "operator_reset")).kind).toBe(
-        "already_invalidated",
-      );
-
-      const newKey = { scopeKey: await readyScope(SCOPE_A2), bindingIndex: 0 };
-      await registry.initBinding(newKey, INIT);
-      const adopted = await registry.commitBinding(
-        newKey,
-        { generation: 0, stableDeviceId: null },
-        readyBinding("avd-1", 1),
-      );
-      expect(adopted).toMatchObject({
-        kind: "committed",
-        adoptedFreeDevice: { stableDeviceId: "avd-1", fromScopeKey: oldKey.scopeKey },
-      });
-      expect(await registry.listFreeDevices()).toEqual([]);
-    });
-
-    test("invalidation of an unknown scope reports not_found", async () => {
-      expect((await registry.beginScopeInvalidation("missing", "operator_reset")).kind).toBe(
-        "not_found",
-      );
-      expect((await registry.completeScopeInvalidation("missing")).kind).toBe("not_found");
-      expect((await registry.markScopeAbandoned("missing")).kind).toBe("not_found");
-    });
-
-    test("a scope is abandoned only after one hour with no acquisition and no live owner", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      await readyScope(SCOPE_B1);
-
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
-      expect(await registry.findAbandonedScopes()).toEqual([]);
-      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-        kind: "not_abandoned",
-        reason: "recent_acquisition",
-      });
-
-      await registry.ensureScope(SCOPE_B1);
-      timer.advanceTime(1);
-      const abandoned = await registry.findAbandonedScopes();
-      expect(abandoned.map((scope) => scope.scopeKey)).toEqual([key.scopeKey]);
-
-      livePids.add(100);
-      await registry.claimExecution(
-        key,
-        { generation: 1, stableDeviceId: "avd-1" },
-        ownerFor(100, "s1"),
-      );
-      expect(await registry.findAbandonedScopes()).toEqual([]);
-      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-        kind: "not_abandoned",
-        reason: "live_owner",
-      });
-
-      livePids.delete(100);
-      const marked = await registry.markScopeAbandoned(key.scopeKey);
-      expect(marked).toMatchObject({
-        kind: "marked",
-        scope: { state: "invalidating", invalidationReason: "abandoned" },
-      });
-      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-        kind: "not_abandoned",
-        reason: "not_valid",
-      });
-      expect(await registry.findAbandonedScopes()).toEqual([]);
-    });
-
-    async function abandon(scopeKey: string): Promise<void> {
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
-      expect((await registry.markScopeAbandoned(scopeKey)).kind).toBe("marked");
-    }
-
-    test("an abandoned scope revives when the same incarnation returns, keeping its bindings", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      await abandon(key.scopeKey);
-      expect(await registry.isDeviceAssignedToValidBinding("android", "avd-1")).toBe(false);
-
-      const revived = await registry.ensureScope(SCOPE_A1);
-      expect(revived).toMatchObject({
-        kind: "ready",
-        created: false,
-        revived: true,
-        scope: {
-          state: "valid",
-          invalidationReason: null,
-          invalidatingAtMs: null,
-          lastAcquiredAtMs: timer.now(),
-        },
-      });
-      // The surviving binding is reused as-is; a deleted device is the reconciler's to recreate.
-      expect(await registry.getAssignment(key)).toMatchObject({
-        generation: 1,
-        stableDeviceId: "avd-1",
-        state: "ready",
-      });
-      expect(await registry.isDeviceAssignedToValidBinding("android", "avd-1")).toBe(true);
-      expect(
-        await registry.commitBinding(
-          key,
-          { generation: 1, stableDeviceId: "avd-1" },
-          readyBinding("avd-1b", 2),
-        ),
-      ).toMatchObject({ kind: "committed", assignment: { generation: 2 } });
-      expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: false });
-    });
-
-    test("a scope abandoned through to invalidated keeps its slots, reserved for its revival", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      await abandon(key.scopeKey);
-      expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
-        kind: "invalidated",
-        freedDevices: [],
-      });
-
-      // Still excluded from generic allocation, not in the free pool, not adoptable elsewhere.
-      expect(await registry.listFreeDevices()).toEqual([]);
-      expect(await registry.snapshotManagedDevices()).toEqual([
-        expect.objectContaining({
-          stableDeviceId: "avd-1",
-          holder: "binding",
-          bindingIndex: 0,
-          scopeState: "invalidated",
-        }),
-      ]);
-      const other = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-      await registry.initBinding(other, INIT);
-      expect(
-        await registry.commitBinding(
-          other,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        ),
-      ).toMatchObject({ kind: "device_assigned_elsewhere" });
-
-      expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({
-        kind: "ready",
-        revived: true,
-        scope: { state: "valid", invalidatedAtMs: null },
-      });
-      // The same row, binding and generation: nothing is re-created or re-adopted.
-      expect(await registry.getAssignment(key)).toMatchObject({
-        generation: 1,
-        stableDeviceId: "avd-1",
-        state: "ready",
-      });
-      expect(await registry.isDeviceAssignedToValidBinding("android", "avd-1")).toBe(true);
-    });
-
-    test("the abandonment clock runs from the last execution release, not the acquisition", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      const binding = { generation: 1, stableDeviceId: "avd-1" };
-      livePids.add(100);
-      await registry.claimExecution(key, binding, ownerFor(100, "s1"));
-      // A 50-minute execution ends.
-      timer.advanceTime(50 * 60 * 1000);
-      await registry.releaseExecution(key, "s1");
-      livePids.delete(100);
-      expect((await registry.getScope(key.scopeKey))?.lastReleasedAtMs).toBe(timer.now());
-
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
-      expect(await registry.findAbandonedScopes()).toEqual([]);
-      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-        kind: "not_abandoned",
-        reason: "recent_acquisition",
-      });
-      timer.advanceTime(1);
-      expect((await registry.findAbandonedScopes()).map((scope) => scope.scopeKey)).toEqual([
-        key.scopeKey,
-      ]);
-    });
-
-    test("an explicit reset of an abandoned scope is permanent and frees its kept slots", async () => {
-      const invalidating = await readyScope(SCOPE_A1);
-      await abandon(invalidating);
-      expect(await registry.beginScopeInvalidation(invalidating, "operator_reset")).toMatchObject({
-        kind: "already_invalidating",
-        scope: { invalidationReason: "operator_reset" },
-      });
-      expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
-
-      const invalidated = await readyScope(SCOPE_B1);
-      const kept = { scopeKey: invalidated, bindingIndex: 0 };
-      await boundSlot(kept, "avd-b");
-      await abandon(invalidated);
-      await registry.completeScopeInvalidation(invalidated);
-      expect(await registry.listAssignments(invalidated)).toHaveLength(1);
-      expect(await registry.beginScopeInvalidation(invalidated, "operator_reset")).toMatchObject({
-        kind: "already_invalidated",
-        scope: { invalidationReason: "operator_reset" },
-      });
-      expect((await registry.ensureScope(SCOPE_B1)).kind).toBe("scope_invalidated");
-      expect(await registry.listAssignments(invalidated)).toEqual([]);
-      expect((await registry.listFreeDevices()).map((device) => device.stableDeviceId)).toEqual([
-        "avd-b",
-      ]);
-    });
-
-    test("an abandonment-only re-mark keeps the scope revivable", async () => {
-      const scopeKey = await readyScope();
-      await abandon(scopeKey);
-      expect(await registry.beginScopeInvalidation(scopeKey, "abandoned")).toMatchObject({
-        kind: "already_invalidating",
-        scope: { invalidationReason: "abandoned" },
-      });
-      expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: true });
-    });
-
-    test("a newer incarnation makes an abandoned one permanently invalid and frees its slots", async () => {
-      const oldKey = await readyScope(SCOPE_A1);
-      await boundSlot({ scopeKey: oldKey, bindingIndex: 0 }, "avd-old");
-      await abandon(oldKey);
-      // Still invalidating: the old incarnation blocks the new one until it settles.
-      expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
-      await registry.completeScopeInvalidation(oldKey);
-      expect(await registry.listFreeDevices()).toEqual([]);
-
-      const newKey = await readyScope(SCOPE_A2);
-      expect((await registry.getScope(oldKey))?.invalidationReason).toBe("incarnation_reset");
-      expect(await registry.listAssignments(oldKey)).toEqual([]);
-      expect(await registry.findDeviceHolder("android", "avd-old")).toMatchObject({
-        kind: "free",
-        device: { fromScopeKey: oldKey },
-      });
-      expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
-
-      await registry.beginScopeInvalidation(newKey, "operator_reset");
-      await registry.completeScopeInvalidation(newKey);
-      expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
-    });
-
-    test("free devices become reclaimable after the abandonment threshold", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-      await registry.completeScopeInvalidation(key.scopeKey);
-      expect(await registry.findReclaimableFreeDevices()).toEqual([]);
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
-      expect(
-        (await registry.findReclaimableFreeDevices()).map((device) => device.stableDeviceId),
-      ).toEqual(["avd-1"]);
-      expect(
-        await registry.findReclaimableFreeDevices({ thresholdMs: 2 * 60 * 60 * 1000 }),
-      ).toEqual([]);
-    });
-
-    describe("free-pool stop state (#11337)", () => {
-      async function dueFreeDevice(): Promise<{
-        target: FreeDeviceStopClaim;
-        key: BindingKey;
-      }> {
-        const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-        await registry.completeScopeInvalidation(key.scopeKey);
-        const [freed] = await registry.listFreeDevices();
-        timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
-        return {
-          target: {
-            platform: "android",
-            stableDeviceId: "avd-1",
-            freedAtMs: freed!.freedAtMs,
-            fromScopeKey: key.scopeKey,
-            claimedBy: "daemon-1",
-          },
-          key,
-        };
-      }
-
-      test("a due device goes free to stopping to stopped and keeps its row", async () => {
-        const { target } = await dueFreeDevice();
-        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "free" });
-
-        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
-        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopping" });
-        // An interrupted attempt is retried: still reclaimable, and begin is idempotent.
-        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
-        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
-
-        expect(await registry.completeFreeDeviceStop(target)).toBe(true);
-        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopped" });
-        expect(await registry.findReclaimableFreeDevices()).toEqual([]);
-        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
-        // Still excluded from generic use while stopped.
-        expect(await registry.snapshotManagedDevices()).toMatchObject([
-          { stableDeviceId: "avd-1", holder: "free" },
-        ]);
-      });
-
-      test("a stopping row is owned: only the claimer drives it until the claim is stale", async () => {
-        const { target } = await dueFreeDevice();
-        const other = { ...target, claimedBy: "daemon-2" };
-        await registry.beginFreeDeviceStop(target);
-
-        expect(await registry.holdsFreeDeviceStop(target)).toBe(true);
-        expect(await registry.holdsFreeDeviceStop(other)).toBe(false);
-        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "not_reclaimable" });
-        expect(await registry.completeFreeDeviceStop(other)).toBe(false);
-        expect(await registry.revertFreeDeviceStop(other)).toBe(false);
-        expect((await registry.listFreeDevices())[0]).toMatchObject({
-          state: "stopping",
-          stopClaimedBy: "daemon-1",
-        });
-
-        // The claimer died: past the stale bound another daemon takes the stop over.
-        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
-        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "begun" });
-        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
-        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
-        expect(await registry.completeFreeDeviceStop(other)).toBe(true);
-      });
-
-      test("a failed shutdown reverts to free so the device is adoptable again", async () => {
-        const { target } = await dueFreeDevice();
-        await registry.beginFreeDeviceStop(target);
-
-        expect(await registry.revertFreeDeviceStop(target)).toBe(true);
-        expect((await registry.listFreeDevices())[0]).toMatchObject({
-          state: "free",
-          stopClaimedBy: null,
-          stopClaimedAtMs: null,
-          deletion: null,
-        });
-        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
-
-        const binding = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-        await registry.initBinding(binding, INIT);
-        const adopted = await registry.commitBinding(
-          binding,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        );
-        expect(adopted).toMatchObject({ kind: "committed" });
-      });
-
-      test("a stale stopping claim no longer blocks adoption", async () => {
-        const { target } = await dueFreeDevice();
-        await registry.beginFreeDeviceStop(target);
-        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
-        const binding = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-        await registry.initBinding(binding, INIT);
-
-        const adopted = await registry.commitBinding(
-          binding,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        );
-
-        expect(adopted).toMatchObject({ kind: "committed" });
-        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
-      });
-
-      test("a device that is not yet due is not claimed", async () => {
-        const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-        await registry.completeScopeInvalidation(key.scopeKey);
-        const [freed] = await registry.listFreeDevices();
-        timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
-        expect(
-          await registry.beginFreeDeviceStop({
-            platform: "android",
-            stableDeviceId: "avd-1",
-            freedAtMs: freed!.freedAtMs,
-            fromScopeKey: key.scopeKey,
-            claimedBy: "daemon-1",
-          }),
-        ).toEqual({ kind: "not_reclaimable" });
-      });
-
-      test("an adoption that wins the race keeps the device and fails the stop CAS", async () => {
-        const { target } = await dueFreeDevice();
-        const binding = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-        await registry.initBinding(binding, INIT);
-        const adopted = await registry.commitBinding(
-          binding,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        );
-        expect(adopted).toMatchObject({ kind: "committed" });
-
-        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
-        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
-        expect(await registry.listFreeDevices()).toEqual([]);
-      });
-
-      test("adoption is refused while stopping and succeeds once stopped", async () => {
-        const { target } = await dueFreeDevice();
-        const binding = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-        await registry.initBinding(binding, INIT);
-        await registry.beginFreeDeviceStop(target);
-
-        expect(
-          await registry.commitBinding(
-            binding,
-            { generation: 0, stableDeviceId: null },
-            readyBinding("avd-1", 1),
-          ),
-        ).toEqual({ kind: "free_device_stopping" });
-        expect(await registry.listFreeDevices()).toHaveLength(1);
-
-        await registry.completeFreeDeviceStop(target);
-        const adopted = await registry.commitBinding(
-          binding,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        );
-        expect(adopted).toMatchObject({
-          kind: "committed",
-          adoptedFreeDevice: { stableDeviceId: "avd-1", state: "stopped" },
-        });
-        expect(await registry.listFreeDevices()).toEqual([]);
-      });
-    });
-
     describe("daemon restart (#11275)", () => {
       const BEFORE_RESTART = { daemonId: "daemon-before", pid: 301, processGenerationToken: "t-1" };
       const AFTER_RESTART = { daemonId: "daemon-after", pid: 302, processGenerationToken: "t-2" };
@@ -1267,19 +587,6 @@ export function describeBindingRegistryContract(
         expect(assignment).toMatchObject({ generation: 1, stableDeviceId: "avd-1" });
       });
 
-      test("a re-owned execution keeps its scope from being abandoned past the threshold", async () => {
-        const key = await liveExecutionAcrossRestart();
-        await reowner().reown(["live-session"]);
-
-        timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
-
-        expect(await registry.findAbandonedScopes()).toEqual([]);
-        expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-          kind: "not_abandoned",
-          reason: "live_owner",
-        });
-      });
-
       test("re-owning is idempotent and never takes a binding another execution holds", async () => {
         const key = await liveExecutionAcrossRestart();
         expect(await reowner().reown(["live-session"])).toHaveLength(1);
@@ -1288,136 +595,6 @@ export function describeBindingRegistryContract(
         expect((await registry.getAssignment(key))?.execOwner).toEqual({
           ...AFTER_RESTART,
           sessionUuid: "live-session",
-        });
-      });
-
-      // #11642: the runner's next incarnation asked while the execution was live, so the scope is
-      // already `invalidating` when the daemon restarts.
-      describe("while the scope is invalidating (#11642)", () => {
-        const BINDING = { generation: 1, stableDeviceId: "avd-1" };
-
-        async function invalidatingAcrossRestart(): Promise<BindingKey> {
-          const key = await liveExecutionAcrossRestart();
-          expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
-          expect(
-            (await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset")).kind,
-          ).toBe("invalidating");
-          return key;
-        }
-
-        test("the restarted daemon re-owns its live execution and the transition waits for it", async () => {
-          const key = await invalidatingAcrossRestart();
-          // Unowned, the record names a dead process: any daemon would retire the scope.
-          const reowned = await reowner().reown(["live-session"]);
-
-          expect(reowned.map((binding) => binding.execOwner)).toEqual([
-            { ...AFTER_RESTART, sessionUuid: "live-session" },
-          ]);
-          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
-            kind: "pending",
-            liveOwners: [{ execOwner: { pid: AFTER_RESTART.pid, sessionUuid: "live-session" } }],
-          });
-          // Re-owning neither revives the scope nor touches the binding.
-          expect(await registry.getScope(key.scopeKey)).toMatchObject({
-            state: "invalidating",
-            invalidationReason: "incarnation_reset",
-          });
-          expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
-        });
-
-        test("the transition completes once the re-owned execution ends, and the next incarnation proceeds", async () => {
-          const key = await invalidatingAcrossRestart();
-          await reowner().reown(["live-session"]);
-
-          expect((await registry.releaseExecution(key, "live-session")).released).toBe(true);
-
-          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
-            kind: "invalidated",
-            freedDevices: [{ stableDeviceId: "avd-1" }],
-          });
-          expect(await registry.ensureScope(SCOPE_A2)).toMatchObject({ kind: "ready" });
-          // Nothing is left to re-own in the retired scope.
-          expect(await reowner().reown(["live-session"])).toEqual([]);
-        });
-
-        test("no other session, reservation or superseding claim gets into the invalidating scope", async () => {
-          const key = await invalidatingAcrossRestart();
-          const other = { ...AFTER_RESTART, sessionUuid: "other-session" };
-
-          // The recorded owner's process is dead: in a valid scope each of these would be claimed.
-          expect((await registry.claimExecution(key, BINDING, other)).kind).toBe("scope_not_valid");
-          expect(
-            (
-              await registry.claimExecution(key, BINDING, other, {
-                supersedesSessionUuid: "live-session",
-              })
-            ).kind,
-          ).toBe("scope_not_valid");
-          expect(
-            (
-              await registry.claimExecution(
-                key,
-                BINDING,
-                { ...AFTER_RESTART, sessionUuid: "reserve-next" },
-                { supersedesSessionUuid: "live-session" },
-              )
-            ).kind,
-          ).toBe("scope_not_valid");
-          expect((await registry.getAssignment(key))?.execOwner).toEqual({
-            ...BEFORE_RESTART,
-            sessionUuid: "live-session",
-          });
-
-          // The same session with a stale binding is still a stale binding.
-          expect(
-            (
-              await registry.claimExecution(
-                key,
-                { generation: 2, stableDeviceId: "avd-1" },
-                { ...AFTER_RESTART, sessionUuid: "live-session" },
-              )
-            ).kind,
-          ).toBe("stale_binding");
-        });
-
-        test("an ownerless binding of an invalidating scope cannot be claimed, even by its last session", async () => {
-          const key = await invalidatingAcrossRestart();
-          await registry.releaseExecution(key, "live-session");
-
-          expect(
-            (
-              await registry.claimExecution(key, BINDING, {
-                ...AFTER_RESTART,
-                sessionUuid: "live-session",
-              })
-            ).kind,
-          ).toBe("scope_not_valid");
-          expect(await reowner().reown(["live-session"])).toEqual([]);
-        });
-
-        test("an invalidated scope accepts no claim, the recorded session's included", async () => {
-          const key = await liveExecutionAcrossRestart();
-          timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
-          // No daemon holds the session and its process is dead: the scope is abandoned through.
-          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
-          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
-
-          expect(await reowner().reown(["live-session"])).toEqual([]);
-          expect((await registry.getAssignment(key))?.execOwner).toEqual({
-            ...BEFORE_RESTART,
-            sessionUuid: "live-session",
-          });
-        });
-
-        test("a scope marked abandoned before the re-own is not retired under the live session", async () => {
-          const key = await liveExecutionAcrossRestart();
-          timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
-          // A peer daemon judged the record by its dead process and marked the scope.
-          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
-
-          expect(await reowner().reown(["live-session"])).toHaveLength(1);
-
-          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("pending");
         });
       });
     });
@@ -1438,49 +615,6 @@ export function describeBindingRegistryContract(
       // Entering `replacing` is a fence: it bumps the generation (#11242).
       const FENCED = { generation: 2, stableDeviceId: "avd-1" };
 
-      test("an abandoned-scope delete opens and fences atomically", async () => {
-        const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        await abandon(key.scopeKey);
-        const opened = await registry.openBindingJournal(key, {
-          kind: "replace",
-          phase: "deleting",
-          owner: OWNER_1,
-          target: TARGET,
-          requireAbandonedScope: true,
-          assignment: { kind: "state", expected: BOUND, state: "replacing" },
-        });
-        expect(opened).toMatchObject({
-          kind: "opened",
-          assignment: { state: "replacing", generation: 2 },
-        });
-      });
-
-      for (const revived of [true, false]) {
-        test(`an abandoned-scope delete refuses a ${revived ? "revived" : "never-abandoned"} scope without writes`, async () => {
-          const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-          await boundSlot(key, "avd-1");
-          if (revived) {
-            await abandon(key.scopeKey);
-            expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ revived: true });
-          }
-          const before = await registry.getAssignment(key);
-          const scope = await registry.getScope(key.scopeKey);
-          const refused = await registry.openBindingJournal(key, {
-            kind: "replace",
-            phase: "deleting",
-            owner: OWNER_1,
-            target: TARGET,
-            requireAbandonedScope: true,
-            assignment: { kind: "state", expected: BOUND, state: "replacing" },
-          });
-          expect(refused).toEqual({ kind: "scope_not_abandoned", scope });
-          expect(await registry.listOpenBindingJournal(key)).toEqual([]);
-          expect(await registry.getBindingJournal(1)).toBeNull();
-          expect(await registry.getAssignment(key)).toEqual(before);
-        });
-      }
-
       test("without the abandonment precondition a valid scope still opens a delete", async () => {
         const key = { scopeKey: await readyScope(), bindingIndex: 0 };
         await boundSlot(key, "avd-1");
@@ -1491,30 +625,6 @@ export function describeBindingRegistryContract(
           generation: 2,
         });
       });
-
-      for (const reset of [true, false]) {
-        test(`an abandoned-scope delete refuses a ${reset ? "reset" : "missing"} scope before changing assignments`, async () => {
-          const key = { scopeKey: reset ? await readyScope() : "missing-scope", bindingIndex: 0 };
-          if (reset) {
-            await boundSlot(key, "avd-1");
-            await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-          }
-          const before = await registry.getAssignment(key);
-          expect(
-            await registry.openBindingJournal(key, {
-              kind: "replace",
-              phase: "deleting",
-              owner: OWNER_1,
-              target: TARGET,
-              requireAbandonedScope: true,
-              assignment: { kind: "state", expected: BOUND, state: "replacing" },
-            }),
-          ).toEqual({ kind: "scope_not_abandoned", scope: await registry.getScope(key.scopeKey) });
-          expect(await registry.getAssignment(key)).toEqual(before);
-          expect(await registry.listOpenBindingJournal(key)).toEqual([]);
-          expect(await registry.getBindingJournal(1)).toBeNull();
-        });
-      }
 
       test("existing open work takes precedence over the abandonment precondition", async () => {
         const key = { scopeKey: await readyScope(), bindingIndex: 0 };
@@ -1527,7 +637,6 @@ export function describeBindingRegistryContract(
             phase: "deleting",
             owner: OWNER_2,
             target: TARGET,
-            requireAbandonedScope: true,
             assignment: { kind: "state", expected: BOUND, state: "replacing" },
           }),
         ).toEqual({ kind: "journal_open", entry });
@@ -1819,44 +928,6 @@ export function describeBindingRegistryContract(
         ).toBe("journal_conflict");
       });
 
-      test("open work blocks scope invalidation but may settle while the scope is invalidating", async () => {
-        const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-        await boundSlot(key, "avd-1");
-        const entry = await openReplace(key);
-        await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset");
-        const pending = await registry.completeScopeInvalidation(key.scopeKey);
-        expect(pending).toMatchObject({ kind: "pending", openJournal: [{ id: entry.id }] });
-
-        const settled = await registry.advanceBindingJournal(entry.id, {
-          owner: OWNER_1,
-          expectedPhase: "deleting",
-          phase: "deleted",
-          assignment: {
-            kind: "commit",
-            expected: FENCED,
-            next: {
-              stableDeviceId: null,
-              deviceName: null,
-              resolvedSpec: null,
-              specFingerprint: null,
-              state: "provisioning",
-            },
-          },
-        });
-        expect(settled.kind).toBe("advanced");
-        await registry.advanceBindingJournal(entry.id, {
-          owner: OWNER_1,
-          expectedPhase: "deleted",
-          phase: "committed",
-        });
-        expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
-        // Non-journaled mutations still need a valid scope.
-        expect(
-          (await registry.updateBindingState(key, { generation: 3, stableDeviceId: null }, "ready"))
-            .kind,
-        ).toBe("scope_not_valid");
-      });
-
       test("a device an open entry is creating is excluded from generic allocation", async () => {
         const key = { scopeKey: await readyScope(), bindingIndex: 0 };
         await registry.initBinding(key, INIT);
@@ -2009,49 +1080,6 @@ export function describeBindingRegistryContract(
       });
     });
 
-    test("findScopes selects by namespace and incarnation, optionally by host", async () => {
-      const a1 = await readyScope(SCOPE_A1);
-      const otherHost = await readyScope({ ...SCOPE_A1, managedHostScope: "host-2" });
-      await readyScope(SCOPE_B1);
-      const query = { runnerNamespace: "runner-a", runnerIncarnation: "boot-1" };
-      expect((await registry.findScopes(query)).map((scope) => scope.scopeKey).sort()).toEqual(
-        [a1, otherHost].sort(),
-      );
-      expect(
-        (await registry.findScopes({ ...query, managedHostScope: "host-1" })).map(
-          (scope) => scope.scopeKey,
-        ),
-      ).toEqual([a1]);
-      expect(await registry.findScopes({ ...query, runnerIncarnation: "boot-9" })).toEqual([]);
-    });
-
-    test("listAbandonedScopes lists abandoned scopes until they are revived or reset", async () => {
-      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
-      await boundSlot(key, "avd-1");
-      expect(await registry.listAbandonedScopes()).toEqual([]);
-      await abandon(key.scopeKey);
-      expect((await registry.listAbandonedScopes()).map((scope) => scope.scopeKey)).toEqual([
-        key.scopeKey,
-      ]);
-      await registry.ensureScope(SCOPE_A1);
-      expect(await registry.listAbandonedScopes()).toEqual([]);
-      await abandon(key.scopeKey);
-      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-      expect(await registry.listAbandonedScopes()).toEqual([]);
-    });
-
-    test("the resource snapshot exposes abandoned scope keys without unrelated scope history", async () => {
-      const abandoned = await readyScope(SCOPE_A1);
-      const reset = await readyScope(SCOPE_B1);
-      await readyScope({ ...SCOPE_A1, runnerNamespace: "untouched" });
-      await abandon(abandoned);
-      await registry.beginScopeInvalidation(reset, "operator_reset");
-      await registry.completeScopeInvalidation(reset);
-      const snapshot = await registry.snapshotBindingResources();
-      expect(snapshot.abandonedScopeKeys).toEqual([abandoned]);
-      expect(snapshot).not.toHaveProperty("scopes");
-    });
-
     test("malformed binding keys and thresholds are rejected before storage", async () => {
       const scopeKey = await readyScope();
       await expect(registry.initBinding({ scopeKey, bindingIndex: -1 }, INIT)).rejects.toThrow(
@@ -2060,182 +1088,36 @@ export function describeBindingRegistryContract(
       await expect(registry.initBinding({ scopeKey, bindingIndex: 1.5 }, INIT)).rejects.toThrow(
         "non-negative integer",
       );
-      await expect(registry.findAbandonedScopes({ thresholdMs: -1 })).rejects.toThrow(
-        "non-negative",
-      );
     });
-    describe("free-device deletion journal", () => {
-      const owner = { daemonId: "one", pid: 11, processGenerationToken: "generation-one" };
-      const next = { daemonId: "two", pid: 12, processGenerationToken: "generation-two" };
-      async function freeRow(id = "amslot-delete") {
-        const scopeKey = await readyScope({ ...SCOPE_A1, runnerNamespace: id });
-        await boundSlot({ scopeKey, bindingIndex: 0 }, id);
-        await registry.beginScopeInvalidation(scopeKey, "operator_reset");
-        await registry.completeScopeInvalidation(scopeKey);
-        return (await registry.listFreeDevices()).find((row) => row.stableDeviceId === id)!;
-      }
-      test("begin is exact-row CAS, persists its owner and rejects a second begin", async () => {
-        const row = await freeRow();
-        expect(
-          await registry.beginFreeDeviceDeletion({ ...row, freedAtMs: row.freedAtMs + 1 }, owner),
-        ).toMatchObject({ kind: "not_evictable" });
-        expect(
-          await registry.beginFreeDeviceDeletion({ ...row, fromScopeKey: "other" }, owner),
-        ).toMatchObject({ kind: "not_evictable" });
-        expect(await registry.beginFreeDeviceDeletion(row, owner)).toMatchObject({
-          kind: "begun",
-          row: {
-            deletion: {
-              owner,
-              attempts: 0,
-              failedDeletes: 0,
-              lastError: null,
-              startedAtMs: timer.now(),
-              nextAttemptAtMs: timer.now(),
-            },
-          },
-        });
-        expect(await registry.beginFreeDeviceDeletion(row, next)).toMatchObject({
-          kind: "not_evictable",
-        });
-        expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
+
+    test("mutations on a missing binding are refused", async () => {
+      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
+      const missing = await registry.commitBinding(
+        key,
+        { generation: 0, stableDeviceId: null },
+        readyBinding("avd-1", 1),
+      );
+      expect(missing.kind).toBe("binding_missing");
+    });
+
+    test("read APIs identify bound devices and unknown identities", async () => {
+      const key = { scopeKey: await readyScope(), bindingIndex: 0 };
+      await boundSlot(key, "avd-1");
+      expect(await registry.findDeviceHolder("android", "avd-1")).toMatchObject({
+        kind: "binding",
+        scope: { state: "valid" },
+        assignment: { bindingIndex: 0 },
       });
-      test("attempt and completion require the exact owner including its process token", async () => {
-        const row = await freeRow();
-        await registry.beginFreeDeviceDeletion(row, owner);
-        const impostor = { ...owner, processGenerationToken: "reused-pid" };
-        expect(
-          await registry.recordFreeDeviceDeletionAttempt(row, impostor, {
-            error: "bad",
-            nextAttemptAtMs: 3,
-          }),
-        ).toBe(false);
-        expect(await registry.completeFreeDeviceDeletion(row, impostor)).toBe(false);
-        expect(
-          await registry.recordFreeDeviceDeletionAttempt(row, owner, {
-            error: "retry",
-            nextAttemptAtMs: timer.now() + 500,
-          }),
-        ).toBe(true);
-        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
-          attempts: 1,
-          failedDeletes: 0,
-          lastError: "retry",
-          nextAttemptAtMs: timer.now() + 500,
-        });
-        expect(
-          await registry.recordFreeDeviceDeletionAttempt(row, owner, {
-            error: "native failed",
-            nextAttemptAtMs: 8,
-            nativeDeleteFailed: true,
-          }),
-        ).toBe(true);
-        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
-          attempts: 2,
-          failedDeletes: 1,
-        });
-        expect(
-          await registry.completeFreeDeviceDeletion({ ...row, fromScopeKey: "other" }, owner),
-        ).toBe(false);
-        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(true);
-        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(false);
-        expect(await registry.listFreeDeviceDeletions()).toEqual([]);
-      });
-      test("claim is owner CAS and preserves the deletion commitment and retry", async () => {
-        const row = await freeRow();
-        await registry.beginFreeDeviceDeletion(row, owner);
-        await registry.recordFreeDeviceDeletionAttempt(row, owner, {
-          error: "retry",
-          nativeDeleteFailed: true,
-          nextAttemptAtMs: 9,
-        });
-        expect(await registry.claimFreeDeviceDeletion(row, next, owner)).toBe(false);
-        expect(await registry.claimFreeDeviceDeletion(row, owner, next)).toBe(true);
-        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
-          owner: next,
-          attempts: 1,
-          failedDeletes: 1,
-          lastError: "retry",
-          nextAttemptAtMs: 9,
-        });
-        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(false);
-        expect(await registry.completeFreeDeviceDeletion(row, next)).toBe(true);
-      });
-      test("list orders retries and marked rows remain excluded, never stoppable or adoptable", async () => {
-        const first = await freeRow("amslot-first");
-        const second = await freeRow("amslot-second");
-        for (const row of [first, second]) {
-          await registry.beginFreeDeviceDeletion(row, owner);
-        }
-        await registry.recordFreeDeviceDeletionAttempt(first, owner, {
-          error: "retry",
-          nextAttemptAtMs: timer.now() + 500,
-        });
-        expect((await registry.listFreeDeviceDeletions()).map((row) => row.stableDeviceId)).toEqual(
-          [second.stableDeviceId, first.stableDeviceId],
-        );
-        expect(await registry.findReclaimableFreeDevices({ thresholdMs: 0 })).toEqual([]);
-        expect(
-          await registry.beginFreeDeviceStop(
-            { ...first, claimedBy: "stopper" },
-            { thresholdMs: 0 },
-          ),
-        ).toEqual({ kind: "not_reclaimable" });
-        const key = { scopeKey: await readyScope(SCOPE_B1), bindingIndex: 0 };
-        await registry.initBinding(key, INIT);
-        expect(
-          await registry.commitBinding(
-            key,
-            { generation: 0, stableDeviceId: null },
-            readyBinding(first.stableDeviceId, 1),
-          ),
-        ).toEqual({ kind: "free_device_stopping" });
-        const opened = await registry.openBindingJournal(key, {
-          kind: "create",
-          phase: "creating",
-          owner,
-          target: {
-            oldStableId: null,
-            oldName: null,
-            newStableId: first.stableDeviceId,
-            newName: first.stableDeviceId,
-            requestedSpec: SPEC,
-            resolvedSpec: SPEC,
-            specFingerprint: "fp",
-          },
-          assignment: {
-            kind: "state",
-            expected: { generation: 0, stableDeviceId: null },
-            state: "provisioning",
-          },
-        });
-        if (opened.kind !== "opened") {
-          throw new Error(opened.kind);
-        }
-        expect(
-          await registry.advanceBindingJournal(opened.entry.id, {
-            owner,
-            expectedPhase: "creating",
-            phase: "committed",
-            assignment: {
-              kind: "commit",
-              expected: opened.entry.binding,
-              next: readyBinding(first.stableDeviceId, 1),
-            },
-          }),
-        ).toEqual({ kind: "free_device_stopping" });
-        expect(await registry.listFreeDeviceDeletions()).toHaveLength(2);
-        expect(
-          (await registry.snapshotManagedDevices()).filter((entry) => entry.holder === "free"),
-        ).toHaveLength(2);
-      });
-      test("deletion metadata returned by list cannot mutate the stored owner", async () => {
-        const row = await freeRow();
-        await registry.beginFreeDeviceDeletion(row, owner);
-        const copy = (await registry.listFreeDevices())[0];
-        copy.deletion!.owner.daemonId = "tampered";
-        expect((await registry.listFreeDevices())[0].deletion!.owner.daemonId).toBe(owner.daemonId);
-      });
+      expect(await registry.findDeviceHolder("android", "unknown")).toBeNull();
+    });
+
+    test("scope namespaces remain independent and an existing incarnation conflicts", async () => {
+      await readyScope(SCOPE_A1);
+      expect((await registry.ensureScope(SCOPE_B1)).kind).toBe("ready");
+      expect(
+        await registry.ensureScope({ ...SCOPE_A1, runnerIncarnation: "boot-2" }),
+      ).toMatchObject({ kind: "incarnation_conflict" });
+      expect((await registry.getScope(computeBindingScopeKey(SCOPE_B1)))?.state).toBe("valid");
     });
   });
 }

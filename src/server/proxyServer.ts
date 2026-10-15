@@ -38,7 +38,6 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
-  managedExecutionEndedPayload,
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
   terminalSessionRefusalFields,
@@ -48,23 +47,10 @@ import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSel
 import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
-import {
-  DAEMON_STALLED_CODE,
-  livenessHandoverPayload,
-  managedDaemonStalledPayload,
-  PROXY_STALLED_CODE,
-  type LivenessHandover,
-} from "../daemon/proxyLivenessRecovery";
-import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
+import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../models/sessionConfig";
 import type { SessionBrokerResult } from "../models/sessionBrokerResult";
-import { RELAUNCH_EXECUTION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import { MANAGED_SLOTS_RESOURCE_URI } from "../models/managedSlotsResult";
-import {
-  bindingForSession,
-  type BindingsResult,
-} from "../daemon/sessionBroker/provisioning/acquisitionResult";
-import { idleReleaseField, SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
+import { idleReleaseField } from "../daemon/releaseReasons";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -88,54 +74,12 @@ function acceptanceDiscoveryConfiguration():
 export interface ProxyMcpServerOptions {
   /** Configuration for the daemon proxy */
   proxyConfig?: DaemonMcpProxyConfig;
-  /** An already-created proxy (managed slots acquire on it before the server exists). */
+  /** An already-created proxy (broker bindings acquire on it before the server exists). */
   proxy?: DaemonMcpProxy;
-  /**
-   * The managed slot acquisition result (#11173): advertised in
-   * `capabilities.experimental["automobile/managedSlots"]` and as `automobile:managed-slots`. A
-   * failed one advertises no tools and refuses every tool call.
-   */
-  bindings?: BindingsResult;
   /** Flat durable broker result exposed only through initialize capabilities. */
   session?: SessionBrokerResult;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
-}
-
-/**
- * The `managed_execution_ended` payload (#11341) when this is a managed connection and the released
- * session is one of its slot sessions (or, without a session, any session of a ready managed
- * connection). A session the connection does not hold keeps its ordinary refusal.
- */
-export function managedEndedPayload(
-  bindings: BindingsResult | undefined,
-  sessionUuid: string | undefined,
-  reason: string,
-) {
-  if (bindings?.outcome !== "ready") {
-    return undefined;
-  }
-  const binding = sessionUuid === undefined ? null : bindingForSession(bindings, sessionUuid);
-  return sessionUuid !== undefined && !binding
-    ? undefined
-    : managedExecutionEndedPayload({ sessionUuid, reason, binding });
-}
-
-/**
- * Rewrite a relayed daemon terminal-session refusal (`session_ownership_lost`, ...) into
- * `managed_execution_ended` on a managed connection (#11341): the daemon's advice to acquire a new
- * session cannot work there. Any other result passes through.
- */
-function managedEndedRelayedResult<T>(
-  result: T,
-  bindings: BindingsResult | undefined,
-): T | CallToolResult {
-  const refusal = readTerminalSessionRefusal(result);
-  const payload =
-    refusal && managedEndedPayload(bindings, refusal.sessionUuid, refusal.reason ?? "unknown");
-  return payload
-    ? { content: [{ type: "text", text: JSON.stringify(payload) }], isError: true }
-    : result;
 }
 
 export function brokerSessionEndedPayload(
@@ -210,85 +154,20 @@ function brokerSessionHasEnded(
 }
 
 /**
- * A `proxy_stalled` handover is a definitive loss: the daemon answered that the session is gone.
- * On a managed connection its "reacquire with getAndroid or getApple" advice cannot work, so a
- * slot session lost that way is answered `managed_execution_ended` like every other terminal
- * release (#11483). `daemon_stalled` is not a loss and keeps its own handover.
- */
-function managedStallLossPayload(
-  bindings: BindingsResult | undefined,
-  sessionUuid: string,
-  handover: LivenessHandover,
-) {
-  return handover.code === PROXY_STALLED_CODE
-    ? managedEndedPayload(
-        bindings,
-        sessionUuid,
-        handover.releaseReasons?.[sessionUuid] ?? SESSION_NOT_FOUND_REASON,
-      )
-    : undefined;
-}
-
-/** Only a ready connection's slot sessions can reclaim without harness intervention. */
-function managedDaemonStallPayload(
-  bindings: BindingsResult | undefined,
-  handover: LivenessHandover,
-  sessionUuid?: string,
-) {
-  if (
-    handover.code !== DAEMON_STALLED_CODE ||
-    bindings?.outcome !== "ready" ||
-    (sessionUuid !== undefined && !bindingForSession(bindings, sessionUuid))
-  ) {
-    return undefined;
-  }
-  const sessions = handover.sessions.filter((session) =>
-    bindingForSession(bindings, session.sessionUuid),
-  );
-  return sessions.length > 0 ? managedDaemonStalledPayload({ ...handover, sessions }) : undefined;
-}
-
-/**
- * The logging notifications for one liveness handover. A managed connection reports each slot
+ * The logging notifications for one liveness handover. A managed connection reports each binding
  * session a `proxy_stalled` handover lost as `managed_execution_ended`; whatever is left keeps
  * the handover payload. Managed `daemon_stalled` sessions receive automatic reclaim advice;
- * non-slot sessions and generic connections keep the generic handover.
+ * non-binding sessions and generic connections keep the generic handover.
  */
-export function livenessHandoverNotificationPayloads(
-  handover: LivenessHandover,
-  bindings?: BindingsResult,
-): unknown[] {
-  const ended = handover.sessions.map((session) =>
-    managedStallLossPayload(bindings, session.sessionUuid, handover),
-  );
-  const rest = handover.sessions.filter((_, index) => !ended[index]);
-  const managed = managedDaemonStallPayload(bindings, { ...handover, sessions: rest });
-  const generic = managed
-    ? rest.filter((session) => !bindingForSession(bindings, session.sessionUuid))
-    : rest;
-  return [
-    ...ended.filter((payload) => payload !== undefined),
-    ...(managed ? [managed] : []),
-    ...(generic.length > 0 ? [livenessHandoverPayload({ ...handover, sessions: generic })] : []),
-  ];
+export function livenessHandoverNotificationPayloads(handover: LivenessHandover): unknown[] {
+  return handover.sessions.length > 0 ? [livenessHandoverPayload(handover)] : [];
 }
 
-function boundSessionOwnershipLostPayload(
-  error: DaemonBoundSessionExpiredError,
-  bindings?: BindingsResult,
-) {
+function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
   if (error instanceof DaemonSessionStalledError) {
     // `daemon_stalled` / `proxy_stalled` (#10053): the harness is told which sessions and devices
     // are affected and what to do, rather than the generic "acquire a replacement session".
-    return (
-      managedStallLossPayload(bindings, error.sessionUuid, error.handover) ??
-      managedDaemonStallPayload(bindings, error.handover, error.sessionUuid) ??
-      error.toPayload()
-    );
-  }
-  const ended = managedEndedPayload(bindings, error.sessionUuid, error.reason);
-  if (ended) {
-    return ended;
+    return error.toPayload();
   }
   return sessionOwnershipLostPayload({
     message:
@@ -300,44 +179,28 @@ function boundSessionOwnershipLostPayload(
   });
 }
 
-function sessionOwnershipLostMessage(
-  error: DaemonBoundSessionExpiredError,
-  bindings?: BindingsResult,
-): string {
-  return JSON.stringify(boundSessionOwnershipLostPayload(error, bindings));
+function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): string {
+  return JSON.stringify(boundSessionOwnershipLostPayload(error));
 }
 
-function sessionOwnershipLostResult(
-  error: DaemonBoundSessionExpiredError,
-  bindings?: BindingsResult,
-): CallToolResult {
+function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
   return {
     content: [
       {
         type: "text",
-        text: sessionOwnershipLostMessage(error, bindings),
+        text: sessionOwnershipLostMessage(error),
       },
     ],
     isError: true,
   };
 }
 
-function sessionOwnershipLostError(
-  error: DaemonBoundSessionExpiredError,
-  bindings?: BindingsResult,
-): McpError {
-  const payload = boundSessionOwnershipLostPayload(error, bindings);
-  return new McpError(-32603, sessionOwnershipLostMessage(error, bindings), payload);
+function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
+  const payload = boundSessionOwnershipLostPayload(error);
+  return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
 }
 
-export function noActiveDeviceSessionPayload(
-  error: { message: string; reason: string },
-  bindings?: BindingsResult,
-) {
-  const ended = managedEndedPayload(bindings, undefined, error.reason);
-  if (ended) {
-    return ended;
-  }
+export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
   return {
     error: {
       code: "no_active_device_session",
@@ -349,19 +212,15 @@ export function noActiveDeviceSessionPayload(
   };
 }
 
-function noActiveDeviceSessionMessage(
-  error: DaemonConnectionSessionReleasedError,
-  bindings?: BindingsResult,
-): string {
-  return JSON.stringify(noActiveDeviceSessionPayload(error, bindings));
+function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {
+  return JSON.stringify(noActiveDeviceSessionPayload(error));
 }
 
 export function noActiveDeviceSessionResult(
   error: DaemonConnectionSessionReleasedError,
-  bindings?: BindingsResult,
 ): CallToolResult {
   return {
-    content: [{ type: "text", text: noActiveDeviceSessionMessage(error, bindings) }],
+    content: [{ type: "text", text: noActiveDeviceSessionMessage(error) }],
     isError: true,
   };
 }
@@ -388,14 +247,11 @@ export function ambiguousSessionSelectorResult(
   };
 }
 
-function noActiveDeviceSessionError(
-  error: DaemonConnectionSessionReleasedError,
-  bindings?: BindingsResult,
-): McpError {
+function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError): McpError {
   return new McpError(
     -32603,
-    noActiveDeviceSessionMessage(error, bindings),
-    noActiveDeviceSessionPayload(error, bindings),
+    noActiveDeviceSessionMessage(error),
+    noActiveDeviceSessionPayload(error),
   );
 }
 
@@ -552,13 +408,12 @@ export function deviceControlTransportFailureResult(
 async function forwardLivenessHandover(
   server: McpServer,
   handover: LivenessHandover,
-  bindings?: BindingsResult,
 ): Promise<void> {
   try {
     // sendLoggingMessage honours a level the client set with logging/setLevel; a client that
     // asked for fewer messages than `error` is not sent the notification and still learns from
     // the structured error on its next tool call.
-    for (const data of livenessHandoverNotificationPayloads(handover, bindings)) {
+    for (const data of livenessHandoverNotificationPayloads(handover)) {
       await server.server.sendLoggingMessage({
         level: "error",
         logger: "auto-mobile.liveness",
@@ -588,15 +443,14 @@ function resolveCallToolErrorResult(
   error: unknown,
   name: string,
   hasOutputSchema: boolean,
-  bindings?: BindingsResult,
 ): CallToolResult {
   if (error instanceof DaemonBoundSessionExpiredError) {
     logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
-    return sessionOwnershipLostResult(error, bindings);
+    return sessionOwnershipLostResult(error);
   }
   if (error instanceof DaemonConnectionSessionReleasedError) {
     logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
-    return noActiveDeviceSessionResult(error, bindings);
+    return noActiveDeviceSessionResult(error);
   }
   if (error instanceof DaemonAmbiguousSessionSelectorError) {
     logger.warn(`[ProxyServer] Ambiguous session selector: ${error.message}`);
@@ -620,13 +474,9 @@ function resolveCallToolErrorResult(
   return shapeToolCallError(error, { toolName: name, source: "ProxyServer" });
 }
 
-/** `capabilities.experimental["automobile/managedSlots"]`: the acquisition result (#11173). */
-function acquisitionCapabilities(
-  bindings: BindingsResult | undefined,
-  session: SessionBrokerResult | undefined,
-) {
+/** Broker session outcome advertised during initialize. */
+function acquisitionCapabilities(session: SessionBrokerResult | undefined) {
   const experimental = {
-    ...(bindings ? { [MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY]: { ...bindings } } : {}),
     ...(session ? { [SESSION_EXPERIMENTAL_CAPABILITY]: { ...session } } : {}),
   };
   return Object.keys(experimental).length > 0 ? { experimental } : {};
@@ -639,82 +489,8 @@ function proxyServerCapabilities(options: ProxyMcpServerOptions) {
     tools: { listChanged: true },
     logging: {},
     prompts: {},
-    ...acquisitionCapabilities(options.bindings, options.session),
+    ...acquisitionCapabilities(options.session),
   };
-}
-
-/** The proxy-local `automobile:managed-slots` resource entry (#11173). */
-const MANAGED_SLOTS_RESOURCE = {
-  uri: MANAGED_SLOTS_RESOURCE_URI,
-  name: "Managed device slots",
-  description:
-    "This execution's binding acquisition: scope, outcome, and per binding the device, fresh session, requested/resolved spec, disposition, readiness and lifecycle evidence, or the typed failure.",
-  mimeType: "application/json",
-};
-
-/** Preserve acquisition evidence and report the terminal release only on the resource (#11712). */
-export function managedSlotsResourceView(
-  result: BindingsResult,
-  ended: { sessionUuid: string; reason: string } | undefined,
-): BindingsResult {
-  if (!ended || bindingForSession(result, ended.sessionUuid) === null) {
-    return result;
-  }
-  return {
-    ...result,
-    bindings: result.bindings.map((binding) =>
-      binding.sessionUuid === ended.sessionUuid
-        ? {
-            ...binding,
-            executionEnded: {
-              reason: ended.reason,
-              ...idleReleaseField(ended.reason),
-              nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
-            },
-          }
-        : binding,
-    ),
-  };
-}
-
-function managedSlotsResourceContents(result: BindingsResult) {
-  return {
-    contents: [
-      {
-        uri: MANAGED_SLOTS_RESOURCE_URI,
-        mimeType: "application/json",
-        text: JSON.stringify(result, null, 2),
-      },
-    ],
-  };
-}
-
-/**
- * A failed managed slot acquisition serves MCP with no tools (owner decision Q5): every tool call
- * is refused with the acquisition's typed failure, which also rides in `initialize` and the
- * `automobile:managed-slots` resource.
- */
-export function bindingsFailedToolResult(result: BindingsResult, name: string) {
-  const failure = result.failure ?? result.bindings.find((binding) => binding.failure)?.failure;
-  const payload = {
-    success: false,
-    error: {
-      code: "binding_acquisition_failed",
-      message: `Tool ${name} is unavailable: this execution's binding acquisition failed${
-        failure ? ` (${failure.code}: ${failure.message})` : ""
-      }. Read ${MANAGED_SLOTS_RESOURCE_URI} for the evidence.`,
-      acquisitionFailure: failure ?? null,
-    },
-  };
-  return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
-}
-
-/** Replace the tool handlers of a proxy whose managed slot acquisition failed: no tools. */
-function refuseToolsAfterFailedAcquisition(server: McpServer, result: BindingsResult): void {
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
-  server.server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    bindingsFailedToolResult(result, request.params.name),
-  );
 }
 
 export function unavailableBrokerSessionToolResult(result: SessionBrokerResult, name: string) {
@@ -747,21 +523,14 @@ function refuseToolsWithoutReadyBrokerSession(
 
 function installAcquisitionToolRefusal(
   server: McpServer,
-  bindings: BindingsResult | undefined,
   session: SessionBrokerResult | undefined,
 ): void {
-  if (bindings?.outcome === "failed") {
-    refuseToolsAfterFailedAcquisition(server, bindings);
-  } else if (session && session.outcome !== "ready") {
+  if (session && session.outcome !== "ready") {
     refuseToolsWithoutReadyBrokerSession(server, session);
   }
 }
 
-function registerProxyResourceHandlers(
-  server: McpServer,
-  proxy: DaemonMcpProxy,
-  bindings: BindingsResult | undefined,
-): void {
+function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy): void {
   // Register resources/list handler. Serves a cold (empty/cached) roster without
   // connecting when no connection exists yet, deferring the daemon connect to the
   // first tool call (issue #5879) so a host that enumerates resources on init
@@ -769,13 +538,13 @@ function registerProxyResourceHandlers(
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
     try {
       const resources = await proxy.listAdvertisedResources();
-      return { resources: bindings ? [MANAGED_SLOTS_RESOURCE, ...resources] : resources };
+      return { resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error, bindings);
+        throw sessionOwnershipLostError(error);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error, bindings);
+        throw noActiveDeviceSessionError(error);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -796,10 +565,10 @@ function registerProxyResourceHandlers(
       return { resourceTemplates };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error, bindings);
+        throw sessionOwnershipLostError(error);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error, bindings);
+        throw noActiveDeviceSessionError(error);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -819,11 +588,6 @@ function registerProxyResourceHandlers(
     if (!uri) {
       throw new ActionableError("Resource URI is missing in the request");
     }
-    if (bindings && uri === MANAGED_SLOTS_RESOURCE_URI) {
-      return managedSlotsResourceContents(
-        managedSlotsResourceView(bindings, proxy.getTerminalSessionRelease()),
-      );
-    }
 
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
@@ -833,10 +597,10 @@ function registerProxyResourceHandlers(
     } catch (error) {
       extra.signal.throwIfAborted();
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error, bindings);
+        throw sessionOwnershipLostError(error);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error, bindings);
+        throw noActiveDeviceSessionError(error);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -929,7 +693,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     void forwardResourceUpdate(server, uri);
   });
   const stopLivenessHandovers = proxy.onLivenessHandover((handover) => {
-    void forwardLivenessHandover(server, handover, options.bindings);
+    void forwardLivenessHandover(server, handover);
   });
   const previousOnClose = server.server.onclose;
   server.server.onclose = () => {
@@ -1013,10 +777,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return { tools };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error, options.bindings);
+        throw sessionOwnershipLostError(error);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error, options.bindings);
+        throw noActiveDeviceSessionError(error);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -1051,10 +815,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
       try {
         const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal);
-        return brokerEndedRelayedResult(
-          managedEndedRelayedResult(result, options.bindings),
-          options.session,
-        );
+        return brokerEndedRelayedResult(result, options.session);
       } catch (error) {
         // The SDK suppresses responses for aborted requests. Do not turn a
         // cancellation into a tool error result while that request unwinds.
@@ -1063,13 +824,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         if (brokerEnded) {
           return brokerEnded;
         }
-        return resolveCallToolErrorResult(error, name, hasOutputSchema, options.bindings);
+        return resolveCallToolErrorResult(error, name, hasOutputSchema);
       }
     },
   });
 
-  registerProxyResourceHandlers(server, proxy, options.bindings);
-  installAcquisitionToolRefusal(server, options.bindings, options.session);
+  registerProxyResourceHandlers(server, proxy);
+  installAcquisitionToolRefusal(server, options.session);
 
   return { server, proxy };
 }

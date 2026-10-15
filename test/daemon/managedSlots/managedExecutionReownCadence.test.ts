@@ -8,7 +8,7 @@ import {
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
-} from "../../../src/daemon/managedSlots/managedExecutionReowner";
+} from "../../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import {
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,

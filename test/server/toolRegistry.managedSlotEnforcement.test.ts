@@ -14,15 +14,15 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
-  DeviceOutsideManagedSlotsError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DEVICE_OUTSIDE_BROKER_GRANT_CODE,
+  DeviceOutsideBrokerGrantError,
+} from "../../src/daemon/sessionBroker/connectionRefusal";
 import {
   DEVICE_ASSIGNED_TO_BINDING_CODE,
   DeviceAssignedToBindingError,
 } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { assertManagedConnectionPlainToolCall } from "../../src/server/managedConnectionToolGate";
+import { assertBrokerConnectionPlainToolCall } from "../../src/server/brokerConnectionToolGate";
 import type { BootedDevice } from "../../src/models";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
@@ -40,7 +40,7 @@ import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindin
 /**
  * #11178 part b: the device-aware tool path refuses control of a device another managed slot holds
  * (idle or not, explicit deviceId or resolved target), and confines a managed connection's control
- * to its own slot devices and sessions. Reads stay open everywhere (owner decision Q6).
+ * to its own granted devices and sessions. Reads stay open everywhere (owner decision Q6).
  */
 describe("ToolRegistry binding enforcement (#11178)", () => {
   const slotA: BootedDevice = { name: "Binding A", deviceId: "IOS-SLOT-A", platform: "ios" };
@@ -178,7 +178,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
   describe("a managed connection", () => {
     beforeEach(() => {
       DaemonState.getInstance()
-        .getManagedConnectionScopes()
+        .getBrokerConnectionScopes()
         .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
     });
 
@@ -197,11 +197,11 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         deviceId: free.deviceId,
         __mcpSessionId: mcpA,
       });
-      expect(refused).toBeInstanceOf(DeviceOutsideManagedSlotsError);
-      expect((refused as DeviceOutsideManagedSlotsError).code).toBe(
-        DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+      expect(refused).toBeInstanceOf(DeviceOutsideBrokerGrantError);
+      expect((refused as DeviceOutsideBrokerGrantError).code).toBe(
+        DEVICE_OUTSIDE_BROKER_GRANT_CODE,
       );
-      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+      expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
         reason: "device",
         deviceId: free.deviceId,
         scopeKey: keyA.scopeKey,
@@ -209,14 +209,14 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       expect(handled).toEqual([]);
     });
 
-    test("may not route control through a session outside its slots", async () => {
+    test("may not route control through a session outside its grants", async () => {
       await sessionManager.createSession("other-session", free.deviceId, "ios");
       const refused = await outcome("controlProbe", {
         sessionUuid: "other-session",
         deviceId: free.deviceId,
         __mcpSessionId: mcpA,
       });
-      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+      expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
         reason: "session",
         sessionUuid: "other-session",
       });
@@ -246,9 +246,9 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       };
 
       const refused = await internal(execA);
-      expect(refused).toBeInstanceOf(DeviceOutsideManagedSlotsError);
-      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
-        code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+      expect(refused).toBeInstanceOf(DeviceOutsideBrokerGrantError);
+      expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
+        code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
         reason: "tool",
         action: "getAndroid",
       });
@@ -262,7 +262,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
 
     // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
     test("a sessionless plan step may name its binding session, not one another connection owns", async () => {
-      const asManagedConnection = (sessionUuid: string): Promise<unknown> =>
+      const asBrokerConnection = (sessionUuid: string): Promise<unknown> =>
         runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
           ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
         ).catch((error: unknown) => error);
@@ -282,11 +282,11 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
           "mcp-socket-other",
         );
 
-      const refused = await asManagedConnection("foreign-session");
+      const refused = await asBrokerConnection("foreign-session");
       expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(handled).toEqual([]);
 
-      await asManagedConnection(execA);
+      await asBrokerConnection(execA);
       expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
@@ -303,8 +303,8 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       } catch (error) {
         refused = error;
       }
-      expect(refused).toBeInstanceOf(DeviceOutsideManagedSlotsError);
-      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+      expect(refused).toBeInstanceOf(DeviceOutsideBrokerGrantError);
+      expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
         reason: "device",
         deviceId: free.deviceId,
       });
@@ -318,7 +318,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
 
     test("may not acquire, start, provision or delete devices, or retarget setActiveDevice", () => {
       const gate = (toolName: string, args: Record<string, unknown>, sessionUuid?: string) => () =>
-        assertManagedConnectionPlainToolCall({
+        assertBrokerConnectionPlainToolCall({
           daemonMode: true,
           requiresDevice: false,
           toolName,
@@ -333,13 +333,15 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         "provisionDevice",
         "deleteDevice",
       ]) {
-        expect(gate(tool, {})).toThrow(DeviceOutsideManagedSlotsError);
+        expect(gate(tool, {})).toThrow(DeviceOutsideBrokerGrantError);
       }
-      expect(gate("setActiveDevice", { deviceId: free.deviceId })).toThrow("not one of its slot");
+      expect(gate("setActiveDevice", { deviceId: free.deviceId })).toThrow(
+        "not one of its granted",
+      );
       expect(gate("setActiveDevice", { deviceId: slotA.deviceId }, execA)).not.toThrow();
       expect(
         gate("killDevice", { device: { deviceId: free.deviceId, name: "Free", platform: "ios" } }),
-      ).toThrow(DeviceOutsideManagedSlotsError);
+      ).toThrow(DeviceOutsideBrokerGrantError);
       expect(gate("listDevices", {})).not.toThrow();
       // Stopping is lifecycle too: even its own slot device stops only through slot release (#11271).
       const ownKill = gate(
@@ -347,18 +349,18 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         { device: { deviceId: slotA.deviceId, name: "Binding A", platform: "ios" } },
         execA,
       );
-      expect(ownKill).toThrow(DeviceOutsideManagedSlotsError);
+      expect(ownKill).toThrow(DeviceOutsideBrokerGrantError);
       try {
         ownKill();
       } catch (error) {
-        expect((error as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+        expect((error as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
           reason: "tool",
           action: "killDevice",
         });
       }
       // A generic connection is not confined.
       expect(() =>
-        assertManagedConnectionPlainToolCall({
+        assertBrokerConnectionPlainToolCall({
           daemonMode: true,
           requiresDevice: false,
           toolName: "getApple",
@@ -445,7 +447,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     manager.stopCleanupTimer();
     DaemonState.getInstance().reset();
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
-    expect(DaemonState.getInstance().getManagedConnectionScopes().get(CONNECTION)).toBeUndefined();
+    expect(DaemonState.getInstance().getBrokerConnectionScopes().get(CONNECTION)).toBeUndefined();
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
   });
 
@@ -455,7 +457,7 @@ describe("platform-only calls on a bound daemon connection", () => {
   ])("a foreign platform is refused before admission; $name", async ({ managed }) => {
     if (managed) {
       DaemonState.getInstance()
-        .getManagedConnectionScopes()
+        .getBrokerConnectionScopes()
         .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
     }
     const session = manager.getSession(SESSION)!;
@@ -468,14 +470,14 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect(answer.isError).toBe(true);
     const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
     expect(payload).toMatchObject({
-      code: managed ? "device_outside_managed_slots" : "device_outside_bound_session",
+      code: managed ? "device_outside_broker_grant" : "device_outside_bound_session",
       platform: "ios",
       retryable: false,
     });
     if (managed) {
       expect(payload).toMatchObject({ action: "homeScreen", reason: "device", scopeKey: SCOPE });
       expect(payload.error).toContain(
-        "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+        "None of its granted devices is an ios device; name a device by deviceId to read one outside its grants.",
       );
     }
     expect(tools.runs).toEqual([]);
@@ -486,7 +488,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     await manager.createSession(IOS_SESSION, iosDevice.deviceId, "ios");
     manager.setDeviceReadiness(IOS_SESSION, "automationReady");
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION, IOS_SESSION] });
     const sessions = [manager.peekSession(SESSION)!, manager.peekSession(IOS_SESSION)!];
     const clocks = sessions.map(({ expiresAt, lastUsedAt }) => ({ expiresAt, lastUsedAt }));
@@ -507,7 +509,7 @@ describe("platform-only calls on a bound daemon connection", () => {
 
   test("a platform-only read outside bindings explains deviceId access", async () => {
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
     const session = manager.peekSession(SESSION)!;
     const clocks = { expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt };
@@ -519,14 +521,14 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect(answer.isError).toBe(true);
     const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
     expect(payload).toMatchObject({
-      code: "device_outside_managed_slots",
+      code: "device_outside_broker_grant",
       reason: "device",
       platform: "ios",
       action: "observe",
       scopeKey: SCOPE,
     });
     expect(payload.error).toContain(
-      "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+      "None of its granted devices is an ios device; name a device by deviceId to read one outside its grants.",
     );
     expect(tools.runs).toEqual([]);
     expect(tools.watcherReads).toEqual([]);
@@ -535,7 +537,7 @@ describe("platform-only calls on a bound daemon connection", () => {
 
   test("the managed connection runs a matching platform on its slot", async () => {
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
     const answer = await fixture.client.callTool({
       name: "homeScreen",

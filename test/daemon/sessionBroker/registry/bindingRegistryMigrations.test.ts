@@ -83,8 +83,7 @@ describe("binding registry migrations", () => {
       await sql`INSERT INTO slot_free_devices (platform, stable_device_id, from_scope_key, freed_at_ms, state)
         VALUES ('android', 'amslot-old', 'scope', 12, 'stopped')`.execute(db);
       await freeDeletion004.up(db as Kysely<unknown>);
-      const registry = new SqliteBindingRegistry(db, { timer: new FakeTimer() });
-      expect(await registry.listFreeDevices()).toMatchObject([
+      expect(await historicalFreeRows(db)).toMatchObject([
         { stableDeviceId: "amslot-old", state: "stopped", deletion: null },
       ]);
       const row = await db.selectFrom("slot_free_devices").selectAll().executeTakeFirstOrThrow();
@@ -95,9 +94,7 @@ describe("binding registry migrations", () => {
       ).rejects.toThrow("CHECK");
       await freeDeletion004.down(db as Kysely<unknown>);
       await freeDeletion004.up(db as Kysely<unknown>);
-      expect(await registry.listFreeDevices()).toMatchObject([
-        { state: "stopped", deletion: null },
-      ]);
+      expect(await historicalFreeRows(db)).toMatchObject([{ state: "stopped", deletion: null }]);
     } finally {
       await db.destroy();
     }
@@ -119,8 +116,9 @@ describe("binding registry migrations", () => {
         db,
       );
       await migrateBindingRegistry(db, ":memory:");
-      const registry = new SqliteBindingRegistry(db, { timer: new FakeTimer() });
-      expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+      expect(
+        (await historicalFreeRows(db)).filter((row) => row.deletion !== null)[0].deletion,
+      ).toMatchObject({
         attempts: 10,
         failedDeletes: 0,
         lastError: "blocked",
@@ -147,12 +145,7 @@ describe("binding registry migrations", () => {
                ('ios', 'UDID-2', NULL, 'scope-old', 22)`.execute(db);
 
       await migrateBindingRegistry(db, ":memory:");
-
-      const registry = new SqliteBindingRegistry(db, {
-        timer: new FakeTimer(),
-        isExecOwnerLive: () => false,
-      });
-      expect(await registry.listFreeDevices()).toEqual([
+      expect(await historicalFreeRows(db)).toEqual([
         {
           platform: "android",
           stableDeviceId: "avd-1",
@@ -228,3 +221,36 @@ describe("binding registry migrations", () => {
     }
   });
 });
+
+async function historicalFreeRows(db: Kysely<BindingRegistryDatabase>) {
+  const rows = await db
+    .selectFrom("slot_free_devices")
+    .selectAll()
+    .orderBy("freed_at_ms")
+    .execute();
+  return rows.map((row) => ({
+    platform: row.platform,
+    stableDeviceId: row.stable_device_id,
+    specFingerprint: row.spec_fingerprint,
+    fromScopeKey: row.from_scope_key,
+    freedAtMs: row.freed_at_ms,
+    state: row.state,
+    stopClaimedBy: row.stop_claimed_by,
+    stopClaimedAtMs: row.stop_claimed_at_ms,
+    deletion:
+      row.deletion_owner_pid === null
+        ? null
+        : {
+            owner: {
+              daemonId: row.deletion_owner_daemon_id,
+              pid: row.deletion_owner_pid,
+              processGenerationToken: row.deletion_owner_process_token,
+            },
+            startedAtMs: row.deletion_started_at_ms,
+            attempts: row.deletion_attempts,
+            failedDeletes: row.deletion_failed_deletes ?? 0,
+            lastError: row.deletion_last_error,
+            nextAttemptAtMs: row.deletion_next_attempt_at_ms,
+          },
+  }));
+}

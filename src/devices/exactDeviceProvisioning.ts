@@ -163,8 +163,8 @@ interface ProvisionDeviceErrorDiagnostics {
   runtimeCompatibility?: IosRuntimeIncompatibility;
   /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
   recovery?: ProvisionDeviceRecoveryEvidence;
-  /** The managed slot holding the device (`device_assigned_to_managed_slot`); no credentials. */
-  managedSlot?: { scopeKey: string; declaredBinding: number | null; stableId: string };
+  /** The broker binding holding the device (`device_assigned_to_binding`); no credentials. */
+  binding?: { scopeKey: string; declaredBinding: number | null; stableId: string };
   /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
   capacity?: ProvisionDeviceCapacityDetails;
 }
@@ -369,8 +369,8 @@ export interface DefaultExactDeviceProvisionerDependencies {
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
   /**
-   * Refuses adopting an existing device a managed slot holds (#11174): generic provisioning must
-   * never take over a slot's device, idle or not. Throws to refuse; absent means no slots.
+   * Refuses adopting an existing device a broker binding holds (#11174): generic provisioning must
+   * never take over a binding's device, idle or not. Throws to refuse; absent means no bindings.
    */
   assertAdoptable?: ExactDeviceAdoptionGuard;
 }
@@ -381,8 +381,8 @@ export type ExactDeviceAdoptionGuard = (device: {
   stableId: string;
 }) => Promise<void>;
 
-/** The provisionDevice failure for a device a managed slot holds (non-retryable). */
-export function managedSlotProvisionError(
+/** The provisionDevice failure for a device a broker binding holds (non-retryable). */
+export function bindingProvisionError(
   error: DeviceAssignedToBindingError,
   context: string,
 ): ProvisionDeviceError {
@@ -392,7 +392,7 @@ export function managedSlotProvisionError(
     false,
     {
       deviceId: error.deviceId,
-      managedSlot: {
+      binding: {
         scopeKey: error.scopeKey,
         declaredBinding: error.declaredBinding,
         stableId: error.stableId,
@@ -493,7 +493,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
   }
 
-  /** Refuse adopting a device a managed slot holds, before reading or touching it (#11174). */
+  /** Refuse adopting a device a broker binding holds, before reading or touching it (#11174). */
   private async assertAdoptable(
     request: ExactDeviceProvisionRequest,
     existing: DeviceInfo,
@@ -506,7 +506,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       await this.dependencies.assertAdoptable({ platform: existing.platform, stableId });
     } catch (error) {
       if (error instanceof DeviceAssignedToBindingError) {
-        throw managedSlotProvisionError(
+        throw bindingProvisionError(
           error,
           `Cannot adopt existing ${request.platform} device '${request.name}'`,
         );

@@ -6,8 +6,7 @@ import {
   type BindingReconcileRequest,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
-import { BindingScopeReset } from "../../../../src/daemon/sessionBroker/provisioning/scopeReset";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -18,7 +17,6 @@ import {
   FakeMatcher,
   FakeProvisioner,
 } from "./fixtures/reconcilerFakes";
-import { assignBindingDevice } from "../provisioning/bindingFixtures";
 import type { BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 
 const SPEC_18 = {
@@ -28,7 +26,7 @@ const SPEC_18 = {
 const SCOPE = { managedHostScope: "host-a", runnerNamespace: "ns", runnerIncarnation: "inc-1" };
 const TOKEN = "test-token";
 function configFor(overrides: { runnerIncarnation?: string } = {}) {
-  return parseBindingConfig({
+  return buildBrokerProvisionRequest({
     contractVersion: 1,
     ...SCOPE,
     ...overrides,
@@ -119,33 +117,6 @@ describe("busy registry callers", () => {
       acquisition.close();
     }
   });
-
-  test.each(["ensureScope", "beginScopeInvalidation", "completeScopeInvalidation"] as const)(
-    "busy incarnation transition %s refuses retryably, then resumes",
-    async (method) => {
-      await registry.ensureScope(configFor());
-      const config = configFor({ runnerIncarnation: "inc-2" });
-      const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-      const conflict = await registry.ensureScope(config);
-      const write = spyOn(registry, method);
-      if (method === "ensureScope") {
-        write.mockResolvedValueOnce(conflict);
-      }
-      write.mockRejectedValueOnce(busy);
-      try {
-        expect(await acquisition.acquire(config, { livenessOwnerToken: TOKEN })).toMatchObject({
-          outcome: "failed",
-          failure: { code: "discovery_incomplete", retryable: true },
-        });
-        expect(await acquisition.acquire(config, { livenessOwnerToken: TOKEN })).toMatchObject({
-          outcome: "ready",
-        });
-      } finally {
-        write.mockRestore();
-        acquisition.close();
-      }
-    },
-  );
 
   test("busy binding initialization returns a retryable refusal, then succeeds", async () => {
     const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
@@ -377,40 +348,4 @@ describe("busy registry callers", () => {
     }
     expect(await reconciler.reconcile(request())).toMatchObject({ outcome: "ready" });
   });
-});
-
-describe("busy scope reset", () => {
-  const RESET = { runnerNamespace: "runner-a", runnerIncarnation: "boot-1" };
-  let registry: FakeBindingRegistry;
-  let reset: BindingScopeReset;
-  beforeEach(() => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    registry = new FakeBindingRegistry(timer, () => false);
-    reset = new BindingScopeReset({
-      registry: async () => registry,
-      timer,
-      isExecOwnerLive: () => false,
-    });
-  });
-  test.each(["beginScopeInvalidation", "completeScopeInvalidation"] as const)(
-    "busy %s refuses retryably and a repeated reset completes",
-    async (method) => {
-      await assignBindingDevice(registry, "android", "avd-a", "runner-a");
-      const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-      const write = spyOn(registry, method).mockRejectedValueOnce(busy);
-      try {
-        await expect(reset.reset(RESET)).rejects.toMatchObject({
-          code: "discovery_incomplete",
-          retryable: true,
-        });
-        expect(await reset.reset(RESET)).toMatchObject({
-          outcome: "invalidated",
-          retryable: false,
-        });
-      } finally {
-        write.mockRestore();
-      }
-    },
-  );
 });

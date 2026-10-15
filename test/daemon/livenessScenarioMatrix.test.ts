@@ -87,7 +87,7 @@ beforeAll(async () => {
   const managedWarm = await LivenessScenario.start({ bindings: true });
   const managed = await managedWarm.acquire();
   await managedWarm.holdAsManagedExecution(managed);
-  await managedWarm.proxy.holdManagedExecutionSession(managed);
+  await managedWarm.holdBrokerExecution(managed);
   await managedWarm.daemonRestart();
   await managedWarm.idle(KEEPER_INTERVAL_MS);
   await managedWarm.stop();
@@ -102,7 +102,7 @@ describe("managed execution owner exemption (#11340)", () => {
     scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     const original = scenario.daemon.manager.getSession(managed)!;
     const clocks = [original.lastUsedAt, original.expiresAt];
     // This sleep-pausing clock counts a forward wall-only jump as sleep, without interval replay.
@@ -130,7 +130,7 @@ describe("managed execution owner exemption (#11340)", () => {
     scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
     const lastBeat = scenario.daemon.manager.getSession(managed)!.lastOwnerHeartbeat!;
@@ -154,7 +154,7 @@ describe("managed execution owner exemption (#11340)", () => {
     const plain = await scenario.acquire(DEVICE_B);
     const managed = await scenario.acquire(DEVICE_A);
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(IDLE_WINDOW_MS + 1);
     await scenario.idleUntilReleased(plain, RELEASE_SLACK_MS);
     const release = scenario.releaseOf(plain)!;
@@ -169,7 +169,7 @@ describe("managed execution owner exemption (#11340)", () => {
     scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
@@ -185,7 +185,7 @@ describe("managed execution owner exemption (#11340)", () => {
     scenario = await LivenessScenario.start({ bindings: true });
     const absent = await scenario.acquire();
     await scenario.holdAsManagedExecution(absent);
-    await scenario.proxy.holdManagedExecutionSession(absent);
+    await scenario.holdBrokerExecution(absent);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(absent);
@@ -2213,7 +2213,7 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
-    await scenario.proxy.holdManagedExecutionSession(session);
+    await scenario.holdBrokerExecution(session);
     const handovers: LivenessHandover[] = [];
     scenario.proxy.onLivenessHandover((handover) => handovers.push(handover));
     await scenario.idle(KEEPER_INTERVAL_MS);

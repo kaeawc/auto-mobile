@@ -117,17 +117,17 @@ export async function resolveDeviceGestureRecordingDevice(
 }
 
 /**
- * The managed-slot exclusion for a recording start or stop (#11352): a device a managed slot
- * holds, idle or executing, is recorded only by that slot's own execution. Refuses with the typed
- * `device_assigned_to_managed_slot`. Injected so tests can assert on the call without a pool.
+ * The broker binding exclusion for a recording start or stop (#11352): a device a broker binding
+ * holds, idle or executing, is recorded only by that binding's own execution. Refuses with the typed
+ * `device_assigned_to_binding`. Injected so tests can assert on the call without a pool.
  */
-export type DeviceGestureRecordingManagedSlotGate = (input: {
+export type DeviceGestureRecordingBindingGate = (input: {
   action: string;
   device: { deviceId: string; platform: Platform };
   requesterSessionUuid: string | undefined;
 }) => Promise<void>;
 
-const defaultManagedSlotGate: DeviceGestureRecordingManagedSlotGate = async (input) => {
+const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     return;
@@ -193,7 +193,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly deviceResolution: DeviceGestureRecordingDeviceResolution;
-  private readonly managedSlotGate: DeviceGestureRecordingManagedSlotGate;
+  private readonly bindingGate: DeviceGestureRecordingBindingGate;
 
   constructor(
     socketPath: string = getSocketPath(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG),
@@ -203,13 +203,13 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
     deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(),
-    managedSlotGate: DeviceGestureRecordingManagedSlotGate = defaultManagedSlotGate,
+    bindingGate: DeviceGestureRecordingBindingGate = defaultBindingGate,
   ) {
     super(socketPath, timer, "DeviceGestureRecording");
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
     this.deviceResolution = deviceResolution;
-    this.managedSlotGate = managedSlotGate;
+    this.bindingGate = bindingGate;
   }
 
   protected async handleRequest(
@@ -297,8 +297,8 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
         deviceId: selected.deviceId,
       });
     }
-    // Preserve managed-slot refusals before the unheld-device start refusal (#11665).
-    await this.managedSlotGate({
+    // Preserve broker binding refusals before the unheld-device start refusal (#11665).
+    await this.bindingGate({
       action: "deviceGestureRecording start",
       device: selected,
       requesterSessionUuid: request.sessionUuid,
@@ -374,7 +374,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
     if (request.deviceId !== undefined && active.deviceId !== request.deviceId) {
       throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
     }
-    await this.managedSlotGate({
+    await this.bindingGate({
       action: "deviceGestureRecording stop",
       device: { deviceId: active.deviceId, platform: active.platform },
       requesterSessionUuid: request.sessionUuid,

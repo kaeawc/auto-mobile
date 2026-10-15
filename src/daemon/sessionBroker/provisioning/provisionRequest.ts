@@ -40,11 +40,7 @@ export interface BrokerProvisionRequest {
 }
 export const MIN_BINDING_IDLE_TIMEOUT_MS = MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS;
 export const MAX_BINDING_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
-export type BindingConfigErrorCode =
-  | "binding_config_invalid"
-  | "contract_unsupported"
-  | "binding_group_unsupported"
-  | "bindings_unsupported";
+export type BindingConfigErrorCode = "binding_config_invalid";
 export class BindingConfigError extends ActionableError {
   constructor(
     public readonly code: BindingConfigErrorCode,

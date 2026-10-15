@@ -8,7 +8,7 @@ import type {
   DaemonMethodResult,
   DaemonStateAccess,
 } from "../../../src/daemon/daemonRequestHandlers";
-import { ManagedConnectionScopes } from "../../helpers/brokerHandlerFixtures";
+import { BrokerConnectionScopes } from "../../helpers/brokerHandlerFixtures";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
   bindBrokerRegistration,
@@ -168,7 +168,7 @@ class HandlerBroker extends SessionBroker {
 describe("session broker daemon handlers", () => {
   let registry: SqliteBindingRegistry;
   let broker: HandlerBroker;
-  let scopes: ManagedConnectionScopes;
+  let scopes: BrokerConnectionScopes;
   let tokens: Map<string, string>;
   let state: DaemonStateAccess;
 
@@ -178,7 +178,7 @@ describe("session broker daemon handlers", () => {
       isExecOwnerLive: () => true,
     });
     broker = new HandlerBroker(registry.sessionBrokerStore(SCOPE));
-    scopes = new ManagedConnectionScopes();
+    scopes = new BrokerConnectionScopes();
     tokens = new Map();
     const service = new SessionBrokerService(
       broker,
@@ -189,7 +189,7 @@ describe("session broker daemon handlers", () => {
     state = {
       isInitialized: () => true,
       getSessionBrokerService: () => service,
-      getManagedConnectionScopes: () => scopes,
+      getBrokerConnectionScopes: () => scopes,
       getSessionManager: () => ({
         hasSession: () => false,
         getSession: () => null,

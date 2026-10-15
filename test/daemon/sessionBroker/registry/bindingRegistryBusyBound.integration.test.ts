@@ -96,7 +96,6 @@ describe("registry busy bound (real SQLite)", () => {
         }).getMigrations();
         expect(migrated.every((migration) => migration.executedAt !== undefined)).toBe(true);
         expect((await reopened.ensureScope(SCOPE)).kind).toBe("ready");
-        expect(await reopened.listFreeDevices()).toEqual([]);
       } finally {
         await reopened.close();
       }
@@ -180,7 +179,6 @@ describe("registry busy bound (real SQLite)", () => {
     try {
       registry = await openSqliteBindingRegistry({ dbPath });
       expect(await registry.snapshotManagedDevices()).toEqual([]);
-      expect(await registry.listFreeDevices()).toEqual([]);
       const started = performance.now();
       const error = await registry.ensureScope(SCOPE).then(
         () => undefined,
@@ -245,7 +243,6 @@ describe("migrated registry open (real SQLite file)", () => {
         const opened = await openSqliteBindingRegistry({ dbPath });
         try {
           expect(statements).not.toContain(BEGIN_TRANSACTION_SQL);
-          expect(await opened.listFreeDevices()).toEqual([]);
         } finally {
           await opened.close();
         }

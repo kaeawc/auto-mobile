@@ -8,7 +8,7 @@ import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission
 import type { AndroidCapacitySample } from "../../../../src/features/bootAdmission/AndroidCapacitySource";
 import { assertBootCapacityAvailable } from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import type { DeviceInfo } from "../../../../src/models/index";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import type { Platform } from "../../../../src/models/Platform";
 import {
   registerDeviceTools,
@@ -224,7 +224,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
         checkBootCapacity,
       },
     });
-    const config = parseBindingConfig({
+    const config = buildBrokerProvisionRequest({
       contractVersion: 1,
       ...SCOPE,
       localBindingCapacity: 1,

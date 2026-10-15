@@ -112,7 +112,7 @@ export interface DeviceAutolockPoolPort {
   isAdbServerResetQuarantined(id: string): boolean;
   /** Refuse a device another live daemon claims, like an explicit bind (#10980). */
   assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
-  /** Refuse a device a managed slot holds, like an explicit bind (#11174). Optional for fakes. */
+  /** Refuse a device a broker binding holds, like an explicit bind (#11174). Optional for fakes. */
   assertNotAssignedToBinding?(
     deviceId: string,
     platform: Platform,

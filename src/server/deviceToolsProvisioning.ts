@@ -71,7 +71,7 @@ import {
 } from "../utils/deviceTimeouts";
 import {
   type ExactDeviceProvisioner,
-  managedSlotProvisionError,
+  bindingProvisionError,
   ProvisionDeviceCreateRejectedError,
   type ProvisionDeviceFailureCode,
   ProvisionDeviceError,
@@ -551,7 +551,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       return knownError;
     }
     if (error instanceof DeviceAssignedToBindingError) {
-      return managedSlotProvisionError(
+      return bindingProvisionError(
         error,
         `Failed to provision ${args.device.platform} device '${args.device.name}'`,
       );
@@ -2423,7 +2423,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       ...(diagnostics.runtimeCompatibility
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
         : {}),
-      ...(diagnostics.managedSlot ? { managedSlot: diagnostics.managedSlot } : {}),
+      ...(diagnostics.binding ? { binding: diagnostics.binding } : {}),
       ...(diagnostics.capacity ? diagnostics.capacity : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };

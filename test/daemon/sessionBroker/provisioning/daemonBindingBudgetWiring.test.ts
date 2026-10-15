@@ -5,7 +5,7 @@ import {
   BINDING_MAX_DEVICES_ENV,
   parseBindingMaxDevices,
 } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { logger } from "../../../../src/utils/logger";
@@ -68,7 +68,7 @@ function wiring(env: NodeJS.ProcessEnv) {
   });
   const acquire = () =>
     handle.acquisition.acquire(
-      parseBindingConfig({
+      buildBrokerProvisionRequest({
         contractVersion: 1,
         managedHostScope: "host",
         runnerNamespace: "new",
@@ -139,29 +139,6 @@ describe("host total-resource limit wiring", () => {
     });
     expect(h.provisioner.calls).toEqual([]);
     expect(h.reads()).toBe(2);
-  });
-  test("unset-limit production journal still redrives marked rows and honors restart reservations", async () => {
-    const h = wiring({});
-    const key = await assignBindingDevice(h.registry, "android", "amslot-cache", "cache");
-    await h.registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-    await h.registry.completeScopeInvalidation(key.scopeKey);
-    const row = (await h.registry.listFreeDevices())[0];
-    h.inventory.devices.push({
-      platform: "android",
-      name: row.stableDeviceId,
-      deviceId: row.stableDeviceId,
-    });
-    await h.registry.beginFreeDeviceDeletion(row, OWNER);
-    h.reserved.add(row.stableDeviceId);
-    const journal = h.handle.journalFor(h.registry);
-    expect((await journal.runPass()).freeDeviceDeletions).toMatchObject([
-      { outcome: "blocked", message: "restart recovery reservation" },
-    ]);
-    expect(h.deleter.calls).toEqual([]);
-    h.reserved.clear();
-    h.timer.advanceTime(1_000);
-    expect((await journal.runPass()).freeDeviceDeletions).toMatchObject([{ outcome: "absent" }]);
-    expect(h.deleter.stableIds()).toEqual([row.stableDeviceId]);
   });
   test("positive safe integers are accepted without a warning", () => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});

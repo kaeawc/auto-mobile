@@ -1,37 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import {
-  managedConnectionHostMutationRefusal,
-  managedConnectionPlatformRefusal,
-  managedConnectionScopeResetRefusal,
-} from "../../../src/daemon/managedSlots/managedConnectionScope";
+  brokerConnectionHostMutationRefusal,
+  brokerConnectionPlatformRefusal,
+} from "../../../src/daemon/sessionBroker/connectionScope";
 import {
-  DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
-  DeviceOutsideManagedSlotsError,
-} from "../../../src/daemon/managedSlots/managedSlotRefusal";
+  DEVICE_OUTSIDE_BROKER_GRANT_CODE,
+  DeviceOutsideBrokerGrantError,
+} from "../../../src/daemon/sessionBroker/connectionRefusal";
 import { computeBindingScopeKey } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 
 const identity = { managedHostScope: "host", runnerNamespace: "runner", runnerIncarnation: "run" };
 const binding = { scopeKey: computeBindingScopeKey(identity), sessionUuids: new Set<string>() };
 
 describe("managed connection host and scope decisions", () => {
-  test("undefined bindings permit host mutation and any scope reset", () => {
-    expect(
-      managedConnectionHostMutationRefusal({ binding: undefined, action: "daemon/refreshDevices" }),
-    ).toBeUndefined();
-    expect(
-      managedConnectionScopeResetRefusal({
-        binding: undefined,
-        action: "daemon/resetSlotScope",
-        identity: { runnerNamespace: "other", runnerIncarnation: "other" },
-      }),
-    ).toBeUndefined();
-  });
-
   test("bound host mutations carry the existing refusal code and binding scope", () => {
-    const refusal = managedConnectionHostMutationRefusal({ binding, action: "ide/setFeatureFlag" });
-    expect(refusal).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+    const refusal = brokerConnectionHostMutationRefusal({ binding, action: "ide/setFeatureFlag" });
+    expect(refusal).toBeInstanceOf(DeviceOutsideBrokerGrantError);
     expect(refusal?.toPayload()).toMatchObject({
-      code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+      code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
       reason: "host",
       scopeKey: binding.scopeKey,
       action: "ide/setFeatureFlag",
@@ -45,34 +31,6 @@ describe("managed connection host and scope decisions", () => {
         "Reads stay open; use a separate MCP connection for anything else.",
       ),
     ).toBe(true);
-  });
-
-  test.each([
-    { ...identity, managedHostScope: "other" },
-    { ...identity, runnerNamespace: "other" },
-    { ...identity, runnerIncarnation: "other" },
-    { runnerNamespace: identity.runnerNamespace, runnerIncarnation: identity.runnerIncarnation },
-  ])("bound scope reset refuses a different or incomplete identity %j", (target) => {
-    const refusal = managedConnectionScopeResetRefusal({
-      binding,
-      action: "daemon/resetSlotScope",
-      identity: target,
-    });
-    expect(refusal).toBeInstanceOf(DeviceOutsideManagedSlotsError);
-    expect(refusal?.toPayload()).toMatchObject({
-      code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
-      reason: "scope",
-      scopeKey: binding.scopeKey,
-      action: "daemon/resetSlotScope",
-      retryable: false,
-    });
-    expect(refusal?.message).toContain("named by all three identity parts");
-  });
-
-  test("bound scope reset permits exactly its own scope even with no sessions", () => {
-    expect(
-      managedConnectionScopeResetRefusal({ binding, action: "daemon/resetSlotScope", identity }),
-    ).toBeUndefined();
   });
 });
 
@@ -118,16 +76,16 @@ test.each([
     binding: sessions === undefined ? undefined : { ...binding, sessionUuids: new Set(sessions) },
     action: "homeScreen",
     platform,
-    slotPlatformOf: (sessionUuid: string) => platforms.get(sessionUuid),
+    grantedPlatformOf: (sessionUuid: string) => platforms.get(sessionUuid),
   };
-  const refusal = managedConnectionPlatformRefusal(input);
+  const refusal = brokerConnectionPlatformRefusal(input);
   if (!refused) {
     expect(refusal).toBeUndefined();
     return;
   }
-  expect(refusal).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+  expect(refusal).toBeInstanceOf(DeviceOutsideBrokerGrantError);
   expect(refusal?.toPayload()).toEqual({
-    code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+    code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
     action: "homeScreen",
     reason: "device",
     platform: "ios",
@@ -135,7 +93,7 @@ test.each([
     retryable: false,
   });
   expect(refusal?.message).toContain(
-    "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+    "None of its granted devices is an ios device; name a device by deviceId to read one outside its grants.",
   );
   expect(refusal?.message).not.toContain("undefined");
 });

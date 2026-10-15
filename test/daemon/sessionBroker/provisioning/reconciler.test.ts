@@ -14,10 +14,7 @@ import type {
   BindingResourceBudget,
 } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
 import { InFlightBindingReservations } from "../../../../src/daemon/sessionBroker/registry/ownerLiveness";
-import {
-  BINDING_ABANDONED_SCOPE_THRESHOLD_MS,
-  type BindingKey,
-} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { type BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import {
   ProvisionDeviceError,
   type ExactDeviceSpecification,
@@ -215,128 +212,6 @@ describe("BindingReconciler", () => {
       });
       expect(result.resolvedSpec).toMatchObject({ ...SPEC_18, displayCutout: expect.any(String) });
       expect(provisioner.created()).toHaveLength(1);
-    });
-
-    test("adopts a matching free-pool device from an invalidated scope", async () => {
-      inventory.devices.push({
-        name: "old",
-        platform: "ios",
-        deviceId: "UDID-FREE",
-        isRunning: false,
-        runtime: IOS_18,
-        deviceType: IPHONE_16,
-      });
-      const old = await registry.ensureScope({ ...SCOPE, runnerNamespace: "other" });
-      if (old.kind !== "ready") {
-        throw new Error("setup");
-      }
-      const oldKey = { scopeKey: old.scope.scopeKey, bindingIndex: 0 };
-      await registry.initBinding(oldKey, { role: "app", platform: "ios", requestedSpec: SPEC_18 });
-      await registry.commitBinding(
-        oldKey,
-        { generation: 0, stableDeviceId: null },
-        {
-          stableDeviceId: "UDID-FREE",
-          deviceName: "old",
-          resolvedSpec: null,
-          specFingerprint: null,
-          state: "ready",
-        },
-      );
-      await registry.beginScopeInvalidation(old.scope.scopeKey, "operator_reset");
-      await registry.completeScopeInvalidation(old.scope.scopeKey);
-
-      const result = expectReady(await reconciler.reconcile(request()));
-
-      expect(result.disposition).toBe("adopted");
-      expect(result.evidence.adoptedFrom).toBe("free_pool");
-      expect(result.assignment).toMatchObject({ stableDeviceId: "UDID-FREE", state: "ready" });
-      expect(await registry.listFreeDevices()).toEqual([]);
-      expect(provisioner.created()).toHaveLength(0);
-    });
-
-    async function freeStoppableIosDevice(): Promise<void> {
-      inventory.devices.push({
-        name: "old",
-        platform: "ios",
-        deviceId: "UDID-FREE",
-        isRunning: false,
-        runtime: IOS_18,
-        deviceType: IPHONE_16,
-      });
-      const old = await registry.ensureScope({ ...SCOPE, runnerNamespace: "other" });
-      if (old.kind !== "ready") {
-        throw new Error("setup");
-      }
-      const oldKey = { scopeKey: old.scope.scopeKey, bindingIndex: 0 };
-      await registry.initBinding(oldKey, { role: "app", platform: "ios", requestedSpec: SPEC_18 });
-      await registry.commitBinding(
-        oldKey,
-        { generation: 0, stableDeviceId: null },
-        {
-          stableDeviceId: "UDID-FREE",
-          deviceName: "old",
-          resolvedSpec: null,
-          specFingerprint: null,
-          state: "ready",
-        },
-      );
-      await registry.beginScopeInvalidation(old.scope.scopeKey, "operator_reset");
-      await registry.completeScopeInvalidation(old.scope.scopeKey);
-      timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
-    }
-
-    test("adopts a stopped free-pool device and boots it through the adopt provision path (#11337)", async () => {
-      await freeStoppableIosDevice();
-      const [free] = await registry.listFreeDevices();
-      const claim = { ...free!, claimedBy: "daemon-1" };
-      await registry.beginFreeDeviceStop(claim);
-      await registry.completeFreeDeviceStop(claim);
-
-      const result = expectReady(await reconciler.reconcile(request()));
-
-      expect(result.disposition).toBe("adopted");
-      expect(result.evidence.adoptedFrom).toBe("free_pool");
-      expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
-      expect(await registry.listFreeDevices()).toEqual([]);
-    });
-
-    test("adopting a stopped device at the boot limit fails typed capacity_exhausted without queueing (#11337)", async () => {
-      await freeStoppableIosDevice();
-      const [free] = await registry.listFreeDevices();
-      const claim = { ...free!, claimedBy: "daemon-1" };
-      await registry.beginFreeDeviceStop(claim);
-      await registry.completeFreeDeviceStop(claim);
-      provisioner.failWith = () =>
-        new BootCapacityExhaustedError(
-          { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
-          "full",
-        );
-
-      const result = expectFailed(await reconciler.reconcile(request()));
-
-      expect(result.failure).toMatchObject({ code: "capacity_exhausted", retryable: true });
-      // One refused boot attempt, no wait. The device is still offline and now reserved by the
-      // binding (adoption commits first), so the caller's retry reuses it once capacity frees up.
-      expect(provisioner.calls).toHaveLength(1);
-      expect(result.assignment).toMatchObject({
-        stableDeviceId: "UDID-FREE",
-        state: "provisioning",
-      });
-      expect(inventory.devices.find((device) => device.deviceId === "UDID-FREE")?.isRunning).toBe(
-        false,
-      );
-    });
-
-    test("does not adopt a free-pool device that is mid-shutdown (#11337)", async () => {
-      await freeStoppableIosDevice();
-      const [free] = await registry.listFreeDevices();
-      await registry.beginFreeDeviceStop({ ...free!, claimedBy: "daemon-1" });
-
-      const result = expectReady(await reconciler.reconcile(request()));
-
-      expect(result.disposition).toBe("created");
-      expect(await registry.listFreeDevices()).toMatchObject([{ state: "stopping" }]);
     });
 
     test("adopts this binding's own uncommitted leftover, but never a matching unmanaged device", async () => {
@@ -882,8 +757,18 @@ describe("BindingReconciler", () => {
         async (code) => {
           const controller = new AbortController();
           const original = new Error(code);
-          const listFreeDevices = registry.listFreeDevices.bind(registry);
-          registry.listFreeDevices = async () => {
+          inventory.devices = [
+            {
+              platform: "ios",
+              deviceId: "orphan-udid",
+              name: `${bindingDeviceName(key, 1, "orphan")}orphan`,
+              deviceType: "simulator",
+              state: "Shutdown",
+              platformVersion: "18.0",
+            },
+          ];
+          const findDeviceHolder = registry.findDeviceHolder.bind(registry);
+          registry.findDeviceHolder = async () => {
             if (code === "cancelled") {
               controller.abort();
             } else if (code === "timeout") {
@@ -896,7 +781,7 @@ describe("BindingReconciler", () => {
               .reconcile(request(SPEC_18, { signal: controller.signal }))
               .catch((error: unknown) => error),
           ).toBe(original);
-          registry.listFreeDevices = listFreeDevices;
+          registry.findDeviceHolder = findDeviceHolder;
           await expectRemovedAndRetry();
         },
       );
@@ -987,8 +872,9 @@ describe("BindingReconciler", () => {
       async (code) => {
         const controller = new AbortController();
         const pending = request(SPEC_18, { signal: controller.signal });
-        // Adoption discovery is the last await before createAndCommit's first guard.
-        registry.listFreeDevices = async () => {
+        inventory.beforeList = undefined;
+        // Complete inventory is the final asynchronous preparation stage.
+        inventory.beforeList = async () => {
           if (code === "cancelled") {
             controller.abort();
           } else {
@@ -1130,7 +1016,7 @@ describe("BindingReconciler", () => {
         retryable: true,
         message: "Managed-binding total-resource budget is exhausted.",
         nextAction:
-          "Reset or release binding scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+          "Free unused broker resources or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
         budget: {
           limit: 1,
           usage: {
@@ -2036,14 +1922,6 @@ describe("BindingReconciler", () => {
 
       expect(result.failure).toMatchObject({ code: "spec_unsupported", retryable: false });
       expect(result.assignment).toBeNull();
-    });
-
-    test("an invalidated scope refuses", async () => {
-      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-
-      const result = expectFailed(await reconciler.reconcile(request()));
-
-      expect(result.failure.code).toBe("scope_not_valid");
     });
 
     test("a platform change replaces the device across platforms, journaled (#11232)", async () => {

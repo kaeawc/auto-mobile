@@ -88,10 +88,7 @@ function reconcilerMayAct(entry: ManagedDeviceEntry): boolean {
   if (!binding) {
     return false;
   }
-  return (
-    entry.holder === "free" ||
-    (entry.scopeKey === binding.scopeKey && entry.bindingIndex === binding.bindingIndex)
-  );
+  return entry.scopeKey === binding.scopeKey && entry.bindingIndex === binding.bindingIndex;
 }
 
 /**

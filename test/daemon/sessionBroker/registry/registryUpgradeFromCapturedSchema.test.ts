@@ -63,23 +63,6 @@ async function expectOwnersAndBudget(registry: BindingRegistry) {
     ["fixture-avd-a", "ready", { ...owner, sessionUuid: "fixture-session-1" }],
     ["fixture-avd-b", "ready", null],
   ]);
-  const free = await registry.listFreeDevices();
-  expect(free).toHaveLength(2);
-  expect(free.find((row) => row.stableDeviceId === "fixture-avd-cached")?.deletion).toBeNull();
-  const deleting = await registry.listFreeDeviceDeletions();
-  expect(deleting).toHaveLength(1);
-  expect(deleting[0]).toMatchObject({
-    stableDeviceId: "fixture-avd-deleting",
-    state: "free",
-    deletion: {
-      owner,
-      startedAtMs: 1_760_000_000_040,
-      attempts: 1,
-      failedDeletes: 0,
-      lastError: "fixture native delete failed",
-      nextAttemptAtMs: 1_760_000_001_040,
-    },
-  });
   const snapshot = await registry.snapshotBindingResources();
   expect(snapshot.openJournal).toMatchObject([
     {
@@ -91,12 +74,12 @@ async function expectOwnersAndBudget(registry: BindingRegistry) {
   ]);
   expect(snapshot.openJournal).toHaveLength(1);
   expect(computeBindingResourceUsage(snapshot)).toEqual({
-    total: 4,
+    total: 2,
     active: 1,
     assignedIdle: 1,
-    cached: 1,
+    cached: 0,
     preparing: 0,
-    deleting: 1,
+    deleting: 0,
     orphaned: 0,
   });
 }

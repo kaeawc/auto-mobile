@@ -8,7 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
-import { DEVICE_OUTSIDE_MANAGED_SLOTS_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -22,7 +22,7 @@ import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindin
 
 /**
  * #11397: a managed connection may not acquire devices. `getAndroid`, `getApple`, `startDevice` and
- * `provisionDevice` are refused with `device_outside_managed_slots`; a multi-device `executePlan`
+ * `provisionDevice` are refused with `device_outside_broker_grant`; a multi-device `executePlan`
  * (`devices: [A, B]`) used to reach the generic pool allocator (`DevicePool.assignMultipleDevices`)
  * for its derived label session and was handed a generic device outside the connection's slot.
  * Plan labels are served only by the connection's own slot sessions, without the allocator.
@@ -116,7 +116,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     await sessionManager.createSession(execA, slotA.deviceId, "ios");
     sessionManager.setDeviceReadiness(execA, "automationReady");
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
 
     // Record what reaches the generic multi-device allocators, then stop the plan before any step.
@@ -182,7 +182,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     expect(allocatorCalls).toEqual([]);
     expect(result).toMatchObject({
       success: false,
-      code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+      code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
       retryable: false,
       // #11421: the refusal's own evidence is on the wire, not only in the message.
       action: "executePlan",
@@ -204,7 +204,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     const viaSession = await runPlan(PLAN, { __mcpSessionId: undefined });
 
     expect(allocatorCalls).toEqual([]);
-    const refusal = { code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE, reason: "tool", deviceLabel: "B" };
+    const refusal = { code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, reason: "tool", deviceLabel: "B" };
     expect(viaSocket).toMatchObject(refusal);
     expect(viaSession).toMatchObject(refusal);
   });
@@ -225,7 +225,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     );
 
     expect(allocatorCalls).toEqual([]);
-    expect(result).toMatchObject({ code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE, deviceLabel: "A" });
+    expect(result).toMatchObject({ code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, deviceLabel: "A" });
   });
 
   // #11421: the slot serves a label with its own device or not at all.
@@ -268,7 +268,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       expect(allocatorCalls).toEqual([]);
       expect(result).toMatchObject({
         success: false,
-        code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+        code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
         deviceLabel: "A",
       });
     });
@@ -388,7 +388,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     test("a refused plan leaves the binding session with the connection", async () => {
       const result = await runPlan(PLAN, { devices: ["A", "B"] });
 
-      expect(result.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
+      expect(result.code).toBe(DEVICE_OUTSIDE_BROKER_GRANT_CODE);
       await expectSlotSessionLive();
     });
 

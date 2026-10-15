@@ -3,7 +3,7 @@ import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sess
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
 import type { DeviceInfo } from "../../../../src/models/index";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { WorkflowBindingDeviceDeleter } from "../../../../src/daemon/sessionBroker/provisioning/deviceDeleter";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -115,7 +115,7 @@ async function harness(assigned = true) {
   });
   const acquire = (deviceType?: string) =>
     acquisition.acquire(
-      parseBindingConfig({
+      buildBrokerProvisionRequest({
         contractVersion: 1,
         ...SCOPE,
         localBindingCapacity: 1,

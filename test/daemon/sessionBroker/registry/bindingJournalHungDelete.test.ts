@@ -40,7 +40,7 @@ async function immediately<T>(operation: Promise<T>): Promise<T> {
   expect(returned).toBe(true);
   return result;
 }
-async function harness(mode: "created" | "deleting" | "free" = "created") {
+async function harness(mode: "created" | "deleting" = "created") {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer, () => false);
   const inventory = new FakeInventory();
@@ -83,16 +83,6 @@ async function harness(mode: "created" | "deleting" | "free" = "created") {
     );
   }
   inventory.devices.push({ platform: "ios", deviceId: "device", name: "amslot-device", ...SPEC });
-  if (mode === "free") {
-    await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(key.scopeKey);
-    const row = (await registry.listFreeDevices())[0];
-    const marked = await registry.beginFreeDeviceDeletion(row, OWNER);
-    if (marked.kind !== "begun") {
-      throw new Error(marked.kind);
-    }
-    return { ...deps, journal, key, row: marked.row, entry: undefined };
-  }
   const assignment = (await registry.getAssignment(key))!;
   const opened = await registry.openBindingJournal(key, {
     kind: mode === "created" ? "create" : "replace",
@@ -185,44 +175,6 @@ describe("bounded abandoned journal deletes", () => {
     expect(BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS).toBe(6);
   });
 
-  test("direct free deletion beyond overdue grace leaves attempts and retry to the pass", async () => {
-    const h = await harness("free");
-    h.deleter.beforeDelete = () => new Promise<void>(() => {});
-    await timeout(h);
-    h.timer.advanceTime(BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
-    const before = await h.registry.listFreeDeviceDeletions();
-    expect(await immediately(h.journal.driveFreeDeviceDeletion(before[0]))).toEqual({
-      kind: "blocked",
-      message: "removal_in_flight",
-    });
-    expect(h.deleter.calls).toHaveLength(1);
-    expect(await h.registry.listFreeDeviceDeletions()).toEqual(before);
-    h.deleter.beforeDelete = undefined;
-    expect(await h.journal.runPass()).toMatchObject({
-      freeDeviceDeletions: [{ outcome: "absent" }],
-    });
-    expect(h.deleter.calls).toHaveLength(2);
-  });
-
-  test("direct free deletion remains blocked while the pass retry is pending", async () => {
-    const h = await harness("free");
-    h.deleter.beforeDelete = () => new Promise<void>(() => {});
-    await timeout(h);
-    h.timer.advanceTime(BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
-    const pass = h.journal.runPass();
-    await flush();
-    expect(h.deleter.calls).toHaveLength(2);
-    const before = await h.registry.listFreeDeviceDeletions();
-    expect(await immediately(h.journal.driveFreeDeviceDeletion(before[0]))).toEqual({
-      kind: "blocked",
-      message: "removal_in_flight",
-    });
-    expect(h.deleter.calls).toHaveLength(2);
-    expect(await h.registry.listFreeDeviceDeletions()).toEqual(before);
-    h.timer.advanceTime(BINDING_JOURNAL_STEP_BUDGET_MS + 5);
-    expect(await pass).toMatchObject({ freeDeviceDeletions: [{ outcome: "failed" }] });
-  });
-
   for (const mode of ["deleting", "created"] as const) {
     test(`${mode} acquisition is blocked immediately while the pass retry is pending`, async () => {
       const h = await harness(mode);
@@ -245,28 +197,6 @@ describe("bounded abandoned journal deletes", () => {
       expect(await pass).toMatchObject({ blocked: [{ reason: "cleanup_pending" }] });
     });
   }
-
-  test("free deletion blocks without an attempt within grace and discovers late absence", async () => {
-    const h = await harness("free");
-    const pending = Promise.withResolvers<void>();
-    h.deleter.beforeDelete = () => pending.promise;
-    await timeout(h);
-    h.timer.advanceTime(1);
-    const before = await h.registry.listFreeDeviceDeletions();
-    const pass = h.journal.runPass();
-    await flush();
-    expect(h.deleter.calls).toHaveLength(1);
-    expect(await pass).toMatchObject({
-      freeDeviceDeletions: [{ outcome: "blocked", message: "removal_in_flight" }],
-    });
-    expect(await h.registry.listFreeDeviceDeletions()).toEqual(before);
-    pending.resolve();
-    await flush();
-    expect(await h.journal.runPass()).toMatchObject({
-      freeDeviceDeletions: [{ outcome: "absent" }],
-    });
-    expect(h.deleter.calls).toHaveLength(1);
-  });
 
   test("late settlement of an abandoned token cannot clear its successor", async () => {
     const h = await harness("deleting");
@@ -293,24 +223,20 @@ describe("bounded abandoned journal deletes", () => {
     expect(h.deleter.calls).toHaveLength(2);
   });
 
-  for (const mode of ["deleting", "free"] as const) {
+  for (const mode of ["deleting"] as const) {
     test(`${mode} retries after overdue grace and settles`, async () => {
       const h = await harness(mode);
       h.deleter.beforeDelete = () => new Promise<void>(() => {});
       await timeout(h);
       h.timer.advanceTime(1);
       expect(await h.journal.runPass()).toMatchObject(
-        mode === "free"
-          ? { freeDeviceDeletions: [{ outcome: "blocked", message: "removal_in_flight" }] }
-          : { blocked: [{ reason: "cleanup_pending" }] },
+        mode === "free" ? {} : { blocked: [{ reason: "cleanup_pending" }] },
       );
       expect(h.deleter.calls).toHaveLength(1);
       h.timer.advanceTime(BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS);
       h.deleter.beforeDelete = undefined;
       expect(await h.journal.runPass()).toMatchObject(
-        mode === "free"
-          ? { freeDeviceDeletions: [{ outcome: "absent" }] }
-          : { settled: [{ phase: "committed" }] },
+        mode === "free" ? {} : { settled: [{ phase: "committed" }] },
       );
       expect(h.deleter.calls).toHaveLength(2);
       expect((await h.registry.getAssignment(h.key))?.stableDeviceId ?? null).toBeNull();

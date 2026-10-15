@@ -104,30 +104,6 @@ export interface BindingAssignmentRecord extends BindingKey {
 }
 
 /**
- * A device released from an invalidated scope. It stays excluded from generic allocation and is
- * adoptable only by a binding (or reclaimable once abandoned).
- */
-export interface FreeBindingDeviceRecord {
-  platform: BindingPlatform;
-  stableDeviceId: string;
-  specFingerprint: string | null;
-  fromScopeKey: string;
-  freedAtMs: number;
-  /**
-   * `free`: not yet reclaimed (the device may be booted). `stopping`: a reclaim sweep claimed it and
-   * is shutting it down, so adoption waits. `stopped`: shut down with its image kept; a matching
-   * binding may adopt it and boots it (#11337).
-   */
-  state: FreeDeviceState;
-  /** Durable deletion commitment; only verified absence removes this row. */
-  deletion: FreeDeviceDeletion | null;
-  /** The daemon driving a `stopping` shutdown; null in every other state. */
-  stopClaimedBy: string | null;
-  /** When that claim was made (registry clock); null in every other state. */
-  stopClaimedAtMs: number | null;
-}
-
-/**
  * How long a `stopping` claim holds against other daemons and against adoption. Past it the claimer
  * is presumed dead: another daemon may re-drive the stop, and a binding may adopt the device. Twice the
  * binding journal's step budget (120 s), which bounds one delete-or-stop step, so a live claimer that
@@ -135,87 +111,11 @@ export interface FreeBindingDeviceRecord {
  */
 export const FREE_DEVICE_STOP_CLAIM_STALE_MS = 2 * 120_000;
 
-export function isStaleFreeDeviceStopClaim(
-  device: Pick<FreeBindingDeviceRecord, "state" | "stopClaimedAtMs">,
-  nowMs: number,
-): boolean {
-  return (
-    device.state === "stopping" &&
-    (device.stopClaimedAtMs === null ||
-      nowMs - device.stopClaimedAtMs >= FREE_DEVICE_STOP_CLAIM_STALE_MS)
-  );
-}
-
-export interface FreeDeviceDeletion {
-  owner: BindingJournalOwner;
-  startedAtMs: number;
-  attempts: number;
-  failedDeletes: number;
-  lastError: string | null;
-  nextAttemptAtMs: number;
-}
-
-export type FreeDeviceIdentity = Pick<
-  FreeBindingDeviceRecord,
-  "platform" | "stableDeviceId" | "fromScopeKey" | "freedAtMs"
-> & { /** Non-authoritative listed name: used only to protect journal targets. */ name?: string };
-
-export type BeginFreeDeviceDeletionResult =
-  | { kind: "begun"; row: FreeBindingDeviceRecord }
-  | { kind: "not_evictable"; reason: string };
-
 /** One statement's consistent view of the total-resource ledger. */
 export interface BindingResourceSnapshot {
   managed: ManagedDeviceEntry[];
-  free: FreeBindingDeviceRecord[];
   openJournal: BindingJournalEntry[];
-  /** Only invalidating scopes with reason abandoned can suppress a deleted replacement charge. */
-  abandonedScopeKeys: string[];
 }
-
-/** Exact identity, including the free incarnation of the device. */
-export function sameFreeDevice(a: FreeDeviceIdentity, b: FreeDeviceIdentity): boolean {
-  return (
-    a.platform === b.platform &&
-    a.stableDeviceId === b.stableDeviceId &&
-    a.fromScopeKey === b.fromScopeKey &&
-    a.freedAtMs === b.freedAtMs
-  );
-}
-
-/** Open journal targets protect both the stable identity and the listed name. */
-export function journalNamesFreeDevice(
-  entry: BindingJournalEntry,
-  row: Pick<FreeDeviceIdentity, "platform" | "stableDeviceId" | "name">,
-): boolean {
-  return (
-    (entry.platform === row.platform &&
-      [entry.target.oldStableId, entry.target.oldName].some(
-        (id) => id === row.stableDeviceId || (row.name !== undefined && id === row.name),
-      )) ||
-    (journalCreationPlatform(entry) === row.platform &&
-      [entry.target.newStableId, entry.target.newName].some(
-        (id) => id === row.stableDeviceId || (row.name !== undefined && id === row.name),
-      ))
-  );
-}
-
-export type FreeDeviceState = "free" | "stopping" | "stopped";
-
-/**
- * The identity a reclaim sweep read plus the daemon claiming the stop; every CAS refuses when the
- * row moved on since or another daemon holds a live claim.
- */
-export type FreeDeviceStopClaim = Pick<
-  FreeBindingDeviceRecord,
-  "platform" | "stableDeviceId" | "freedAtMs" | "fromScopeKey"
-> & { claimedBy: string };
-
-export type BeginFreeDeviceStopResult =
-  /** The row is now `stopping` (or already was, from an earlier interrupted attempt). */
-  | { kind: "begun" }
-  /** Adopted, re-freed since, not yet due or already stopped: nothing to shut down. */
-  | { kind: "not_reclaimable" };
 
 /** The optimistic-concurrency token every mutating binding step must present. */
 export interface BindingBindingExpectation {
@@ -271,16 +171,12 @@ export type BindingCasFailure =
   | { kind: "scope_not_valid"; scope: BindingScopeRecord | null }
   | { kind: "binding_missing" }
   | { kind: "stale_binding"; current: BindingAssignmentRecord }
-  | { kind: "device_assigned_elsewhere"; holder: BindingAssignmentRecord }
-  /** The free-pool device is being shut down by a reclaim sweep; adopt it once it is `stopped`. */
-  | { kind: "free_device_stopping" };
+  | { kind: "device_assigned_elsewhere"; holder: BindingAssignmentRecord };
 
 export type CommitBindingResult =
   | {
       kind: "committed";
       assignment: BindingAssignmentRecord;
-      /** Set when the committed device was taken out of the free pool by this commit. */
-      adoptedFreeDevice: FreeBindingDeviceRecord | null;
     }
   | BindingCasFailure;
 
@@ -335,71 +231,23 @@ export interface ReleaseExecutionResult {
   assignment: BindingAssignmentRecord | null;
 }
 
-export type DeviceHolder =
-  | { kind: "binding"; scope: BindingScopeRecord; assignment: BindingAssignmentRecord }
-  | { kind: "free"; device: FreeBindingDeviceRecord };
+export type DeviceHolder = {
+  kind: "binding";
+  scope: BindingScopeRecord;
+  assignment: BindingAssignmentRecord;
+};
 
 /** One device the binding system holds, for generic-pool exclusion snapshots. */
 export interface ManagedDeviceEntry {
   platform: BindingPlatform;
   stableDeviceId: string;
-  holder: "binding" | "free";
+  holder: "binding";
   scopeKey: string;
   bindingIndex: number | null;
   scopeState: BindingScopeState | null;
   /** The live execution's session for a binding entry, if one is recorded; null for free devices. */
   execSessionUuid: string | null;
 }
-
-export type BeginScopeInvalidationResult =
-  | { kind: "invalidating"; scope: BindingScopeRecord }
-  | { kind: "already_invalidating"; scope: BindingScopeRecord }
-  | { kind: "already_invalidated"; scope: BindingScopeRecord }
-  | { kind: "not_found" };
-
-export type CompleteScopeInvalidationResult =
-  | { kind: "invalidated"; scope: BindingScopeRecord; freedDevices: FreeBindingDeviceRecord[] }
-  | { kind: "already_invalidated"; scope: BindingScopeRecord }
-  /** Live owners or pending cleanup still block the transition (retryable). */
-  | {
-      kind: "pending";
-      scope: BindingScopeRecord;
-      liveOwners: BindingAssignmentRecord[];
-      /** Bindings whose released work is still settling under a live settler. */
-      settling: BindingAssignmentRecord[];
-      cleanupPending: BindingAssignmentRecord[];
-      /** Unfinished journaled work (#11179); accepted cleanup is never abandoned. */
-      openJournal: BindingJournalEntry[];
-    }
-  | { kind: "not_invalidating"; scope: BindingScopeRecord }
-  | { kind: "not_found" };
-
-export type MarkScopeAbandonedResult =
-  | { kind: "marked"; scope: BindingScopeRecord }
-  | {
-      kind: "not_abandoned";
-      scope: BindingScopeRecord;
-      reason: "not_valid" | "recent_acquisition" | "live_owner";
-    }
-  | { kind: "not_found" };
-
-/** Selects scopes by namespace and incarnation; omitting the host scope matches every host. */
-export interface BindingScopeQuery {
-  runnerNamespace: string;
-  runnerIncarnation: string;
-  managedHostScope?: string;
-}
-
-export interface AbandonmentQuery {
-  /** Defaults to {@link BINDING_ABANDONED_SCOPE_THRESHOLD_MS}. */
-  thresholdMs?: number;
-}
-
-/**
- * Owner decision 2026-10-09 (#11172 Q3): a scope with no activity (acquisition or execution
- * release) and no live owner for one hour is abandoned, and its devices may be deleted.
- */
-export const BINDING_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------------------------
 // Binding journal (#11179)
@@ -508,19 +356,12 @@ export interface OpenBindingJournalInput {
   owner: BindingJournalOwner;
   /** Anchors the entry to the binding's current binding; applied in the same transaction. */
   assignment: BindingJournalAssignmentChange;
-  /**
-   * Open only while the binding's scope is still abandoned (`invalidating`, reason `abandoned`),
-   * checked in the same transaction as the entry and its fence. A scope revived (or reset, or
-   * missing) by then is refused `scope_not_abandoned` and nothing is written (#11545).
-   */
-  requireAbandonedScope?: boolean;
 }
 
 export type OpenBindingJournalResult =
   | { kind: "opened"; entry: BindingJournalEntry; assignment: BindingAssignmentRecord }
   /** The binding already has unfinished journaled work; only one open entry per binding. */
   | { kind: "journal_open"; entry: BindingJournalEntry }
-  | { kind: "scope_not_abandoned"; scope: BindingScopeRecord | null }
   | BindingJournalChangeFailure;
 
 export interface AdvanceBindingJournalInput {
@@ -637,92 +478,7 @@ export interface BindingRegistry {
    * invalidated, or parked in the free pool.
    */
   snapshotManagedDevices(): Promise<ManagedDeviceEntry[]>;
-  listFreeDevices(): Promise<FreeBindingDeviceRecord[]>;
   snapshotBindingResources(): Promise<BindingResourceSnapshot>;
-  beginFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ): Promise<BeginFreeDeviceDeletionResult>;
-  recordFreeDeviceDeletionAttempt(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
-  ): Promise<boolean>;
-  completeFreeDeviceDeletion(row: FreeDeviceIdentity, owner: BindingJournalOwner): Promise<boolean>;
-  claimFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    expectedOwner: BindingJournalOwner,
-    nextOwner: BindingJournalOwner,
-  ): Promise<boolean>;
-  listFreeDeviceDeletions(): Promise<FreeBindingDeviceRecord[]>;
-
-  /**
-   * valid → invalidating. Idempotent; blocks new acquisitions immediately. An explicit reset of a
-   * scope already abandoned records the reset reason, so the scope can no longer be revived.
-   */
-  beginScopeInvalidation(
-    scopeKey: string,
-    reason: BindingScopeInvalidationReason,
-  ): Promise<BeginScopeInvalidationResult>;
-  /**
-   * invalidating → invalidated once no live owner, no `cleanup_pending` binding, no open journal entry
-   * and no binding settling under a live settler remains (a dead settler's binding is settled and does not block): bound
-   * devices move to the free pool and the scope's bindings are removed. Idempotent.
-   *
-   * A scope invalidated only by abandonment is still revivable, so its bindings are KEPT (their
-   * devices stay excluded and reserved for the same incarnation); they move to the free pool only
-   * when the invalidation becomes permanent — an explicit reset or a newer incarnation.
-   */
-  completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult>;
-
-  /**
-   * Valid scopes with no activity (acquisition or execution release) within the threshold and no
-   * live execution owner or settler.
-   */
-  findAbandonedScopes(query?: AbandonmentQuery): Promise<BindingScopeRecord[]>;
-  /**
-   * Atomically re-check abandonment and move the scope to `invalidating` with reason `abandoned`,
-   * so no acquisition races the later device deletion.
-   */
-  markScopeAbandoned(scopeKey: string, query?: AbandonmentQuery): Promise<MarkScopeAbandonedResult>;
-  /**
-   * Free-pool devices that have sat unadopted for at least the threshold and are not yet
-   * `stopped` (a `stopping` one is returned so an interrupted shutdown is retried).
-   */
-  findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeBindingDeviceRecord[]>;
-  /**
-   * CAS to `stopping` under `claim.claimedBy`, only while the row is the one that was read (same
-   * `freedAtMs`), still past the threshold, and either `free`, already claimed by the same daemon,
-   * or claimed by another daemon whose claim is stale. A concurrent adoption deletes the row, so it
-   * wins.
-   */
-  beginFreeDeviceStop(
-    claim: FreeDeviceStopClaim,
-    query?: AbandonmentQuery,
-  ): Promise<BeginFreeDeviceStopResult>;
-  /** Whether the row is still `stopping` under this claim (not adopted, not taken over). */
-  holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
-  /** CAS `stopping` to `stopped` after the shutdown was verified; false when the claim was lost. */
-  completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
-  /** CAS `stopping` back to `free` after a failed shutdown, so the device is adoptable again. */
-  revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
-  /** Every scope of `(namespace, incarnation)`, optionally narrowed to one host scope. */
-  findScopes(query: BindingScopeQuery): Promise<BindingScopeRecord[]>;
-  /**
-   * Scopes marked abandoned and not yet revived or reset (`invalidating`, reason `abandoned`):
-   * their bindings keep their bindings so a returning incarnation can revive them.
-   */
-  listAbandonedScopes(): Promise<BindingScopeRecord[]>;
-
-  /**
-   * Open a journal entry for a binding together with its anchoring assignment change. Refused while
-   * the binding has another open entry, the binding moved, or the requested scope precondition fails.
-   * Callers without the abandonment precondition retain their existing refusal variants.
-   */
-  openBindingJournal(
-    key: BindingKey,
-    input: OpenBindingJournalInput & { requireAbandonedScope?: false },
-  ): Promise<Exclude<OpenBindingJournalResult, { kind: "scope_not_abandoned" }>>;
   openBindingJournal(
     key: BindingKey,
     input: OpenBindingJournalInput,
@@ -773,34 +529,6 @@ export function assertValidBindingKey(key: BindingKey): void {
   }
 }
 
-export function resolveAbandonmentThresholdMs(query: AbandonmentQuery | undefined): number {
-  const thresholdMs = query?.thresholdMs ?? BINDING_ABANDONED_SCOPE_THRESHOLD_MS;
-  if (!Number.isFinite(thresholdMs) || thresholdMs < 0) {
-    throw new ActionableError(
-      `Abandonment threshold must be a non-negative number, got ${thresholdMs}`,
-    );
-  }
-  return thresholdMs;
-}
-
-/** A scope whose idle devices may be accepted for abandoned-scope deletion. */
-export function isAbandonedScope(scope: BindingScopeRecord | null): boolean {
-  return scope?.state === "invalidating" && scope.invalidationReason === "abandoned";
-}
-
-/**
- * Whether an acquisition of the same incarnation may reactivate this scope: it left `valid` only
- * because it was abandoned, not because of a reset (owner decision 2026-10-09).
- */
-export function isRevivableScope(scope: BindingScopeRecord): boolean {
-  return scope.state !== "valid" && scope.invalidationReason === "abandoned";
-}
-
-/** Whether a reason makes an invalidation permanent (anything but abandonment). */
-export function isPermanentInvalidationReason(reason: BindingScopeInvalidationReason): boolean {
-  return reason !== "abandoned";
-}
-
 /** Whether entering `state` needs a settler, and whether one was given. */
 export function assertSettlerForState(
   state: BindingAssignmentState,
@@ -813,11 +541,6 @@ export function assertSettlerForState(
     throw new ActionableError("Marking a binding settling requires the settling daemon");
   }
   return options.settler;
-}
-
-/** The scope's most recent acquisition or execution release: the abandonment clock's start. */
-export function lastScopeActivityMs(scope: BindingScopeRecord): number {
-  return Math.max(scope.lastAcquiredAtMs, scope.lastReleasedAtMs ?? 0);
 }
 
 export function bindingMatches(

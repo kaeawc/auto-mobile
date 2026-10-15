@@ -14,7 +14,7 @@ import {
   openSqliteBindingRegistry,
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -160,7 +160,7 @@ describe("binding registry schema compatibility", () => {
       timer: new FakeTimer(),
     });
     try {
-      expect(await registry.listFreeDevices()).toEqual([]);
+      expect(await registry.snapshotManagedDevices()).toEqual([]);
     } finally {
       await registry.close();
     }
@@ -198,7 +198,7 @@ describe("binding registry schema compatibility", () => {
     });
     try {
       const result = await acquisition.acquire(
-        parseBindingConfig({
+        buildBrokerProvisionRequest({
           contractVersion: 1,
           managedHostScope: "host",
           runnerNamespace: "runner",

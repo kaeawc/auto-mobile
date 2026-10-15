@@ -6,11 +6,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import {
-  DAEMON_RELEASE_SESSION_METHOD,
-  DAEMON_RELEASE_EXECUTION_METHOD,
-  DAEMON_VERSION,
-} from "../../src/daemon/constants";
+import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from "../../src/processLifecycle";
@@ -20,11 +16,6 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
-import {
-  BrokerExecutionRelease,
-  managedExecutionSessionsFrom,
-} from "../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 
@@ -327,35 +318,6 @@ test("close with no connected daemon performs no lifecycle RPC", async () => {
   const rig = setup();
   await rig.proxy.close();
   expect(rig.wire).toEqual([]);
-});
-
-test("managed sessions use only releaseExecution even without a stable owner token", async () => {
-  const rig = setup();
-  await rig.sessions.createSession("managed", "device-managed", "android");
-  await rig.sessions.adoptManagedExecutionLivenessPolicy("managed", { idleTimeoutMs: 600_000 });
-  const registry = new FakeBindingRegistry(rig.timer);
-  const drain = new BrokerExecutionRelease({
-    registry: async () => registry,
-    work: {
-      cancelDeviceSessionExecutions: async () => 0,
-      waitForDeviceSessionExecutionsToEnd: async () => true,
-      hasActiveDeviceSessionExecutions: () => false,
-    },
-    sessions: managedExecutionSessionsFrom(rig.sessions, { releaseDevice: async () => {} }),
-    timer: rig.timer,
-  });
-  rig.state.getManagedExecutionRelease = () => drain;
-  try {
-    await rig.proxy.holdManagedExecutionSession("managed");
-    await rig.proxy.close();
-    expect(releases(rig)).toEqual([]);
-    expect(
-      rig.wire.filter(({ method }) => method === DAEMON_RELEASE_EXECUTION_METHOD),
-    ).toHaveLength(1);
-    expect(rig.sessions.hasSession("managed")).toBe(false);
-  } finally {
-    drain.close();
-  }
 });
 
 test("one-shot CLI sessions survive close before liveness is declared", async () => {

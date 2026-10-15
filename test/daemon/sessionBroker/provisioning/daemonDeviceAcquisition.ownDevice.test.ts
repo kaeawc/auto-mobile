@@ -9,7 +9,7 @@ import { InMemoryBootDurationHistory } from "../../../../src/features/iosSimFlee
 import { IosSimCapacityGate } from "../../../../src/features/iosSimFleet/CapacityGate";
 import { IosSimFleetCostCollector } from "../../../../src/features/iosSimFleet/FleetCostCollector";
 import type { DeviceInfo } from "../../../../src/models/index";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeAndroidCapacitySource } from "../../../fakes/FakeAndroidCapacitySource";
 import { FakeFleetHostSource } from "../../../fakes/FakeFleetHostSource";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
@@ -198,7 +198,7 @@ async function harness(
   });
   const acquire = async (platform: "android" | "ios") =>
     await acquisition.acquire(
-      parseBindingConfig({
+      buildBrokerProvisionRequest({
         contractVersion: 1,
         ...SCOPE,
         localBindingCapacity: 1,

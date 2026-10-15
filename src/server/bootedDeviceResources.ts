@@ -1065,7 +1065,7 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
-    // Refresh the managed-slot snapshot so held devices are not reported as free, as listDevices does.
+    // Refresh the broker binding snapshot so held devices are not reported as free, as listDevices does.
     await devicePool?.refreshInventoryOwnership();
     options.onDiscovery(
       discovery.devices.map((device) =>

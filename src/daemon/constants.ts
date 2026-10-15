@@ -454,7 +454,7 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  * args of every internal call (see `server/internalToolCall.ts`). Defined here so it takes part in
  * the canonical {@link INTERNAL_TOOL_PARAM_NAMES} list without an import cycle: a handler that
  * re-parses its own arguments against a `.strict()` schema must strip it like every other internal
- * param, or every internal caller (e.g. the managed-slot reconciler's `provisionDevice`, #11266)
+ * param, or every internal caller (e.g. the broker binding reconciler's `provisionDevice`, #11266)
  * gets an "Unrecognized key" refusal.
  */
 export const INTERNAL_NO_DIFF_PARAM = "__internalNoDiff";
@@ -553,22 +553,12 @@ export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
 
 /**
- * Ends a managed slot execution (#11177): cancels and drains its in-flight work within a bounded
- * budget, releases the session's live control, and KEEPS the slot's device assignment (the device
+ * Ends a broker binding execution (#11177): cancels and drains its in-flight work within a bounded
+ * budget, releases the session's live control, and KEEPS the binding's device assignment (the device
  * is never returned to generic allocation). Answers `reusable_for_this_slot` or `cleanup_pending`.
  */
+/** @deprecated Removed socket endpoint; retained only until the step-b2 harness migration. */
 export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
-
-/** Operator reset of one runner incarnation's managed slot scope (#11174; `--daemon reset-slot-scope`). */
-export const DAEMON_RESET_BINDING_SCOPE_METHOD = "daemon/resetSlotScope";
-
-/**
- * Acquires a stdio proxy's managed device slots before it serves `initialize` (#11173): ensures the
- * runner scope (implicit incarnation transition, abandoned-scope revival), reconciles each slot to
- * its declared spec, claims the slot for a fresh session owned by the caller's liveness token and
- * puts that session on the `managed-execution` policy. Answers a typed `ManagedSlotsResult`.
- */
-export const DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD = "daemon/acquireManagedSlots";
 
 /**
  * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
@@ -654,7 +644,7 @@ export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 /**
  * The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. The value is a
  * plain millisecond count (digits only, #11612): `"2m"` is not 2 ms, it is ignored with a warning
- * naming the variable. Like a managed-slot config it may lengthen the 2-minute window but never
+ * naming the variable. Like a broker binding config it may lengthen the 2-minute window but never
  * shorten it, so a typo cannot make every CLI session idle-release at the next scan.
  */
 export function getCliSessionIdleTimeoutMs(): number {

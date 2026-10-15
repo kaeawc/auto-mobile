@@ -3,9 +3,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   brokerSessionEndedPayload,
-  livenessHandoverNotificationPayloads,
-  managedEndedPayload,
-  managedSlotsResourceView,
   noActiveDeviceSessionResult,
 } from "../../src/server/proxyServer";
 import {
@@ -26,11 +23,7 @@ import {
 } from "../../src/daemon/types";
 import { UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
-import {
-  readyManagedSlotsResult,
-  REFUSAL_FIXTURES_DIR,
-  REFUSAL_SURFACES_DIR,
-} from "../helpers/refusalWireFixtures";
+import { REFUSAL_FIXTURES_DIR, REFUSAL_SURFACES_DIR } from "../helpers/refusalWireFixtures";
 
 import {
   handleDaemonRequest,
@@ -39,7 +32,6 @@ import {
 import { RELEASE_REASON_WIRE_BUILDERS } from "../lint/releaseReasonWireBuilders";
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
-const bindings = readyManagedSlotsResult(SESSION);
 type Holder = { reason?: unknown; releaseReason?: unknown; idle?: unknown };
 const snapshot = (reason: string): SessionReleaseSnapshot => ({
   sessionId: SESSION,
@@ -133,39 +125,6 @@ const surfaces: Surface[] = [
         SESSION,
         reason,
       )!.error,
-  },
-  {
-    name: "managed tool result",
-    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
-    reasonKey: "reason",
-    holder: (reason) => managedEndedPayload(bindings, SESSION, reason)!.error,
-  },
-  {
-    name: "managed liveness logging notification",
-    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
-    reasonKey: "reason",
-    holder: (reason) =>
-      livenessHandoverNotificationPayloads(
-        {
-          code: "proxy_stalled",
-          sessions: [
-            { sessionUuid: SESSION, deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 0 },
-          ],
-          attempts: 1,
-          lastAcknowledgedHeartbeatAt: 0,
-          action: "reacquire_lost_sessions",
-          releaseReasons: { [SESSION]: reason },
-        },
-        bindings,
-      )[0].error as Holder,
-  },
-  {
-    name: "bindings resource",
-    builders: ["src/server/proxyServer.ts#managedSlotsResourceView"],
-    reasonKey: "reason",
-    holder: (reason) =>
-      managedSlotsResourceView(bindings, { sessionUuid: SESSION, reason }).bindings[0]
-        .executionEnded!,
   },
   {
     name: "ownership lost",

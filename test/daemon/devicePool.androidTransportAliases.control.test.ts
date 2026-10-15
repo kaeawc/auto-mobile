@@ -186,8 +186,8 @@ describe("binding Android hold snapshot", () => {
       holderOf: () => entry,
     };
     const { pool } = harness(exclusion);
-    expect(await pool.androidManagedSlotHold([])).toEqual({ entry });
-    expect(await pool.androidManagedSlotHold(["Pixel"])).toBeUndefined();
+    expect(await pool.androidBindingHold([])).toEqual({ entry });
+    expect(await pool.androidBindingHold(["Pixel"])).toBeUndefined();
     expect(refreshes).toEqual([{ maxAgeMs: 1000 }, { maxAgeMs: 1000 }]);
   });
 
@@ -200,7 +200,7 @@ describe("binding Android hold snapshot", () => {
     const { pool, manager } = harness(exclusion);
     manager.setBootedDevices("android", [{ ...row("emulator-5554"), name: "Pixel" }]);
     await pool.refreshDevices();
-    expect(await pool.androidManagedSlotHold(["emulator-5554"])).toBeUndefined();
-    expect(await pool.androidManagedSlotHold([])).toEqual({ entry: undefined });
+    expect(await pool.androidBindingHold(["emulator-5554"])).toBeUndefined();
+    expect(await pool.androidBindingHold([])).toEqual({ entry: undefined });
   });
 });

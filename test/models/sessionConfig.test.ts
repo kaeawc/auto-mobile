@@ -38,16 +38,18 @@ describe("session config launch resolution", () => {
 
   test("rejects incompatible launch bindings before reading a file", () => {
     let reads = 0;
-    expect(() =>
-      resolveSessionConfig({
-        flagValue: "/session.json",
-        readFile: () => {
-          reads++;
-          return JSON.stringify(config);
-        },
-        hasManagedSlotConfig: true,
-      }),
-    ).toThrow("session_config_invalid");
+    for (const incompatible of [{ hasInitialSessionUuid: true }, { noProxy: true }]) {
+      expect(() =>
+        resolveSessionConfig({
+          flagValue: "/missing",
+          readFile: () => {
+            reads++;
+            return "";
+          },
+          ...incompatible,
+        }),
+      ).toThrow("session_config_invalid");
+    }
     expect(reads).toBe(0);
   });
 

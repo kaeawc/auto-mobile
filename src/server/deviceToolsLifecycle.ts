@@ -25,7 +25,7 @@ import {
   assertLifecycleCallerMayStopRestartReservation,
   assertLifecycleTargetNotHeldByOtherDaemon,
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
-  assertLifecycleCallerNotOnForeignManagedSlot,
+  assertLifecycleCallerNotOnForeignBinding,
   lifecycleRequester,
   resolveRestartStopIdentity,
   type LifecycleRequester,
@@ -194,11 +194,11 @@ export function typedTeardownRefusal(
 }
 
 /**
- * Refuse deleteDevice of a device a managed slot holds before any teardown work, stopped or not:
+ * Refuse deleteDevice of a device a broker binding holds before any teardown work, stopped or not:
  * an idle assigned AVD has no session, so only the registry knows it is taken. Internal rollbacks
  * (no requester) are not generic callers and skip it.
  */
-async function managedSlotDeleteRefusal(
+async function bindingDeleteRefusal(
   args: TeardownDeviceArgs,
   requester: LifecycleRequester | undefined,
 ): Promise<{ response: TeardownToolResponse } | undefined> {
@@ -206,7 +206,7 @@ async function managedSlotDeleteRefusal(
     return undefined;
   }
   try {
-    await assertLifecycleCallerNotOnForeignManagedSlot({
+    await assertLifecycleCallerNotOnForeignBinding({
       toolName: "deleteDevice",
       device: { deviceId: args.target.stableId, platform: args.target.platform },
       requester,
@@ -224,7 +224,7 @@ async function managedSlotDeleteRefusal(
 }
 
 /**
- * killDevice's entry check: a managed slot's device stops only for that slot's execution, force or
+ * killDevice's entry check: a broker binding's device stops only for that binding's execution, force or
  * not (#11174); a device another session holds stops only for its holder or an explicit force
  * (#10785), and one another live daemon holds only with an explicit force (#11200).
  */
@@ -234,7 +234,7 @@ async function assertKillDeviceCaller(
   deadlineMs: number,
   signal: AbortSignal | undefined,
 ): Promise<RestartStopIdentity | undefined> {
-  await assertLifecycleCallerNotOnForeignManagedSlot({
+  await assertLifecycleCallerNotOnForeignBinding({
     toolName: "killDevice",
     device: args.device,
     requester: lifecycleRequester(args),
@@ -280,7 +280,7 @@ async function preLeaseRefusal(
   requester: LifecycleRequester | undefined,
   lifecycleLease: VirtualDeviceLifecycleLease | undefined,
 ): Promise<TeardownToolResponse | undefined> {
-  const slotRefusal = await managedSlotDeleteRefusal(pre.args, requester);
+  const slotRefusal = await bindingDeleteRefusal(pre.args, requester);
   return slotRefusal
     ? slotRefusal.response
     : await preLeaseHolderRefusal(pre, requester, lifecycleLease);
@@ -448,7 +448,7 @@ function createDeleteDeviceWorkflow(
       };
       // Re-check under the lease: a slot may have taken the device since the entry check.
       const resolution =
-        (await managedSlotDeleteRefusal(args, requester)) ?? (await resolveTeardownTarget(context));
+        (await bindingDeleteRefusal(args, requester)) ?? (await resolveTeardownTarget(context));
       if ("response" in resolution) {
         return { response: resolution.response };
       }
@@ -558,7 +558,7 @@ function createDeleteDeviceWorkflow(
           `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
         effectiveError,
       );
-      // A typed refusal (a managed slot or a session took the device between the entry check and
+      // A typed refusal (a broker binding or a session took the device between the entry check and
       // the shutdown reservation, a shutdown or capacity refusal) keeps its code and retry hints.
       const typed = typedTeardownRefusal(args, effectiveError, state?.target.device, phase);
       if (typed) {
@@ -710,7 +710,7 @@ export function createLifecycleHandlers() {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
     const stopIdentities: TeardownStopIdentities = new Map();
-    // Refuse a managed slot's device before reserving the teardown lease, as killDevice does:
+    // Refuse a broker binding's device before reserving the teardown lease, as killDevice does:
     // that reservation preempts the slot's in-flight acquisition even when the delete is then
     // refused (#11271). The workflow re-checks under the lease.
     try {

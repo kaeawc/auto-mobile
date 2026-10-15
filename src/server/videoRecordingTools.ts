@@ -43,7 +43,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import {
   assertLifecycleCallerHoldsDevice,
-  assertLifecycleCallerNotOnForeignManagedSlot,
+  assertLifecycleCallerNotOnForeignBinding,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
@@ -571,7 +571,7 @@ async function skippedFanoutTarget(
       reason:
         error instanceof InputDeviceOwnedError
           ? "Device is held by another session."
-          : "Device is assigned to another execution's managed slot.",
+          : "Device is assigned to another execution's broker binding.",
     };
   }
   return undefined;
@@ -655,7 +655,7 @@ export interface RecordingRequesterResolver {
   ): boolean;
   /** Whether a live session holds `deviceId`. A device no session holds takes calls from anyone. */
   isDeviceHeld(deviceId: string): boolean;
-  /** Daemon-aware holder and managed-slot gate; omitted by small in-memory resolver fakes. */
+  /** Daemon-aware holder and broker binding gate; omitted by small in-memory resolver fakes. */
   assertFanoutTargetAllowed?(device: BootedDevice, requester: LifecycleRequester): Promise<void>;
   /** Holder identity, when available, for the connection-ownership seam. Never sent to clients. */
   holdingSessionUuid?(deviceId: string): string | undefined;
@@ -679,7 +679,7 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
       : undefined;
     const effectiveRequester = held ? { ...requester, sessionUuid: held } : requester;
     const input = { toolName: "videoRecording", device, requester: effectiveRequester };
-    await assertLifecycleCallerNotOnForeignManagedSlot(input);
+    await assertLifecycleCallerNotOnForeignBinding(input);
     assertLifecycleCallerHoldsDevice({ ...input, force: false });
   },
   baseSessionUuid(sessionUuid) {

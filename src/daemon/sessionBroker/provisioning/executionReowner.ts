@@ -1,45 +1,42 @@
 /**
  * Re-owning live managed executions after a daemon restart (#11275).
  *
- * A slot's execution owner is the daemon process holding the execution's session: the session (its
+ * A binding's execution owner is the daemon process holding the execution's session: the session (its
  * owner lease, heartbeat and idle judgement) lives in that daemon, and so do the reservations the
  * reconciler claims before a session exists. The proxy's process is not recorded: the daemon never
- * learns a trusted proxy PID, and a proxy without its daemon session cannot use the slot anyway.
+ * learns a trusted proxy PID, and a proxy without its daemon session cannot use the binding anyway.
  *
  * A managed-execution session survives a daemon restart (it is rehydrated and its proxy re-binds),
- * but the slot still names the previous daemon's PID, which is now dead. Left alone, the slot looks
+ * but the binding still names the previous daemon's PID, which is now dead. Left alone, the binding looks
  * ownerless: a duplicate acquisition takes it over and the abandonment sweep can fence it. So once
  * this daemon holds such a session again (rehydration, or the proxy's `daemon/registerSession`
- * re-bind) it re-stamps the slot's owner with itself, claiming the slot for the same session UUID.
+ * re-bind) it re-stamps the binding's owner with itself, claiming the binding for the same session UUID.
  * Rehydrated work stays gated until that host-visible ownership is confirmed (#12053).
  */
 
-import type { BackoffPolicy } from "../../utils/Backoff";
-import type { ActionableError } from "../../models/ActionableError";
-import {
-  BindingOwnershipLostError,
-  BindingOwnershipUnconfirmedError,
-} from "../sessionBroker/provisioning/refusal";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import type { ReleaseDeviceHold } from "../sessionManager";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "../sessionBroker/provisioning/executionRelease";
+import type { BackoffPolicy } from "../../../utils/Backoff";
+import type { ActionableError } from "../../../models/ActionableError";
+import { BindingOwnershipLostError, BindingOwnershipUnconfirmedError } from "./refusal";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import type { ReleaseDeviceHold } from "../../sessionManager";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./executionRelease";
 import {
   RegistryRetryPacing,
   REGISTRY_RETRY_INITIAL_DELAY_MS,
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
   REGISTRY_BUSY_WRITE_MS,
-} from "../sessionBroker/registry/registryRetryPacing";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { logger } from "../../utils/logger";
+} from "../registry/registryRetryPacing";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 import {
   journalOwnersEqual,
   type ClaimExecutionResult,
   type BindingAssignmentRecord,
   type BindingProcessIdentity,
   type BindingRegistry,
-} from "../sessionBroker/registry/bindingRegistry";
+} from "../registry/bindingRegistry";
 
 export type ManagedExecutionReownRegistry = Pick<
   BindingRegistry,
@@ -49,11 +46,11 @@ export type ManagedExecutionReownRegistry = Pick<
 export interface ManagedExecutionReownerDependencies {
   registry: () => Promise<ManagedExecutionReownRegistry>;
   /**
-   * Whether the host registry exists. A host that never served a managed slot has none, and
+   * Whether the host registry exists. A host that never served a broker binding has none, and
    * re-owning must not create it. Defaults to always existing.
    */
   registryExists?: () => boolean;
-  /** This daemon, as recorded for a slot's execution owner. */
+  /** This daemon, as recorded for a binding's execution owner. */
   owner: () => BindingProcessIdentity;
   timer?: Timer;
   retryBackoff?: BackoffPolicy;
@@ -282,7 +279,7 @@ export class ManagedExecutionReowner {
       return;
     }
     const episode = this.episode(id);
-    // Busy writes and unready slots are expected while the retained session recovers.
+    // Busy writes and unready bindings are expected while the retained session recovers.
     logger.debug(message, error);
     const ageMs = (this.deps.timer ?? defaultTimer).now() - episode.sinceMs;
     if (
@@ -449,7 +446,7 @@ export class ManagedExecutionReowner {
       this.forgetRegistrySteps(id);
       this.ownership.set(id, "lost");
       logger.warn(
-        `[Bindings] Session '${id}' no longer owns its managed slot; acquire a new session.`,
+        `[Bindings] Session '${id}' no longer owns its broker binding; acquire a new session.`,
       );
       this.resolveHold(id, "skip-device-writes");
       this.episodes.get(id)?.stop.abort();

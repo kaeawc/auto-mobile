@@ -5,17 +5,20 @@ import ts from "typescript";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
 import {
-  PRODUCT_PATH_ENV_VARIABLES,
+  PRODUCT_PATH_ENV_VARIABLES as HARNESS_PRODUCT_PATH_ENV_VARIABLES,
   NON_PATH_ENV_VARIABLES,
   productEnvClassificationIssues,
 } from "../../scripts/manual-test/productPathEnv";
+
+// The removed launch input remains in the separately maintained harness until step b2.
+const PRODUCT_PATH_ENV_VARIABLES = HARNESS_PRODUCT_PATH_ENV_VARIABLES.filter(
+  (row) => row.name !== "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+);
 
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 
 const INTERNAL: Record<string, string> = {
-  AUTOMOBILE_MANAGED_SLOT_CONFIG:
-    "Experimental managed-slot launch config (#11172); documented in managed-slots.md with #11180.",
   AUTOMOBILE_TEST_MODE: "ADB test fake activation, not a device configuration option.",
   AUTOMOBILE_ALLOW_IN_MEMORY_DB: "Test-only opt-in to a nonpersistent database.",
   AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET: "Test-only opt-in to a real CtrlProxy WebSocket.",

@@ -570,7 +570,7 @@ export interface PreCliLivenessSnapshot {
  *   invocation connects, runs one tool and exits, so between calls nobody is
  *   heartbeating; the session is instead reaped only after a wall-clock idle
  *   period measured in minutes, and never for a missing first heartbeat.
- * - `managed-execution` (#11176): a session a managed slot execution holds through its stdio
+ * - `managed-execution` (#11176): a session a broker binding execution holds through its stdio
  *   proxy. Judged exactly like `heartbeat` (owner lease plus suspect grace, idle measured from the
  *   end of the last tool call, reads never count), but its idle window is the launcher-trusted
  *   override bounded to 2–60 minutes (default 2), and a one-shot `--cli` declaration never moves
@@ -684,8 +684,8 @@ export interface SessionReleaseSnapshot {
   /** PID of the other daemon that claimed the device, when the terminal reason names one (#11098). */
   ownerPid?: number;
   /**
-   * Set to `managed-execution` when a managed slot execution's session is released on a live path
-   * (commit or forced stuck release), so release listeners can keep its slot assignment while
+   * Set to `managed-execution` when a broker binding execution's session is released on a live path
+   * (commit or forced stuck release), so release listeners can keep its binding assignment while
    * clearing the execution owner (#11177). Absent for every other policy.
    */
   livenessPolicy?: typeof MANAGED_EXECUTION_LIVENESS_POLICY;
@@ -1080,7 +1080,7 @@ export interface SessionDeviceAssigner {
   /**
    * Hold each row's device for that row while restart recovery works through the rows (#11294).
    * The assigner must exempt a row's own recovery from its reservation, and may decline a device
-   * (one a managed slot holds). Optional: an assigner without it recovers rows unreserved.
+   * (one a broker binding holds). Optional: an assigner without it recovers rows unreserved.
    */
   reserveDevicesForRehydration?(rows: readonly RehydrationDeviceReservation[]): Promise<void>;
   /** Give up the reservation made for `sessionId`; a no-op when there is none. */
@@ -5704,7 +5704,7 @@ export class SessionManager {
 
   /**
    * Notified with a session that finished rehydrating after the startup deadline (late row or
-   * follow-up), so the daemon re-owns its managed slot like the startup batch (#11288).
+   * follow-up), so the daemon re-owns its broker binding like the startup batch (#11288).
    */
   setLateRehydrationListener(listener: (rehydrated: readonly string[]) => Promise<void>): void {
     this.lateRehydrationListener = listener;
@@ -6540,7 +6540,7 @@ export class SessionManager {
   }
 
   /**
-   * Whether this daemon holds `sessionId` as a live managed slot execution (#11275): present, on
+   * Whether this daemon holds `sessionId` as a live broker binding execution (#11275): present, on
    * the `managed-execution` policy and not being released. The stored idle deadline does not
    * decide managed liveness; a lapsed owner lease stays live until the heartbeat path actually
    * releases the session. A rehydrated session waiting for its proxy counts until released too.
@@ -12954,11 +12954,11 @@ export class SessionManager {
   /**
    * Put a session on the `managed-execution` liveness policy (#11176) with its idle window: the
    * launcher-trusted `idleTimeoutMs` (bounded 2–60 minutes) or the 2-minute default. Called by the
-   * managed slot acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
+   * broker binding acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
    * the window. The owner lease is unchanged, and the idle deadline is re-derived from the last
    * tool activity, never from now, so adopting the policy is not device use (#10656).
    *
-   * Throws `ManagedSlotConfigError` for an out-of-bounds window and `ActionableError` for an
+   * Throws `BindingConfigError` for an out-of-bounds window and `ActionableError` for an
    * unknown session or a `cli-idle` one (a one-shot CLI session is not an execution's session).
    * A failed durable write rolls the in-memory change back and throws.
    */

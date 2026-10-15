@@ -9,10 +9,6 @@ import {
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import {
-  DefaultBindingEvictionSelector,
-  JournaledBindingCacheEvictor,
-} from "../../../../src/daemon/sessionBroker/provisioning/cacheEviction";
-import {
   RegistryBindingResourceBudget,
   computeBindingResourceUsage,
   type BindingResourceBudget,
@@ -34,10 +30,6 @@ import {
   FakeDeleter,
 } from "../registry/fixtures/reconcilerFakes";
 import { assignBindingDevice } from "./bindingFixtures";
-import type {
-  BindingKey,
-  BindingJournalEntry,
-} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 
 const SPEC = { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" };
 const OWNER = { daemonId: "one", pid: 101, processGenerationToken: "one" };
@@ -81,10 +73,6 @@ describe("binding total-resource enforcement on SQLite", () => {
       policy: { limit: () => limit },
       inventory,
       timer,
-      eviction: {
-        selector: new DefaultBindingEvictionSelector({ inventory, claims, timer }),
-        evictor: new JournaledBindingCacheEvictor(source, () => reconciler.journal),
-      },
     });
     const reconciler = makeWithBudget(budget, source, owner);
     return reconciler;
@@ -126,171 +114,9 @@ describe("binding total-resource enforcement on SQLite", () => {
       deadlineMs: timer.now() + 60_000,
     };
   }
-  async function cache(id: string, compatible = false) {
-    const key = await assignBindingDevice(registry, "android", id, id);
-    await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(key.scopeKey);
-    inventory.devices.push({
-      platform: "android",
-      deviceId: id,
-      name: id,
-      ...(compatible ? SPEC : {}),
-    });
-    return (await registry.listFreeDevices()).find((row) => row.stableDeviceId === id)!;
-  }
   async function usage() {
     return computeBindingResourceUsage(await registry.snapshotBindingResources());
   }
-
-  warmTest("failed journaled cache deletion preserves the next cache", async () => {
-    await assignBindingDevice(registry, "android", "active", "active", "exec");
-    await cache("amslot-first");
-    timer.advanceTime(1);
-    await cache("amslot-second");
-    const second = (await registry.listFreeDevices()).find(
-      (row) => row.stableDeviceId === "amslot-second",
-    );
-    deleter.beforeDelete = async (target) => {
-      deleter.failWith = target.stableId === "amslot-first" ? "native delete failed" : undefined;
-    };
-    const result = await make(2).reconcile(await request());
-    expect(deleter.stableIds()).toEqual(["amslot-first"]);
-    expect(inventory.has("amslot-second")).toBe(true);
-    expect(
-      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-second"),
-    ).toEqual(second);
-    expect(
-      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-first"),
-    ).toMatchObject({ deletion: { failedDeletes: 1 } });
-    expect(result).toMatchObject({
-      outcome: "failed",
-      failure: {
-        code: "binding_budget_exhausted",
-        budget: {
-          limit: 2,
-          usage: { total: 4 },
-          retained: [
-            { stableDeviceId: "amslot-first", reason: "deletion_pending", failedDeletes: 1 },
-          ],
-          evictionFailures: [{ stableDeviceId: "amslot-first" }],
-        },
-      },
-    });
-    expect(provisioner.calls).toEqual([]);
-  });
-
-  for (const markerCount of [1, 2]) {
-    warmTest(
-      `stuck markers preserve cache unless creation can fit (markers=${markerCount})`,
-      async () => {
-        for (let index = 0; index < markerCount; index += 1) {
-          const row = await cache(`amslot-stuck-${index}`);
-          await registry.beginFreeDeviceDeletion(row, OWNER);
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            await registry.recordFreeDeviceDeletionAttempt(row, OWNER, {
-              error: "native delete failed",
-              nativeDeleteFailed: true,
-              nextAttemptAtMs: timer.now() + 60_000,
-            });
-          }
-          timer.advanceTime(1);
-        }
-        await cache("amslot-cache");
-        const nativeCounts: number[] = [];
-        provisioner.beforeCreate = async () => {
-          nativeCounts.push(inventory.devices.length + 1);
-        };
-        const result = await make(1).reconcile(await request());
-        if (markerCount === 1) {
-          expect(result.outcome).toBe("ready");
-          expect(deleter.stableIds()).toEqual(["amslot-cache"]);
-          expect(inventory.has("amslot-cache")).toBe(false);
-          expect(nativeCounts).toEqual([2]);
-          expect((await usage()).total).toBe(1);
-        } else {
-          expect(result).toMatchObject({
-            outcome: "failed",
-            failure: {
-              code: "binding_budget_exhausted",
-              budget: {
-                retained: [
-                  { stableDeviceId: "amslot-stuck-0", reason: "deletion_stuck", uncounted: true },
-                  { stableDeviceId: "amslot-stuck-1", reason: "deletion_stuck" },
-                ],
-              },
-            },
-          });
-          expect(deleter.calls).toEqual([]);
-          expect(inventory.has("amslot-cache")).toBe(true);
-          expect(
-            (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-cache"),
-          ).toMatchObject({ deletion: null });
-        }
-        expect(
-          (await registry.listOpenBindingJournal()).filter(
-            (entry) => entry.target.oldStableId === "amslot-cache",
-          ),
-        ).toEqual([]);
-      },
-    );
-  }
-
-  warmTest(
-    "at the limit journaled LRU deletion retains newer cache and admits creation",
-    async () => {
-      await cache("amslot-old");
-      timer.advanceTime(1);
-      await cache("amslot-newer");
-      const reads: number[] = [];
-      const original = registry.snapshotBindingResources.bind(registry);
-      registry.snapshotBindingResources = async () => {
-        const snapshot = await original();
-        reads.push(computeBindingResourceUsage(snapshot).total);
-        return snapshot;
-      };
-      const result = await make(2).reconcile(await request());
-      expect(result.outcome).toBe("ready");
-      expect(deleter.stableIds()).toEqual(["amslot-old"]);
-      expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
-        "amslot-newer",
-      ]);
-      // The opened intent is charged before admission (3); native resources stay <= 2.
-      expect(reads).toEqual([3, 3, 2]);
-      expect(inventory.devices).toHaveLength(2);
-      expect((await usage()).total).toBe(2);
-    },
-  );
-
-  test("no eligible cache produces typed evidence, closes intent and removes the never-bound binding", async () => {
-    await cache("amslot-held");
-    claims.sessions.set("amslot-held", ["session"]);
-    const req = await request();
-    await registry.initBinding(req.key, {
-      role: req.role,
-      platform: req.platform,
-      requestedSpec: SPEC,
-    });
-    const result = await make().reconcile(req);
-    expect(result).toMatchObject({
-      outcome: "failed",
-      failure: {
-        code: "binding_budget_exhausted",
-        retryable: true,
-        budget: {
-          limit: 1,
-          usage: { total: 2, cached: 1, preparing: 1, orphaned: 0 },
-          retained: [{ stableDeviceId: "amslot-held", reason: "session_holds_device" }],
-        },
-      },
-    });
-    if (result.outcome === "failed") {
-      expect(result.failure).not.toHaveProperty("retryAfterMs");
-    }
-    expect(provisioner.calls).toEqual([]);
-    expect(deleter.calls).toEqual([]);
-    expect(await registry.listOpenBindingJournal(req.key)).toEqual([]);
-    expect(await registry.getAssignment(req.key)).toBeNull();
-  });
 
   test("two daemon registries at N-1 admit exactly one concurrent creation", async () => {
     await assignBindingDevice(registry, "android", "occupied", "occupied");
@@ -310,154 +136,6 @@ describe("binding total-resource enforcement on SQLite", () => {
     expect(provisioner.calls.filter((call) => call.mode === "create")).toHaveLength(1);
     expect(await registry.listOpenBindingJournal()).toEqual([]);
     expect((await usage()).total).toBe(2);
-  });
-
-  test("failed eviction stays deleting, cannot be adopted, and redrives after backoff", async () => {
-    const row = await cache("amslot-cache");
-    deleter.failWith = "native deletion failed";
-    const reconciler = make();
-    const result = await reconciler.reconcile(await request());
-    expect(result).toMatchObject({
-      outcome: "failed",
-      failure: {
-        code: "binding_budget_exhausted",
-        budget: {
-          usage: { deleting: 1, cached: 0 },
-          evictionFailures: [
-            { stableDeviceId: row.stableDeviceId, message: "native deletion failed" },
-          ],
-        },
-      },
-    });
-    expect(await usage()).toMatchObject({ total: 1, deleting: 1 });
-    const adopter = await request("adopter");
-    await registry.initBinding(adopter.key, {
-      role: "primary",
-      platform: "android",
-      requestedSpec: SPEC,
-    });
-    expect(
-      await registry.commitBinding(
-        adopter.key,
-        { generation: 0, stableDeviceId: null },
-        {
-          stableDeviceId: row.stableDeviceId,
-          deviceName: row.stableDeviceId,
-          resolvedSpec: SPEC,
-          specFingerprint: "fp",
-          state: "ready",
-        },
-      ),
-    ).toEqual({ kind: "free_device_stopping" });
-    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toEqual([]);
-    timer.advanceTime(1_000);
-    deleter.failWith = undefined;
-    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
-      { outcome: "absent" },
-    ]);
-    expect(await registry.listFreeDevices()).toEqual([]);
-    expect((await reconciler.reconcile(await request("retry"))).outcome).toBe("ready");
-    expect(deleter.stableIds()).toEqual(["amslot-cache", "amslot-cache"]);
-  });
-
-  warmTest("a failed oldest deletion refuses creation without evicting newer cache", async () => {
-    await cache("amslot-old");
-    timer.advanceTime(1);
-    await cache("amslot-newer");
-    const originalDelete = deleter.deleteAndVerifyAbsence.bind(deleter);
-    deleter.deleteAndVerifyAbsence = async (target) => {
-      if (deleter.calls.length === 0) {
-        deleter.calls.push(target);
-        return { kind: "failed", message: "native deletion failed" };
-      }
-      return originalDelete(target);
-    };
-    const reconciler = make(2);
-    expect(await reconciler.reconcile(await request())).toMatchObject({
-      outcome: "failed",
-      failure: {
-        code: "binding_budget_exhausted",
-        budget: { retained: [{ stableDeviceId: "amslot-old", reason: "deletion_pending" }] },
-      },
-    });
-    expect(deleter.stableIds()).toEqual(["amslot-old"]);
-    expect(
-      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-newer")
-        ?.deletion,
-    ).toBeNull();
-    expect(provisioner.calls).toEqual([]);
-    timer.advanceTime(1_000);
-    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
-      { outcome: "absent" },
-    ]);
-    expect((await reconciler.reconcile(await request("retry"))).outcome).toBe("ready");
-    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
-      "amslot-newer",
-    ]);
-    expect(deleter.stableIds()).toEqual(["amslot-old", "amslot-old"]);
-  });
-
-  warmTest("a shortfall of two with one pending deletion preserves every cache", async () => {
-    const pending = await cache("amslot-pending");
-    await registry.beginFreeDeviceDeletion(pending, OWNER);
-    timer.advanceTime(1);
-    await cache("amslot-next");
-    timer.advanceTime(1);
-    await cache("amslot-newer");
-    const result = await make(2).reconcile(await request());
-    expect(result).toMatchObject({
-      outcome: "failed",
-      failure: { code: "binding_budget_exhausted" },
-    });
-    expect(deleter.stableIds()).toEqual([]);
-    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
-      "amslot-pending",
-      "amslot-next",
-      "amslot-newer",
-    ]);
-    expect(provisioner.calls).toEqual([]);
-  });
-
-  warmTest("a hanging cache delete settles at the preparation deadline with timeout", async () => {
-    await cache("amslot-cache");
-    const started = Promise.withResolvers<void>();
-    const finishDelete = Promise.withResolvers<void>();
-    deleter.beforeDelete = async () => {
-      started.resolve();
-      return finishDelete.promise;
-    };
-    const req = { ...(await request()), deadlineMs: timer.now() + 5_000 };
-    const reconciler = make();
-    let result: Awaited<ReturnType<BindingReconciler["reconcile"]>> | undefined;
-    const pending = reconciler.reconcile(req).then((value) => {
-      result = value;
-    });
-    try {
-      await started.promise;
-      expect(deleter.calls).toHaveLength(1);
-      timer.advanceTime(4_999);
-      await flushMicrotasks();
-      expect(result).toBeUndefined();
-      timer.advanceTime(1);
-      await flushMicrotasks();
-      expect(result).toMatchObject({ outcome: "failed", failure: { code: "timeout" } });
-    } finally {
-      if (result === undefined) {
-        finishDelete.resolve();
-      }
-      await pending;
-    }
-    await pending;
-    expect(await registry.listOpenBindingJournal(req.key)).toEqual([]);
-    expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
-    expect(provisioner.calls).toEqual([]);
-    // The timed-out deletion is never reverted; periodic redrive completes it.
-    deleter.beforeDelete = undefined;
-    timer.advanceTime(1_000);
-    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
-      { outcome: "absent" },
-    ]);
-    finishDelete.resolve();
   });
 
   warmTest("a hanging ledger inventory read is bounded by the preparation deadline", async () => {
@@ -532,32 +210,6 @@ describe("binding total-resource enforcement on SQLite", () => {
     expect(await registry.listOpenBindingJournal(req.key)).toEqual([]);
   });
 
-  warmTest(
-    "a post-marker transient busy refusal keeps its delete committed for redrive",
-    async () => {
-      await cache("amslot-cache");
-      let checks = 0;
-      claims.beforeDescribe = async () => {
-        if (++checks === 2) {
-          claims.claims.set("amslot-cache", { kind: "unknown", reason: "transient" });
-        }
-      };
-      const reconciler = make();
-      expect(await reconciler.reconcile(await request())).toMatchObject({
-        outcome: "failed",
-        failure: { code: "binding_budget_exhausted" },
-      });
-      expect(deleter.calls).toEqual([]);
-      expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
-      timer.advanceTime(1_000);
-      claims.claims.clear();
-      expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
-        { outcome: "absent" },
-      ]);
-      expect(deleter.stableIds()).toEqual(["amslot-cache"]);
-    },
-  );
-
   warmTest.each(["exhausted", "cancelled"] as const)(
     "a failed create-entry close preserves the original %s admission failure",
     async (kind) => {
@@ -613,71 +265,17 @@ describe("binding total-resource enforcement on SQLite", () => {
     },
   );
 
-  warmTest.each([
-    ["bound", "claim"],
-    ["owner_changed", "claim"],
-    ["gone", "claim"],
-    ["bound", "absence"],
-    ["owner_changed", "absence"],
-    ["gone", "absence"],
-  ] as const)(
-    "the final deletion recheck protects a row that became %s during %s discovery",
-    async (change, stage) => {
-      const row = await cache("amslot-cache");
-      const begun = await registry.beginFreeDeviceDeletion(row, OWNER);
-      if (begun.kind !== "begun") {
-        throw new Error(begun.reason);
-      }
-      const req = await request("older-build");
-      await registry.initBinding(req.key, {
-        role: "primary",
-        platform: "android",
-        requestedSpec: SPEC,
-      });
-      const changeRow = async () => {
-        if (change === "bound") {
-          // An older build ignores the deletion marker when publishing its assignment.
-          await db
-            .updateTable("slot_assignments")
-            .set({ stable_device_id: row.stableDeviceId, device_name: row.stableDeviceId })
-            .where("scope_key", "=", req.key.scopeKey)
-            .execute();
-        } else if (change === "owner_changed") {
-          await registry.claimFreeDeviceDeletion(row, OWNER, { daemonId: "other", pid: 202 });
-        } else {
-          await registry.completeFreeDeviceDeletion(row, OWNER);
-        }
-      };
-      if (stage === "claim") {
-        claims.beforeDescribe = changeRow;
-      } else {
-        inventory.remove(row.stableDeviceId);
-        inventory.beforeList = changeRow;
-      }
-      expect(await make().journal.driveFreeDeviceDeletion(begun.row)).toMatchObject(
-        change === "bound" ? { kind: "blocked", message: "assigned" } : { kind: "lost" },
-      );
-      expect(deleter.calls).toEqual([]);
-      if (change === "bound") {
-        expect((await registry.listFreeDeviceDeletions())[0].deletion?.attempts).toBe(1);
-      }
-    },
-  );
-
-  test.each(["cache", "orphan"] as const)(
+  test.each(["orphan"] as const)(
     "compatible %s adoption is charge-neutral at the limit",
     async (source) => {
       const req = await request();
-      if (source === "cache") {
-        await cache("amslot-cache", true);
-      } else {
-        inventory.devices.push({
-          platform: "android",
-          deviceId: "orphan",
-          name: bindingDeviceName(req.key, 1, "abcd"),
-          ...SPEC,
-        });
-      }
+
+      inventory.devices.push({
+        platform: "android",
+        deviceId: "orphan",
+        name: bindingDeviceName(req.key, 1, "abcd"),
+        ...SPEC,
+      });
       const result = await make().reconcile(req);
       expect(result).toMatchObject({ outcome: "ready", disposition: "adopted" });
       expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
@@ -812,16 +410,11 @@ describe("binding total-resource enforcement on SQLite", () => {
       }
       return snapshot;
     };
-    const evictor = new JournaledBindingCacheEvictor(registry, () => make().journal);
     const budget = new RegistryBindingResourceBudget({
       registry: async () => registry,
       policy: { limit: () => 1 },
       inventory,
       timer,
-      eviction: {
-        selector: new DefaultBindingEvictionSelector({ inventory, claims, timer }),
-        evictor,
-      },
     });
     expect(await budget.admitCreation({ journalEntryId: opened.entry.id })).toMatchObject({
       kind: "admitted",
@@ -830,60 +423,5 @@ describe("binding total-resource enforcement on SQLite", () => {
     });
     expect(reads).toBe(2);
     expect(deleter.calls).toEqual([]);
-  });
-
-  test("an abandoned deleted entry releases its charge while a genuine replacement retains it", async () => {
-    async function deleted(namespace: string, abandoned: boolean): Promise<BindingJournalEntry> {
-      const key: BindingKey = await assignBindingDevice(registry, "android", namespace, namespace);
-      if (abandoned) {
-        await registry.markScopeAbandoned(key.scopeKey, { thresholdMs: 0 });
-      }
-      const opened = await registry.openBindingJournal(key, {
-        kind: "replace",
-        phase: "deleting",
-        owner: OWNER,
-        requireAbandonedScope: abandoned,
-        target: {
-          oldStableId: namespace,
-          oldName: namespace,
-          newStableId: null,
-          newName: null,
-          requestedSpec: SPEC,
-          resolvedSpec: SPEC,
-          specFingerprint: "fp",
-        },
-        assignment: {
-          kind: "state",
-          expected: { generation: 1, stableDeviceId: namespace },
-          state: "replacing",
-        },
-      });
-      if (opened.kind !== "opened") {
-        throw new Error(opened.kind);
-      }
-      const advanced = await registry.advanceBindingJournal(opened.entry.id, {
-        owner: OWNER,
-        expectedPhase: "deleting",
-        phase: "deleted",
-        assignment: {
-          kind: "commit",
-          expected: opened.entry.binding,
-          next: {
-            stableDeviceId: null,
-            deviceName: null,
-            resolvedSpec: null,
-            specFingerprint: null,
-            state: "provisioning",
-          },
-        },
-      });
-      if (advanced.kind !== "advanced") {
-        throw new Error(advanced.kind);
-      }
-      return advanced.entry;
-    }
-    await deleted("abandoned", true);
-    await deleted("replacement", false);
-    expect(await usage()).toMatchObject({ total: 1, preparing: 1 });
   });
 });

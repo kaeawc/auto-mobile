@@ -16,7 +16,6 @@ import type {
   BindingKey,
   BindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { BindingScopeReset } from "../../../../src/daemon/sessionBroker/provisioning/scopeReset";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
@@ -882,9 +881,8 @@ describe.each(REGISTRIES)(
         (step) => ({ owner, ownerPid, step }),
       ),
     );
-
     test.each(NEVER_ENDING)(
-      "record of $owner, $step busy until the cap under work that never ends: still fenced past the cap, and --force recovers the binding or says why not",
+      "record of $owner, $step busy until the cap under work that never ends: still fenced past the cap",
       async ({ ownerPid, step }) => {
         const tableDrain = newTableDrain(step);
         if (ownerPid !== DAEMON_PID) {
@@ -897,31 +895,6 @@ describe.each(REGISTRIES)(
         await timer.sleep(CAP_MS + 2 * SLOW_POLL_MS + 500);
         expect((await claimForNextExecution()).kind).not.toBe("claimed");
 
-        const reset = new BindingScopeReset({
-          registry: async () => registry,
-          timer,
-          isExecOwnerLive: liveness,
-          thisProcess: { pid: DAEMON_PID },
-          settlementCapMs: CAP_MS,
-        });
-        const result = await reset.reset({
-          runnerNamespace: SCOPE.runnerNamespace,
-          runnerIncarnation: SCOPE.runnerIncarnation,
-          waitMs: 0,
-          force: true,
-        });
-        const refusals = result.scopes[0]?.forceRefusals ?? [];
-        expect(result.outcome === "invalidated" || refusals.length > 0).toBe(true);
-        // A record this daemon could not even look up yet, and so not re-stamp, still names the
-        // other running daemon: the refusal says that this daemon cannot judge it.
-        const reasons =
-          ownerPid === OTHER_DAEMON_PID && step === "findExecutionAssignments"
-            ? /^(live_owner|within_settlement_cap|owner_liveness_unknown)$/
-            : /^(live_owner|within_settlement_cap)$/;
-        expect(refusals.map((refusal) => refusal.reason)).toEqual(
-          refusals.map(() => expect.stringMatching(reasons)),
-        );
-        expect(refusals.every((refusal) => refusal.message.length > 0)).toBe(true);
         work.active.delete(S1);
       },
     );

@@ -7,15 +7,8 @@ import {
   DefaultManagedSpecResolver,
   BindingReconciler,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
-import {
-  computeBindingScopeKey,
-  type BindingScopeRecord,
-} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
-import {
-  BINDING_SCOPE_RESET_DEFAULT_WAIT_MS,
-  BindingScopeReset,
-} from "../../../../src/daemon/sessionBroker/provisioning/scopeReset";
-import { parseBindingConfig } from "../../../helpers/provisionRequestFixture";
+import { computeBindingScopeKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { type BrokerProvisionRequest } from "../../../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
@@ -37,7 +30,7 @@ const DAEMON_PID = 4242;
 function configFor(
   overrides: { runnerIncarnation?: string; runtime?: string; idleTimeoutMs?: number } = {},
 ): BrokerProvisionRequest {
-  return parseBindingConfig({
+  return buildBrokerProvisionRequest({
     contractVersion: 1,
     managedHostScope: "host-a",
     runnerNamespace: "ns",
@@ -236,127 +229,5 @@ describe("BrokerDeviceAcquisition", () => {
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("cancelled");
     expect(sessions.released).toEqual(["session-1"]);
-  });
-
-  describe("scope transitions", () => {
-    test("a new incarnation retires a settled old one and adopts its device", async () => {
-      const old = configFor();
-      const first = await acquisition.acquire(old, { livenessOwnerToken: TOKEN });
-      await endExecution(old, first.bindings[0]!.sessionUuid!);
-
-      const next = await acquisition.acquire(configFor({ runnerIncarnation: "inc-2" }), {
-        livenessOwnerToken: TOKEN,
-      });
-
-      expect(next.outcome).toBe("ready");
-      expect(next.bindings[0]).toMatchObject({ disposition: "adopted" });
-      expect(next.bindings[0]!.device!.stableId).toBe(first.bindings[0]!.device!.stableId);
-      expect((await registry.getScope(computeBindingScopeKey(old)))?.state).toBe("invalidated");
-
-      const stale = await acquisition.acquire(old, { livenessOwnerToken: TOKEN });
-      expect(stale.failure).toMatchObject({ code: "scope_invalidated", retryable: false });
-    });
-
-    test("an old incarnation with a live execution keeps the new one pending", async () => {
-      await acquisition.acquire(configFor(), { livenessOwnerToken: TOKEN });
-
-      const next = await acquisition.acquire(configFor({ runnerIncarnation: "inc-2" }), {
-        livenessOwnerToken: TOKEN,
-      });
-
-      expect(next.outcome).toBe("failed");
-      expect(next.failure).toMatchObject({ code: "scope_transition_pending", retryable: true });
-      expect(next.bindings).toEqual([]);
-    });
-
-    function acquisitionWithReset(
-      resetSupersededScope: (
-        scope: BindingScopeRecord,
-        waitMs: number,
-      ) => ReturnType<BindingScopeReset["resetSupersededScope"]> | undefined,
-    ): BrokerDeviceAcquisition {
-      return new BrokerDeviceAcquisition({
-        registry: async () => registry,
-        reconcile: (_registry, request) => reconciler.reconcile(request),
-        sessions,
-        owner: () => ({ daemonId: "daemon-1", pid: DAEMON_PID }),
-        timer,
-        resetSupersededScope,
-      });
-    }
-
-    test("a new incarnation waits, through the implicit reset, for the old execution to settle", async () => {
-      const old = configFor();
-      const first = await acquisition.acquire(old, { livenessOwnerToken: TOKEN });
-      const reset = new BindingScopeReset({ registry: async () => registry, timer });
-      const waits: number[] = [];
-      const withReset = acquisitionWithReset((scope, waitMs) => {
-        waits.push(waitMs);
-        return reset.resetSupersededScope(scope, waitMs);
-      });
-      // The old execution ends while the reset is waiting on it.
-      const sleep = timer.sleep.bind(timer);
-      timer.sleep = async (ms: number) => {
-        await endExecution(old, first.bindings[0]!.sessionUuid!);
-        timer.advanceTime(ms);
-      };
-      try {
-        const next = await withReset.acquire(configFor({ runnerIncarnation: "inc-2" }), {
-          livenessOwnerToken: TOKEN,
-        });
-
-        expect(next.outcome).toBe("ready");
-        expect(next.bindings[0]).toMatchObject({ disposition: "adopted" });
-        expect(waits).toEqual([BINDING_SCOPE_RESET_DEFAULT_WAIT_MS]);
-        expect((await registry.getScope(computeBindingScopeKey(old)))?.state).toBe("invalidated");
-      } finally {
-        timer.sleep = sleep;
-      }
-    });
-
-    test("an implicit reset still pending reports scope_transition_pending within the deadline", async () => {
-      await acquisition.acquire(configFor(), { livenessOwnerToken: TOKEN });
-      const waits: number[] = [];
-      const withReset = acquisitionWithReset(async (scope, waitMs) => {
-        waits.push(waitMs);
-        return {
-          ...scope,
-          outcome: "pending",
-          freedDevices: [],
-          pending: {
-            liveOwners: [{ bindingIndex: 0, sessionUuid: "session-1", pid: DAEMON_PID }],
-            settling: [],
-            cleanupPending: [],
-            openJournal: [],
-          },
-        };
-      });
-      const next = configFor({ runnerIncarnation: "inc-2" });
-
-      const result = await withReset.acquire(
-        { ...next, preparationTimeoutMs: 3_000 },
-        { livenessOwnerToken: TOKEN },
-      );
-
-      expect(result.failure).toMatchObject({ code: "scope_transition_pending", retryable: true });
-      expect(result.failure?.message).toContain("1 live execution(s)");
-      // The settle wait never outlives the acquisition's preparation budget.
-      expect(waits).toEqual([3_000]);
-    });
-
-    test("an abandoned scope whose incarnation returns is revived and reuses its device", async () => {
-      const config = configFor();
-      const first = await acquisition.acquire(config, { livenessOwnerToken: TOKEN });
-      await endExecution(config, first.bindings[0]!.sessionUuid!);
-      timer.advanceTime(2 * 60 * 60 * 1000);
-      const marked = await registry.markScopeAbandoned(computeBindingScopeKey(config));
-      expect(marked.kind).toBe("marked");
-
-      const revived = await acquisition.acquire(config, { livenessOwnerToken: TOKEN });
-
-      expect(revived.outcome).toBe("ready");
-      expect(revived.scope.revived).toBe(true);
-      expect(revived.bindings[0]).toMatchObject({ disposition: "reused" });
-    });
   });
 });

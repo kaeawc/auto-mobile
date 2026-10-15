@@ -77,14 +77,6 @@ describe("SqliteBindingRegistry on a shared file", () => {
           "device_assigned_elsewhere",
         );
         expect(await b.isDeviceAssignedToValidBinding("android", winner)).toBe(true);
-
-        expect((await a.beginScopeInvalidation(scopeKey, "operator_reset")).kind).toBe(
-          "invalidating",
-        );
-        expect((await b.beginScopeInvalidation(scopeKey, "operator_reset")).kind).toBe(
-          "already_invalidating",
-        );
-        expect((await b.ensureScope(IDENTITY)).kind).toBe("scope_invalidated");
       } finally {
         await a.close();
         await b.close();

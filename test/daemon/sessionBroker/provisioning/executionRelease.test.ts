@@ -12,12 +12,6 @@ import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/reg
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { logger } from "../../../../src/utils/logger";
 import { SessionManager } from "../../../../src/daemon/sessionManager";
-import { DeviceSessionRegistry } from "../../../../src/daemon/deviceSessionRegistry";
-import { DAEMON_RELEASE_EXECUTION_METHOD } from "../../../../src/daemon/constants";
-import {
-  handleDaemonRequest,
-  type DaemonStateAccess,
-} from "../../../../src/daemon/daemonRequestHandlers";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -245,7 +239,6 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(await registry.snapshotManagedDevices()).toEqual([
       expect.objectContaining({ stableDeviceId: AVD, holder: "binding", bindingIndex: 0 }),
     ]);
-    expect(await registry.listFreeDevices()).toEqual([]);
     await claim(S2);
   });
 
@@ -629,35 +622,5 @@ describe("managed execution release wiring", () => {
     } finally {
       manager.stopCleanupTimer();
     }
-  });
-
-  test("daemon/releaseExecution validates its params and needs the drain", async () => {
-    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
-    const state: DaemonStateAccess = {
-      isInitialized: () => true,
-      getSessionManager: () => manager,
-      getDevicePool: () => ({
-        refreshDevices: async () => 0,
-        getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-        releaseDevice: async () => {},
-      }),
-      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
-    };
-    const request = (params: Record<string, unknown>) =>
-      handleDaemonRequest(
-        { id: "r", type: "daemon_request", method: DAEMON_RELEASE_EXECUTION_METHOD, params },
-        state,
-      );
-
-    expect(await request({})).toMatchObject({ success: false });
-    expect(await request({ sessionId: S1 })).toMatchObject({
-      success: false,
-      error: expect.stringContaining("livenessOwnerToken"),
-    });
-    expect(await request({ sessionId: S1, livenessOwnerToken: "token" })).toMatchObject({
-      success: false,
-      error: expect.stringContaining("not available"),
-    });
-    manager.stopCleanupTimer();
   });
 });

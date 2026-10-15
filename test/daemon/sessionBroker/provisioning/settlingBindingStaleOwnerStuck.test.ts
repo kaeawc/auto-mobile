@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  MANAGED_EXECUTION_SETTLEMENT_CAP_MS,
   BrokerExecutionRelease,
   type ManagedExecutionSessions,
   type ManagedExecutionWork,
@@ -16,7 +15,6 @@ import type {
   BindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
-import { BindingScopeReset } from "../../../../src/daemon/sessionBroker/provisioning/scopeReset";
 import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -216,21 +214,6 @@ describe.each(REGISTRIES)(
       expect(liveness(left!.execOwner!)).toBe(false);
     }
 
-    function newReset(): BindingScopeReset {
-      return new BindingScopeReset({
-        registry: async () => registry,
-        timer,
-        isExecOwnerLive: liveness,
-      });
-    }
-
-    const RESET = {
-      runnerNamespace: SCOPE.runnerNamespace,
-      runnerIncarnation: SCOPE.runnerIncarnation,
-      waitMs: 0,
-      force: true,
-    };
-
     test("returns to ready once the released work settles, with the dead record cleared", async () => {
       await releaseWithFailedOwnerClear();
 
@@ -340,42 +323,6 @@ describe.each(REGISTRIES)(
         expect(await registry.listOpenBindingJournal(key)).toEqual([]);
       });
 
-      test("re-checks only until the settlement cap, then leaves the binding settling for --force", async () => {
-        await settleWhileHeldAgain();
-        const start = timer.now();
-        const polls: number[] = [];
-        const originalSleep = timer.sleep.bind(timer);
-        const sleep = spyOn(timer, "sleep").mockImplementation((ms: number) => {
-          polls.push(ms);
-          return originalSleep(ms);
-        });
-
-        await drain.whenIdle();
-        sleep.mockRestore();
-
-        // Bounded: the watcher ended on its own, at the fast cadence, no later than the cap.
-        expect(polls.length).toBeGreaterThanOrEqual(2);
-        // Two bounded loops poll: the watcher's re-check and the retry of the failed owner clear.
-        expect(polls.length).toBeLessThanOrEqual(2 * (CAP_MS / POLL_MS + 1));
-        expect(polls.every((ms) => ms === POLL_MS)).toBe(true);
-        expect(timer.now() - start).toBeLessThanOrEqual(CAP_MS + POLL_MS);
-        expect(await registry.getAssignment(key)).toMatchObject({
-          state: "settling",
-          execOwner: { sessionUuid: S1 },
-        });
-        expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
-        expect(
-          warn.mock.calls.filter(([message]) =>
-            String(message).includes("still holds the owner record"),
-          ),
-        ).toHaveLength(1);
-
-        // The operator path stays open: once the session ends, --force past the cap resets it.
-        sessions.live.delete(S1);
-        timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
-        expect((await newReset().reset(RESET)).outcome).toBe("invalidated");
-      });
-
       test("close stops the re-check; the binding stays settling", async () => {
         await settleWhileHeldAgain();
         const start = timer.now();
@@ -390,53 +337,6 @@ describe.each(REGISTRIES)(
         });
         expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
       });
-    });
-
-    test("reset-binding-scope --force past the cap overrides it: the leftover owner is not a live execution", async () => {
-      await releaseWithFailedOwnerClear();
-      // The released work never settles: exactly the stuck settlement --force exists for.
-      drain.close();
-      await drain.whenIdle();
-      timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
-
-      const forced = await newReset().reset(RESET);
-
-      expect(forced.scopes[0]?.pending?.liveOwners ?? []).toEqual([]);
-      expect(forced.outcome).toBe("invalidated");
-    });
-
-    test("--force inside the cap says how long remains instead of skipping the binding (#11539)", async () => {
-      await releaseWithFailedOwnerClear();
-      drain.close();
-      await drain.whenIdle();
-
-      const forced = await newReset().reset(RESET);
-
-      expect(forced.outcome).toBe("pending");
-      expect(forced.scopes[0]?.forceRefusals?.map((refusal) => refusal.reason)).toEqual([
-        "within_settlement_cap",
-      ]);
-      expect((await registry.getAssignment(key))?.state).toBe("settling");
-    });
-
-    test("--force past the cap never cuts a settling binding whose owner is live", async () => {
-      await releaseWithFailedOwnerClear();
-      drain.close();
-      await drain.whenIdle();
-      sessions.live.set(S1, DEVICE);
-      timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
-
-      const forced = await newReset().reset(RESET);
-
-      expect(forced.outcome).toBe("pending");
-      expect(forced.scopes[0]?.pending?.liveOwners).toEqual([
-        { bindingIndex: 0, sessionUuid: S1, pid: DAEMON_PID },
-      ]);
-      expect(await registry.getAssignment(key)).toMatchObject({
-        state: "settling",
-        execOwner: { sessionUuid: S1 },
-      });
-      expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
     });
   },
 );

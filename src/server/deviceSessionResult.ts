@@ -2,10 +2,7 @@ import { idleReleaseField } from "../daemon/releaseReasons";
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
-  MANAGED_EXECUTION_ENDED_CODE,
-  RELAUNCH_EXECUTION_NEXT_ACTION,
 } from "../models/deviceSessionRecovery";
-import type { BindingResultEntry } from "../daemon/sessionBroker/provisioning/acquisitionResult";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
@@ -76,43 +73,6 @@ export function terminalSessionRefusalFields(ownerPid?: number) {
     recovery: {
       action: "acquire_replacement_session" as const,
       tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-    },
-  };
-}
-
-/**
- * The envelope a managed connection answers with once its execution's session is terminally released
- * (#11341). Every idle or heartbeat release is terminal and a managed proxy never acquires devices
- * itself, so the answer is not retryable, names `relaunch_execution` (the runner's decision) and
- * carries no recovery tools. The slot is named when the session is one of the connection's slots.
- */
-export function managedExecutionEndedPayload({
-  sessionUuid,
-  reason,
-  binding,
-}: {
-  sessionUuid?: string;
-  reason: string;
-  binding?: Pick<BindingResultEntry, "bindingIndex" | "assignmentGeneration"> | null;
-}) {
-  return {
-    error: {
-      code: MANAGED_EXECUTION_ENDED_CODE,
-      message:
-        `This managed execution has ended: its device session${sessionUuid ? ` ${sessionUuid}` : ""} ` +
-        `was released (${reason}) and cannot be reused. This connection never acquires devices, so ` +
-        "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work.",
-      ...(sessionUuid === undefined ? {} : { sessionUuid }),
-      reason,
-      ...idleReleaseField(reason),
-      retryable: false as const,
-      nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
-      ...(binding
-        ? {
-            bindingIndex: binding.bindingIndex,
-            assignmentGeneration: binding.assignmentGeneration,
-          }
-        : {}),
     },
   };
 }

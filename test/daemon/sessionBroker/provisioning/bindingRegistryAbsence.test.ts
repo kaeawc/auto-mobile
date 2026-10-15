@@ -3,14 +3,12 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDevicePoolDependencies } from "../../../helpers/devicePoolDependencies";
-import { AbandonedScopeReclaimer } from "../../../helpers/deferredProvisioningFixtures";
 import { assertInputNotOnForeignBindingDevice } from "../../../../src/daemon/inputDeviceOwnership";
 import {
   createDefaultBindingExclusion,
   RegistryBindingExclusion,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
 import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
-import { BindingScopeReset } from "../../../../src/daemon/sessionBroker/provisioning/scopeReset";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { defaultBindingRegistryPath } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { DevicePool } from "../../../../src/daemon/devicePool";
@@ -119,24 +117,6 @@ describe("binding registry absence", () => {
     await expect(inputCheck(pool, sessionManager)).rejects.toMatchObject({
       code: "discovery_incomplete",
     });
-  });
-
-  test("the abandoned-scope sweep and the operator reset never open an absent registry", async () => {
-    const reclaimer = new AbandonedScopeReclaimer({
-      registry: open,
-      registryExists: () => exists,
-      journal: () => {
-        throw new Error("must not drive the journal");
-      },
-      timer,
-    });
-    expect(await reclaimer.sweep()).toEqual({ marked: [], deleted: [], blocked: [], skipped: [] });
-
-    const reset = new BindingScopeReset({ registry: open, registryExists: () => exists, timer });
-    expect(
-      (await reset.reset({ runnerNamespace: "ns", runnerIncarnation: "boot-1" })).outcome,
-    ).toBe("not_found");
-    expect(opens).toBe(0);
   });
 
   describe("the daemon's default exclusion", () => {

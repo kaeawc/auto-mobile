@@ -19,11 +19,6 @@ import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import { migrateBindingRegistry } from "./bindingRegistryMigrations";
 import {
-  isAbandonedScope,
-  sameFreeDevice,
-  journalNamesFreeDevice,
-  type FreeDeviceIdentity,
-  type BeginFreeDeviceDeletionResult,
   type BindingResourceSnapshot,
   isBindingJournalPhaseOpen,
   journalOwnersEqual,
@@ -50,26 +45,13 @@ import {
   bindingMatches,
   computeBindingScopeKey,
   entersFencingState,
-  isPermanentInvalidationReason,
-  isRevivableScope,
-  lastScopeActivityMs,
-  resolveAbandonmentThresholdMs,
-  FREE_DEVICE_STOP_CLAIM_STALE_MS,
-  type AbandonmentQuery,
-  type BeginFreeDeviceStopResult,
-  type BeginScopeInvalidationResult,
   type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
-  type CompleteScopeInvalidationResult,
   type DeviceHolder,
   type EnsureScopeResult,
-  type FreeDeviceState,
-  type FreeDeviceStopClaim,
-  type FreeBindingDeviceRecord,
   type InitBindingResult,
   type ManagedDeviceEntry,
-  type MarkScopeAbandonedResult,
   type ReleaseExecutionResult,
   type BindingAssignmentRecord,
   type BindingAssignmentState,
@@ -85,7 +67,6 @@ import {
   type BindingRegistry,
   type BindingScopeIdentity,
   type BindingScopeInvalidationReason,
-  type BindingScopeQuery,
   type BindingScopeRecord,
   type BindingScopeState,
   type UpdateBindingStateOptions,
@@ -169,25 +150,6 @@ interface BindingAssignmentsTable {
   updated_at_ms: number;
 }
 
-interface BindingFreeDevicesTable {
-  platform: BindingPlatform;
-  stable_device_id: string;
-  spec_fingerprint: string | null;
-  from_scope_key: string;
-  freed_at_ms: number;
-  state: Generated<FreeDeviceState>;
-  stop_claimed_by: string | null;
-  stop_claimed_at_ms: number | null;
-  deletion_owner_daemon_id: string | null;
-  deletion_owner_pid: number | null;
-  deletion_owner_process_token: string | null;
-  deletion_started_at_ms: number | null;
-  deletion_attempts: number | null;
-  deletion_failed_deletes: number | null;
-  deletion_last_error: string | null;
-  deletion_next_attempt_at_ms: number | null;
-}
-
 interface BindingJournalTable {
   id: Generated<number>;
   scope_key: string;
@@ -211,9 +173,9 @@ interface BindingJournalTable {
 }
 
 export interface BindingRegistryDatabase {
+  slot_free_devices: BindingFreeDevicesTable;
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
-  slot_free_devices: BindingFreeDevicesTable;
   slot_journal: BindingJournalTable;
   session_broker_requests: BrokerRequestsTable;
   session_broker_resources: BrokerResourcesTable;
@@ -222,7 +184,6 @@ export interface BindingRegistryDatabase {
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
 type ScopeRow = Selectable<BindingScopesTable>;
 type AssignmentRow = Selectable<BindingAssignmentsTable>;
-type FreeDeviceRow = Selectable<BindingFreeDevicesTable>;
 type JournalRow = Selectable<BindingJournalTable>;
 
 function toScope(row: ScopeRow): BindingScopeRecord {
@@ -300,34 +261,6 @@ function toAssignment(row: AssignmentRow): BindingAssignmentRecord {
     execOwner: toExecOwner(row),
     settler: toSettler(row),
     updatedAtMs: row.updated_at_ms,
-  };
-}
-
-function toFreeDevice(row: FreeDeviceRow): FreeBindingDeviceRecord {
-  return {
-    platform: row.platform,
-    stableDeviceId: row.stable_device_id,
-    specFingerprint: row.spec_fingerprint,
-    fromScopeKey: row.from_scope_key,
-    freedAtMs: row.freed_at_ms,
-    state: row.state,
-    stopClaimedBy: row.stop_claimed_by,
-    stopClaimedAtMs: row.stop_claimed_at_ms,
-    deletion:
-      row.deletion_owner_daemon_id === null
-        ? null
-        : {
-            owner: {
-              daemonId: row.deletion_owner_daemon_id,
-              pid: row.deletion_owner_pid!,
-              processGenerationToken: row.deletion_owner_process_token,
-            },
-            startedAtMs: row.deletion_started_at_ms!,
-            attempts: row.deletion_attempts!,
-            failedDeletes: row.deletion_failed_deletes ?? 0,
-            lastError: row.deletion_last_error,
-            nextAttemptAtMs: row.deletion_next_attempt_at_ms!,
-          },
   };
 }
 
@@ -589,7 +522,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
           revived: false,
         };
       }
-      if (existing && !isRevivableScope(existing)) {
+      if (existing) {
         return { kind: "scope_invalidated", scope: existing };
       }
       const live = await trx
@@ -602,34 +535,6 @@ export class SqliteBindingRegistry implements BindingRegistry {
         .executeTakeFirst();
       if (live) {
         return { kind: "incarnation_conflict", current: toScope(live) };
-      }
-      if (existing) {
-        const revived = await trx
-          .updateTable("slot_scopes")
-          .set({
-            state: "valid",
-            invalidation_reason: null,
-            invalidating_at_ms: null,
-            invalidated_at_ms: null,
-            last_acquired_at_ms: nowMs,
-          })
-          .where("scope_key", "=", scopeKey)
-          .returningAll()
-          .executeTakeFirstOrThrow();
-        return { kind: "ready", scope: toScope(revived), created: false, revived: true };
-      }
-      // A newer incarnation supersedes every abandoned one of this namespace for good: their kept
-      // bindings (all already invalidated, or the conflict above would have refused) are freed.
-      const superseded = await trx
-        .updateTable("slot_scopes")
-        .set({ invalidation_reason: "incarnation_reset" })
-        .where("managed_host_scope", "=", identity.managedHostScope)
-        .where("runner_namespace", "=", identity.runnerNamespace)
-        .where("invalidation_reason", "=", "abandoned")
-        .returning("scope_key")
-        .execute();
-      for (const { scope_key } of superseded) {
-        await this.releaseBindingsToFreePool(trx, scope_key);
       }
       const row: ScopeRow = {
         scope_key: scopeKey,
@@ -741,7 +646,6 @@ export class SqliteBindingRegistry implements BindingRegistry {
       return checked;
     }
     const platform = assertPlatformChangeAllowed(checked, next);
-    let adoptedFreeDevice: FreeBindingDeviceRecord | null = null;
     if (next.stableDeviceId !== null) {
       const holder = await trx
         .selectFrom("slot_assignments")
@@ -755,13 +659,8 @@ export class SqliteBindingRegistry implements BindingRegistry {
       if (holder) {
         return { kind: "device_assigned_elsewhere", holder: toAssignment(holder) };
       }
-      const taken = await this.takeFreeDevice(trx, platform, next.stableDeviceId);
-      if (taken === "stopping") {
-        // A reclaim sweep is shutting this device down; adopting now would race that shutdown.
-        return { kind: "free_device_stopping" };
-      }
-      adoptedFreeDevice = taken;
     }
+
     const deviceChanged =
       next.stableDeviceId !== checked.stableDeviceId || platform !== checked.platform;
     const updated = await trx
@@ -791,7 +690,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
       .where("slot_index", "=", key.bindingIndex)
       .returningAll()
       .executeTakeFirstOrThrow();
-    return { kind: "committed", assignment: toAssignment(updated), adoptedFreeDevice };
+    return { kind: "committed", assignment: toAssignment(updated) };
   }
 
   async updateBindingState(
@@ -975,13 +874,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
         return { kind: "binding", scope, assignment: toAssignment(assignment) };
       }
     }
-    const free = await this.db
-      .selectFrom("slot_free_devices")
-      .selectAll()
-      .where("platform", "=", platform)
-      .where("stable_device_id", "=", stableDeviceId)
-      .executeTakeFirst();
-    return free ? { kind: "free", device: toFreeDevice(free) } : null;
+    return null;
   }
 
   async isDeviceAssignedToValidBinding(
@@ -1000,16 +893,14 @@ export class SqliteBindingRegistry implements BindingRegistry {
   }
 
   async snapshotManagedDevices(): Promise<ManagedDeviceEntry[]> {
-    return (await this.snapshotResources(false)).managed;
+    return (await this.snapshotResources()).managed;
   }
 
   async snapshotBindingResources(): Promise<BindingResourceSnapshot> {
-    return this.snapshotResources(true);
+    return this.snapshotResources();
   }
 
-  private async snapshotResources(
-    includeAbandonedScopes: boolean,
-  ): Promise<BindingResourceSnapshot> {
+  private async snapshotResources(): Promise<BindingResourceSnapshot> {
     const assignedQuery = this.db
       .selectFrom("slot_assignments")
       .innerJoin("slot_scopes", "slot_scopes.scope_key", "slot_assignments.scope_key")
@@ -1035,30 +926,6 @@ export class SqliteBindingRegistry implements BindingRegistry {
     const snapshot = await this.db
       .selectNoFrom([
         jsonArrayFrom(assignedQuery).$castTo<string>().as("assigned"),
-        jsonArrayFrom(
-          this.db
-            .selectFrom("slot_free_devices")
-            .select([
-              "platform",
-              "stable_device_id",
-              "spec_fingerprint",
-              "from_scope_key",
-              "freed_at_ms",
-              "state",
-              "stop_claimed_by",
-              "stop_claimed_at_ms",
-              "deletion_owner_daemon_id",
-              "deletion_owner_pid",
-              "deletion_owner_process_token",
-              "deletion_started_at_ms",
-              "deletion_attempts",
-              "deletion_failed_deletes",
-              "deletion_last_error",
-              "deletion_next_attempt_at_ms",
-            ]),
-        )
-          .$castTo<string>()
-          .as("free"),
         jsonArrayFrom(
           this.db
             .selectFrom("slot_journal")
@@ -1088,27 +955,12 @@ export class SqliteBindingRegistry implements BindingRegistry {
           .$castTo<string>()
           .as("pending"),
       ])
-      .$if(includeAbandonedScopes, (query) =>
-        query.select(
-          jsonArrayFrom(
-            this.db
-              .selectFrom("slot_scopes")
-              .select("scope_key")
-              .where("state", "=", "invalidating")
-              .where("invalidation_reason", "=", "abandoned"),
-          )
-            .$castTo<string>()
-            .as("abandonedScopeKeys"),
-        ),
-      )
       .executeTakeFirstOrThrow();
     // Decode only the aggregate arrays; target_json must remain a string for the journal codec.
     const assigned: Awaited<ReturnType<typeof assignedQuery.execute>> = JSON.parse(
       snapshot.assigned,
     );
-    const free: FreeDeviceRow[] = JSON.parse(snapshot.free);
     const pendingRows: JournalRow[] = JSON.parse(snapshot.pending);
-    const abandoned: Array<{ scope_key: string }> = JSON.parse(snapshot.abandonedScopeKeys ?? "[]");
     const pending = pendingRows.map(toJournalEntry);
     const entries: ManagedDeviceEntry[] = [
       ...assigned.flatMap((row): ManagedDeviceEntry[] =>
@@ -1126,396 +978,12 @@ export class SqliteBindingRegistry implements BindingRegistry {
               },
             ],
       ),
-      ...free.map((row): ManagedDeviceEntry => ({
-        platform: row.platform,
-        stableDeviceId: row.stable_device_id,
-        holder: "free",
-        scopeKey: row.from_scope_key,
-        bindingIndex: null,
-        scopeState: null,
-        execSessionUuid: null,
-      })),
     ];
     return {
       managed: [...entries, ...journalTargetEntries(pending, entries)],
-      free: free.map(toFreeDevice),
       openJournal: pending,
-      abandonedScopeKeys: abandoned.map((row) => row.scope_key),
     };
   }
-
-  async listFreeDevices(): Promise<FreeBindingDeviceRecord[]> {
-    const rows = await this.db
-      .selectFrom("slot_free_devices")
-      .selectAll()
-      .orderBy("freed_at_ms")
-      .execute();
-    return rows.map(toFreeDevice);
-  }
-
-  async beginScopeInvalidation(
-    scopeKey: string,
-    reason: BindingScopeInvalidationReason,
-  ): Promise<BeginScopeInvalidationResult> {
-    return this.db.transaction().execute(async (trx): Promise<BeginScopeInvalidationResult> => {
-      const scope = await this.readScope(trx, scopeKey);
-      if (!scope) {
-        return { kind: "not_found" };
-      }
-      if (scope.state === "valid") {
-        return { kind: "invalidating", scope: await this.markInvalidating(trx, scope, reason) };
-      }
-      const current = await this.makeResetPermanent(trx, scope, reason);
-      return current.state === "invalidating"
-        ? { kind: "already_invalidating", scope: current }
-        : { kind: "already_invalidated", scope: current };
-    });
-  }
-
-  async completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult> {
-    return this.db.transaction().execute(async (trx): Promise<CompleteScopeInvalidationResult> => {
-      const scope = await this.readScope(trx, scopeKey);
-      if (!scope) {
-        return { kind: "not_found" };
-      }
-      if (scope.state === "invalidated") {
-        return { kind: "already_invalidated", scope };
-      }
-      if (scope.state !== "invalidating") {
-        return { kind: "not_invalidating", scope };
-      }
-      const assignments = (
-        await trx
-          .selectFrom("slot_assignments")
-          .selectAll()
-          .where("scope_key", "=", scopeKey)
-          .execute()
-      ).map(toAssignment);
-      const liveOwners = assignments.filter(
-        (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
-      );
-      const settling = assignments.filter(
-        (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
-      );
-      const cleanupPending = assignments.filter(
-        (assignment) => assignment.state === "cleanup_pending",
-      );
-      const openJournal = (
-        await trx
-          .selectFrom("slot_journal")
-          .selectAll()
-          .where("scope_key", "=", scopeKey)
-          .where("phase", "not in", [...BINDING_JOURNAL_TERMINAL_PHASES])
-          .orderBy("id")
-          .execute()
-      ).map(toJournalEntry);
-      if (
-        liveOwners.length > 0 ||
-        settling.length > 0 ||
-        cleanupPending.length > 0 ||
-        openJournal.length > 0
-      ) {
-        return { kind: "pending", scope, liveOwners, settling, cleanupPending, openJournal };
-      }
-      const nowMs = this.timer.now();
-      // An abandoned scope stays revivable: keep its bindings until the invalidation is permanent.
-      const freedDevices =
-        scope.invalidationReason === "abandoned"
-          ? []
-          : await this.releaseBindingsToFreePool(trx, scopeKey);
-      const invalidated = await trx
-        .updateTable("slot_scopes")
-        .set({ state: "invalidated", invalidated_at_ms: nowMs })
-        .where("scope_key", "=", scopeKey)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      return { kind: "invalidated", scope: toScope(invalidated), freedDevices };
-    });
-  }
-
-  async findAbandonedScopes(query?: AbandonmentQuery): Promise<BindingScopeRecord[]> {
-    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    const candidates = (
-      await this.db
-        .selectFrom("slot_scopes")
-        .selectAll()
-        .where("state", "=", "valid")
-        .where("last_acquired_at_ms", "<=", cutoffMs)
-        .execute()
-    )
-      .map(toScope)
-      .filter((scope) => lastScopeActivityMs(scope) <= cutoffMs)
-      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b));
-    const abandoned: BindingScopeRecord[] = [];
-    for (const scope of candidates) {
-      if (!(await this.hasLiveExecOwner(this.db, scope.scopeKey))) {
-        abandoned.push(scope);
-      }
-    }
-    return abandoned;
-  }
-
-  async markScopeAbandoned(
-    scopeKey: string,
-    query?: AbandonmentQuery,
-  ): Promise<MarkScopeAbandonedResult> {
-    const thresholdMs = resolveAbandonmentThresholdMs(query);
-    return this.db.transaction().execute(async (trx): Promise<MarkScopeAbandonedResult> => {
-      const scope = await this.readScope(trx, scopeKey);
-      if (!scope) {
-        return { kind: "not_found" };
-      }
-      if (scope.state !== "valid") {
-        return { kind: "not_abandoned", scope, reason: "not_valid" };
-      }
-      if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
-        return { kind: "not_abandoned", scope, reason: "recent_acquisition" };
-      }
-      if (await this.hasLiveExecOwner(trx, scopeKey)) {
-        return { kind: "not_abandoned", scope, reason: "live_owner" };
-      }
-      return { kind: "marked", scope: await this.markInvalidating(trx, scope, "abandoned") };
-    });
-  }
-
-  async findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeBindingDeviceRecord[]> {
-    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    const rows = await this.db
-      .selectFrom("slot_free_devices")
-      .selectAll()
-      .where("freed_at_ms", "<=", cutoffMs)
-      .where("state", "<>", "stopped")
-      .where("deletion_owner_daemon_id", "is", null)
-      .orderBy("freed_at_ms")
-      .execute();
-    return rows.map(toFreeDevice);
-  }
-
-  private freeRow(trx: Executor, row: FreeDeviceIdentity) {
-    return trx
-      .selectFrom("slot_free_devices")
-      .selectAll()
-      .where("platform", "=", row.platform)
-      .where("stable_device_id", "=", row.stableDeviceId)
-      .where("from_scope_key", "=", row.fromScopeKey)
-      .where("freed_at_ms", "=", row.freedAtMs)
-      .executeTakeFirst();
-  }
-
-  async beginFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ): Promise<BeginFreeDeviceDeletionResult> {
-    return this.db.transaction().execute(async (trx): Promise<BeginFreeDeviceDeletionResult> => {
-      const current = await this.freeRow(trx, row);
-      if (!current || !sameFreeDevice(toFreeDevice(current), row)) {
-        return { kind: "not_evictable", reason: "row_moved" };
-      }
-      if (current.deletion_owner_daemon_id !== null || current.state === "stopping") {
-        return { kind: "not_evictable", reason: "deletion_pending_or_stopping" };
-      }
-      const bound = await trx
-        .selectFrom("slot_assignments")
-        .select("scope_key")
-        .where("platform", "=", row.platform)
-        .where("stable_device_id", "=", row.stableDeviceId)
-        .executeTakeFirst();
-      if (bound) {
-        return { kind: "not_evictable", reason: "assigned" };
-      }
-      const journal = await trx
-        .selectFrom("slot_journal")
-        .selectAll()
-        .where("phase", "not in", BINDING_JOURNAL_TERMINAL_PHASES)
-        .execute();
-      if (journal.some((entry) => journalNamesFreeDevice(toJournalEntry(entry), row))) {
-        return { kind: "not_evictable", reason: "journal_open" };
-      }
-      const marked = await trx
-        .updateTable("slot_free_devices")
-        .set({
-          deletion_owner_daemon_id: owner.daemonId,
-          deletion_owner_pid: owner.pid,
-          deletion_owner_process_token: owner.processGenerationToken ?? null,
-          deletion_started_at_ms: this.timer.now(),
-          deletion_attempts: 0,
-          deletion_failed_deletes: 0,
-          deletion_last_error: null,
-          deletion_next_attempt_at_ms: this.timer.now(),
-        })
-        .where("platform", "=", row.platform)
-        .where("stable_device_id", "=", row.stableDeviceId)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      return { kind: "begun", row: toFreeDevice(marked) };
-    });
-  }
-
-  private async ownsFreeDeletion(
-    trx: Executor,
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ) {
-    const found = await this.freeRow(trx, row);
-    const record = found && toFreeDevice(found);
-    return record?.deletion && journalOwnersEqual(record.deletion.owner, owner) ? record : null;
-  }
-
-  async recordFreeDeviceDeletionAttempt(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
-  ): Promise<boolean> {
-    return this.db.transaction().execute(async (trx) => {
-      const current = await this.ownsFreeDeletion(trx, row, owner);
-      if (!current?.deletion) {
-        return false;
-      }
-      await trx
-        .updateTable("slot_free_devices")
-        .set({
-          deletion_attempts: current.deletion.attempts + 1,
-          deletion_failed_deletes:
-            current.deletion.failedDeletes + Number(attempt.nativeDeleteFailed === true),
-          deletion_last_error: attempt.error,
-          deletion_next_attempt_at_ms: attempt.nextAttemptAtMs,
-        })
-        .where("platform", "=", row.platform)
-        .where("stable_device_id", "=", row.stableDeviceId)
-        .execute();
-      return true;
-    });
-  }
-
-  async completeFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    owner: BindingJournalOwner,
-  ): Promise<boolean> {
-    return this.db.transaction().execute(async (trx) => {
-      if (!(await this.ownsFreeDeletion(trx, row, owner))) {
-        return false;
-      }
-      await trx
-        .deleteFrom("slot_free_devices")
-        .where("platform", "=", row.platform)
-        .where("stable_device_id", "=", row.stableDeviceId)
-        .execute();
-      return true;
-    });
-  }
-
-  async claimFreeDeviceDeletion(
-    row: FreeDeviceIdentity,
-    expectedOwner: BindingJournalOwner,
-    nextOwner: BindingJournalOwner,
-  ): Promise<boolean> {
-    return this.db.transaction().execute(async (trx) => {
-      if (!(await this.ownsFreeDeletion(trx, row, expectedOwner))) {
-        return false;
-      }
-      await trx
-        .updateTable("slot_free_devices")
-        .set({
-          deletion_owner_daemon_id: nextOwner.daemonId,
-          deletion_owner_pid: nextOwner.pid,
-          deletion_owner_process_token: nextOwner.processGenerationToken ?? null,
-        })
-        .where("platform", "=", row.platform)
-        .where("stable_device_id", "=", row.stableDeviceId)
-        .execute();
-      return true;
-    });
-  }
-
-  async listFreeDeviceDeletions(): Promise<FreeBindingDeviceRecord[]> {
-    const rows = await this.db
-      .selectFrom("slot_free_devices")
-      .selectAll()
-      .where("deletion_owner_daemon_id", "is not", null)
-      .orderBy("deletion_next_attempt_at_ms")
-      .execute();
-    return rows.map(toFreeDevice);
-  }
-
-  async beginFreeDeviceStop(
-    claim: FreeDeviceStopClaim,
-    query?: AbandonmentQuery,
-  ): Promise<BeginFreeDeviceStopResult> {
-    const nowMs = this.timer.now();
-    const cutoffMs = nowMs - resolveAbandonmentThresholdMs(query);
-    const staleBeforeMs = nowMs - FREE_DEVICE_STOP_CLAIM_STALE_MS;
-    const claimed = await this.db
-      .updateTable("slot_free_devices")
-      .set({ state: "stopping", stop_claimed_by: claim.claimedBy, stop_claimed_at_ms: nowMs })
-      .where("deletion_owner_daemon_id", "is", null)
-      .where("platform", "=", claim.platform)
-      .where("stable_device_id", "=", claim.stableDeviceId)
-      .where("freed_at_ms", "=", claim.freedAtMs)
-      .where("freed_at_ms", "<=", cutoffMs)
-      .where((eb) =>
-        eb.or([
-          eb("state", "=", "free"),
-          eb.and([
-            eb("state", "=", "stopping"),
-            eb.or([
-              eb("stop_claimed_by", "=", claim.claimedBy),
-              eb("stop_claimed_at_ms", "is", null),
-              eb("stop_claimed_at_ms", "<=", staleBeforeMs),
-            ]),
-          ]),
-        ]),
-      )
-      .returning("stable_device_id")
-      .executeTakeFirst();
-    return claimed ? { kind: "begun" } : { kind: "not_reclaimable" };
-  }
-
-  async holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    const row = await this.db
-      .selectFrom("slot_free_devices")
-      .select("stable_device_id")
-      .where("platform", "=", claim.platform)
-      .where("stable_device_id", "=", claim.stableDeviceId)
-      .where("freed_at_ms", "=", claim.freedAtMs)
-      .where("state", "=", "stopping")
-      .where("stop_claimed_by", "=", claim.claimedBy)
-      .executeTakeFirst();
-    return row !== undefined;
-  }
-
-  async completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    return this.releaseFreeDeviceStop(claim, "stopped");
-  }
-
-  async revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
-    return this.releaseFreeDeviceStop(claim, "free");
-  }
-
-  private async releaseFreeDeviceStop(
-    claim: FreeDeviceStopClaim,
-    next: "free" | "stopped",
-  ): Promise<boolean> {
-    const updated = await this.db
-      .updateTable("slot_free_devices")
-      .set({ state: next, stop_claimed_by: null, stop_claimed_at_ms: null })
-      .where("platform", "=", claim.platform)
-      .where("stable_device_id", "=", claim.stableDeviceId)
-      .where("freed_at_ms", "=", claim.freedAtMs)
-      .where("state", "=", "stopping")
-      .where("stop_claimed_by", "=", claim.claimedBy)
-      .returning("stable_device_id")
-      .executeTakeFirst();
-    return updated !== undefined;
-  }
-
-  openBindingJournal(
-    key: BindingKey,
-    input: OpenBindingJournalInput & { requireAbandonedScope?: false },
-  ): Promise<Exclude<OpenBindingJournalResult, { kind: "scope_not_abandoned" }>>;
-  openBindingJournal(
-    key: BindingKey,
-    input: OpenBindingJournalInput,
-  ): Promise<OpenBindingJournalResult>;
   async openBindingJournal(
     key: BindingKey,
     input: OpenBindingJournalInput,
@@ -1533,12 +1001,6 @@ export class SqliteBindingRegistry implements BindingRegistry {
       const open = await this.readOpenJournal(trx, key);
       if (open) {
         return { kind: "journal_open", entry: open };
-      }
-      if (input.requireAbandonedScope) {
-        const scope = await this.readScope(trx, key.scopeKey);
-        if (!isAbandonedScope(scope)) {
-          return { kind: "scope_not_abandoned", scope };
-        }
       }
       const applied = await this.applyJournalAssignmentChange(trx, key, input.assignment);
       if ("kind" in applied) {
@@ -1670,30 +1132,6 @@ export class SqliteBindingRegistry implements BindingRegistry {
     return rows.map(toJournalEntry);
   }
 
-  async findScopes(query: BindingScopeQuery): Promise<BindingScopeRecord[]> {
-    let select = this.db
-      .selectFrom("slot_scopes")
-      .selectAll()
-      .where("runner_namespace", "=", query.runnerNamespace)
-      .where("runner_incarnation", "=", query.runnerIncarnation);
-    if (query.managedHostScope !== undefined) {
-      select = select.where("managed_host_scope", "=", query.managedHostScope);
-    }
-    const rows = await select.orderBy("created_at_ms").orderBy("scope_key").execute();
-    return rows.map(toScope);
-  }
-
-  async listAbandonedScopes(): Promise<BindingScopeRecord[]> {
-    const rows = await this.db
-      .selectFrom("slot_scopes")
-      .selectAll()
-      .where("state", "=", "invalidating")
-      .where("invalidation_reason", "=", "abandoned")
-      .orderBy("invalidating_at_ms")
-      .execute();
-    return rows.map(toScope);
-  }
-
   async close(): Promise<void> {
     await this.db.destroy();
   }
@@ -1807,130 +1245,23 @@ export class SqliteBindingRegistry implements BindingRegistry {
       (execOwner === null || !this.isExecOwnerLive(execOwner))
     );
   }
+}
 
-  /** Take a device out of the free pool for adoption, unless a reclaim sweep is stopping it. */
-  private async takeFreeDevice(
-    trx: Executor,
-    platform: BindingPlatform,
-    stableDeviceId: string,
-  ): Promise<FreeBindingDeviceRecord | "stopping" | null> {
-    const taken = await trx
-      .deleteFrom("slot_free_devices")
-      .where("deletion_owner_daemon_id", "is", null)
-      .where("platform", "=", platform)
-      .where("stable_device_id", "=", stableDeviceId)
-      .where((eb) =>
-        eb.or([
-          eb("state", "<>", "stopping"),
-          eb("stop_claimed_at_ms", "is", null),
-          eb("stop_claimed_at_ms", "<=", this.timer.now() - FREE_DEVICE_STOP_CLAIM_STALE_MS),
-        ]),
-      )
-      .returningAll()
-      .executeTakeFirst();
-    if (taken) {
-      return toFreeDevice(taken);
-    }
-    const stopping = await trx
-      .selectFrom("slot_free_devices")
-      .select("state")
-      .where("platform", "=", platform)
-      .where("stable_device_id", "=", stableDeviceId)
-      .executeTakeFirst();
-    return stopping ? "stopping" : null;
-  }
-
-  /**
-   * Move a scope's bound devices to the free pool and remove its bindings. Used when an invalidation
-   * is (or becomes) permanent.
-   */
-  private async releaseBindingsToFreePool(
-    trx: Executor,
-    scopeKey: string,
-  ): Promise<FreeBindingDeviceRecord[]> {
-    const assignments = (
-      await trx
-        .selectFrom("slot_assignments")
-        .selectAll()
-        .where("scope_key", "=", scopeKey)
-        .orderBy("slot_index")
-        .execute()
-    ).map(toAssignment);
-    const nowMs = this.timer.now();
-    const freedDevices = assignments.flatMap((assignment): FreeBindingDeviceRecord[] =>
-      assignment.stableDeviceId === null
-        ? []
-        : [
-            {
-              platform: assignment.platform,
-              stableDeviceId: assignment.stableDeviceId,
-              specFingerprint: assignment.specFingerprint,
-              fromScopeKey: scopeKey,
-              freedAtMs: nowMs,
-              state: "free",
-              stopClaimedBy: null,
-              stopClaimedAtMs: null,
-              deletion: null,
-            },
-          ],
-    );
-    await trx.deleteFrom("slot_assignments").where("scope_key", "=", scopeKey).execute();
-    if (freedDevices.length > 0) {
-      await trx
-        .insertInto("slot_free_devices")
-        .values(
-          freedDevices.map((device) => ({
-            platform: device.platform,
-            stable_device_id: device.stableDeviceId,
-            spec_fingerprint: device.specFingerprint,
-            from_scope_key: device.fromScopeKey,
-            freed_at_ms: device.freedAtMs,
-          })),
-        )
-        .execute();
-    }
-    return freedDevices;
-  }
-
-  /**
-   * An explicit reset of an abandoned scope replaces the revivable reason with the reset's; when
-   * the scope was already invalidated, its kept bindings are freed now.
-   */
-  private async makeResetPermanent(
-    trx: Executor,
-    scope: BindingScopeRecord,
-    reason: BindingScopeInvalidationReason,
-  ): Promise<BindingScopeRecord> {
-    if (!isRevivableScope(scope) || !isPermanentInvalidationReason(reason)) {
-      return scope;
-    }
-    if (scope.state === "invalidated") {
-      await this.releaseBindingsToFreePool(trx, scope.scopeKey);
-    }
-    const row = await trx
-      .updateTable("slot_scopes")
-      .set({ invalidation_reason: reason })
-      .where("scope_key", "=", scope.scopeKey)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    return toScope(row);
-  }
-
-  private async markInvalidating(
-    trx: Executor,
-    scope: BindingScopeRecord,
-    reason: BindingScopeInvalidationReason,
-  ): Promise<BindingScopeRecord> {
-    const row = await trx
-      .updateTable("slot_scopes")
-      .set({
-        state: "invalidating",
-        invalidation_reason: reason,
-        invalidating_at_ms: this.timer.now(),
-      })
-      .where("scope_key", "=", scope.scopeKey)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    return toScope(row);
-  }
+interface BindingFreeDevicesTable {
+  platform: BindingPlatform;
+  stable_device_id: string;
+  spec_fingerprint: string | null;
+  from_scope_key: string;
+  freed_at_ms: number;
+  state: Generated<"free" | "stopping" | "stopped">;
+  stop_claimed_by: string | null;
+  stop_claimed_at_ms: number | null;
+  deletion_owner_daemon_id: string | null;
+  deletion_owner_pid: number | null;
+  deletion_owner_process_token: string | null;
+  deletion_started_at_ms: number | null;
+  deletion_attempts: number | null;
+  deletion_failed_deletes: number | null;
+  deletion_last_error: string | null;
+  deletion_next_attempt_at_ms: number | null;
 }

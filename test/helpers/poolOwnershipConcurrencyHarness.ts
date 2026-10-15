@@ -103,7 +103,6 @@ export type StepKind =
   | "slotAssign"
   | "slotExecStart"
   | "slotExecEnd"
-  | "slotRelease"
   // Tool-path operations: the admission a read or a control call passes before a handler runs.
   | "toolRead"
   | "toolControl"
@@ -155,15 +154,9 @@ export function describeStep(step: Step, index: number): string {
   const target =
     step.kind === "advance"
       ? `${step.ms}ms`
-      : [
-            "kill",
-            "disconnect",
-            "reconnect",
-            "slotAssign",
-            "slotExecStart",
-            "slotExecEnd",
-            "slotRelease",
-          ].includes(step.kind)
+      : ["kill", "disconnect", "reconnect", "slotAssign", "slotExecStart", "slotExecEnd"].includes(
+            step.kind,
+          )
         ? `d${step.device}`
         : [
               "acquireMcp",
@@ -1036,22 +1029,6 @@ class OwnershipWorld {
     });
   }
 
-  /**
-   * The slot's scope is reset: its device goes to the free pool. A device parked there is still
-   * managed (never generic capacity), so the slot keeps excluding it.
-   */
-  slotRelease(deviceIndex: number): void {
-    const binding = this.slotFor(deviceIndex);
-    if (!binding || binding.execSession) {
-      return;
-    }
-    this.log(`binding release ${DEVICES[deviceIndex]!.deviceId}`);
-    this.launch(`binding release ${DEVICES[deviceIndex]!.deviceId}`, async () => {
-      await this.bindingRegistry.beginScopeInvalidation(binding.key.scopeKey, "operator_reset");
-      await this.bindingRegistry.completeScopeInvalidation(binding.key.scopeKey);
-    });
-  }
-
   // ---------------------------------------------------------------------------------------------
   // Tool-path operations
 
@@ -1579,9 +1556,6 @@ class OwnershipWorld {
         break;
       case "slotExecEnd":
         this.slotExecEnd(step.device);
-        break;
-      case "slotRelease":
-        this.slotRelease(step.device);
         break;
       case "toolRead":
         this.toolRead(client, step.turns % 2 === 0, "observe");

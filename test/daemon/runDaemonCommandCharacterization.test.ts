@@ -76,10 +76,6 @@ describe("daemon command characterization with fake I/O", () => {
             "stdout",
             "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
           ],
-          [
-            "stdout",
-            "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a binding scope; free its devices",
-          ],
           ["stdout", "\nOptions:"],
           [
             "stdout",

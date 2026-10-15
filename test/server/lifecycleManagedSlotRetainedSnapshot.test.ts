@@ -5,7 +5,7 @@ import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisi
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   assertLifecycleCallerHoldsDevice,
-  assertLifecycleCallerNotOnForeignManagedSlot,
+  assertLifecycleCallerNotOnForeignBinding,
 } from "../../src/server/lifecycleDeviceOwnership";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -72,7 +72,7 @@ describe("lifecycle retained binding snapshot", () => {
     const h = await fixture();
     await h.exclusion.refresh();
     h.outage.unreadable = true;
-    await expect(assertLifecycleCallerNotOnForeignManagedSlot(h.input())).resolves.toBeUndefined();
+    await expect(assertLifecycleCallerNotOnForeignBinding(h.input())).resolves.toBeUndefined();
     expect(() => assertLifecycleCallerHoldsDevice(h.input())).not.toThrow();
   });
 

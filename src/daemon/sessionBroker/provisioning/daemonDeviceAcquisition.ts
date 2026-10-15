@@ -6,7 +6,6 @@
 
 import { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyReason";
 import { RegistryBindingResourceBudget, parseBindingMaxDevices } from "./resourceBudget";
-import { DefaultBindingEvictionSelector, JournaledBindingCacheEvictor } from "./cacheEviction";
 import type { DeviceInfo } from "../../../models/index";
 import {
   MultiPlatformDeviceManager,
@@ -25,11 +24,7 @@ import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
-import {
-  BrokerDeviceAcquisition,
-  type BrokerDeviceAcquisitionDependencies,
-  type BrokerDeviceAcquisitionSessions,
-} from "./deviceAcquisition";
+import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
 import {
   DeviceManagerBindingInventory,
   GateBindingBootCapacity,
@@ -73,15 +68,9 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
   executions?: LiveExecutionSessions;
   owner: () => BindingProcessIdentity;
   timer: Timer;
-  /**
-   * The daemon's journal identity and the in-flight set it shares with the drain (#11179), so one
-   * process never drives a journal entry twice.
-   */
   journal: { owner: BindingJournalOwner; inFlight: BindingJournalInFlight };
   /** Defaults to the in-process tool registry (the same handlers MCP callers run). */
   invokeTool?: BindingToolInvoker;
-  /** The settle-waiting implicit reset of a superseded incarnation (#11174). */
-  resetSupersededScope?: BrokerDeviceAcquisitionDependencies["resetSupersededScope"];
   /** The host device tooling behind the reconciler's ports; tests inject fakes. */
   tooling?: DaemonBindingTooling;
 }
@@ -174,15 +163,6 @@ export function createDaemonBrokerDeviceAcquisition(
               policy: { limit: () => limit },
               inventory,
               timer: options.timer,
-              eviction: {
-                selector: new DefaultBindingEvictionSelector({
-                  inventory,
-                  claims,
-                  isBusy,
-                  timer: options.timer,
-                }),
-                evictor: new JournaledBindingCacheEvictor(registry, () => journal),
-              },
             });
       reconciler = new BindingReconciler({
         registry,
@@ -222,7 +202,6 @@ export function createDaemonBrokerDeviceAcquisition(
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });
-      const journal: BindingJournal = reconciler.journal;
       reconcilers.set(registry, reconciler);
     }
     return reconciler;
@@ -236,7 +215,6 @@ export function createDaemonBrokerDeviceAcquisition(
     sessions: options.sessions,
     owner: options.owner,
     timer: options.timer,
-    ...(options.resetSupersededScope ? { resetSupersededScope: options.resetSupersededScope } : {}),
   });
   return {
     acquisition,

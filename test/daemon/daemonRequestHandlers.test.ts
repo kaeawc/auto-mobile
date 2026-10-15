@@ -262,9 +262,6 @@ describe("handleDaemonRequest", () => {
           "input/typeText.mode:append",
           "input/gestureStream",
           "daemon/registerSession",
-          // Advertised once the proxy acquires managed slots (#11173).
-          "managed-slots/v1",
-          "managed-slots/v1.deviceFamily",
         ],
       },
     });
@@ -286,12 +283,6 @@ describe("handleDaemonRequest", () => {
     const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
     expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
     expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1");
-    for (const method of ["daemon/acquireManagedSlots", "daemon/resetSlotScope"]) {
-      expect(await handleDaemonRequest(buildRequest(method), state)).toMatchObject({
-        success: false,
-        code: "session_broker_exclusive",
-      });
-    }
     // A provider that has not completed broker startup cannot grant a session.
     expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
       success: false,

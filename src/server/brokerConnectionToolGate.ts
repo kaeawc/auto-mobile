@@ -1,15 +1,15 @@
 import { DaemonState } from "../daemon/daemonState";
-import { managedConnectionPlainToolRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import { brokerConnectionPlainToolRefusal } from "../daemon/sessionBroker/connectionScope";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
 /**
  * The managed-connection gate for plain (not device-aware) tools (#11178): a socket session bound
- * to managed slots may not acquire, start, stop, provision or delete devices, and may point
- * `setActiveDevice` only at its own slot devices. Device-aware tools are gated in
+ * to broker bindings may not acquire, start, stop, provision or delete devices, and may point
+ * `setActiveDevice` only at its own binding devices. Device-aware tools are gated in
  * ToolRegistry, where the target device is resolved. No-op outside the daemon and for generic
- * connections. Throws `DeviceOutsideManagedSlotsError` (`device_outside_managed_slots`).
+ * connections. Throws `DeviceOutsideBrokerGrantError` (`device_outside_broker_grant`).
  */
-export function assertManagedConnectionPlainToolCall(input: {
+export function assertBrokerConnectionPlainToolCall(input: {
   daemonMode: boolean;
   requiresDevice: boolean;
   toolName: string;
@@ -21,12 +21,12 @@ export function assertManagedConnectionPlainToolCall(input: {
   if (!input.daemonMode || input.requiresDevice || !daemonState.isInitialized()) {
     return;
   }
-  const binding = daemonState.getManagedConnectionScopes().get(input.mcpSessionId);
+  const binding = daemonState.getBrokerConnectionScopes().get(input.mcpSessionId);
   if (!binding) {
     return;
   }
   const sessionManager = daemonState.getSessionManager();
-  const refusal = managedConnectionPlainToolRefusal({
+  const refusal = brokerConnectionPlainToolRefusal({
     binding,
     toolName: input.toolName,
     args:
@@ -35,7 +35,7 @@ export function assertManagedConnectionPlainToolCall(input: {
       ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ??
         input.sessionUuid)
       : undefined,
-    slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+    grantedDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
   });
   if (refusal) {
     throw refusal;

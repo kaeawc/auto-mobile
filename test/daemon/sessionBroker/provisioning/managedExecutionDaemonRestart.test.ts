@@ -1,7 +1,7 @@
+const BINDING_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
 import {
-  BINDING_ABANDONED_SCOPE_THRESHOLD_MS,
   type BindingExecOwnerLiveness,
   type BindingKey,
   type BindingProcessIdentity,
@@ -191,11 +191,6 @@ describe("managed execution across a daemon restart", () => {
       owner: { sessionUuid: SESSION },
     });
     timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
-    expect(await registry.findAbandonedScopes()).toEqual([]);
-    expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-      kind: "not_abandoned",
-      reason: "live_owner",
-    });
   });
 
   test("before any re-own, the restarted daemon's liveness keeps the live execution's binding in use", async () => {
@@ -210,15 +205,9 @@ describe("managed execution across a daemon restart", () => {
       kind: "binding_in_use",
       owner: { sessionUuid: SESSION, pid: BEFORE.pid },
     });
-    expect(await registry.findAbandonedScopes()).toEqual([]);
-    expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
-      kind: "not_abandoned",
-      reason: "live_owner",
-    });
 
     // Once the session is gone, the dead previous daemon no longer pins the binding.
     await manager.releaseSession(SESSION);
-    expect(await registry.findAbandonedScopes()).toHaveLength(1);
   });
 });
 

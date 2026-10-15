@@ -36,10 +36,10 @@ import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
-  managedConnectionPlanLabelRefusal,
-  slotDeviceFailsLabelCriteria,
-} from "../daemon/managedSlots/managedConnectionScope";
-import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
+  brokerConnectionPlanLabelRefusal,
+  grantedDeviceFailsLabelCriteria,
+} from "../daemon/sessionBroker/connectionScope";
+import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
 import type { DevicePool } from "../daemon/devicePool";
 import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
@@ -751,7 +751,7 @@ export class PlanExecutionOrchestrator {
     );
     const sessionIds = Object.values(labelToSessionMap);
     // A managed connection is refused here, before anything is published, allocated or booted.
-    const slotDevices = this.managedSlotLabelDevices(
+    const grantedDevices = this.brokerGrantedLabelDevices(
       sessionUuid,
       labelToSessionMap,
       normalized,
@@ -761,7 +761,7 @@ export class PlanExecutionOrchestrator {
       sessionUuid,
       labelToSessionMap,
       sessionManager,
-      slotDevices,
+      grantedDevices,
     );
 
     // The plan execution is tracked on its base session. Publish its derived
@@ -785,11 +785,11 @@ export class PlanExecutionOrchestrator {
     };
 
     // A derived label session lives only as long as its plan run (#11572): this run's allocation
-    // may mint each label again, however the previous run's label session ended. A managed slot
-    // serves its labels with live slot sessions and mints nothing.
+    // may mint each label again, however the previous run's label session ended. A broker binding
+    // serves its labels with live binding sessions and mints nothing.
     const allocation = Promise.resolve().then(() => {
-      if (slotDevices) {
-        return slotDevices;
+      if (grantedDevices) {
+        return grantedDevices;
       }
       const closeLabelMints = sessionManager.openPlanLabelMints(sessionUuid, labelToSessionMap);
       return Promise.resolve()
@@ -844,10 +844,10 @@ export class PlanExecutionOrchestrator {
     sessionUuid: string,
     labelToSessionMap: Record<string, string>,
     sessionManager: SessionManager,
-    slotDevices: Map<string, string> | undefined,
+    grantedDevices: Map<string, string> | undefined,
   ): void {
-    // A managed slot serves its labels with its own live slot sessions and mints nothing.
-    if (slotDevices) {
+    // A broker binding serves its labels with its own live binding sessions and mints nothing.
+    if (grantedDevices) {
       return;
     }
     for (const [label, labelSessionUuid] of Object.entries(labelToSessionMap)) {
@@ -868,28 +868,28 @@ export class PlanExecutionOrchestrator {
   }
 
   /**
-   * Managed slots (#11397): a managed connection controls only its own slot devices, so its plan
+   * Broker bindings (#11397): a managed connection controls only its own binding devices, so its plan
    * labels are never handed to the generic pool allocator, which lends generic devices and can boot
-   * more. Returns the session -> device map for labels its own slot sessions serve, throws
-   * `device_outside_managed_slots` for a label they cannot serve, and returns undefined for a
+   * more. Returns the session -> device map for labels its own binding sessions serve, throws
+   * `device_outside_broker_grant` for a label they cannot serve, and returns undefined for a
    * generic connection. A plan step carries no socket session id, so the connection is also
-   * recognized by the slot session the plan runs on.
+   * recognized by the binding session the plan runs on.
    */
-  private managedSlotLabelDevices(
+  private brokerGrantedLabelDevices(
     sessionUuid: string,
     labelToSessionMap: Record<string, string>,
     normalized: NormalizedPlanDevices,
     sessionManager: SessionManager,
   ): Map<string, string> | undefined {
-    const scopes = DaemonState.getInstance().getManagedConnectionScopes();
+    const scopes = DaemonState.getInstance().getBrokerConnectionScopes();
     const connectionId: unknown = Reflect.get(this.request, INTERNAL_MCP_SESSION_PARAM);
     const binding =
       scopes.get(typeof connectionId === "string" ? connectionId : undefined) ??
-      scopes.forSlotSession(planLifecycleSessionUuid(sessionUuid));
+      scopes.forGrantedSession(planLifecycleSessionUuid(sessionUuid));
     if (!binding) {
       return undefined;
     }
-    const refusal = managedConnectionPlanLabelRefusal({
+    const refusal = brokerConnectionPlanLabelRefusal({
       binding,
       action: "executePlan",
       labelSessions: labelToSessionMap,
@@ -898,26 +898,26 @@ export class PlanExecutionOrchestrator {
       throw refusal;
     }
     const devicePool = DaemonState.getInstance().getDevicePool();
-    const slotDevices = new Map<string, string>();
-    for (const [label, slotSessionUuid] of Object.entries(labelToSessionMap)) {
-      const slotSession = sessionManager.getSession(slotSessionUuid);
+    const grantedDevices = new Map<string, string>();
+    for (const [label, grantedSessionUuid] of Object.entries(labelToSessionMap)) {
+      const grantedSession = sessionManager.getSession(grantedSessionUuid);
       // The slot serves the label with its own device or not at all: a declared criterion that
       // device demonstrably fails is refused instead of silently ignored (#11421).
       if (
-        !slotSession?.assignedDevice ||
-        slotDeviceFailsLabelCriteria({
+        !grantedSession?.assignedDevice ||
+        grantedDeviceFailsLabelCriteria({
           declared: normalized.definitions.find((definition) => definition.label === label),
-          slotPlatform: slotSession.platform,
-          device: devicePool.getDevice(slotSession.assignedDevice),
+          grantedPlatform: grantedSession.platform,
+          device: devicePool.getDevice(grantedSession.assignedDevice),
         })
       ) {
-        throw new DeviceOutsideManagedSlotsError("executePlan", "tool", binding.scopeKey, {
+        throw new DeviceOutsideBrokerGrantError("executePlan", "tool", binding.scopeKey, {
           deviceLabel: label,
         });
       }
-      slotDevices.set(slotSessionUuid, slotSession.assignedDevice);
+      grantedDevices.set(grantedSessionUuid, grantedSession.assignedDevice);
     }
-    return slotDevices;
+    return grantedDevices;
   }
 
   private requestDeviceAllocation(

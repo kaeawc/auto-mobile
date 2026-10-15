@@ -157,20 +157,7 @@ describe.each(factories)("existing configuration (%s)", (_name, open) => {
       }
       return binding.assignment;
     }
-    async function freeToNextScope() {
-      await store.beginScopeInvalidation(key.scopeKey, "operator_reset");
-      await store.completeScopeInvalidation(key.scopeKey);
-      const next = await store.ensureScope({
-        managedHostScope: "host",
-        runnerNamespace: "ns",
-        runnerIncarnation: "next",
-      });
-      if (next.kind !== "ready") {
-        throw new Error("scope setup failed");
-      }
-      key.scopeKey = next.scope.scopeKey;
-    }
-    return { store, inventory, provisioner, reader, key, seed, acquire, freeToNextScope };
+    return { store, inventory, provisioner, reader, key, seed, acquire };
   }
 
   function simulator(deviceType: string | undefined = OLD_MODEL): DeviceInfo {
@@ -223,29 +210,6 @@ describe.each(factories)("existing configuration (%s)", (_name, open) => {
     expect(await h.store.getAssignment(h.key)).toEqual(repeated.assignment);
     expect(h.provisioner.created()).toHaveLength(0);
   });
-
-  test.each(["ios", "android"] as const)(
-    "adopts an any-model %s free device with its own configuration",
-    async (platform) => {
-      const h = await setup(platform, avdConfig);
-      await h.seed(platform === "ios" ? simulator() : avd);
-      // Acquire with the same ports under the new scope.
-      await h.freeToNextScope();
-      const result = await h.acquire();
-      expect(result.outcome).toBe("ready");
-      if (result.outcome !== "ready") {
-        throw new Error("expected ready");
-      }
-      expect(result.disposition).toBe("adopted");
-      expect(result.resolvedSpec).toMatchObject({
-        runtime: platform === "ios" ? IOS : ANDROID,
-        deviceType: platform === "ios" ? OLD_MODEL : "pixel_tablet",
-        displayCutout: "none",
-      });
-      expect((await h.store.getAssignment(h.key))?.resolvedSpec).toEqual(result.resolvedSpec);
-      expect(h.provisioner.created()).toHaveLength(0);
-    },
-  );
 
   test("widens Android to any model and reports the AVD's own hardware", async () => {
     const h = await setup("android", avdConfig);
@@ -323,43 +287,6 @@ describe.each(factories)("existing configuration (%s)", (_name, open) => {
       }
       expect((await h.store.getAssignment(h.key))?.generation).toBe(1);
       expect(h.provisioner.created()).toHaveLength(source === "created" ? 1 : 0);
-    },
-  );
-
-  test.each(["reused", "adopted"] as const)(
-    "an any-model Android device without a hardware profile is %s with only known metadata",
-    async (disposition) => {
-      const h = await setup("android", { ...avdConfig, deviceName: undefined });
-      await h.seed(avd);
-      if (disposition === "adopted") {
-        await h.freeToNextScope();
-      }
-      const result = await h.acquire();
-      if (result.outcome !== "ready") {
-        throw new Error(`expected ready, got ${JSON.stringify(result.failure)}`);
-      }
-      expect(result.disposition).toBe(disposition);
-      expect(result.resolvedSpec).toEqual({
-        runtime: ANDROID,
-        configuration: {
-          cpuCores: 2,
-          audioInput: false,
-          memoryMb: 3072,
-          screenWidth: 2560,
-          screenHeight: 1600,
-          screenDensity: 276,
-        },
-      });
-      expect(await h.reader.readExistingSpec(avd)).toEqual(result.resolvedSpec);
-      expect(result.assignment.resolvedSpec).toEqual(result.resolvedSpec);
-      const repeated = await h.acquire();
-      expect(repeated).toMatchObject({
-        outcome: "ready",
-        disposition: "reused",
-        resolvedSpec: result.resolvedSpec,
-        assignment: { generation: result.assignment.generation },
-      });
-      expect(h.provisioner.created()).toHaveLength(0);
     },
   );
 

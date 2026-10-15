@@ -40,7 +40,7 @@ describe("managed execution recovery is gated before publication", () => {
       restore();
     }
     DaemonState.getInstance().reset();
-    expect(DaemonState.getInstance().getManagedExecutionReowner()).toBeUndefined();
+    expect(DaemonState.getInstance().getBrokerExecutionReowner()).toBeUndefined();
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     Reflect.set(executionTracker, "sessionClockOffsetProvider", trackerClock);
     Reflect.set(executionTracker, "autolockSessionResolver", trackerResolver);
@@ -397,7 +397,7 @@ describe("managed execution recovery is gated before publication", () => {
     sessions.setManagedExecutionRecoveryListener(installed);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
     Reflect.set(daemon, "bindingRegistry", registryWait.promise);
-    const reowner = DaemonState.getInstance().getManagedExecutionReowner()!;
+    const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
     expect(reowner.automationRefusal(ID)).toBeInstanceOf(BindingOwnershipUnconfirmedError);
@@ -429,7 +429,7 @@ describe("managed execution recovery is gated before publication", () => {
     Reflect.set(daemon, "sessionManager", sessions);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
     Reflect.set(daemon, "bindingRegistry", registryWait.promise);
-    const reowner = DaemonState.getInstance().getManagedExecutionReowner()!;
+    const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     const originalRelease = Reflect.get(daemon, "cancelAndReleaseSession");
     const calls: unknown[][] = [];
@@ -499,7 +499,7 @@ describe("managed execution recovery is gated before publication", () => {
           },
         }),
       );
-      const reowner = DaemonState.getInstance().getManagedExecutionReowner()!;
+      const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
       reowners.push(reowner);
       await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
       const devices = spyOn(daemon.getDevicePool(), "getAllDevices").mockReturnValue([

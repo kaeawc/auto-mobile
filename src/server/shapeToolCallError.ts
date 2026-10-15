@@ -43,7 +43,7 @@ import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
-import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
@@ -169,7 +169,7 @@ function hasSelfDescribedRefusalPayload(
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
   | DeviceAssignedToBindingError
-  | DeviceOutsideManagedSlotsError
+  | DeviceOutsideBrokerGrantError
   | DeviceOutsideBoundSessionError
   | SessionOutsideBoundSessionError
   | InputDeviceOwnedError
@@ -186,7 +186,7 @@ function hasSelfDescribedRefusalPayload(
     PlanExecutionInProgressError,
     AmbiguousDeviceTargetError,
     DeviceAssignedToBindingError,
-    DeviceOutsideManagedSlotsError,
+    DeviceOutsideBrokerGrantError,
     DeviceOutsideBoundSessionError,
     SessionOutsideBoundSessionError,
     InputDeviceOwnedError,

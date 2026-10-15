@@ -624,7 +624,7 @@ export class DeviceAutoStart {
     return await this.port.deviceManager.isDeviceImageRunning(image);
   }
 
-  /** Suppressed, or held by a managed slot: generic auto-start never boots a slot's device (#11174). */
+  /** Suppressed, or held by a broker binding: generic auto-start never boots a binding's device (#11174). */
   isExcludedFromAutoStart(image: DeviceInfo): boolean {
     return (
       this.isAutoStartSuppressed(image) ||

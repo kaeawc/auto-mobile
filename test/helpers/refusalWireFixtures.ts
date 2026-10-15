@@ -1,3 +1,4 @@
+import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
@@ -5,7 +6,6 @@ import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission
 import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
-import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { SessionConfigError } from "../../src/models/sessionConfig";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
@@ -107,7 +107,7 @@ import {
   ProvisionDeviceError,
   ProvisionDeviceCreateRejectedError,
 } from "../../src/devices/exactDeviceProvisioning";
-import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
@@ -130,25 +130,11 @@ import {
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import {
   mcpOverloadResult,
-  managedEndedPayload,
-  bindingsFailedToolResult,
   noActiveDeviceSessionResult,
   noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
-import {
-  BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES,
-  type BrokerDeviceAcquisitionOwnFailureCode,
-  type BindingResultEntry,
-  type BindingsFailure,
-  type BindingsResult,
-} from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
-import { acquisitionFailure } from "../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import {
-  BINDING_RECONCILE_FAILURE_CODES,
-  failure as reconcileFailure,
-} from "../../src/daemon/sessionBroker/provisioning/reconciler";
 import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
@@ -520,9 +506,9 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => provisionFailure(iosInventoryIncomplete()),
   ],
   [
-    "device_outside_managed_slots.tool",
-    "DeviceOutsideManagedSlotsError via shapeToolCallError",
-    () => shaped(new DeviceOutsideManagedSlotsError("startDevice", "tool", "0123abcd")),
+    "device_outside_broker_grant.tool",
+    "DeviceOutsideBrokerGrantError via shapeToolCallError",
+    () => shaped(new DeviceOutsideBrokerGrantError("startDevice", "tool", "0123abcd")),
   ],
   ...RECOVERY_LOSSES.map(([name, error]): FixtureEntry => [
     `session_ownership_lost.recovery_${name}`,
@@ -570,14 +556,6 @@ const BUILDERS: readonly FixtureEntry[] = [
           ]),
         ),
       ) as RefusalWireResult,
-  ],
-  [
-    "managed_execution_ended",
-    "managedEndedPayload",
-    () =>
-      jsonResult(
-        managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "heartbeat_timeout"),
-      ),
   ],
   [
     "session_terminal_release_in_progress",
@@ -638,11 +616,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new BindingOwnershipLostError(SESSION)),
   ],
   [
-    "device_outside_managed_slots",
-    "DeviceOutsideManagedSlotsError via shapeToolCallError",
+    "device_outside_broker_grant",
+    "DeviceOutsideBrokerGrantError via shapeToolCallError",
     () =>
       shaped(
-        new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
+        new DeviceOutsideBrokerGrantError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
       ),
   ],
   [
@@ -705,203 +683,6 @@ const BUILDERS: readonly FixtureEntry[] = [
 
 /** Fixture stem of a provisionDevice failure whose bare code has no fixture of its own. */
 export const PROVISION_DEVICE_FIXTURE_PREFIX = "provision_device.";
-/** Fixture stem of a managed slot acquisition failure: the wrapper code, then the nested one. */
-export const MANAGED_SLOT_FIXTURE_PREFIX = "binding_acquisition_failed.";
-
-/** The retryability each call site passes to `acquisitionFailure`. */
-const OWN_FAILURE_RETRYABLE: Readonly<Record<BrokerDeviceAcquisitionOwnFailureCode, boolean>> = {
-  binding_config_invalid: false,
-  contract_unsupported: false,
-  registry_schema_unsupported: false,
-  binding_group_unsupported: false,
-  bindings_unsupported: false,
-  scope_invalidated: false,
-  scope_transition_pending: true,
-  execution_policy_failed: true,
-  execution_hold_failed: true,
-  liveness_owner_conflict: true,
-  daemon_unavailable: true,
-  timeout: true,
-  cancelled: true,
-};
-
-/** A failed acquisition, with the failure on the scope or (as the reconciler reports it) the slot. */
-export function failedManagedSlotsResult(
-  slotFailure: BindingsFailure,
-  onSlot = false,
-): BindingsResult {
-  const binding: BindingResultEntry = {
-    bindingIndex: 0,
-    role: "primary",
-    platform: "android",
-    assignmentGeneration: null,
-    device: null,
-    sessionUuid: null,
-    requestedSpec: null,
-    resolvedSpec: null,
-    specFingerprint: null,
-    disposition: null,
-    readiness: null,
-    lifecycle: null,
-    failure: slotFailure,
-  };
-  return {
-    contractVersion: 1,
-    scope: {
-      managedHostScope: "host",
-      runnerNamespace: "ns",
-      runnerIncarnation: "inc",
-      scopeKey: null,
-    },
-    outcome: "failed",
-    bindings: onSlot ? [binding] : [],
-    ...(onSlot ? {} : { failure: slotFailure }),
-  };
-}
-
-/** A ready acquisition whose one slot (index 1, generation 3) holds `sessionUuid`. */
-export function readyManagedSlotsResult(sessionUuid: string): BindingsResult {
-  const { bindings, scope } = failedManagedSlotsResult(capacitySlotFailure(), true);
-  return {
-    contractVersion: 1,
-    scope: { ...scope, scopeKey: "0123abcd" },
-    outcome: "ready",
-    bindings: [
-      { ...bindings[0], failure: undefined, bindingIndex: 1, assignmentGeneration: 3, sessionUuid },
-    ],
-  };
-}
-
-function managedSlotsFailureResult(
-  slotFailure: BindingsFailure,
-  onSlot = false,
-): RefusalWireResult {
-  return bindingsFailedToolResult(
-    failedManagedSlotsResult(slotFailure, onSlot),
-    "tapOn",
-  ) as RefusalWireResult;
-}
-
-/** Total-resource evidence is independent of boot admission and has no retry hint. */
-function budgetSlotFailure(): BindingsFailure {
-  return reconcileFailure("binding_budget_exhausted", "Total-resource capacity is exhausted.", {
-    budget: {
-      limit: 2,
-      usage: {
-        total: 3,
-        active: 1,
-        assignedIdle: 0,
-        cached: 0,
-        preparing: 1,
-        deleting: 1,
-        orphaned: 0,
-      },
-      retained: [
-        {
-          platform: "android",
-          stableDeviceId: "amslot-kept",
-          reason: "deletion_pending",
-          attempts: 2,
-          failedDeletes: 1,
-          lastError: "delete failed",
-        },
-        {
-          platform: "android",
-          stableDeviceId: "amslot-stuck",
-          reason: "deletion_stuck",
-          attempts: 5,
-          failedDeletes: 3,
-          uncounted: true,
-          lastError: "native delete keeps failing",
-        },
-      ],
-      charged: [
-        { platform: "android", stableDeviceId: "active-device", kind: "assigned_active" },
-        { platform: "android", stableDeviceId: "amslot-kept", kind: "deletion_stuck" },
-        {
-          platform: "android",
-          stableDeviceId: "amslot-stuck",
-          kind: "deletion_stuck",
-          uncounted: true,
-        },
-      ],
-      evictionFailures: [
-        { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
-      ],
-    },
-  });
-}
-
-/** A slot-level `capacity_exhausted` failure carrying boot-capacity details (#11390, #11402). */
-function capacitySlotFailure(externalDevices?: string[]): BindingsFailure {
-  const { code, retryable, message, nextAction, capacity } = reconcileFailure(
-    "capacity_exhausted",
-    "capacity_exhausted fixture",
-    {
-      capacity: {
-        limit: 2,
-        booted: 2,
-        retryAfterMs: 5_000,
-        ...(externalDevices ? { externalDevices } : {}),
-      },
-    },
-  );
-  return { code, retryable, message, nextAction, ...(capacity ? { capacity } : {}) };
-}
-
-/** Nested codes that reach a client under `managed_slot_acquisition_failed`. */
-export function managedSlotNestedCodes(): string[] {
-  const own: readonly string[] = BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES;
-  return [...own, ...BINDING_RECONCILE_FAILURE_CODES.filter((code) => !own.includes(code))];
-}
-
-function managedSlotFixtures(): [string, string, () => RefusalWireResult][] {
-  const own: readonly string[] = BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES;
-  const withCapacity: [string, string, () => RefusalWireResult][] = [
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}binding_budget_exhausted.budget`,
-      "reconciler failure with budget via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(budgetSlotFailure(), true),
-    ],
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}capacity_exhausted.capacity`,
-      "reconciler failure with capacity via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(capacitySlotFailure(), true),
-    ],
-    [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}capacity_exhausted.capacity_external`,
-      "reconciler failure with capacity via managedSlotsFailedToolResult",
-      () => managedSlotsFailureResult(capacitySlotFailure(["emulator-5560"]), true),
-    ],
-  ];
-  return [
-    ...withCapacity,
-    ...managedSlotNestedCodes().map((code): [string, string, () => RefusalWireResult] => [
-      `${MANAGED_SLOT_FIXTURE_PREFIX}${code}`,
-      own.includes(code)
-        ? "acquisitionFailure via managedSlotsFailedToolResult"
-        : "reconciler failure via managedSlotsFailedToolResult",
-      () => {
-        if (own.includes(code)) {
-          const ownCode = code as BrokerDeviceAcquisitionOwnFailureCode;
-          return managedSlotsFailureResult(
-            acquisitionFailure(ownCode, `${code} fixture`, OWN_FAILURE_RETRYABLE[ownCode]),
-          );
-        }
-        const {
-          code: failureCode,
-          retryable,
-          message,
-          nextAction,
-        } = reconcileFailure(
-          code as (typeof BINDING_RECONCILE_FAILURE_CODES)[number],
-          `${code} fixture`,
-        );
-        return managedSlotsFailureResult({ code: failureCode, retryable, message, nextAction });
-      },
-    ]),
-  ];
-}
 
 /** provisionDevice failure codes whose bare wire code has no fixture above. */
 function provisionFixtures(
@@ -920,9 +701,11 @@ function provisionFixtures(
 /** Every refusal fixture, built fresh from the real TypeScript builders. */
 export function buildRefusalWireFixtures(): RefusalWireFixture[] {
   const covered = new Set(BUILDERS.map(([code]) => code));
-  return [...BUILDERS, ...provisionFixtures(covered), ...managedSlotFixtures()].map(
-    ([code, builder, build]) => ({ code, builder, result: build() }),
-  );
+  return [...BUILDERS, ...provisionFixtures(covered)].map(([code, builder, build]) => ({
+    code,
+    builder,
+    result: build(),
+  }));
 }
 
 /**
@@ -967,12 +750,6 @@ export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
     name: "daemon_shutting_down",
     testFile: "test/daemon/refusalWireContract.test.ts",
     errorClass: DaemonShuttingDownError,
-  },
-  {
-    surface: "managed-slots-response",
-    name: "binding_config_invalid",
-    testFile: "test/daemon/refusalWireContract.test.ts",
-    errorClass: BindingConfigError,
   },
   {
     surface: "provision-envelope",
@@ -1156,12 +933,12 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [
-    "device_outside_managed_slots",
-    () => new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
+    "device_outside_broker_grant",
+    () => new DeviceOutsideBrokerGrantError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
   ],
   [
-    "device_outside_managed_slots.tool",
-    () => new DeviceOutsideManagedSlotsError("startDevice", "tool", "0123abcd"),
+    "device_outside_broker_grant.tool",
+    () => new DeviceOutsideBrokerGrantError("startDevice", "tool", "0123abcd"),
   ],
   [
     "device_assigned_to_binding",
@@ -1293,24 +1070,6 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       builder: "typedTeardownRefusal",
       payload: teardownFailure(new BindingDiscoveryIncompleteError("registry locked")),
     },
-    {
-      surface: "managed-slots-result",
-      name: "binding_budget_exhausted.budget",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(budgetSlotFailure(), true),
-    },
-    {
-      surface: "managed-slots-result",
-      name: "capacity_exhausted.capacity",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(capacitySlotFailure(), true),
-    },
-    {
-      surface: "managed-slots-result",
-      name: "capacity_exhausted.capacity_external",
-      builder: "reconciler failure in ManagedSlotsResult",
-      payload: failedManagedSlotsResult(capacitySlotFailure(["emulator-5560"]), true),
-    },
   ];
 }
 
@@ -1321,12 +1080,6 @@ export function serializeRefusalSurfaceFixture(fixture: RefusalSurfaceFixture): 
 /** The wire codes a top-level fixture carries, outermost first, derived from its file stem. */
 export function expectedWireCodes(fixtureCode: string): string[] {
   const variantless = (stem: string) => stem.split(".")[0];
-  if (fixtureCode.startsWith(MANAGED_SLOT_FIXTURE_PREFIX)) {
-    return [
-      "binding_acquisition_failed",
-      variantless(fixtureCode.slice(MANAGED_SLOT_FIXTURE_PREFIX.length)),
-    ];
-  }
   if (fixtureCode.startsWith(PROVISION_DEVICE_FIXTURE_PREFIX)) {
     return [variantless(fixtureCode.slice(PROVISION_DEVICE_FIXTURE_PREFIX.length))];
   }
@@ -1353,6 +1106,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   Error["constructor"],
   string
 >([
+  [
+    BindingConfigError,
+    "Internal broker validation becomes a SessionBroker failure; slot launch and socket serializers were removed.",
+  ],
   [
     BindingRegistrySchemaUnsupportedError,
     "internal registry-open refusal; ManagedSlotAcquisition maps it to the fixture-covered registry_schema_unsupported acquisition failure before serialization",

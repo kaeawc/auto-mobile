@@ -105,22 +105,7 @@ import {
   readSessionBrokerHostConfig,
   SESSION_BROKER_HOST_CONFIG_ENV,
 } from "./sessionBroker/hostConfig";
-import { BindingScopeReset } from "./sessionBroker/provisioning/scopeReset";
-import { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
-import {
-  createDefaultAbandonedScopeReclaimer,
-  type ManagedSlotReclaimerFactory,
-  type ManagedSlotReclaimerHandle,
-} from "./managedSlots/defaultAbandonedScopeReclaimer";
-import {
-  createDefaultFreeDeviceReclaimer,
-  type FreeDeviceReclaimerFactory,
-  type FreeDeviceReclaimerHandle,
-} from "./managedSlots/defaultFreeDeviceReclaimer";
-import type {
-  AbandonedScopeReclaimJournal,
-  AbandonedScopeReclaimRegistry,
-} from "./managedSlots/abandonedScopeReclaimer";
+import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import {
   createDaemonBrokerDeviceAcquisition,
   type DaemonBrokerDeviceAcquisitionHandle,
@@ -128,7 +113,6 @@ import {
 import type {
   BindingExecOwnerLiveness,
   BindingJournalOwner,
-  BindingRegistry,
 } from "./sessionBroker/registry/bindingRegistry";
 import {
   BindingJournalInFlight,
@@ -775,14 +759,12 @@ export class Daemon {
   private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
     ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
     : undefined;
-  private managedSlotExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
-  /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
-  private readonly managedSlotJournalInFlight = new BindingJournalInFlight();
-  private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
-  private freeDeviceReclaimer: FreeDeviceReclaimerHandle | undefined;
+  private bindingExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
+  /** Journal entries this daemon is driving; shared by the drain and the binding reconciler. */
+  private readonly bindingJournalInFlight = new BindingJournalInFlight();
   private brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
-  private managedSlotRedrive: BindingJournalRedriveLoop | undefined;
+  private bindingRedrive: BindingJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -851,21 +833,10 @@ export class Daemon {
     incumbentOwnerGuard: IncumbentOwnerGuard = new IncumbentOwnerGuard(),
     private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
       new AvdManagerService(),
-    /** Managed-slot exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
-    private readonly managedSlotExclusionFactory: (
+    /** Managed-binding exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
+    private readonly bindingExclusionFactory: (
       timer: Timer,
     ) => BindingExclusion = createDefaultBindingExclusion,
-    /** Abandoned managed-slot scope reclamation (#11174); not armed under `bun test`. */
-    private readonly managedSlotReclaimerFactory: ManagedSlotReclaimerFactory = createDefaultAbandonedScopeReclaimer,
-    /**
-     * The slot journal the abandoned-scope sweep deletes through (#11179), built over the registry
-     * with this daemon's device inventory and claim ports. Undefined leaves the sweep unarmed.
-     */
-    private readonly managedSlotJournalFactory?: (
-      registry: AbandonedScopeReclaimRegistry,
-    ) => AbandonedScopeReclaimJournal,
-    /** Free-pool device reclamation (#11337); not armed under `bun test`. */
-    private readonly freeDeviceReclaimerFactory: FreeDeviceReclaimerFactory = createDefaultFreeDeviceReclaimer,
     /** Host forward evidence is supplied by the production entry point only (#12220). */
     private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence,
   ) {
@@ -989,7 +960,7 @@ export class Daemon {
     );
     DaemonState.getInstance().setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
     this.installManagedExecutionRelease();
-    this.installManagedSlotAcquisition();
+    this.installBrokerDeviceAcquisition();
 
     this.applyRuntimeOptions(options);
     this.applyAccessibilityOptions(options);
@@ -997,21 +968,21 @@ export class Daemon {
   }
 
   /**
-   * Wire `daemon/releaseExecution` and the managed-session release listener (#11177). The host-wide
-   * slot registry opens lazily, on the first managed execution's release, so daemons that never
-   * serve a managed slot never touch it.
+   * Wire the broker execution drain and managed-session release listener (#11177). The host-wide
+   * binding registry opens lazily, on the first managed execution's release, so daemons that never
+   * serve a broker binding never touch it.
    */
   private installManagedExecutionRelease(): void {
     const release = new BrokerExecutionRelease({
-      registry: () => this.openManagedSlotRegistry(),
-      journal: { inFlight: this.managedSlotJournalInFlight },
+      registry: () => this.openBindingRegistry(),
+      journal: { inFlight: this.bindingJournalInFlight },
       work: executionTracker,
       sessions: managedExecutionSessionsFrom(this.sessionManager, {
         releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
       }),
       timer: this.timer,
       settler: this.bindingJournalOwner(),
-      isExecOwnerLive: this.managedSlotOwnerLiveness(),
+      isExecOwnerLive: this.bindingOwnerLiveness(),
       ownership: {
         isReleaseHeld: (id) => this.managedExecutionReowner?.isReleaseHeld(id) ?? false,
         confirmOwnership: (id) => this.managedExecutionReowner?.confirmOwnership(id),
@@ -1022,16 +993,6 @@ export class Daemon {
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
       release.onSessionReleased(snapshot, options),
     );
-    DaemonState.getInstance().setManagedExecutionRelease(release);
-    // `daemon/resetSlotScope` (#11174): opens the registry only when an operator asks.
-    DaemonState.getInstance().setSlotScopeReset(
-      new BindingScopeReset({
-        registry: () => this.openManagedSlotRegistry(),
-        registryExists: () => this.managedSlotRegistryExists(),
-        timer: this.timer,
-        isExecOwnerLive: this.managedSlotOwnerLiveness(),
-      }),
-    );
   }
 
   /**
@@ -1040,58 +1001,16 @@ export class Daemon {
    * its session, even when the recorded owner is a previous daemon that died with a restart
    * (#11275); a record this daemon wrote is judged by its session alone (#11339).
    */
-  private managedSlotOwnerLiveness(): BindingExecOwnerLiveness {
-    this.managedSlotExecOwnerLiveness ??= withLiveExecutionSessions(
+  private bindingOwnerLiveness(): BindingExecOwnerLiveness {
+    this.bindingExecOwnerLiveness ??= withLiveExecutionSessions(
       defaultBindingExecOwnerLiveness,
       this.sessionManager,
     );
-    return this.managedSlotExecOwnerLiveness;
-  }
-
-  /** Start the abandoned-scope sweep (#11174): one hour idle, no live owner → devices deleted. */
-  private startManagedSlotReclaimer(): void {
-    if (this.sessionBrokerConfigPath) {
-      // Ordinary session return and broker LRU eviction own this private inventory.
-      return;
-    }
-    this.managedSlotReclaimer ??= this.managedSlotReclaimerFactory({
-      registry: () => this.openManagedSlotRegistry(),
-      registryExists: () => this.managedSlotRegistryExists(),
-      journal: this.managedSlotJournalFactory ?? this.defaultManagedSlotJournalFactory(),
-      timer: this.timer,
-    });
-    this.managedSlotReclaimer?.start();
-    // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
-    this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
-      registry: () => this.openManagedSlotRegistry(),
-      journalFor: (registry) => this.brokerDeviceAcquisition?.journalFor(registry),
-      registryExists: () => this.managedSlotRegistryExists(),
-      pool: this.devicePool,
-      executions: this.sessionManager,
-      timer: this.timer,
-      claimedBy: this.daemonSessionId,
-    });
-    this.freeDeviceReclaimer?.start();
+    return this.bindingExecOwnerLiveness;
   }
 
   /**
-   * The journal the abandoned-scope sweep deletes through when none was injected: the acquisition
-   * reconciler's own journal (#11173), with this daemon's journal owner, the in-flight set shared
-   * with the drain, real inventory/claims and the verified delete workflow.
-   */
-  private defaultManagedSlotJournalFactory():
-    | ((registry: AbandonedScopeReclaimRegistry) => AbandonedScopeReclaimJournal)
-    | undefined {
-    const acquisition = this.brokerDeviceAcquisition;
-    // The sweep hands back the registry this daemon opened (`openManagedSlotRegistry`), so the
-    // narrowed view is the full registry the journal needs.
-    return acquisition
-      ? (registry) => acquisition.journalFor(registry as BindingRegistry)
-      : undefined;
-  }
-
-  /**
-   * Rehydrated managed executions are live again, held by this daemon, but their slots still name
+   * Rehydrated managed executions are live again, held by this daemon, but their bindings still name
    * the previous daemon as owner: re-own them now, before any acquisition or sweep sees a dead
    * owner (#11275). The proxy's re-bind re-owns them too; this covers the window before it.
    */
@@ -1102,13 +1021,13 @@ export class Daemon {
     await this.managedExecutionReowner?.reown(executions, { rehydrated: true });
   }
 
-  /** A host that never served a managed slot has no registry; maintenance must not create one. */
-  private managedSlotRegistryExists(): boolean {
+  /** A host that never served a broker binding has no registry; maintenance must not create one. */
+  private bindingRegistryExists(): boolean {
     return this.bindingRegistry !== undefined || bindingRegistryFileExists();
   }
 
   /**
-   * This daemon as a managed-slot settler and journal owner (#11179): PID plus process-generation
+   * This daemon as a broker binding settler and journal owner (#11179): PID plus process-generation
    * token, so entries it opens are redriven by a later daemon once this process is gone.
    */
   private bindingJournalOwner(): BindingJournalOwner {
@@ -1119,16 +1038,15 @@ export class Daemon {
   }
 
   /**
-   * Wire `daemon/acquireManagedSlots` (#11173): a managed slot proxy's acquisition before it serves
-   * `initialize`. Shares the drain's lazily opened registry; the slot sessions are released through
+   * Build the broker provisioning engine over the drain's lazily opened registry. Sessions release through
    * the same session-and-device path the drain uses.
    */
-  private installManagedSlotAcquisition(): void {
+  private installBrokerDeviceAcquisition(): void {
     const sessions = managedExecutionSessionsFrom(this.sessionManager, {
       releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
     });
     const acquisition = createDaemonBrokerDeviceAcquisition({
-      registry: () => this.openManagedSlotRegistry(),
+      registry: () => this.openBindingRegistry(),
       sessions: {
         claimLivenessOwnership: (sessionId, ownerToken) =>
           this.sessionManager.claimLivenessOwnership(sessionId, ownerToken),
@@ -1144,18 +1062,13 @@ export class Daemon {
       timer: this.timer,
       journal: {
         owner: this.bindingJournalOwner(),
-        inFlight: this.managedSlotJournalInFlight,
+        inFlight: this.bindingJournalInFlight,
       },
-      // A new incarnation retires the old one through the same settle-waiting reset as the
-      // operator command (#11174), published by installManagedExecutionRelease.
-      resetSupersededScope: (scope, waitMs) =>
-        DaemonState.getInstance().getBindingScopeReset()?.resetSupersededScope(scope, waitMs),
     });
     this.brokerDeviceAcquisition = acquisition;
-    DaemonState.getInstance().setManagedSlotAcquisition(acquisition.acquisition);
     this.managedExecutionReowner = new ManagedExecutionReowner({
-      registry: () => this.openManagedSlotRegistry(),
-      registryExists: () => this.managedSlotRegistryExists(),
+      registry: () => this.openBindingRegistry(),
+      registryExists: () => this.bindingRegistryExists(),
       owner: () => this.bindingJournalOwner(),
       timer: this.timer,
       isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
@@ -1184,7 +1097,7 @@ export class Daemon {
         });
       },
     });
-    DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
+    DaemonState.getInstance().setBrokerExecutionReowner(this.managedExecutionReowner);
     this.sessionManager.setReleaseDeviceHold((id) =>
       this.managedExecutionReowner?.releaseDeviceHold(id),
     );
@@ -1192,19 +1105,19 @@ export class Daemon {
     // daemon first opens the registry (#11338), so a fresh host that creates it on its first
     // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
     if (process.env.NODE_ENV !== "test" && bindingRegistryFileExists()) {
-      void this.openManagedSlotRegistry().catch((error: unknown) => {
+      void this.openBindingRegistry().catch((error: unknown) => {
         logger.warn(`[Daemon] Binding journal redrive not started: ${errorMessage(error)}`, error);
       });
     }
   }
 
-  private openManagedSlotRegistry(): Promise<SqliteBindingRegistry> {
+  private openBindingRegistry(): Promise<SqliteBindingRegistry> {
     if (this.bindingRegistry) {
       return this.bindingRegistry;
     }
     const opening = openSqliteBindingRegistry({
       timer: this.timer,
-      isExecOwnerLive: this.managedSlotOwnerLiveness(),
+      isExecOwnerLive: this.bindingOwnerLiveness(),
     });
     this.bindingRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
@@ -1216,10 +1129,10 @@ export class Daemon {
         if (
           acquisition &&
           !this.sessionBrokerConfigPath &&
-          !this.managedSlotRedrive &&
+          !this.bindingRedrive &&
           process.env.NODE_ENV !== "test"
         ) {
-          this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+          this.bindingRedrive = acquisition.startJournalRedrive(registry);
         }
       },
       // The open failure is logged (and the open forgotten) by the handler below.
@@ -1236,25 +1149,21 @@ export class Daemon {
     return opening;
   }
 
-  /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
+  /** Stop the drain's settlement watchers and close the binding registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
     await this.sessionBrokerService?.close();
     this.sessionBrokerService = undefined;
     DaemonState.getInstance().setSessionBrokerService(undefined);
     this.brokerExecutionRelease?.close();
     this.managedExecutionReowner?.close();
-    this.managedSlotReclaimer?.stop();
-    this.managedSlotReclaimer = undefined;
-    this.freeDeviceReclaimer?.stop();
-    this.freeDeviceReclaimer = undefined;
     // Interrupt discovery and the inter-pass wait, then join within 100ms of this stage's 200ms.
     // Unfinished cleanup stays journaled even if an unabortable registry call outlives the join.
     try {
-      await this.managedSlotRedrive?.stop();
+      await this.bindingRedrive?.stop();
     } catch (error) {
       logger.warn(`[Daemon] Stopping journal redrive failed: ${errorMessage(error)}`, error);
     }
-    this.managedSlotRedrive = undefined;
+    this.bindingRedrive = undefined;
     this.brokerDeviceAcquisition?.acquisition.close();
     this.brokerDeviceAcquisition = undefined;
     const registry = this.bindingRegistry;
@@ -1277,7 +1186,7 @@ export class Daemon {
         "Session broker requires the provider's native ownership and cleanup machinery",
       );
     }
-    const registry = await this.openManagedSlotRegistry();
+    const registry = await this.openBindingRegistry();
     const config = await readSessionBrokerHostConfig(this.sessionBrokerConfigPath);
     this.sessionBrokerService = await openSessionBrokerService({
       config,
@@ -1300,8 +1209,8 @@ export class Daemon {
     });
     DaemonState.getInstance().setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.
-    if (!this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
-      this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+    if (!this.bindingRedrive && process.env.NODE_ENV !== "test") {
+      this.bindingRedrive = acquisition.startJournalRedrive(registry);
     }
   }
 
@@ -1319,7 +1228,7 @@ export class Daemon {
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
-      bindingExclusion: this.managedSlotExclusionFactory(this.timer),
+      bindingExclusion: this.bindingExclusionFactory(this.timer),
       ...(this.foreignCtrlProxyForwardEvidence
         ? {
             foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
@@ -2075,7 +1984,6 @@ export class Daemon {
     this.startNavigationRetentionMonitor();
     this.startForwardLeaseIdleReleaser();
     this.startPrivateDaemonOrphanWatchdog();
-    this.startManagedSlotReclaimer();
   }
 
   private async startAfterSocketBind(): Promise<void> {
@@ -3217,7 +3125,7 @@ export class Daemon {
 
   /**
    * Whether anyone but the requester holds the device, for classifying a READ: another local
-   * session, a managed slot (idle or not, unless the requester is the slot's execution), or
+   * session, a broker binding (idle or not, unless the requester is the binding's execution), or
    * another daemon's claim. Such a request is downgraded to the connect-only read, never refused.
    * An ownership state that cannot be read counts as held: a read must not risk a rebind on a
    * device that may belong to someone else. The checks reuse the pool's own gates and their
@@ -5896,9 +5804,6 @@ export class Daemon {
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   const daemon = new Daemon(
     options,
-    undefined,
-    undefined,
-    undefined,
     undefined,
     undefined,
     undefined,

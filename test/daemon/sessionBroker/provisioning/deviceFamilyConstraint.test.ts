@@ -149,18 +149,7 @@ async function harness(
       requestedSpec,
       deadlineMs: timer.now() + 60_000,
     });
-  const seedFree = async (device: DeviceInfo) => {
-    const oldKey = await assignBindingDevice(
-      registry,
-      platform,
-      device.deviceId ?? device.name,
-      device.name,
-    );
-    inventory.devices.push(device);
-    await registry.beginScopeInvalidation(oldKey.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(oldKey.scopeKey);
-  };
-  return { registry, inventory, provisioner, deleter, key, acquire, seedFree };
+  return { registry, inventory, provisioner, deleter, key, acquire };
 }
 
 function expectNoMutation(h: Awaited<ReturnType<typeof harness>>) {
@@ -194,34 +183,6 @@ describe("binding iOS family constraints", () => {
     });
     expect(h.deleter.stableIds()).toEqual([IPAD_OLD]);
     expect(h.provisioner.created()[0]?.spec).not.toHaveProperty("deviceFamily");
-  });
-
-  test("phone adopts an eligible non-default iPhone, skipping an eligible iPad", async () => {
-    const h = await harness("ios");
-    await h.seedFree(iosDevice(IPAD_OLD, "a-ipad"));
-    await h.seedFree(iosDevice(IPHONE_15, "b-iphone"));
-    const result = await h.acquire({ runtime: IOS, deviceFamily: "phone" });
-    expect(result).toMatchObject({
-      outcome: "ready",
-      disposition: "adopted",
-      device: { stableId: "b-iphone" },
-      requestedSpec: { deviceFamily: "phone" },
-      resolvedSpec: { deviceType: IPHONE_15 },
-    });
-    expect(result.resolvedSpec).not.toHaveProperty("deviceFamily");
-    expect(h.provisioner.calls[0]?.spec).toEqual({ runtime: IOS });
-    expect(h.deleter.calls).toEqual([]);
-  });
-
-  test("phone creates when only an eligible free-pool iPad exists", async () => {
-    const h = await harness("ios");
-    await h.seedFree(iosDevice(IPAD_OLD));
-    expect(await h.acquire({ runtime: IOS, deviceFamily: "phone" })).toMatchObject({
-      disposition: "created",
-      resolvedSpec: { deviceType: IPHONE_16 },
-    });
-    expect(h.inventory.has(IPAD_OLD)).toBe(true);
-    expect(h.deleter.calls).toEqual([]);
   });
 
   test("omitting family still reuses an assigned iPad", async () => {
@@ -426,27 +387,6 @@ describe("binding Android family constraints", () => {
       expect(result.resolvedSpec).not.toHaveProperty("deviceFamily");
       expect(result.assignment?.requestedSpec).toEqual(spec);
       expect(h.provisioner.calls[0]?.spec).toEqual({ runtime: ANDROID, deviceType });
-    },
-  );
-
-  test.each(["reused", "adopted"] as const)(
-    "Android %s keeps family in reporting and strips it from provision",
-    async (disposition) => {
-      const h = await harness(
-        "android",
-        disposition === "reused" ? { assigned: { ...ANDROID_DEVICE } } : {},
-      );
-      if (disposition === "adopted") {
-        await h.seedFree({ ...ANDROID_DEVICE });
-      }
-      const result = await h.acquire({ runtime: ANDROID, deviceFamily: "phone" });
-      expect(result).toMatchObject({
-        disposition,
-        requestedSpec: { deviceFamily: "phone" },
-        resolvedSpec: { deviceType: "pixel_8" },
-      });
-      expect(result.resolvedSpec).not.toHaveProperty("deviceFamily");
-      expect(h.provisioner.calls[0]?.spec).toEqual({ runtime: ANDROID });
     },
   );
 

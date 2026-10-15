@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -19,11 +20,20 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.BeforeClass
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DeviceStateTransitionsRegistrationTest {
-  private val flat = FoldPosture(Kind.FLAT, isVertical = true, isSeparating = false)
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun warmScheduler() {
+      runTest {} // Keep coroutine scheduler initialization outside per-test timing.
+    }
+  }
+
+  private val flat = FoldPosture(Kind.FLAT, isSeparating = false)
   private val halfOpened = flat.copy(state = Kind.HALF_OPENED, isSeparating = true)
 
   private class FakeSource : PostureSource {
@@ -53,6 +63,118 @@ class DeviceStateTransitionsRegistrationTest {
       assertTrue(entries.single().first.contains("fold-posture events are lost"))
       assertSame(cause, entries.single().second)
     }
+  }
+
+  @Test
+  fun `old window extensions warn but still observe`() {
+    for (version in listOf(0, 1)) {
+      val source = FakeSource()
+      val warnings = Warnings()
+      val states = mutableListOf<Int>()
+      val registration =
+        DeviceStateTransitions.register(source, 30, warnings::warn, { version }) { states += it }
+      assertNotNull(registration)
+      warnings.assertLost(null)
+      assertEquals(
+        "WindowManager window extensions level $version < 2 cannot report fold posture from a service context; fold-posture events are lost",
+        warnings.entries.single().first,
+      )
+      source.emit(flat)
+      source.emit(halfOpened)
+      assertEquals(listOf(postureCode(listOf(halfOpened))), states)
+      registration!!.close()
+    }
+  }
+
+  @Test
+  fun `supported window extensions observe silently`() {
+    for (version in listOf(2, 3)) {
+      val source = FakeSource()
+      val warnings = Warnings()
+      val registration =
+        DeviceStateTransitions.register(source, 30, warnings::warn, { version }) { fail() }
+      assertNotNull(source.listener)
+      assertTrue(warnings.entries.isEmpty())
+      registration!!.close()
+    }
+  }
+
+  @Test
+  fun `extension version failures warn but still observe`() {
+    for (failure in listOf(IllegalStateException("backend"), NoClassDefFoundError("extensions"))) {
+      val source = FakeSource()
+      val warnings = Warnings()
+      val registration =
+        DeviceStateTransitions.register(source, 30, warnings::warn, { throw failure }) { fail() }
+      assertNotNull(source.listener)
+      assertEquals(1, warnings.entries.size)
+      assertEquals(
+        "WindowManager extension version unavailable; fold-posture events may be lost",
+        warnings.entries.single().first,
+      )
+      assertSame(failure, warnings.entries.single().second)
+      registration!!.close()
+    }
+  }
+
+  @Test
+  fun `listener failure warns and later emissions still arrive`() {
+    val failure = IllegalStateException("listener failed")
+    val warnings = Warnings()
+    val test = TestScope()
+    val delivered = mutableListOf<List<FoldPosture>>()
+    val source =
+      PostureFlowSource(
+        {
+          flow {
+            emit(listOf(flat))
+            emit(listOf(halfOpened))
+            emit(emptyList())
+          }
+        },
+        StandardTestDispatcher(test.testScheduler),
+        warnings::warn,
+      )
+    val registration = source.observe {
+      if (it == listOf(flat)) throw failure
+      delivered += it
+    }
+    test.runCurrent()
+    assertEquals(listOf(listOf(halfOpened), emptyList()), delivered)
+    assertEquals(listOf("fold-posture listener failed" to failure), warnings.entries)
+    registration.close()
+  }
+
+  @Test
+  fun `listener cancellation propagates without warning and stops collection`() {
+    val warnings = Warnings()
+    val test = TestScope()
+    var deliveries = 0
+    var released = false
+    val source =
+      PostureFlowSource(
+        {
+          flow {
+            try {
+              emit(listOf(flat))
+              emit(listOf(halfOpened))
+            } finally {
+              released = true
+            }
+          }
+        },
+        StandardTestDispatcher(test.testScheduler),
+        warnings::warn,
+      )
+    val registration = source.observe {
+      deliveries++
+      throw CancellationException("listener cancelled")
+    }
+    test.runCurrent()
+    assertEquals(1, deliveries)
+    assertTrue(released)
+    assertTrue(warnings.entries.isEmpty())
+    registration.close()
   }
 
   @Test
@@ -244,6 +366,12 @@ class DeviceStateTransitionsRegistrationTest {
     test.runCurrent()
     assertTrue(released)
     warnings.assertLost(failure)
+    assertEquals(
+      "WindowManager collection failed; fold-posture events are lost",
+      warnings.entries.single().first,
+    )
+    test.runCurrent()
+    assertEquals(1, warnings.entries.size)
     registration!!.close()
   }
 }

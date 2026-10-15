@@ -10,9 +10,7 @@ import org.junit.Test
 class DeviceStateTransitionsPostureCodeTest {
   private fun combinations(): List<FoldPosture> =
     Kind.entries.flatMap { state ->
-      listOf(false, true).flatMap { vertical ->
-        listOf(false, true).map { separating -> FoldPosture(state, vertical, separating) }
-      }
+      listOf(false, true).map { separating -> FoldPosture(state, separating) }
     }
 
   @Test
@@ -24,8 +22,8 @@ class DeviceStateTransitionsPostureCodeTest {
   fun `each posture combination has a distinct nonzero stable code`() {
     val features = combinations()
     val codes = features.map { postureCode(listOf(it)) }
-    assertEquals(8, codes.toSet().size)
-    assertEquals((1..8).toList(), codes)
+    assertEquals(4, codes.toSet().size)
+    assertEquals((1..4).toList(), codes)
     assertTrue(codes.all { it > 0 })
     assertEquals(codes, features.map { postureCode(listOf(it.copy())) })
   }

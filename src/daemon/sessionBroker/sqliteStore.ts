@@ -1,4 +1,5 @@
 import type { Kysely, Selectable, Transaction } from "kysely";
+import type { SessionBrokerFailure } from "../../models/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import type { SlotRegistryDatabase } from "../managedSlots/sqliteSlotRegistry";
@@ -35,6 +36,7 @@ function requestRecord(row: Selectable<BrokerRequestsTable>): BrokerRequestRecor
     sessionId: row.session_id,
     error: row.error,
     errorCode: row.error_code,
+    retryable: row.retryable === 1,
   };
 }
 
@@ -134,7 +136,7 @@ export class SqliteSessionBrokerStore {
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
   async recordPreAdmissionFailure(
     input: Pick<BrokerAdmissionInput, "requestId" | "fingerprint" | "parameters" | "owner">,
-    failure: { code: string; message: string },
+    failure: SessionBrokerFailure,
   ): Promise<BrokerRequestRecord> {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
       throw new ActionableError("Session request identity and fingerprint must be non-empty");
@@ -161,6 +163,7 @@ export class SqliteSessionBrokerStore {
           session_id: null,
           error: failure.message,
           error_code: failure.code,
+          retryable: failure.retryable ? 1 : 0,
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -194,6 +197,7 @@ export class SqliteSessionBrokerStore {
           session_id: null,
           error: null,
           error_code: null,
+          retryable: null,
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -230,6 +234,7 @@ export class SqliteSessionBrokerStore {
             session_id: null,
             error: SESSION_REQUEST_ABANDONED_MESSAGE,
             error_code: SESSION_REQUEST_ABANDONED_CODE,
+            retryable: 0,
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -264,6 +269,7 @@ export class SqliteSessionBrokerStore {
         state: "failed",
         error: SESSION_REQUEST_ABANDONED_MESSAGE,
         error_code: SESSION_REQUEST_ABANDONED_CODE,
+        retryable: 0,
       });
       return { request, ...(ticket ? { ticket } : {}) };
     });
@@ -410,6 +416,7 @@ export class SqliteSessionBrokerStore {
     owner: SlotProcessIdentity,
     error: string,
     errorCode = "session_preparation_failed",
+    retryable = false,
   ): Promise<DestructionTicket | undefined> {
     return this.db.transaction().execute(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
@@ -425,7 +432,12 @@ export class SqliteSessionBrokerStore {
           );
         }
       }
-      await this.updateRequest(trx, requestId, { state: "failed", error, error_code: errorCode });
+      await this.updateRequest(trx, requestId, {
+        state: "failed",
+        error,
+        error_code: errorCode,
+        retryable: retryable ? 1 : 0,
+      });
       return ticket;
     });
   }
@@ -763,7 +775,7 @@ export class SqliteSessionBrokerStore {
     changes: Partial<
       Pick<
         BrokerRequestsTable,
-        "state" | "resource_id" | "session_id" | "error" | "error_code" | "owner_json"
+        "state" | "resource_id" | "session_id" | "error" | "error_code" | "retryable" | "owner_json"
       >
     >,
   ): Promise<BrokerRequestRecord> {

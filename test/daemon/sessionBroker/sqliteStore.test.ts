@@ -193,13 +193,16 @@ describe("session broker durable admission", () => {
   test("pre-admission refusal keeps its identity without reserving device or session capacity", async () => {
     const refusal = await store.recordPreAdmissionFailure(input("unavailable"), {
       code: "catalog_unavailable",
+      retryable: true,
       message: "No authoritative inventory",
     });
     expect(refusal).toMatchObject({
       state: "failed",
       resourceId: null,
       sessionId: null,
+      retryable: true,
     });
+    expect(await registry.sessionBrokerStore(scopeKey).getRequest("unavailable")).toEqual(refusal);
     expect(await store.admit(input("unavailable"))).toEqual({
       kind: "existing",
       request: refusal,
@@ -207,6 +210,7 @@ describe("session broker durable admission", () => {
     await expect(
       store.recordPreAdmissionFailure(input("unavailable", { fingerprint: "changed" }), {
         code: "another_error",
+        retryable: false,
         message: "Must not replace existing failure",
       }),
     ).rejects.toThrow("different parameters");

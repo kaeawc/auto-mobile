@@ -26,7 +26,7 @@ describe("slot registry migrations", () => {
         db,
         provider: slotRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(7);
+      expect(migrations).toHaveLength(8);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateSlotRegistry(db, ":memory:");
@@ -39,6 +39,40 @@ describe("slot registry migrations", () => {
       await db.destroy();
     }
   });
+  test("migration 007 preserves legacy failure receipts with nonretryable null defaults", async () => {
+    const db = new Kysely<SlotRegistryDatabase>({
+      dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+    });
+    try {
+      const migrator = new Migrator({ db, provider: slotRegistryMigrationProvider });
+      expect((await migrator.migrateTo("2026_10_15_006_session_broker")).error).toBeUndefined();
+      await sql`INSERT INTO session_broker_requests (request_id, fingerprint, parameters_json, owner_json, state, error, error_code)
+        VALUES ('legacy', 'fingerprint', '{}', '{"daemonId":"d","pid":1}', 'failed', 'native failure', 'timeout')`.execute(
+        db,
+      );
+      await migrateSlotRegistry(db, ":memory:");
+      expect(
+        (await db.selectFrom("session_broker_requests").selectAll().executeTakeFirstOrThrow())
+          .retryable,
+      ).toBeNull();
+      const registry = new SqliteSlotRegistry(db, { timer: new FakeTimer() });
+      expect(await registry.sessionBrokerStore("scope").getRequest("legacy")).toMatchObject({
+        errorCode: "timeout",
+        error: "native failure",
+        retryable: false,
+      });
+      await expect(
+        sql`UPDATE session_broker_requests SET retryable = 2`.execute(db),
+      ).rejects.toThrow("CHECK");
+      await sql`UPDATE session_broker_requests SET retryable = 1`.execute(db);
+      expect(await registry.sessionBrokerStore("scope").getRequest("legacy")).toMatchObject({
+        retryable: true,
+      });
+    } finally {
+      await db.destroy();
+    }
+  });
+
   test("migration 004 preserves stopped images, defaults markers to null and preserves the state CHECK", async () => {
     const db = new Kysely<SlotRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),

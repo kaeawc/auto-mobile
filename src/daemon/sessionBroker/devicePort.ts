@@ -3,6 +3,14 @@ import type {
   SessionDeviceProfile,
 } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
+import { ActionableError } from "../../models/ActionableError";
+import type { SessionBrokerFailure } from "../../models/sessionBrokerResult";
+
+export class SessionBrokerFailureError extends ActionableError {
+  constructor(readonly failure: SessionBrokerFailure) {
+    super(failure.message);
+  }
+}
 
 export interface SessionDevicePreparationOptions {
   livenessOwnerToken: string;

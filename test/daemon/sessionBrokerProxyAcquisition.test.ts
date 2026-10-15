@@ -69,6 +69,30 @@ function rig(
 }
 
 describe("session broker proxy acquisition", () => {
+  test.each([false, true])(
+    "preserves transient failure retryability through lost reply=%s",
+    async (lostReply) => {
+      const receipt: SessionBrokerResult = {
+        ...ready,
+        outcome: "failed",
+        sessionUuid: null,
+        profile: null,
+        failure: { code: "timeout", message: "runner-setup timed out", retryable: true },
+      };
+      const { ports, held } = rig((method) => {
+        if (method === "daemon/capabilities") {
+          return { capabilities: ["session-broker/v1"] };
+        }
+        if (lostReply && method === DAEMON_PREPARE_SESSION_METHOD) {
+          throw new Error("reply lost");
+        }
+        return receipt;
+      });
+      expect(await acquireSessionThroughDaemon(config, ports)).toEqual(receipt);
+      expect(held).toEqual([]);
+    },
+  );
+
   test("prepares once with no allocation controls and holds the exact ready UUID", async () => {
     const { ports, calls, held } = rig((method) =>
       method === "daemon/capabilities" ? { capabilities: ["session-broker/v1"] } : ready,

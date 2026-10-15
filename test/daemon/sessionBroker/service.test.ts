@@ -114,7 +114,7 @@ describe("session broker service lifecycle", () => {
       journal: { owner: OWNER, redriveSlot: unusedNativeCall },
       owner: OWNER,
       timer,
-      sessionIsLive: () => true,
+      sessionDisposition: () => "live",
       hostLock: lock,
       catalog: async () => iosCatalog(),
     };

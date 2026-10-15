@@ -337,6 +337,7 @@ import {
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { sessionDisposition } from "./sessionBroker/sessionDisposition";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import {
   createDaemonTerminalReleaseJournal,
@@ -1287,7 +1288,12 @@ export class Daemon {
       journal: acquisition.journalFor(registry),
       owner: this.managedSlotJournalOwner(),
       timer: this.timer,
-      sessionIsLive: (sessionUuid) => this.sessionManager.peekSession(sessionUuid) !== null,
+      sessionDisposition: (sessionUuid) =>
+        sessionDisposition(sessionUuid, {
+          isLive: (uuid) => this.sessionManager.peekSession(uuid) !== null,
+          getSession: (uuid) => this.deviceSessionRepository.getSession(uuid),
+          timer: this.timer,
+        }),
       liveSessionIds: () =>
         this.sessionManager
           .getAllSessions()

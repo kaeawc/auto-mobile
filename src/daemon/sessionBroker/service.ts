@@ -24,7 +24,7 @@ import {
   type SqliteSlotRegistry,
 } from "../managedSlots/sqliteSlotRegistry";
 import { computeSlotScopeKey, type SlotProcessIdentity } from "../managedSlots/slotRegistry";
-import { SessionBroker } from "./broker";
+import { SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
@@ -67,7 +67,7 @@ export interface OpenSessionBrokerServiceOptions {
   journal: Pick<ManagedSlotJournal, "owner" | "redriveSlot">;
   owner: SlotProcessIdentity;
   timer: Timer;
-  sessionIsLive: (sessionUuid: string) => boolean;
+  sessionDisposition: NonNullable<SessionBrokerOptions["sessionDisposition"]>;
   /** Already rehydrated base sessions; generic work must be drained before opting in. */
   liveSessionIds?: () => readonly string[];
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
@@ -146,7 +146,7 @@ export async function openSessionBrokerService(
         }
         return defaults;
       },
-      sessionIsLive: options.sessionIsLive,
+      sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: options.config.reuseCleanDevices,
     });
     await broker.recover();

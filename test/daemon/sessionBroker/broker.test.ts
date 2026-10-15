@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
-import type {
-  SessionBrokerDevicePort,
+import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  type SessionBrokerDevicePort,
   SessionDevicePreparationOptions,
 } from "../../../src/daemon/sessionBroker/devicePort";
 import { nativeProfile } from "../../../src/daemon/sessionBroker/profile";
@@ -38,6 +40,7 @@ function config(requestId: string): SessionConfig {
 class FakeNativePort implements SessionBrokerDevicePort {
   readonly prepared: string[] = [];
   readonly destroyed: string[] = [];
+  readonly released: string[] = [];
   readonly resetResources: string[] = [];
   readonly dirty = new Set<string>();
   readonly sessions = new Map<string, BrokerResourceRecord>();
@@ -95,6 +98,7 @@ class FakeNativePort implements SessionBrokerDevicePort {
   }
 
   async release(sessionId: string) {
+    this.released.push(sessionId);
     await this.releaseHook?.();
     if (!this.canRelease) {
       return { settled: false };
@@ -157,9 +161,20 @@ describe("session-only broker lifecycle", () => {
   let devices: FakeNativePort;
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
+  let ownerLive = true;
+
+  beforeAll(async () => {
+    // Warm SQLite/migration setup outside the per-test budget, as the shared DB harness does.
+    const warm = await openSqliteSlotRegistry({ dbPath: ":memory:" });
+    await warm.close();
+  });
 
   beforeEach(async () => {
-    registry = await openSqliteSlotRegistry({ dbPath: ":memory:", isExecOwnerLive: () => true });
+    ownerLive = true;
+    registry = await openSqliteSlotRegistry({
+      dbPath: ":memory:",
+      isExecOwnerLive: () => ownerLive,
+    });
     const scope = await registry.ensureScope({
       managedHostScope: "private-host",
       runnerNamespace: "private-broker",
@@ -193,6 +208,139 @@ describe("session-only broker lifecycle", () => {
     }
     return result.sessionUuid;
   }
+
+  test.each([
+    ["timeout", true, true],
+    ["spec_unsupported", false, true],
+    ["timeout", true, false],
+  ] as const)(
+    "typed %s retryable=%s with confirmed cleanup=%s survives replay and reopened store",
+    async (code, retryable, cleanupConfirmed) => {
+      devices.prepareError = new SessionBrokerFailureError({
+        code,
+        retryable,
+        message: "native preparation failed",
+      });
+      devices.canDestroy = cleanupConfirmed;
+      const failed = await broker.prepare(config("typed-failure"), "owner-token");
+      expect(failed).toMatchObject({
+        outcome: "failed",
+        cleanupPending: !cleanupConfirmed,
+        failure: { code, retryable: retryable && cleanupConfirmed },
+      });
+      expect(await broker.prepare(config("typed-failure"), "owner-token")).toEqual(failed);
+      expect(devices.prepared).toHaveLength(1);
+      const scopeKey = (await options.store.listResources())[0].scopeKey;
+      const reopened = new SessionBroker({
+        ...options,
+        store: registry.sessionBrokerStore(scopeKey),
+      });
+      expect(await reopened.ownedStatus("typed-failure", "owner-token")).toEqual(failed);
+      if (!cleanupConfirmed) {
+        devices.canDestroy = true;
+        await reopened.recover();
+        expect(await reopened.status("typed-failure")).toMatchObject({
+          cleanupPending: false,
+          failure: { code, retryable },
+        });
+      }
+    },
+  );
+
+  test("typed pre-admission failure retains retryability after reopening the store", async () => {
+    const failure = { code: "timeout", retryable: true, message: "catalog readiness timed out" };
+    options.catalog = () => Promise.reject(new SessionBrokerFailureError(failure));
+    const failed = await broker.prepare(config("catalog-transient"), "owner-token");
+    expect(failed.failure).toEqual(failure);
+    const reopened = new SessionBroker({
+      ...options,
+      store: registry.sessionBrokerStore("unused-scope"),
+    });
+    expect(await reopened.ownedStatus("catalog-transient", "owner-token")).toEqual(failed);
+    expect(await reopened.prepare(config("catalog-transient"), "owner-token")).toEqual(failed);
+    expect(devices.prepared).toEqual([]);
+  });
+
+  test("untyped preparation error remains permanent and generic", async () => {
+    devices.prepareError = new Error("native error");
+    expect(await broker.prepare(config("untyped"), "owner-token")).toMatchObject({
+      outcome: "failed",
+      failure: { code: "session_preparation_failed", retryable: false },
+    });
+  });
+
+  test("recoverable restart handoff and return preserve the active UUID until expiry", async () => {
+    const timer = new FakeTimer();
+    let returned = false;
+    // This seam must be consulted even though the session is temporarily absent from memory.
+    options.sessionDisposition = () =>
+      Promise.resolve(returned ? "live" : timer.now() < 100 ? "recoverable-handoff" : "gone");
+    const uuid = await ready("handoff");
+    const receipt = await options.store.getRequest("handoff");
+    await broker.recover();
+    expect(devices.destroyed).toEqual([]);
+    expect(devices.released).toEqual([]);
+    expect(await options.store.getRequest("handoff")).toEqual(receipt);
+    returned = true;
+    await broker.recover();
+    expect(await broker.status("handoff")).toMatchObject({ outcome: "ready", sessionUuid: uuid });
+    expect(devices.released).toEqual([]);
+    returned = false;
+    timer.advanceTime(101);
+    devices.canDestroy = false;
+    await broker.recover();
+    expect(await broker.status("handoff")).toMatchObject({
+      outcome: "pending",
+      cleanupPending: true,
+    });
+    const resource = (await options.store.listResources())[0];
+    expect(resource).toMatchObject({ state: "destroying", requestId: "handoff" });
+    expect(resource.revision).toBeGreaterThan(1);
+    expect(devices.released).toEqual([uuid]);
+    devices.canDestroy = true;
+    await broker.recover();
+    await broker.recover();
+    expect(devices.destroyed).toEqual([resource.resourceId]);
+    expect(await broker.status("handoff")).toMatchObject({
+      outcome: "released",
+      sessionUuid: uuid,
+    });
+  });
+
+  test("explicit owner release during restart handoff still destroys normally", async () => {
+    options.sessionDisposition = () => "recoverable-handoff";
+    const uuid = await ready("owner-release");
+    expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+    expect(devices.destroyed).toHaveLength(1);
+  });
+
+  test("dead process ownership is recovered regardless of session disposition", async () => {
+    await ready("dead-owner");
+    ownerLive = false;
+    devices.canDestroy = false;
+    const successor = new SessionBroker({
+      ...options,
+      owner: { ...OWNER, pid: 202, daemonId: "successor" },
+      sessionDisposition: () => "recoverable-handoff",
+    });
+    // The real store's injected process liveness authority controls takeover.
+    const recover = spyOn(options.store, "recoverRequest");
+    await successor.recover();
+    expect(recover).toHaveBeenCalledWith("dead-owner", expect.objectContaining({ pid: 202 }));
+    recover.mockRestore();
+    expect(await options.store.getRequest("dead-owner")).toMatchObject({
+      state: "failed",
+      errorCode: "session_owner_exited",
+      sessionId: "session-1",
+    });
+    expect((await options.store.listResources())[0]).toMatchObject({
+      state: "destroying",
+      requestId: "dead-owner",
+    });
+    devices.canDestroy = true;
+    await successor.recover();
+    expect(devices.destroyed).toHaveLength(1);
+  });
 
   test("consumer configuration rejects slot, scope, lane and capacity inputs", () => {
     expect(parseSessionConfig(config("plain"))).toEqual(config("plain"));

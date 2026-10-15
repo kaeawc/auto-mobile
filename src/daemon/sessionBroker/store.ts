@@ -15,6 +15,7 @@ export interface BrokerRequestRecord {
   sessionId: string | null;
   error: string | null;
   errorCode: string | null;
+  retryable: boolean;
 }
 
 export interface BrokerResourceRecord {
@@ -38,6 +39,7 @@ export interface BrokerRequestsTable {
   session_id: string | null;
   error: string | null;
   error_code: string | null;
+  retryable: number | null;
 }
 
 export interface BrokerResourcesTable {

@@ -17,7 +17,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { SlotProcessIdentity } from "../managedSlots/slotRegistry";
 import type { BrokerLimits } from "./admission";
-import type { SessionBrokerDevicePort } from "./devicePort";
+import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
+import type { SessionLiveness } from "./sessionDisposition";
 import { nativeProfile, poolProfile } from "./profile";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
@@ -37,21 +38,15 @@ export interface SessionBrokerOptions {
   limits: BrokerLimits;
   catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
   defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
-  /** Admission-only session lookup; must not start lazy release from inside recovery. */
-  sessionIsLive?: (sessionUuid: string) => boolean;
+  /** Admission-only lookup; must not start lazy release from inside recovery. */
+  sessionDisposition?: (sessionUuid: string) => SessionLiveness | Promise<SessionLiveness>;
   /** Opt in only after the native reset baseline has passed contamination tests. */
   reuseCleanDevices?: boolean;
 }
 
-class RequirementError extends ActionableError {
-  constructor(readonly failure: SessionBrokerFailure) {
-    super(failure.message);
-  }
-}
-
 function unwrap<T>(result: RequirementResult<T>): T {
   if (!result.ok) {
-    throw new RequirementError({
+    throw new SessionBrokerFailureError({
       code: result.error.code,
       message: result.error.message,
       retryable: result.error.transient,
@@ -61,7 +56,7 @@ function unwrap<T>(result: RequirementResult<T>): T {
 }
 
 function failureFor(error: unknown): SessionBrokerFailure {
-  return error instanceof RequirementError
+  return error instanceof SessionBrokerFailureError
     ? error.failure
     : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };
 }
@@ -145,6 +140,10 @@ export class SessionBroker {
       admitted = true;
       return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
     } catch (error) {
+      logger.warn(
+        `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
+        error,
+      );
       return this.handlePreparationFailure(
         config,
         livenessOwnerToken,
@@ -171,6 +170,7 @@ export class SessionBroker {
         this.options.owner,
         failure.message,
         failure.code,
+        failure.retryable,
       );
       if (ticket) {
         await this.tryCleanup(ticket);
@@ -182,7 +182,12 @@ export class SessionBroker {
         );
       }
       const result = await this.result(request);
-      return request.errorCode === SESSION_REQUEST_ABANDONED_CODE ? result : { ...result, failure };
+      return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
+        ? result
+        : {
+            ...result,
+            failure: { ...failure, retryable: failure.retryable && !result.cleanupPending },
+          };
     }
     // Catalog/default resolution can fail before admission. Retain that terminal identity too:
     // a changed host catalog must not turn its replay into a new native acquisition.
@@ -429,9 +434,10 @@ export class SessionBroker {
       if (
         request.state === "active" &&
         request.sessionId &&
-        this.options.sessionIsLive &&
-        !this.options.sessionIsLive(request.sessionId)
+        this.options.sessionDisposition &&
+        (await this.options.sessionDisposition(request.sessionId)) === "gone"
       ) {
+        // Expired restart handoffs use ordinary, durably owned release; no replacement is selected.
         await this.release(request.sessionId);
       }
       if (request.state === "acquiring" && !this.preparations.has(request.requestId)) {
@@ -584,7 +590,7 @@ export class SessionBroker {
             failure: {
               code: request.errorCode ?? "session_preparation_failed",
               message: request.error,
-              retryable: false,
+              retryable: request.retryable && !this.cleanupIsPending(request, resource),
             },
           }
         : {}),

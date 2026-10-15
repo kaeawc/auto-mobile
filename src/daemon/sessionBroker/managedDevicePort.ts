@@ -17,7 +17,11 @@ import { parseManagedSlotConfig, type ManagedSlotConfig } from "../../models/man
 import { ActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
-import type { SessionBrokerDevicePort, SessionDevicePreparationOptions } from "./devicePort";
+import {
+  SessionBrokerFailureError,
+  type SessionBrokerDevicePort,
+  type SessionDevicePreparationOptions,
+} from "./devicePort";
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 
@@ -105,11 +109,13 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (typeof sessionId === "string" && sessionId.length > 0) {
       await this.dependencies.managedExecutionRelease.releaseExecution(sessionId);
     }
-    throw new ActionableError(
-      result.failure?.message ??
-        slot?.failure?.message ??
-        "Managed device preparation did not return an automation-ready session",
-    );
+    const { code, retryable, message } = result.failure ??
+      slot?.failure ?? {
+        code: "session_preparation_failed",
+        retryable: false,
+        message: "Managed device preparation did not return an automation-ready session",
+      };
+    throw new SessionBrokerFailureError({ code, retryable, message });
   }
 
   private isReadySlot(

@@ -11,6 +11,7 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import { currentManagedSlotReconciler } from "../../../src/daemon/managedSlots/managedSlotExclusion";
 import type { ManagedDevicePortDependencies } from "../../../src/daemon/sessionBroker/managedDevicePort";
@@ -154,6 +155,46 @@ function acquisition(
 }
 
 describe("ManagedDevicePort preparation and release", () => {
+  test.each(["result", "slot"] as const)(
+    "preserves typed retryable acquisition failure from %s and releases its session",
+    async (source) => {
+      const failure = {
+        code: "timeout" as const,
+        retryable: true,
+        message: "runner-setup timed out; retry acquisition",
+        nextAction: "Retry acquisition",
+      };
+      const releases: string[] = [];
+      const port = new ManagedDevicePort({
+        scope: SCOPE,
+        managedSlotAcquisition: acquisition((config) =>
+          Promise.resolve({
+            ...readyResult(config, { failure: source === "slot" ? failure : undefined }),
+            outcome: "failed",
+            ...(source === "result" ? { failure } : {}),
+          }),
+        ),
+        managedExecutionRelease: {
+          releaseExecution: (id) => {
+            releases.push(id);
+            return Promise.resolve(releaseResult(id));
+          },
+        },
+        registry: {} as never,
+        managedSlotJournal: {
+          owner: OWNER,
+          redriveSlot: () => Promise.resolve({ kind: "clear", redriven: [] }),
+        },
+      });
+      const rejected = port.prepare(resource(), { livenessOwnerToken: "consumer" });
+      await expect(rejected).rejects.toBeInstanceOf(SessionBrokerFailureError);
+      await expect(rejected).rejects.toMatchObject({
+        failure: { code: "timeout", retryable: true, message: failure.message },
+      });
+      expect(releases).toEqual(["session-1"]);
+    },
+  );
+
   test("maps exact iOS native identifiers and private provider allocation options", async () => {
     let received: ManagedSlotConfig | undefined;
     const port = new ManagedDevicePort({

@@ -150,6 +150,7 @@ class HandlerBroker extends SessionBroker {
       sessionId,
       error: null,
       errorCode: null,
+      retryable: false,
     };
   }
 
@@ -208,6 +209,27 @@ describe("session broker daemon handlers", () => {
 
   afterEach(async () => {
     await registry.close();
+  });
+
+  test("prepare and request status preserve the same typed transient failure", async () => {
+    const receipt = {
+      ...result("request-1", "failed"),
+      failure: { code: "timeout", message: "runner-setup timed out", retryable: true },
+    };
+    broker.prepareResult = receipt;
+    broker.statuses.set(`request-1:${TOKEN}`, receipt);
+    expect(
+      await handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).toEqual({ success: true, result: receipt });
+    expect(
+      await handleBrokerSessionStatus(
+        request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).toEqual({ success: true, result: receipt });
   });
 
   test("malformed prepare and status requests replace any previous binding", async () => {

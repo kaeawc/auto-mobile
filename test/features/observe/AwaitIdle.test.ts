@@ -1,5 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
+import { validGfxinfoOutput, noFrameGfxinfoOutput } from "./gfxinfoFixtures";
+import {
+  AwaitIdle,
+  NO_FRAME_STATS_GRACE_MS,
+  NO_FRAME_STATS_GRACE_POLLS,
+} from "../../../src/features/observe/AwaitIdle";
 import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
 import {
   WINDOW_MANAGER_ROTATION_COMMAND,
@@ -88,6 +93,92 @@ class CancellingAdbExecutor extends FakeAdbExecutor {
 function createAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
   return new AwaitIdle(device, { create: () => adb }, timer);
 }
+
+describe("AwaitIdle missing frame stats", () => {
+  test("ends an 8000ms wait early after both the poll and elapsed grace", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app'", {
+      stdout: noFrameGfxinfoOutput,
+      stderr: "",
+    });
+    const awaitIdle = createAwaitIdle(adb, timer);
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+
+    expect(metrics?.stabilityWaitMs).toBeGreaterThanOrEqual(NO_FRAME_STATS_GRACE_MS);
+    expect(metrics?.stabilityWaitMs).toBeLessThan(2000);
+    expect(timer.now()).toBeLessThan(2000);
+    expect(metrics?.pollCount).toBeGreaterThan(NO_FRAME_STATS_GRACE_POLLS);
+    expect(metrics?.isStable).toBe(false);
+    expect(metrics).toHaveProperty("idleEndReason", "noFrameStats");
+  });
+
+  test("waits for frames arriving after 500ms without frame stats", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
+      ...Array.from({ length: 30 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
+      { stdout: validGfxinfoOutput, stderr: "" },
+    ]);
+    const awaitIdle = createAwaitIdle(adb, timer);
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+
+    expect(metrics?.pollCount).toBeGreaterThan(30);
+    expect(metrics?.stabilityWaitMs).toBeGreaterThanOrEqual(500);
+    expect(metrics?.stabilityWaitMs).toBeLessThan(NO_FRAME_STATS_GRACE_MS);
+    expect(metrics?.isStable).toBe(true);
+    expect(metrics).not.toHaveProperty("idleEndReason");
+  });
+
+  test("resets the consecutive counter when valid frame stats arrive", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const awaitIdle = createAwaitIdle(adb, timer);
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    // Neither run reaches ten polls; their combined length would trip an unreset counter.
+    adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
+      ...Array.from({ length: 6 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
+      { stdout: validGfxinfoOutput, stderr: "" },
+      ...Array.from({ length: 6 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
+      { stdout: validGfxinfoOutput, stderr: "" },
+    ]);
+    const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+
+    expect(metrics?.pollCount).toBeGreaterThan(14);
+    expect(metrics?.isStable).toBe(true);
+    expect(metrics).not.toHaveProperty("idleEndReason");
+  });
+
+  test("restarts the elapsed grace when valid frame stats interrupt a streak", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("dumpsys gfxinfo 'com.example.app' reset", { stdout: "", stderr: "" });
+    // Each streak lasts about 660ms; only their combined duration exceeds the grace.
+    adb.setCommandResponseSequence("dumpsys gfxinfo 'com.example.app'", [
+      ...Array.from({ length: 40 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
+      { stdout: validGfxinfoOutput, stderr: "" },
+      ...Array.from({ length: 40 }, () => ({ stdout: noFrameGfxinfoOutput, stderr: "" })),
+      { stdout: validGfxinfoOutput, stderr: "" },
+    ]);
+    const awaitIdle = createAwaitIdle(adb, timer);
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+
+    expect(metrics?.pollCount).toBeGreaterThan(82);
+    expect(metrics?.stabilityWaitMs).toBeGreaterThan(NO_FRAME_STATS_GRACE_MS);
+    expect(metrics?.isStable).toBe(true);
+    expect(metrics).not.toHaveProperty("idleEndReason");
+  });
+});
 
 describe("AwaitIdle UI stability deadline", () => {
   test("bounds initialization and skips later samples after its budget expires", async () => {

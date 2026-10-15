@@ -223,7 +223,7 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`; re-run the job on a fresh runner (#12237). The
+and reports `RUNNER-CONTENDED`; CI automatically reruns failed jobs once on fresh runners when every failed job is a unit lane carrying that marker (#12237). The
 per-shard `.wall` record still excludes the end probe and the poll latency.
 
 ## 5. Change made: tier C files share processes

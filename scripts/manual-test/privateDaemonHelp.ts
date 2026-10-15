@@ -15,6 +15,10 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
   "--batch-dir": "Absolute evidence root (required).",
   "--count": "Number of daemons, 1–8 (required for init).",
   "--base-port": "First HTTP port (required for init); consecutive ports follow.",
+  "--broker-batch": "Broker batch JSON input for init; daemon 1 is the only broker.",
+  "--max-devices": "Broker total-device ceiling (default: 2; hard maximum: 4).",
+  "--allow-reuse":
+    "Allow clean-device reuse and a nonzero idle pool for broker init (default: off).",
   "--aux-root": "Short absolute socket root (default: /tmp/am-mt-<batch hash>).",
   "--server": "Absolute built server path (default: checkout/dist/src/index.js).",
   "--orphan-idle-ms": "Orphan idle timeout (default: 0, disabled).",
@@ -27,7 +31,8 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
   "--wait-ms": "Stop wait bound, integer >= 0 (default: 30000 ms).",
   "--device":
     "Repeatable shutdown target by device ID or unique name; checked batch-inferred devices require exact device ID (serial/UDID); an ambiguous selector stops nothing (ambiguous) (default: only batch-booted unprotected virtual devices with positive environment evidence).",
-  "--dry-run": "List shutdown outcomes without stopping devices (default: off).",
+  "--dry-run":
+    "Plan init files/modes/start env without writes or probes, or list shutdown outcomes (default: off).",
   "--strict": "Preflight exits 1 when warnings are present (default: off).",
   "--role": "Boot role matching ^[A-Za-z0-9._-]{1,64}$ (required for boot-gate; no default).",
   "--max-concurrent": "Boot permits, integer 1–8 (default: 1).",
@@ -49,7 +54,7 @@ Commands:
   stop      Stop one isolated daemon and remove its pid.txt on success.
   status    Read selected/all pid/socket state; --devices adds inventories.
   env       Print one daemon's env.sh path.
-  wrappers  Regenerate only <batch>/bin/amN, proxyN, frameN, auxN.
+  wrappers  Regenerate <batch>/bin/amN, proxyN, frameN, auxN, brokerN (brokerN always uses daemon 1).
   devices   List merged daemon device views with provenance, protection and PID.
   shutdown-devices  Stop only batch-booted unprotected virtual devices through a daemon.
   preflight  Report host power, sleep, lid, load and memory without requiring batch.json.
@@ -68,6 +73,7 @@ ${PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")
   .join("\n")}
 Android inventory reads the local ADB server socket without launching adb; it can neither start nor restart a server.
 Other derived env: MT_BATCH, MT_DAEMON, MT_SERVER, MT_PORT; AUTOMOBILE_APPEARANCE_SYNC=off; AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0 unless configured.
+Broker init renders broker/host-config.json and broker/clients.json (0600). AUTOMOBILE_SESSION_BROKER_CONFIG is set only for daemon 1 start; client/wrapper env stays scrubbed. --env/--daemon-env cannot set broker/session configuration variables.
 Devices and teardown:
   batch-booted: positive MT_BATCH evidence for this batch; bootedBy daemon<N> comes from MT_DAEMON=P<digits>.
   broker-owned: product naming predicate matches; display only, never authorizes shutdown.
@@ -86,6 +92,7 @@ stop --wait-ms 0 signals and reports still-alive unless the daemon is already go
 boot-gate --min-interval-ms is best-effort when --max-concurrent is above 1. A boot-gate killed by a signal leaves its permit lock to be reclaimed once its PID is gone.
 Exit codes: 0 success/status; 1 typed non-success outcome (daemon still alive, a device not stopped, inventory errors, preflight --strict with warnings); 2 usage/guard/I/O or a boot-gate wait deadline; start propagates the product launch command's exit code; boot-gate -- COMMAND exits with the command's code.
 Examples:
+  private-daemon init --batch-dir /private/batch --count 2 --base-port 3160 --broker-batch /private/broker-batch.json --dry-run
   private-daemon init --batch-dir /private/batch --count 2 --base-port 3160 --daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg --tool-call-recording --daemon-env 2:AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=/private/prebuilt
   private-daemon stop --batch-dir /private/batch --daemon 2
   private-daemon start --batch-dir /private/batch --daemon 2 -- --debug

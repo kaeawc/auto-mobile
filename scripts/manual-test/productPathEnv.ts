@@ -102,6 +102,14 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Test preload isolation marker, not a state destination.",
   },
   {
+    name: "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    kind: "input",
+    owner: "harness",
+    // legacy: removed together with the product reads by the remove-device-slots lane
+    reason:
+      "Read-only managed-slot config source (inline JSON or file path); explicitly unset by clients.",
+  },
+  {
     name: "AUTOMOBILE_SESSION_CONFIG",
     kind: "input",
     owner: "harness",
@@ -219,6 +227,8 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_LOG_LEVEL",
   "AUTOMOBILE_LOG_SINK",
   "AUTOMOBILE_MANAGED_ADB_SERVER",
+  // legacy: removed together with the product reads by the remove-device-slots lane
+  "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
   "AUTOMOBILE_MAX_OBSERVATION_AGE_MS",
   "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
   "AUTOMOBILE_MIGRATION_RECOVERY",

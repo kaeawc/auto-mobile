@@ -506,9 +506,9 @@ describe("oxlint fixture scratch cleanup", () => {
       [tmpdir()]: ["oxlint-scoping-stale", "oxlint-scoping-fresh", "other"],
     };
     const mtimes: Record<string, number> = {
-      "/repo/src/oxlint-scoping-legacy": now - 24 * 60 * 60 * 1_000,
-      "/repo/scratch/oxlint-scoping-stale": now - 60 * 60 * 1_000 - 1,
-      "/repo/scratch/oxlint-scoping-fresh": now - 1,
+      [join("/repo/src", "oxlint-scoping-legacy")]: now - 24 * 60 * 60 * 1_000,
+      [join("/repo/scratch", "oxlint-scoping-stale")]: now - 60 * 60 * 1_000 - 1,
+      [join("/repo/scratch", "oxlint-scoping-fresh")]: now - 1,
       [join(tmpdir(), "oxlint-scoping-stale")]: now - 60 * 60 * 1_000 - 1,
       [join(tmpdir(), "oxlint-scoping-fresh")]: now - 1,
     };
@@ -525,8 +525,8 @@ describe("oxlint fixture scratch cleanup", () => {
       now,
     );
     expect(removed).toEqual([
-      "/repo/src/oxlint-scoping-legacy",
-      "/repo/scratch/oxlint-scoping-stale",
+      join("/repo/src", "oxlint-scoping-legacy"),
+      join("/repo/scratch", "oxlint-scoping-stale"),
       join(tmpdir(), "oxlint-scoping-stale"),
     ]);
   });

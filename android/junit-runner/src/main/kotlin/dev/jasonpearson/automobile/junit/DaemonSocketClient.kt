@@ -229,6 +229,78 @@ internal object DaemonSocketClientManager {
   }
 }
 
+internal data class DaemonForwardedFlag(
+  val systemProperty: String,
+  val envVar: String,
+  val cliFlag: String,
+)
+
+/**
+ * Configure with a JVM property (e.g. `-Dautomobile.daemon.dismiss.keyboard.after.input=true`) or
+ * its environment variable.
+ */
+internal val DAEMON_FORWARDED_FLAGS =
+  listOf(
+    DaemonForwardedFlag(
+      "automobile.daemon.dismiss.keyboard.after.input",
+      "AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT",
+      "--dismiss-keyboard-after-input",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.ui.perf.mode",
+      "AUTOMOBILE_DAEMON_NO_UI_PERF",
+      "--no-ui-perf-mode",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.navigation.screenshots",
+      "AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS",
+      "--no-navigation-screenshots",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.waitfor.polling.overhead",
+      "AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD",
+      "--no-waitfor-polling-overhead",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.include.not.important.views",
+      "AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS",
+      "--no-include-not-important-views",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.report.view.ids",
+      "AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS",
+      "--no-report-view-ids",
+    ),
+    DaemonForwardedFlag(
+      "automobile.daemon.no.retrieve.interactive.windows",
+      "AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS",
+      "--no-retrieve-interactive-windows",
+    ),
+  )
+
+internal interface DaemonFlagEnvironment {
+  fun flagProperty(name: String): Boolean
+
+  fun env(name: String): String?
+}
+
+internal object SystemDaemonFlagEnvironment : DaemonFlagEnvironment {
+  override fun flagProperty(name: String): Boolean = SystemPropertyCache.getBoolean(name, false)
+
+  override fun env(name: String): String? = System.getenv(name)
+}
+
+internal fun forwardedDaemonFlags(environment: DaemonFlagEnvironment): List<String> {
+  return DAEMON_FORWARDED_FLAGS.mapNotNull { flag ->
+    val envValue = environment.env(flag.envVar)?.trim()?.lowercase().orEmpty()
+    if (environment.flagProperty(flag.systemProperty) || envValue in setOf("1", "true", "yes")) {
+      flag.cliFlag
+    } else {
+      null
+    }
+  }
+}
+
 internal object DaemonSocketPaths {
   private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 30000L
   private const val DAEMON_STARTUP_LIFECYCLE_BUDGETS = 3L
@@ -284,28 +356,28 @@ internal object DaemonSocketPaths {
     }
   }
 
-  fun buildDaemonStartCommand(): List<String> {
-    return buildDaemonCommand("start")
+  fun buildDaemonStartCommand(
+    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
+  ): List<String> {
+    return buildDaemonCommand("start", flagEnvironment)
   }
 
-  fun buildDaemonRestartCommand(): List<String> {
-    return buildDaemonCommand("restart")
+  fun buildDaemonRestartCommand(
+    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
+  ): List<String> {
+    return buildDaemonCommand("restart", flagEnvironment)
   }
 
-  private fun buildDaemonCommand(subCommand: String): List<String> {
+  private fun buildDaemonCommand(
+    subCommand: String,
+    flagEnvironment: DaemonFlagEnvironment = SystemDaemonFlagEnvironment,
+  ): List<String> {
     val command =
       resolveLocalCommand(subCommand)
         ?: resolvePackageCommand(subCommand)
         ?: listOf("auto-mobile", "--daemon", subCommand)
 
-    return command
-      .withDismissKeyboardAfterInput()
-      .withNoUiPerfMode()
-      .withNoNavigationScreenshots()
-      .withNoWaitForPollingOverhead()
-      .withNoIncludeNotImportantViews()
-      .withNoReportViewIds()
-      .withNoRetrieveInteractiveWindows()
+    return command + forwardedDaemonFlags(flagEnvironment)
   }
 
   private fun resolveLocalCommand(subCommand: String): List<String>? {
@@ -664,175 +736,6 @@ internal object DaemonSocketPaths {
     forceRestart: Boolean,
   ): Boolean {
     return assetVersionSkew && !versionSkew && !buildSkew && !forceRestart
-  }
-
-  /**
-   * When true, the spawned daemon passes `--dismiss-keyboard-after-input` so every `inputText` call
-   * hides the soft keyboard after injection (Android emulator CI often leaves it open otherwise).
-   *
-   * Configured via JVM system property `automobile.daemon.dismiss.keyboard.after.input` (e.g.
-   * `./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true`) or environment variable
-   * `AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT`.
-   */
-  private fun dismissKeyboardAfterInputRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)) {
-      return true
-    }
-    val env =
-      System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withDismissKeyboardAfterInput(): List<String> {
-    if (!dismissKeyboardAfterInputRequested()) return this
-    return this + "--dismiss-keyboard-after-input"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-ui-perf-mode` so CI / emulator runs skip UI
-   * performance audit paths. Matches manual `bun … --daemon start --no-ui-perf-mode` when the
-   * runner performs `--daemon restart`.
-   */
-  private fun noUiPerfModeRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean("automobile.daemon.no.ui.perf.mode", false)) {
-      return true
-    }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_UI_PERF")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoUiPerfMode(): List<String> {
-    if (!noUiPerfModeRequested()) return this
-    return this + "--no-ui-perf-mode"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-navigation-screenshots` to disable screenshot
-   * capture on navigation events. Reduces emulator resource usage in CI where navigation graph
-   * thumbnails are not needed.
-   */
-  private fun noNavigationScreenshotsRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean("automobile.daemon.no.navigation.screenshots", false)) {
-      return true
-    }
-    val env =
-      System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoNavigationScreenshots(): List<String> {
-    if (!noNavigationScreenshotsRequested()) return this
-    return this + "--no-navigation-screenshots"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-include-not-important-views` to disable
-   * `FLAG_INCLUDE_NOT_IMPORTANT_VIEWS` on the CtrlProxy accessibility service.
-   *
-   * Configured via JVM system property `automobile.daemon.no.include.not.important.views` or
-   * environment variable `AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS`.
-   */
-  private fun noIncludeNotImportantViewsRequested(): Boolean {
-    if (
-      SystemPropertyCache.getBoolean(
-        "automobile.daemon.no.include.not.important.views",
-        false,
-      )
-    ) {
-      return true
-    }
-    val env =
-      System.getenv("AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS")
-        ?.trim()
-        ?.lowercase()
-        .orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoIncludeNotImportantViews(): List<String> {
-    if (!noIncludeNotImportantViewsRequested()) return this
-    return this + "--no-include-not-important-views"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-report-view-ids` to disable `FLAG_REPORT_VIEW_IDS`
-   * on the CtrlProxy accessibility service.
-   *
-   * Configured via JVM system property `automobile.daemon.no.report.view.ids` or environment
-   * variable `AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS`.
-   */
-  private fun noReportViewIdsRequested(): Boolean {
-    if (
-      SystemPropertyCache.getBoolean(
-        "automobile.daemon.no.report.view.ids",
-        false,
-      )
-    ) {
-      return true
-    }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoReportViewIds(): List<String> {
-    if (!noReportViewIdsRequested()) return this
-    return this + "--no-report-view-ids"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-retrieve-interactive-windows` to disable
-   * `FLAG_RETRIEVE_INTERACTIVE_WINDOWS` on the CtrlProxy accessibility service.
-   *
-   * Configured via JVM system property `automobile.daemon.no.retrieve.interactive.windows` or
-   * environment variable `AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS`.
-   */
-  private fun noRetrieveInteractiveWindowsRequested(): Boolean {
-    if (
-      SystemPropertyCache.getBoolean(
-        "automobile.daemon.no.retrieve.interactive.windows",
-        false,
-      )
-    ) {
-      return true
-    }
-    val env =
-      System.getenv("AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS")
-        ?.trim()
-        ?.lowercase()
-        .orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoRetrieveInteractiveWindows(): List<String> {
-    if (!noRetrieveInteractiveWindowsRequested()) return this
-    return this + "--no-retrieve-interactive-windows"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-waitfor-polling-overhead` to skip screenshots and
-   * back stack collection during observe waitFor polling loops. Reduces ADB contention that can
-   * cause ctrl-proxy WebSocket instability on resource-constrained CI emulators.
-   *
-   * Configured via JVM system property `automobile.daemon.no.waitfor.polling.overhead` or
-   * environment variable `AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD`.
-   */
-  private fun noWaitForPollingOverheadRequested(): Boolean {
-    if (
-      SystemPropertyCache.getBoolean(
-        "automobile.daemon.no.waitfor.polling.overhead",
-        false,
-      )
-    ) {
-      return true
-    }
-    val env =
-      System.getenv("AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoWaitForPollingOverhead(): List<String> {
-    if (!noWaitForPollingOverheadRequested()) return this
-    return this + "--no-waitfor-polling-overhead"
   }
 
   private fun resolveLocalProjectPath(): String? {

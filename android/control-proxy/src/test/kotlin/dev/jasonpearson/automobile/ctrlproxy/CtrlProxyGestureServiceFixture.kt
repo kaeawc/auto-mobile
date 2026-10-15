@@ -14,7 +14,8 @@ import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.util.ReflectionHelpers
 
 /**
- * Shared by the dispatch and overload tests; every gesture component remains the real service's.
+ * Shared by the display-routing and caret-clearing tests; every gesture component remains the real
+ * service's.
  */
 internal class CtrlProxyGestureServiceFixture {
   data class Ack(val id: String?, val success: Boolean, val error: String?)

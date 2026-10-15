@@ -912,6 +912,7 @@ interface WsStorageChangedMessage extends WsMessageBase {
   value?: string | null;
   valueType?: KeyValueType;
   sequenceNumber?: number;
+  /** Device change kind: "add", "modify", or "remove"; absent on legacy frames. */
   changeType?: string;
   // Prior value for this key, emitted by runners that capture it on-device
   // (#3000). Absent on legacy runners; an explicit null means "no prior value".

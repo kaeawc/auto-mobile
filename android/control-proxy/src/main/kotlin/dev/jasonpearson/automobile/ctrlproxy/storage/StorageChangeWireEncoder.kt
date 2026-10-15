@@ -4,6 +4,22 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
+ * Infers the change kind from SDK metadata forwarded unchanged by StorageSubscriptionManager. A
+ * non-null key with a null value is a removal, even from a legacy SDK. A known prior-value type
+ * with no prior value and a non-null new value is an add (the SDK uses UNKNOWN for that prior
+ * type); any other known prior type is a modify. Otherwise omit the kind for the host's legacy
+ * modify default. A file clear has a null key and value: it is not a key removal, and is a modify
+ * when the SDK supplies its UNKNOWN prior type, or omitted for legacy SDKs.
+ */
+internal fun storageChangeType(event: PreferenceChangeEvent): String? =
+  when {
+    event.key != null && event.value == null -> "remove"
+    event.previousValueType != null && event.previousValue == null && event.value != null -> "add"
+    event.previousValueType != null -> "modify"
+    else -> null
+  }
+
+/**
  * Builds the `storage_changed` WebSocket payload for a [PreferenceChangeEvent].
  *
  * Extracted from CtrlProxy so the JSON shaping — in particular the type-aware quoting of
@@ -33,6 +49,7 @@ internal fun buildStorageChangedMessage(
   }
   append(""","value":${encodeTypedValue(event.value, event.type, json)}""")
   append(""","valueType":${json.encodeToString(event.type)}""")
+  storageChangeType(event)?.let { append(""","changeType":${json.encodeToString(it)}""") }
   // Emit `previousValue` ONLY when the SDK actually supplied a prior-value type — i.e.
   // it captured the change and knows the prior value (a genuine "no prior value" add
   // still carries previousValueType = UNKNOWN, so it is emitted as null). A legacy SDK

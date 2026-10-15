@@ -1,4 +1,5 @@
 import * as buildIdentity from "../../src/daemon/buildIdentity";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -95,7 +96,12 @@ function assertProvisionSurface(name: string, payload: unknown): void {
     payload,
   };
   const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
-  const bytes = serializeRefusalSurfaceFixture(fixture);
+  // daemonBuild embeds the live package version; pin it so a release bump does not
+  // stale the captured fixtures.
+  const bytes = serializeRefusalSurfaceFixture(fixture).replaceAll(
+    `${DAEMON_VERSION}+fixture-build`,
+    "0.0.0+fixture-build",
+  );
   if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
     writeFileSync(path, bytes);
   }

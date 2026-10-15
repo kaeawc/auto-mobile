@@ -64,3 +64,43 @@ test("dispatch completion is idempotent while another command remains pending", 
   other(true);
   expect(state.timeoutError("expired")).toBeUndefined();
 });
+
+test("settled resolves immediately without a dispatched command", async () => {
+  const state = new TextRequestState();
+  expect(state.hasPending()).toBe(false);
+  await state.settled();
+});
+
+test("all settlement waiters wait for every pending command", async () => {
+  const state = new TextRequestState();
+  const first = state.dispatched();
+  const second = state.dispatched();
+  let settled = 0;
+  const waiters = [state.settled(), state.settled()].map((waiter) => waiter.then(() => settled++));
+  first(true);
+  first(true);
+  await Promise.resolve();
+  expect(state.hasPending()).toBe(true);
+  expect(settled).toBe(0);
+  second(false, new Error("lost reply"));
+  await Promise.all(waiters);
+  expect(state.hasPending()).toBe(false);
+  expect(settled).toBe(2);
+  await state.settled();
+});
+
+test("settlement tracks a later dispatch independently", async () => {
+  const state = new TextRequestState();
+  state.dispatched()(true);
+  await state.settled();
+  const complete = state.dispatched();
+  let settled = false;
+  const waiter = state.settled().then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  complete(true);
+  await waiter;
+  expect(settled).toBe(true);
+});

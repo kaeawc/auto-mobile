@@ -991,7 +991,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1390,6 +1390,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/mac-queue-watchdog.sh
+
+  # =============================================================================
+  # Attestation Gate (shadow, advisory) (#11984)
+  # =============================================================================
+  # Advisory, shadow-only, never skips anything (#11984, #11985).
+  # The composite records excluded observations until an actual lane result is supplied.
+  attestation-gate-shadow:
+    name: "Attestation Gate (shadow, advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    needs: detect-changes
+    if: always() && !cancelled() && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: ./.github/actions/attestation-gate
+        with:
+          commit-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
 
   # =============================================================================
   # Node Checks (#10894)

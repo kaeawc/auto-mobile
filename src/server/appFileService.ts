@@ -283,14 +283,6 @@ export function getAppFileService(): AppFileService {
   return appFileService;
 }
 
-export function setAppFileServiceForTesting(service: AppFileService): void {
-  appFileService = service;
-}
-
-export function resetAppFileServiceForTesting(): void {
-  appFileService = null;
-}
-
 export function createAppFileServiceForTesting(
   deps: AppFileServiceDependencies = {},
 ): AppFileService {

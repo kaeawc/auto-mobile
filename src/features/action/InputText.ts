@@ -1020,6 +1020,7 @@ export class InputText extends BaseVisualChange {
           noRetry,
           beforeDispatch: index === 0 ? beforeDispatch : undefined,
           signal,
+          waitForProcessSettlementAfterAbort: true,
         }),
       );
       assertInputNotAborted(signal);
@@ -1146,12 +1147,28 @@ export class InputText extends BaseVisualChange {
         const keys = keyCode.split(" ");
         for (const key of keys) {
           assertInputNotAborted(signal);
-          await this.withTextDispatch(() => this.adb.executeCommand(`shell input keyevent ${key}`));
+          await this.withTextDispatch(() =>
+            this.adb.executeCommand(
+              `shell input keyevent ${key}`,
+              undefined,
+              undefined,
+              undefined,
+              signal,
+              true,
+            ),
+          );
           assertInputNotAborted(signal);
         }
       } else {
         await this.withTextDispatch(() =>
-          this.adb.executeCommand(`shell input keyevent ${keyCode}`),
+          this.adb.executeCommand(
+            `shell input keyevent ${keyCode}`,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+            true,
+          ),
         );
         assertInputNotAborted(signal);
       }

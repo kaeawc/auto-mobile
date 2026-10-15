@@ -652,7 +652,7 @@ describe("a proxy never stops or restarts the daemon (#10053)", () => {
   test("the proxy's recovery methods never reach the daemon manager", () => {
     const proxy = codeOnly(readFileSync(path.join(root, "src/daemon/daemonMcpProxy.ts"), "utf8"));
     const from = proxy.indexOf("private createLivenessRecovery()");
-    const to = proxy.indexOf("private async heartbeatOtherHeldSessions()");
+    const to = proxy.indexOf("private heartbeatHeldSession(");
     expect(from).toBeGreaterThan(-1);
     expect(to).toBeGreaterThan(from);
     const recoveryMethods = proxy.slice(from, to);

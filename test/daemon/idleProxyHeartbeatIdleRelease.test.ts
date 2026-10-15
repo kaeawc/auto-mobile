@@ -294,7 +294,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
       expiresAt: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
       liveness: { state: "live" },
     });
-    expect(await persistence.getSession?.(SESSION)).toMatchObject({
+    expect(await persistence.getSession(SESSION)).toMatchObject({
       status: "active",
       last_used_at_ms: acquiredAt,
       expires_at_ms: acquiredAt + SESSION_IDLE_TIMEOUT_MS,
@@ -315,7 +315,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     expect(available.result).toMatchObject({ availableDevices: 1, assignedDevices: 0 });
     // Whichever idle path wins — the scan's sweep or the next tick's lookup — the
     // reason is an idle expiry, never "heartbeat-timeout".
-    const releasedRow = await persistence.getSession?.(SESSION);
+    const releasedRow = await persistence.getSession(SESSION);
     expect(releasedRow).toMatchObject({ status: "expired" });
     expect(["cleanup-expired"]).toContain(releasedRow!.release_reason!);
   });

@@ -46,7 +46,7 @@ test.each(["cleanup", "lookup"] as const)(
       }
       await manager.waitForSessionRelease("owner");
       await drainUntilQuiescent(timer);
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         status: "expired",
         release_reason: "heartbeat-timeout",
       });
@@ -70,7 +70,7 @@ test("caller-driven release captures the device until the caller returns it to t
       device.deviceId,
     );
     await drainUntilQuiescent(timer);
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       release_reason: "explicit-release",
     });
     expect(pool.getDevice(device.deviceId)).toMatchObject({ status: "busy", sessionId: "owner" });

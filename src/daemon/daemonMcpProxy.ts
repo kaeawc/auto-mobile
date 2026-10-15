@@ -1,3 +1,4 @@
+import { HeartbeatKeeper, type HeartbeatKeeperPort } from "./proxy/HeartbeatKeeper";
 import {
   DaemonLifecycleReconciler,
   runPreflightTransport,
@@ -88,6 +89,7 @@ import {
 } from "./client";
 import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
+import { carryToolFailureMark } from "../utils/toolFailureSignal";
 import { z } from "zod";
 import {
   SOCKET_PATH,
@@ -353,7 +355,7 @@ export function resourceUriNamesSession(uri: string): boolean {
 const NO_HANDOFFS: ReadonlySet<string> = new Set();
 
 /** The latest binding's keeper heartbeat while it is in flight. */
-interface LatestHeartbeatAsk {
+export interface LatestHeartbeatAsk {
   /** It was answered not-found, so any further answer is to the second ask. */
   notFound: boolean;
   /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
@@ -390,10 +392,10 @@ function withResumedNotice(
   ) {
     return result;
   }
-  return {
+  return carryToolFailureMark(result, {
     ...result,
     content: [...result.content, { type: "text", text: JSON.stringify(notice) }],
-  };
+  });
 }
 
 /** A live session the daemon reports this proxy's stable token owns (#10990). */
@@ -627,6 +629,7 @@ export class DaemonMcpProxy {
   private structuredSessionNotFound = false;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
+  private readonly proxyHeartbeatKeeper: HeartbeatKeeper;
   private readonly heartbeatLeashMs: number;
   private readonly heartbeatIntervalMs: number;
   /**
@@ -1065,6 +1068,17 @@ export class DaemonMcpProxy {
     this.tickLateness = new TickLatenessClock(this.heartbeatIntervalMs);
     this.livenessRecovery = this.createLivenessRecovery();
     this.livenessOwnerToken = resolveLivenessOwnerToken(config);
+    this.proxyHeartbeatKeeper = new HeartbeatKeeper({
+      timer: this.timer,
+      state: this.sessionState,
+      tickLateness: this.tickLateness,
+      livenessRecovery: this.livenessRecovery,
+      managedExecutionSessions: this.managedExecutionSessions,
+      heartbeatLeashMs: this.heartbeatLeashMs,
+      heartbeatIntervalMs: this.heartbeatIntervalMs,
+      boundSessionReplayTtlMs: this.boundSessionReplayTtlMs,
+      port: this.createHeartbeatKeeperPort(),
+    });
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
       this.heartbeatIntervalMs,
@@ -5395,45 +5409,29 @@ export class DaemonMcpProxy {
     };
   }
 
-  private async runBoundSessionHeartbeatTick(): Promise<void> {
-    if (this.tickLateness.note(this.timer.now()) > this.heartbeatLeashMs) {
-      this.beginProxyStallRecovery();
-    }
-    if (this.otherHeldSessions.size === 0) {
-      await this.runLatestBindingHeartbeatTick();
-      return;
-    }
-    // Each held session is isolated: a failure of one never skips the others,
-    // and the latest binding's own failure semantics are preserved.
-    const [latestBinding] = await Promise.allSettled([
-      this.runLatestBindingHeartbeatTick(),
-      this.heartbeatOtherHeldSessions(),
-    ]);
-    if (latestBinding.status === "rejected") {
-      throw latestBinding.reason;
-    }
+  private createHeartbeatKeeperPort(): HeartbeatKeeperPort {
+    return {
+      runLatestBindingHeartbeatTick: (...args) => this.runLatestBindingHeartbeatTick(...args),
+      hasSessionCallInFlight: (...args) => this.hasSessionCallInFlight(...args),
+      daemonKeepsSessionInUse: (...args) => this.daemonKeepsSessionInUse(...args),
+      recordHeldSessionTerminalLoss: (...args) => this.recordHeldSessionTerminalLoss(...args),
+      idleSessionReleaseReason: (...args) => this.idleSessionReleaseReason(...args),
+      dropHeldSession: (...args) => this.dropHeldSession(...args),
+      withRecoverableReconnect: (...args) => this.withRecoverableReconnect(...args),
+      askSessionHeartbeat: (...args) => this.askSessionHeartbeat(...args),
+      recordHeldSessionHeartbeatSuccess: (...args) =>
+        this.recordHeldSessionHeartbeatSuccess(...args),
+      noteLateHeartbeatAck: (...args) => this.noteLateHeartbeatAck(...args),
+      handleHeldSessionHeartbeatError: (...args) => this.handleHeldSessionHeartbeatError(...args),
+      isMissingHeartbeatAcknowledgement: (...args) =>
+        this.isMissingHeartbeatAcknowledgement(...args),
+      heldSessionUuids: (...args) => this.heldSessionUuids(...args),
+      isClosing: () => this.closing,
+    };
   }
 
-  /**
-   * This proxy's own tick fired later than the lease allows, so its sessions' leases may have
-   * lapsed while it could not heartbeat (#10053). Sessions it still heartbeats (and managed
-   * sessions) are re-heartbeated with the same owner token: one kept as suspect is restored with
-   * the same UUID, one still awaited keeps its window, and one lost is reported in the
-   * `proxy_stalled` handover. A stopped unmanaged session waits for a tool call, never stall recovery.
-   */
-  private beginProxyStallRecovery(): void {
-    logger.warn(
-      `[DaemonMcpProxy] Heartbeat tick fired more than ${this.heartbeatLeashMs}ms late; re-heartbeating held sessions`,
-    );
-    for (const sessionUuid of this.heldSessionUuids()) {
-      if (
-        this.notFoundStopped.has(sessionUuid) &&
-        !this.managedExecutionSessions.has(sessionUuid)
-      ) {
-        continue;
-      }
-      this.livenessRecovery.begin(sessionUuid, PROXY_STALLED_CODE);
-    }
+  private runBoundSessionHeartbeatTick(): Promise<void> {
+    return this.proxyHeartbeatKeeper.tick();
   }
 
   /** Every session this proxy heartbeats: the latest binding plus the ones it still holds. */
@@ -6213,123 +6211,15 @@ export class DaemonMcpProxy {
       : undefined;
   }
 
-  /** Stop heartbeating held sessions no tool call has named within the idle window (#10657). */
-  private evictAbandonedHeldSessions(): void {
-    const now = this.timer.now();
-    for (const [sessionUuid, held] of [...this.otherHeldSessions]) {
-      if (
-        !this.hasSessionCallInFlight(sessionUuid) &&
-        now - held.lastUsedAt >= this.boundSessionReplayTtlMs &&
-        !this.daemonKeepsSessionInUse(sessionUuid)
-      ) {
-        logger.info(
-          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
-        );
-        this.recordHeldSessionTerminalLoss(
-          sessionUuid,
-          this.idleSessionReleaseReason(sessionUuid),
-          undefined,
-          true,
-        );
-        this.dropHeldSession(sessionUuid);
-      }
-    }
+  private heartbeatHeldSession(sessionUuid: string): Promise<void> {
+    return this.proxyHeartbeatKeeper.heartbeatHeldSession(sessionUuid);
   }
 
-  private async heartbeatOtherHeldSessions(): Promise<void> {
-    this.evictAbandonedHeldSessions();
-    await Promise.all(
-      [...this.otherHeldSessions.keys()].map((sessionUuid) =>
-        this.heartbeatHeldSession(sessionUuid),
-      ),
-    );
-  }
-
-  /** Never rejects: a held session's failure is logged and must not stop its siblings. */
-  private async heartbeatHeldSession(sessionUuid: string): Promise<void> {
-    const held = this.otherHeldSessions.get(sessionUuid);
-    if (!held || this.closing) {
-      return;
-    }
-    const claimLivenessOwnership = !held.claimSent;
-    try {
-      await this.heartbeatWithStallDetection(sessionUuid, async (isCurrent) => {
-        // A skipped send proved nothing, so it must not be recorded as a success.
-        let sent = false;
-        // Fencing the latest binding must not silence its siblings, hence
-        // allowReleasedSession. Not-found is not proof of loss here, as on the
-        // latest binding's tick: the release notification is authoritative.
-        await runWithoutDaemonLifecycle(() =>
-          this.withRecoverableReconnect(
-            // A reconnect retry runs after the hold may have ended: a session handed over while
-            // this heartbeat waited on a stalled daemon must not be heartbeated on the daemon
-            // that replaced it (#11018), and a dropped one not at all.
-            async () => {
-              if (this.otherHeldSessions.get(sessionUuid) === held) {
-                await this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership);
-                sent = true;
-              }
-            },
-            sessionUuid,
-            true,
-            false,
-          ),
-        );
-        if (sent && isCurrent()) {
-          this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
-        } else if (sent && this.otherHeldSessions.get(sessionUuid) === held) {
-          this.noteLateHeartbeatAck(sessionUuid);
-        }
-      });
-    } catch (error) {
-      this.handleHeldSessionHeartbeatError(sessionUuid, claimLivenessOwnership, error);
-    }
-  }
-
-  /**
-   * Run one session's periodic heartbeat. An ownership refusal, a lost session or any other answer
-   * from the daemon is handled by the caller; the absence of an acknowledgement (the heartbeat
-   * timed out or the daemon was unreachable) starts bounded recovery for that session (#10053)
-   * instead of a time-threshold fence.
-   */
-  private async heartbeatWithStallDetection(
+  private heartbeatWithStallDetection(
     sessionUuid: string,
     send: (isCurrent: () => boolean) => Promise<void>,
   ): Promise<void> {
-    if (this.livenessRecovery.isRecovering(sessionUuid)) {
-      return;
-    }
-    let abandoned = false;
-    try {
-      await raceWithDeadline(() => send(() => !abandoned), {
-        timer: this.timer,
-        timeoutMs: this.heartbeatRequestTimeoutMs(),
-        label: "Bound-session heartbeat",
-        onTimeout: () => {
-          abandoned = true;
-        },
-      });
-    } catch (error) {
-      abandoned = true;
-      if (this.closing) {
-        return;
-      }
-      if (error instanceof LifecycleConnectionInFlightError) {
-        // The heartbeat was never sent: a tool call is establishing the shared connection. That
-        // says nothing about the daemon, and the next tick retries on that connection (#10508).
-        logger.debug(
-          `[DaemonMcpProxy] Heartbeat for session ${sessionUuid} deferred: ${errorMessage(error)}`,
-        );
-        return;
-      }
-      if (!this.isMissingHeartbeatAcknowledgement(error)) {
-        throw error;
-      }
-      logger.warn(
-        `[DaemonMcpProxy] No heartbeat acknowledgement for session ${sessionUuid}: ${errorMessage(error)}; starting recovery`,
-      );
-      this.livenessRecovery.begin(sessionUuid, DAEMON_STALLED_CODE);
-    }
+    return this.proxyHeartbeatKeeper.heartbeatWithStallDetection(sessionUuid, send);
   }
 
   /**

@@ -25,14 +25,9 @@ class SteppedPersistence extends FakeDeviceSessionPersistence {
   private parked: { step: PersistStep; reached: () => void; finish: Promise<void> } | undefined;
   private finishParked: (() => void) | undefined;
 
-  constructor() {
-    super();
-    // The lookup exists from the start, so the terminal-row read is an await of its own. The
-    // first upsert swaps in the repository's real lookup.
-    this.getSession = async () => {
-      await this.pass("terminal-row read");
-      return undefined;
-    };
+  override async getSession(sessionUuid: string) {
+    await this.pass("terminal-row read");
+    return await super.getSession(sessionUuid);
   }
 
   /** Park the next `step`; resolves once the mint is waiting on it. */
@@ -79,7 +74,7 @@ class SteppedPersistence extends FakeDeviceSessionPersistence {
   }
 
   async row(sessionUuid: string) {
-    return await this.getSession!(sessionUuid);
+    return await this.getSession(sessionUuid);
   }
 }
 

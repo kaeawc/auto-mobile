@@ -1,3 +1,4 @@
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -88,21 +89,27 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     const persisted = persistedRow();
     const releaseReasons: string[] = [];
     const upserts: string[] = [];
-    const persistence: DeviceSessionPersistence = {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession(session) {
-        upserts.push(session.session_uuid);
-      },
-      async recordActivity() {},
-      async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
-        releaseReasons.push(releaseReason);
-        persisted.status = status;
-        persisted.released_at_ms = releasedAtMs;
-        persisted.release_reason = releaseReason;
-      },
-    };
+    const persistence: DeviceSessionPersistence = Object.assign(
+      new FakeDeviceSessionPersistence(),
+      {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession(session) {
+          upserts.push(session.session_uuid);
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          releaseReasons.push(releaseReason);
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+    );
     const sessions = new SessionManager(timer, persistence);
     managers.push(sessions);
     const devices = new FakeDeviceManager();

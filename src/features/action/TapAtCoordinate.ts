@@ -56,6 +56,7 @@ import {
   type IosCoordinateTapClient,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  dispatchIosDoubleTap,
   isStaleFrameContextRejection,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
@@ -65,12 +66,7 @@ import {
   tryAtomicAndroidDoubleTap,
 } from "./androidDoubleTap";
 
-import {
-  DOUBLE_TAP_GAP_MS,
-  LONG_PRESS_DEFAULT_MS,
-  LONG_PRESS_MIN_MS,
-  LONG_PRESS_MAX_MS,
-} from "./tapAtGesture";
+import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
 
 class TapAtGeometryError extends ActionableError {}
 
@@ -349,6 +345,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   iosClient?: IosCoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
+  dispatchIosDoubleTap?: typeof dispatchIosDoubleTap;
   invalidateIosCache?: () => void;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
@@ -391,6 +388,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient<() => void> & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
+  private readonly iosDoubleTap: typeof dispatchIosDoubleTap;
   private readonly iosClient: IosCoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
@@ -417,6 +415,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
     this.androidCoordinateTap =
       dependencies.dispatchAndroidCoordinateTap ?? dispatchAndroidCoordinateTap;
+    this.iosDoubleTap = dependencies.dispatchIosDoubleTap ?? dispatchIosDoubleTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??
@@ -711,18 +710,13 @@ export class TapAtCoordinate extends BaseVisualChange {
     onTapDelivered: () => void,
     signal?: AbortSignal,
   ): Promise<number> {
-    await this.iosCoordinateTap(
-      this.iosClient,
-      point.x,
-      point.y,
-      tapDurationMs(options, "ios"),
-      frameContext,
-      { signal },
-    );
-    onTapDelivered();
+    this.assertDisplayRevisionCurrent(transitionRevision);
+    const dispatch = options.action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap;
+    await dispatch(this.iosClient, point.x, point.y, tapDurationMs(options, "ios"), frameContext, {
+      signal,
+    });
     try {
-      throwIfAborted(signal);
-      await this.dispatchSecondIosTap(options, point, transitionRevision, signal);
+      onTapDelivered();
       if (options.action === "doubleTap") {
         onTapDelivered();
       }
@@ -1254,24 +1248,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
   }
 
-  private async dispatchSecondIosTap(
-    options: TapAtOptions,
-    point: { x: number; y: number },
-    revision: { revision: number; observedGeneration: number },
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (options.action !== "doubleTap") {
-      return;
-    }
-    await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-    throwIfAborted(signal);
-    this.assertDisplayRevisionCurrent(revision);
-    await this.iosCoordinateTap(this.iosClient, point.x, point.y, IOS_TAP_DURATION_MS, undefined, {
-      failureLabel: "second tap",
-      signal,
-    });
-  }
-
   private resolveCoordinates(
     options: TapAtOptions,
     observeResult: ObserveResult,
@@ -1427,7 +1403,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): Promise<void> {
     const action = options.action ?? "tap";
     const duration = tapDurationMs(options, this.device.platform);
-    const dispatch = async (second: boolean) => {
+    const dispatch = async () => {
       throwIfAborted(signal);
       context.assertCurrent();
       if (this.device.platform === "android") {
@@ -1444,15 +1420,18 @@ export class TapAtCoordinate extends BaseVisualChange {
           context,
         );
       } else if (this.device.platform === "ios") {
-        await this.iosCoordinateTap(
+        await (action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap)(
           this.iosClient,
           point.x,
           point.y,
           duration,
-          second ? undefined : observation.viewHierarchy?.frameContext,
-          { failureLabel: second ? "second tap" : "tap", signal },
+          observation.viewHierarchy?.frameContext,
+          { signal },
         );
         context.onTapDelivered();
+        if (action === "doubleTap") {
+          context.onTapDelivered();
+        }
       } else {
         throw unsupportedPlatformError(this.device.platform, "tapAt gesture");
       }
@@ -1470,18 +1449,13 @@ export class TapAtCoordinate extends BaseVisualChange {
         assertCurrent: context.assertCurrent,
         onTapDelivered: context.onTapDelivered,
         onWarning: context.onWarning,
-        tap: () => dispatch(false),
+        tap: () => dispatch(),
       });
       return;
     }
-    await dispatch(false);
+    await dispatch();
     if (this.device.platform === "ios") {
       try {
-        throwIfAborted(signal);
-        if (action === "doubleTap") {
-          await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-          await dispatch(true);
-        }
         throwIfAborted(signal);
       } finally {
         this.invalidateIosCacheSafely();

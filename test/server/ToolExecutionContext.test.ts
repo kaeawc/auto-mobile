@@ -1,3 +1,4 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
@@ -2407,7 +2408,10 @@ describe("ToolExecutionContext", () => {
     const activityStartedPromise = new Promise<void>((resolve) => {
       activityStarted = resolve;
     });
-    const repository = {
+    const repository = Object.assign(new FakeDeviceSessionPersistence(), {
+      recordLivenessOwnership: async () => {},
+      replaceLivenessOwnership: async () => {},
+      claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
       async upsertActiveSession(): Promise<void> {},
       async recordActivity(): Promise<void> {
         activityStarted();
@@ -2415,7 +2419,7 @@ describe("ToolExecutionContext", () => {
       },
       async markReleased(): Promise<void> {},
       async markStaleActiveSessionsExpired(): Promise<void> {},
-    };
+    } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>);
     const manager = new SessionManager(fakeTimer, repository);
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "test-daemon-session-id", {
@@ -2448,12 +2452,18 @@ describe("ToolExecutionContext", () => {
 
   test("bounds accessibility setup and rejects it after the session releases", async () => {
     const boundedTimer = new FakeTimer();
-    const boundedSessionManager = new SessionManager(boundedTimer, {
-      async upsertActiveSession(): Promise<void> {},
-      async recordActivity(): Promise<void> {},
-      async markReleased(): Promise<void> {},
-      async markStaleActiveSessionsExpired(): Promise<void> {},
-    });
+    const boundedSessionManager = new SessionManager(
+      boundedTimer,
+      Object.assign(new FakeDeviceSessionPersistence(), {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+    );
     const boundedDeviceManager = new FakeDeviceManager();
     boundedDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     const boundedPool = new DevicePool(
@@ -2616,14 +2626,20 @@ describe("ToolExecutionContext", () => {
       })) as any;
 
       const persisted = nonTerminalPersisted("restarted-session", "device-1");
-      const recoveryManager = new SessionManager(fakeTimer, {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {},
-        async recordActivity() {},
-        async markReleased() {},
-      });
+      const recoveryManager = new SessionManager(
+        fakeTimer,
+        Object.assign(new FakeDeviceSessionPersistence(), {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased() {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+      );
       const recoveryPool = new DevicePool(
         createDevicePoolDependencies(recoveryManager, "test-daemon-session-id", {
           timer: fakeTimer,

@@ -6,5 +6,6 @@ import Foundation
 /// identifiers — adding, dropping, or renaming a case changes the advertised
 /// contract (#5787).
 public enum RunnerFeature: String, CaseIterable, Codable, Sendable {
+    case doubleTapV1 = "double_tap_v1"
     case displayCutoutInfo = "display_cutout_info"
 }

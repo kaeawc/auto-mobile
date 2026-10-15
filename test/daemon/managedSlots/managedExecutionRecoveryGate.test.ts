@@ -269,7 +269,7 @@ describe("managed execution recovery is gated before publication", () => {
     await sessions.claimLivenessOwnership("fresh", "fresh-token");
     await sessions.adoptManagedExecutionLivenessPolicy("fresh");
     expect(calls).toEqual([]);
-    expect((await persistence.getSession?.("fresh"))?.liveness_policy).toBe("managed-execution");
+    expect((await persistence.getSession("fresh"))?.liveness_policy).toBe("managed-execution");
   });
 
   test("creation failure rejects the recovery signal and drops the unpublished gate", async () => {

@@ -147,6 +147,9 @@ enum PrototypeMenus {
             }
         }
         if let child = fields["child"] { try validateAuthoredText(child, path: "\(path).child") }
+        for (screen, screenPath) in PrototypeStacks.screenChildren(in: fields, path: path) {
+            try validateAuthoredText(screen, path: screenPath)
+        }
     }
 
     static func validate(_ raw: JSONValue, state: [String: JSONValue], path: String = "root") throws {
@@ -202,6 +205,9 @@ enum PrototypeMenus {
             }
         }
         if let child = fields["child"] { try validate(child, state: state, path: "\(path).child") }
+        for (screen, screenPath) in PrototypeStacks.screenChildren(in: fields, path: path) {
+            try validate(screen, state: state, path: screenPath)
+        }
     }
 
     /// Bottom-end alignment in window-local coordinates, clamped on both axes.

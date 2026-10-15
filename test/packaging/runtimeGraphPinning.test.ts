@@ -42,11 +42,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
     "ws",
   ];
 
-  // The packages the built artifact actually imports from node_modules at runtime:
-  // the jimp/sharp image backends (dynamic imports in the bundle) plus kysely,
-  // which every DB migration `.ts` copied into dist/ imports for its `sql` tag and
-  // which the migrator loads from disk at runtime (not bundled into index.js).
-  const RUNTIME_ROOTS = ["jimp", "@jimp/core", "sharp", "kysely"];
+  // Only the jimp/sharp image backends are imported from node_modules at runtime;
+  // kysely is bundled into dist.
+  const RUNTIME_ROOTS = ["jimp", "@jimp/core", "sharp"];
 
   test("every runtime dependency is pinned to an exact version", () => {
     const ranged = Object.entries(pkg.dependencies).filter(([, spec]) => !isExactVersion(spec));

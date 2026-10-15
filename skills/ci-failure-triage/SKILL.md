@@ -27,11 +27,14 @@ read-only unless the user also asks to fix a confirmed cause.
    only an advisory lane failed.
 3. For `CHECK-UPSTREAM-FIRST`, inspect the named upstream row before retrying or
    filing work. A red aggregator is not a test diagnosis.
-4. Do not re-fix `KNOWN-NONFIX` signatures. In particular, a Dependabot
+4. When the verdict is `INVESTIGATE` with a named test `file:line` or missing
+   import path, act on that diagnosis. Treat a shard as signal-killed only
+   when the output says `killed by signal`.
+5. Do not re-fix `KNOWN-NONFIX` signatures. In particular, a Dependabot
    sharp/jimp bump that breaks the pinned clean-room graph is designed to be
    rejected; close or ignore that Dependabot PR instead of changing runtime
    dependencies.
-5. For integration-test or runtime-graph input changes, run
+6. For integration-test or runtime-graph input changes, run
    `bash scripts/prepush-integration.sh` before pushing. It runs only changed
    integration files and only runs the clean-room runtime audit when its inputs
    changed.

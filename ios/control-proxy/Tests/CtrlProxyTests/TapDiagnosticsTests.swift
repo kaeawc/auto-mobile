@@ -1,4 +1,5 @@
 @testable import CtrlProxy
+import CtrlProxyTestSupport
 import Foundation
 import XCTest
 
@@ -189,6 +190,38 @@ final class TapDiagnosticsTests: XCTestCase {
         XCTAssertNil(fixture.normalizedOffset)
     }
 
+    func testDoubleTapWireFixtureRoutesToOneDoubleTap() async throws {
+        let url = WireSnapshotFixture.fixtureURL(fromTestFilePath: #filePath)
+        let snapshot = try XCTUnwrap(WireSnapshotFixture.load(contentsOf: url).first {
+            $0.name == "request_tap_coordinates_double_tap"
+        })
+        let payload = try JSONDecoder().decode(
+            RequestTapCoordinates.self,
+            from: JSONSerialization.data(withJSONObject: snapshot.wire)
+        )
+        XCTAssertEqual(payload.doubleTap, true)
+        let gestures = FakeGesturePerformer()
+        let handler = CommandHandler(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        var wire = snapshot.wire
+        wire["diagnostics"] = true
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: JSONSerialization.data(withJSONObject: wire)
+        )
+        let result = await handler.handle(request)
+        let response = try XCTUnwrap(result as? WebSocketResponse)
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, ResponseType.tapCoordinatesResult.rawValue)
+        XCTAssertNil(response.tapDiagnostics)
+        XCTAssertEqual(gestures.doubleTapPoints, [.init(x: 120.5, y: 240.25)])
+        XCTAssertEqual(gestures.tapCalls, 0)
+        XCTAssertEqual(gestures.diagnosticTapCalls, 0)
+    }
+
     func testHandlerOffUsesPlainTapAndOmitsDiagnostics() async throws {
         let gestures = FakeGesturePerformer()
         let handler = CommandHandler(
@@ -206,6 +239,7 @@ final class TapDiagnosticsTests: XCTestCase {
             XCTAssertNil(response.tapDiagnostics)
             XCTAssertFalse(try encoded(response).contains("tapDiagnostics"))
         }
+        XCTAssertEqual(gestures.doubleTapPoints.count, 0)
         XCTAssertEqual(gestures.tapCalls, 2)
         XCTAssertEqual(gestures.diagnosticTapCalls, 0)
     }
@@ -242,6 +276,7 @@ final class TapDiagnosticsTests: XCTestCase {
             let result = await handler.handle(request)
             XCTAssertEqual((result as? WebSocketResponse)?.success, true)
         }
+        XCTAssertEqual(gestures.doubleTapPoints.count, 0)
         XCTAssertEqual(gestures.tapCalls, 2)
         XCTAssertEqual(gestures.tapDurations, [0.05, 0.05])
         XCTAssertEqual(gestures.lastTap?.x, 443)

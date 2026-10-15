@@ -99,3 +99,14 @@ not a supported interface and may break between runtimes.
 - Repeat the issue's grant matrix against the Playground and record `readWrite`/`addOnly` per sequence, plus a cold
   restart after the best sequence.
 - Try grant-after-launch and a raw TCC write (option D); record the Xcode and runtime versions.
+
+## Implied add-only readback (#12462)
+
+The inference from a full `kTCCServicePhotos` grant (`auth_value` 2) to `photos-add` applies only on
+simulator runtime major >= 27 (threshold ORCHESTRATOR-CHOSEN, issue #12486). The 27.0 capture in
+`test/fixtures/ios-tcc-photos/` shows add-only `authorized` even with a stale PhotosAdd row; the iOS
+26.5 fixture set shows it does not: PhotoKit addOnly is `notDetermined` after reset+grant photos and
+`denied` after revoke+grant photos. Runtime version comes from `device.iosVersion` or
+`device.osVersion`; with an unknown runtime, readback reports the stored PhotosAdd row. Gating on the
+Photos row's `auth_version` was considered (27.0 wrote 2, 26.5 wrote 1) and rejected as too indirect
+and undocumented.

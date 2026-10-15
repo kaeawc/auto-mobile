@@ -128,6 +128,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       daemon_session_id: record.daemonSessionId ?? null,
       created_at_ms: existing?.created_at_ms ?? record.createdAtMs,
       last_used_at_ms: record.lastUsedAtMs,
+      activity_seq: record.activitySeq ?? record.lastUsedAtMs,
       expires_at_ms: record.expiresAtMs,
       released_at_ms: null,
       release_reason: null,
@@ -202,7 +203,12 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       // Mirrors DeviceSessionRepository: zero matched rows is a failure (#11129).
       throw new DeviceSessionNotActiveError(sessionUuid);
     }
+    const seq = update.activitySeq ?? update.lastUsedAtMs;
+    if ((row.activity_seq ?? 0) > seq) {
+      return;
+    }
     Object.assign(row, {
+      activity_seq: Math.max(row.activity_seq ?? 0, seq),
       last_used_at_ms: update.lastUsedAtMs,
       expires_at_ms: update.expiresAtMs,
       session_timeout_ms: update.sessionTimeoutMs,

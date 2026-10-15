@@ -8,7 +8,7 @@ import XCTest
 /// tests so the availability signal cannot be silently disconnected. See #3985.
 ///
 /// Mirrors `CtrlProxyTests.GesturePerformerSymbolsUnavailableWiringTests`; reads the
-/// rewrite's `Sources/CtrlProxyRewrite/GesturePerformer.swift`. The ported `pinch`/
+/// rewrite's `Sources/CtrlProxyRewrite/GesturePerformer*.swift`. The ported `pinch`/
 /// `multiFingerSwipe` keep the same bridge-availability wiring, so the same substring
 /// ordering must hold.
 final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
@@ -103,13 +103,20 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let sourceURL = packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite/GesturePerformer.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let sourcesURL = packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite")
+        let source = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(atPath: sourcesURL.path)
+                .filter { $0.hasPrefix("GesturePerformer") && $0.hasSuffix(".swift") && !$0.contains("NonIOSStub") }
+                .sorted()
+                .map { try String(contentsOf: sourcesURL.appendingPathComponent($0), encoding: .utf8) }
+                .first { $0.contains("func " + name) }
+        )
         let functionStart = try XCTUnwrap(source.range(of: "func " + name))
         let remainingSource = source[functionStart.upperBound...]
         let nextDeclaration = [
             remainingSource.range(of: "\n        public func ").map(\.lowerBound),
             remainingSource.range(of: "\n        private ").map(\.lowerBound),
+            remainingSource.range(of: "\n        func ").map(\.lowerBound),
         ].compactMap { $0 }.min()
         let functionEnd = nextDeclaration ?? source.endIndex
 

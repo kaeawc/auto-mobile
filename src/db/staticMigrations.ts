@@ -73,6 +73,7 @@ import * as m070 from "./migrations/2026_10_09_002_drop_device_teardown_operatio
 import * as m071 from "./migrations/2026_10_12_000_rename_recording_tool_names";
 import * as m072 from "./migrations/2026_10_12_001_video_recording_capture_teardown";
 import * as m073 from "./migrations/2026_10_13_000_video_recording_recorder_daemon";
+import * as m074 from "./migrations/2026_10_15_000_device_session_activity_seq";
 
 /**
  * Bundle the default migrations without runtime folder discovery. Keep keys identical to
@@ -153,6 +154,7 @@ export const STATIC_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_12_000_rename_recording_tool_names": m071,
   "2026_10_12_001_video_recording_capture_teardown": m072,
   "2026_10_13_000_video_recording_recorder_daemon": m073,
+  "2026_10_15_000_device_session_activity_seq": m074,
 };
 
 export const staticMigrationProvider: MigrationProvider = {

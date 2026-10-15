@@ -22,7 +22,9 @@ export interface KeyedJsonConfigRepositoryOptions<TConfig> {
   logger?: Logger;
 }
 
-// Orchestrator-chosen compatibility policy: non-strict objects strip unknown keys.
+// Non-strict objects strip removed keys such as backupTimeoutMs and userApps.
+// Audit: appearance and video recording required fields were present in their
+// first persisted shapes; resolution was optional from the start.
 export const appearanceConfigSchema = z.object({
   syncWithHost: z.boolean(),
   defaultMode: z.enum(["light", "dark", "auto"]),
@@ -30,15 +32,15 @@ export const appearanceConfigSchema = z.object({
 });
 
 export const deviceSnapshotConfigSchema = z.object({
-  includeAppData: z.boolean(),
-  includeSettings: z.boolean(),
-  useVmSnapshot: z.boolean(),
-  strictBackupMode: z.boolean(),
-  vmSnapshotTimeoutMs: z.number(),
+  includeAppData: z.boolean().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeAppData),
+  includeSettings: z.boolean().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeSettings),
+  useVmSnapshot: z.boolean().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.useVmSnapshot),
+  strictBackupMode: z.boolean().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.strictBackupMode),
+  vmSnapshotTimeoutMs: z.number().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs),
   // Rows predating #6960 lack retention fields; preserve the manager's default.
   maxVmSnapshotsPerAvd: z.number().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxVmSnapshotsPerAvd),
   maxVmArchiveSizeMb: z.number().optional(),
-  maxArchiveSizeMb: z.number(),
+  maxArchiveSizeMb: z.number().default(DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb),
 });
 
 export const videoRecordingConfigSchema = z.object({

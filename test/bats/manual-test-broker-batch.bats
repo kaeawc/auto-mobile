@@ -118,3 +118,19 @@ plan() {
   [[ "${output}" == *'status | down | report'* ]]
   [ ! -e "${BATCH}" ]
 }
+
+@test "broker-scenario list and help need no daemon or batch" {
+  unset MT_BATCH
+  local scenario="${BATS_TEST_DIRNAME}/../../scripts/manual-test/broker-scenario.ts"
+  run bun "${scenario}" list
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'capacity-refusal-and-replay'* ]]
+  [[ "${output}" == *'cross-client-isolation'* ]]
+  [[ "${output}" == *'fake'* ]]
+  run bun "${scenario}" --help
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'run <name>'* ]]
+  [[ "${output}" == *'--dry-run'* ]]
+  [[ "${output}" == *'--device'* ]]
+  [ ! -e "${BATCH}" ]
+}

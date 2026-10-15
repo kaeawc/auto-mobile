@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from mcp_harness.cli import parser, prepare, two
 from mcp_harness.close_result import worst_exit
+from mcp_harness.launch import LaunchSpec
+from tests.support import ROOT
 from tests.support import call, guard_ok, tempdir
 
 class PairTests(unittest.TestCase):
@@ -47,6 +49,32 @@ class PairTests(unittest.TestCase):
                     a_request = next(r for r in rows[0] if r["event"] == "request" and r["index"] == 1)
                     b_close = next(r for r in rows[1] if r["event"] == "close")
                     self.assertGreater(a_request["monotonicAbsoluteMs"], b_close["monotonicAbsoluteMs"])
+
+    def test_broker_capability_survives_peer_closing_out_of_order(self) -> None:
+        # Product-generated reply, shared with the TypeScript parser tests.
+        receipt = json.loads((ROOT / "test/fixtures/session-broker/fake-lifecycle.json").read_text())["prepareSession"]
+        with tempdir() as tmp:
+            path = Path(tmp) / "steps.json"
+            path.write_text(json.dumps({"steps": [call("echo", text="broker")],
+                                        "afterPeerClosed": [call("echo", text="surviving broker client")]}))
+            args = parser(True).parse_args(["--fake-server", "--script", str(path),
+                                           "--out-dir", tmp, "--close-order", "b-first"])
+            launch, scripts = prepare(args, True, guard_ok)
+            launch = LaunchSpec(launch.command,
+                                [*launch.args, "--advertise-session", json.dumps(receipt)], launch.env)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(asyncio.run(two(args, launch, scripts)), 0)
+            a, b = [[json.loads(line) for line in
+                     (Path(tmp) / "lifetime-001" / f"{name}.jsonl").read_text().splitlines()]
+                    for name in "AB"]
+            for rows in (a, b):
+                initialized = next(row for row in rows if row["event"] == "initialize")
+                self.assertEqual(initialized["response"]["capabilities"]["experimental"]["automobile/session"], receipt)
+                self.assertTrue(any(row["event"] == "close" for row in rows))
+            peer_close = next(row for row in b if row["event"] == "close")
+            surviving_call = next(row for row in a if row["event"] == "request" and
+                                  row["step"].get("arguments", {}).get("text") == "surviving broker client")
+            self.assertGreater(surviving_call["monotonicAbsoluteMs"], peer_close["monotonicAbsoluteMs"])
 
     def test_precedence(self) -> None:
         self.assertEqual(worst_exit([0, 1, 3, 2]), 2)

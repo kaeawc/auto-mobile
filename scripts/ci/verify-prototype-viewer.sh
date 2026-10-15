@@ -37,7 +37,7 @@ if [[ ! -s "${executable}" || ! -x "${executable}" ]]; then
   echo "ERROR: PrototypeViewer executable missing or not executable" >&2
   exit 1
 fi
-lipo -verify_arch arm64 x86_64 "${executable}"
+lipo "${executable}" -verify_arch arm64 x86_64
 minos="$(plutil -extract MinimumOSVersion raw -o - "${app}/Info.plist")"
 if [[ "${minos}" != "${expected_min}" ]]; then
   echo "ERROR: MinimumOSVersion must be ${expected_min}, got '${minos}'" >&2

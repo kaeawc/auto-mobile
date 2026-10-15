@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Response Types (matching Android)
 
-public enum ResponseType: String, Sendable {
+public enum ResponseType: String, CaseIterable, Sendable {
     case hierarchyUpdate = "hierarchy_update"
     case setHierarchyPollIntervalResult = "set_hierarchy_poll_interval_result"
     case screenshot

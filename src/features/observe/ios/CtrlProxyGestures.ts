@@ -26,6 +26,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(
     context: DelegateContext,
     private readonly environment: Pick<SystemDetection, "getEnvVar"> = new DefaultSystemDetection(),
+    private readonly getDoubleTapFeatures?: (signal?: AbortSignal) => Promise<string[] | null>,
   ) {
     super(context, {
       logTag: "CTRL_PROXY",
@@ -88,6 +89,45 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         frameContext,
         signal,
         onDispatch,
+      }),
+    );
+  }
+
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    return sendIOSPressCommand(
+      this.getDoubleTapFeatures
+        ? {
+            ...this.context,
+            ensureConnected: async (perf) => {
+              const connected = await this.context.ensureConnected(perf);
+              if (connected) {
+                const features = await this.getDoubleTapFeatures?.(signal);
+                if (features && !features.includes("double_tap_v1")) {
+                  throw new Error(
+                    "iOS CtrlProxy runner is too old for a double tap and must be updated; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.",
+                  );
+                }
+              }
+              return connected;
+            },
+          }
+        : this.context,
+      this.tapCommandOptions({
+        x,
+        y,
+        duration: 50,
+        timeoutMs,
+        frameContext,
+        signal,
+        onDispatch,
+        doubleTap: true,
       }),
     );
   }

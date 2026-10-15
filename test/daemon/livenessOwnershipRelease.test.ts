@@ -610,7 +610,7 @@ describe("deliberate liveness ownership release", () => {
       finish.resolve();
       expect((await released).success).toBe(true);
       expect((await claimed).success).toBe(true);
-      expect((await persistence.getSession?.(SESSION))?.liveness_owner_token).toBe("next");
+      expect((await persistence.getSession(SESSION))?.liveness_owner_token).toBe("next");
     } finally {
       finish.resolve();
       spy.mockRestore();

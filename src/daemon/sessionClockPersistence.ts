@@ -25,10 +25,9 @@
  *
  * Only absolute instants are converted; durations (`session_timeout_ms`, ...) are frame-free. The
  * #11129 guards keep working: the row generation is not a time, and the stale-write guard
- * (`last_used_at_ms` only moves forward) compares stamps from the same daemon, converted with the
- * same offset unless a wall step falls between two writes. A backward step there makes the newer
- * write read as stale and leaves the row's later, pre-step lease in place until the converted
- * activity passes it, so the row errs toward keeping a session, by at most the step.
+ * compares the raw session-clock activity sequence (#11497), which never steps backward within
+ * this daemon/session. Wall stamps remain display/recovery instants; a wall step cannot reject
+ * newer activity or let a delayed older write replace its lease.
  */
 
 import type { DeviceSession, DeviceSessionStatus } from "../db/types";
@@ -124,10 +123,9 @@ const toWallIfGiven = (frame: SessionClockFrame, ms: number | undefined) =>
 
 /**
  * `inner` as the session manager sees it: every instant it is handed is on the session clock and
- * is stored as wall ms, and every row it returns has its instants on the session clock. An
- * optional method is present exactly while `inner` has it, looked up per access (an
- * implementation may install one late, and a spy may replace it). The wrappers add no awaits of
- * their own beyond one conversion step on reads.
+ * is stored as wall ms, and every row it returns has its instants on the session clock. All
+ * required methods delegate to `inner`, looked up per call so spies may replace them. The
+ * wrappers add no awaits of their own beyond one conversion step on reads.
  */
 class SessionClockPersistence implements DeviceSessionPersistence {
   private readonly written = new WrittenStamps();
@@ -155,6 +153,7 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     return this.inner.upsertActiveSession(
       {
         ...record,
+        activitySeq: record.activitySeq ?? record.lastUsedAtMs,
         createdAtMs: this.store(record.sessionUuid, "created", record.createdAtMs),
         lastUsedAtMs: this.store(record.sessionUuid, "lastUsed", record.lastUsedAtMs),
         expiresAtMs: this.store(record.sessionUuid, "expires", record.expiresAtMs),
@@ -164,72 +163,58 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     );
   }
 
-  get getSession(): DeviceSessionPersistence["getSession"] {
-    if (!this.inner.getSession) {
-      return undefined;
-    }
-    const getSession = this.inner.getSession.bind(this.inner);
-    return (sessionUuid) =>
-      getSession(sessionUuid).then(
-        (row) => row && deviceSessionOnSessionClock(row, this.frame, this.written),
-      );
+  getSession(sessionUuid: string): Promise<DeviceSession | undefined> {
+    return this.inner
+      .getSession(sessionUuid)
+      .then((row) => row && deviceSessionOnSessionClock(row, this.frame, this.written));
   }
 
-  get listRecoverableSessions(): DeviceSessionPersistence["listRecoverableSessions"] {
-    if (!this.inner.listRecoverableSessions) {
-      return undefined;
-    }
-    const listRecoverableSessions = this.inner.listRecoverableSessions.bind(this.inner);
-    return (nowMs, livePeerDaemonSessionIds) =>
-      listRecoverableSessions(toWallIfGiven(this.frame, nowMs), livePeerDaemonSessionIds).then(
-        (rows) => rows.map((row) => deviceSessionOnSessionClock(row, this.frame, this.written)),
+  listRecoverableSessions(
+    nowMs?: number,
+    livePeerDaemonSessionIds?: () => readonly string[],
+  ): Promise<DeviceSession[]> {
+    return this.inner
+      .listRecoverableSessions(toWallIfGiven(this.frame, nowMs), livePeerDaemonSessionIds)
+      .then((rows) =>
+        rows.map((row) => deviceSessionOnSessionClock(row, this.frame, this.written)),
       );
   }
 
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
     return this.inner.recordActivity(sessionUuid, {
       ...update,
+      activitySeq: update.activitySeq ?? update.lastUsedAtMs,
       lastUsedAtMs: this.store(sessionUuid, "lastUsed", update.lastUsedAtMs),
       expiresAtMs: this.store(sessionUuid, "expires", update.expiresAtMs),
     });
   }
 
-  get recordRestartRecoveryActivity(): DeviceSessionPersistence["recordRestartRecoveryActivity"] {
-    if (!this.inner.recordRestartRecoveryActivity) {
-      return undefined;
-    }
-    const record = this.inner.recordRestartRecoveryActivity.bind(this.inner);
-    return (sessionUuid, activityAtMs) => record(sessionUuid, this.frame.toWall(activityAtMs));
+  recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void> {
+    return this.inner.recordRestartRecoveryActivity(sessionUuid, this.frame.toWall(activityAtMs));
   }
 
-  get recordLivenessOwnership(): DeviceSessionPersistence["recordLivenessOwnership"] {
-    if (!this.inner.recordLivenessOwnership) {
-      return undefined;
-    }
-    return this.inner.recordLivenessOwnership.bind(this.inner);
+  recordLivenessOwnership(
+    ...args: Parameters<DeviceSessionPersistence["recordLivenessOwnership"]>
+  ): ReturnType<DeviceSessionPersistence["recordLivenessOwnership"]> {
+    return this.inner.recordLivenessOwnership(...args);
   }
 
-  get claimRecoverableSession(): DeviceSessionPersistence["claimRecoverableSession"] {
-    if (!this.inner.claimRecoverableSession) {
-      return undefined;
-    }
-    // Generations and daemon ids are frame-free.
-    return this.inner.claimRecoverableSession.bind(this.inner);
+  claimRecoverableSession(
+    ...args: Parameters<DeviceSessionPersistence["claimRecoverableSession"]>
+  ): ReturnType<DeviceSessionPersistence["claimRecoverableSession"]> {
+    return this.inner.claimRecoverableSession(...args);
   }
 
-  get releaseRecoverableSessionClaim(): DeviceSessionPersistence["releaseRecoverableSessionClaim"] {
-    if (!this.inner.releaseRecoverableSessionClaim) {
-      return undefined;
-    }
-    // Generations and daemon ids are frame-free.
-    return this.inner.releaseRecoverableSessionClaim.bind(this.inner);
+  releaseRecoverableSessionClaim(
+    ...args: Parameters<DeviceSessionPersistence["releaseRecoverableSessionClaim"]>
+  ): ReturnType<DeviceSessionPersistence["releaseRecoverableSessionClaim"]> {
+    return this.inner.releaseRecoverableSessionClaim(...args);
   }
 
-  get replaceLivenessOwnership(): DeviceSessionPersistence["replaceLivenessOwnership"] {
-    if (!this.inner.replaceLivenessOwnership) {
-      return undefined;
-    }
-    return this.inner.replaceLivenessOwnership.bind(this.inner);
+  replaceLivenessOwnership(
+    ...args: Parameters<DeviceSessionPersistence["replaceLivenessOwnership"]>
+  ): ReturnType<DeviceSessionPersistence["replaceLivenessOwnership"]> {
+    return this.inner.replaceLivenessOwnership(...args);
   }
 
   markReleased(

@@ -460,6 +460,15 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
+  requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    timeoutMs?: number,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
+
   requestTapCoordinates(
     x: number,
     y: number,
@@ -741,7 +750,7 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
 ] as const;
 
 /** Non-command wire capabilities advertised by runners built from this source revision. */
-export const IOS_RUNNER_FEATURE_FLAGS = ["display_cutout_info"] as const;
+export const IOS_RUNNER_FEATURE_FLAGS = ["display_cutout_info", "double_tap_v1"] as const;
 
 // The immutable 0.0.66 IPA predates the feature handshake. Require the flag
 // only once the release pipeline cuts 0.0.67+ from source that advertises it.
@@ -1947,7 +1956,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       (value) => {
         this._gestures = value;
       },
-      () => new CtrlProxyGestures(this.createDelegateContext()),
+      () =>
+        new CtrlProxyGestures(this.createDelegateContext(), undefined, async (signal) => {
+          if (this.supportedFeatures === null) {
+            await this.waitForHandshake(undefined, signal);
+          }
+          // Legacy handshakes omit features; never assume they understand doubleTap.
+          return this.getCachedSupportedFeatures() ?? [];
+        }),
     );
   }
 
@@ -3932,6 +3948,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       duration,
       timeoutMs,
       perf,
+      frameContext,
+      signal,
+      onDispatch,
+    );
+  }
+
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    timeoutMs?: number,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    return this.gestures.requestDoubleTapCoordinates(
+      x,
+      y,
+      timeoutMs,
       frameContext,
       signal,
       onDispatch,

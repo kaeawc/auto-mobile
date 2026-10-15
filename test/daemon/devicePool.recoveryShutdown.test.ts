@@ -540,7 +540,7 @@ test("continuity releases an externally closed emulator without relaunch and reh
     ).resolves.toBe("released");
     expect(manager.kills).toEqual([]);
     expect(manager.startedDevices).toEqual([]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${original.name}`,
     });
@@ -614,7 +614,7 @@ test("a pool-allocated emulator without a recorded image still persists as devic
     ).resolves.toBe("released");
     expect(manager.kills).toEqual([]);
     expect(manager.startedDevices).toEqual([]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${original.name}`,
     });
@@ -671,7 +671,7 @@ test("onLoss recovery does not actively relaunch a pool-allocated emulator witho
     // widen what `isAndroidEmulatorActiveRelaunchEligible` permits.
     expect(manager.kills).toEqual([]);
     expect(manager.startedDevices).toEqual([]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${original.name}`,
     });
@@ -726,7 +726,7 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
       incidentId,
     });
 
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "released",
       release_reason: `device-disconnected:${original.deviceId};incident=${incidentId}`,
     });
@@ -801,7 +801,7 @@ test.each(["not-attempted", "exhausted"] as const)(
     await drainUntilQuiescent(timer);
     // Drain the unfixed wait too, so the red test never leaves work behind.
     const failureAtNextTick = failure;
-    const rowAtNextTick = await persistence.getSession?.("session");
+    const rowAtNextTick = await persistence.getSession("session");
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     await resume;
     expect(failureAtNextTick).toBeInstanceOf(ActionableError);
@@ -1469,7 +1469,7 @@ test.each(["not-attempted", "exhausted"] as const)(
   async (outcome) => {
     const { timer, persistence, sessions, pool, manager, incident } =
       await setupSettledRestart(outcome);
-    const persisted = { ...(await persistence.getSession?.("session")) };
+    const persisted = { ...(await persistence.getSession("session")) };
     timer.advanceTime(60_000);
     timer.clearHistory();
     const error = await sessions
@@ -1508,7 +1508,7 @@ test.each(["not-attempted", "exhausted"] as const)(
     );
     expect(timer.getSleepHistory()).toEqual([]);
     // The row stays non-terminal; only the call's restart-recovery activity extends its expiry (#10713).
-    expect(await persistence.getSession?.("session")).toEqual({
+    expect(await persistence.getSession("session")).toEqual({
       ...persisted,
       expires_at_ms: timer.now() + persisted.session_timeout_ms!,
     });
@@ -1519,7 +1519,7 @@ test.each(["not-attempted", "exhausted"] as const)(
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
     ).resolves.toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "active",
       device_id: original.deviceId,
     });
@@ -1615,7 +1615,7 @@ test("settled restart retry keeps serial reuse pending without claiming the repl
     },
   });
   expect(sessions.getSession("session")).toBeNull();
-  expect(await persistence.getSession?.("session")).toMatchObject({
+  expect(await persistence.getSession("session")).toMatchObject({
     status: "released",
     release_reason: `device-restart:${original.name}`,
   });
@@ -1629,7 +1629,7 @@ test("settled restart retry keeps serial reuse pending without claiming the repl
 
 test("settled restart retry keeps an absent serial pending without changing persistence", async () => {
   const { sessions, pool, persistence, incident } = await setupSettledRestart();
-  const persisted = await persistence.getSession?.("session");
+  const persisted = await persistence.getSession("session");
   await expect(
     sessions.getOrCreateSession("session", pool, "android", undefined, true),
   ).rejects.toMatchObject({
@@ -1640,7 +1640,7 @@ test("settled restart retry keeps an absent serial pending without changing pers
       recoveryWindowRemainingMs: 180_000,
     },
   });
-  expect(await persistence.getSession?.("session")).toEqual(persisted);
+  expect(await persistence.getSession("session")).toEqual(persisted);
   expect(sessions.getTerminalReleaseSnapshot("session")).toBeUndefined();
 });
 
@@ -1944,14 +1944,14 @@ test.each([180_000, 240_000])(
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
     ).rejects.toThrow("recovery outcome: not-attempted");
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
     timer.advanceTime(elapsed);
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
     ).rejects.toThrow("terminal after restart-recovery-timeout");
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "expired",
       release_reason: "restart-recovery-timeout",
       released_at_ms: elapsed,
@@ -1976,7 +1976,7 @@ test("device-restart resume waits for the same serial and preserves its session 
     await flush();
     // The handoff hold outlives this caller; its three-minute expiry is still armed.
     expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
 
@@ -1987,7 +1987,7 @@ test("device-restart resume waits for the same serial and preserves its session 
       sessionId: "session",
       assignedDevice: original.deviceId,
     });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "active",
       device_id: original.deviceId,
     });
@@ -2033,7 +2033,7 @@ test("device-restart resume waits through an unknown new serial and binds by AVD
     await drainUntilQuiescent(timer);
     // The handoff hold outlives this caller; its three-minute expiry is still armed.
     expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
 
@@ -2065,7 +2065,7 @@ test("device-restart resume after 45 seconds reuses the same serial and session 
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
     ).resolves.toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "active",
       device_id: original.deviceId,
     });
@@ -2092,7 +2092,7 @@ test("device-restart resume after 45 seconds binds a new serial by AVD name and 
       assignedDevice: returned.deviceId,
       stableDeviceId: original.name,
     });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "active",
       device_id: returned.deviceId,
     });
@@ -2113,7 +2113,7 @@ test("device-restart resume refuses a present device after the full recovery dea
     ).rejects.toMatchObject({
       release: { releaseReason: "restart-recovery-timeout", terminal: true },
     });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "expired",
       release_reason: "restart-recovery-timeout",
       device_id: original.deviceId,
@@ -2132,7 +2132,7 @@ test("device-restart resume terminalizes absence at the persisted restart deadli
     expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     await expect(resume).rejects.toThrow("recovery reason: target-absent");
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "released",
       release_reason: "identity-recovery-target-absent",
     });
@@ -2147,7 +2147,7 @@ const RESTART_TEST_IDLE_MS = 2 * 60_000;
 /** A device-restart release whose idle deadline (two minutes) falls inside the cold-boot window. */
 async function setupPassiveRestartWithIdleWindow() {
   const setup = await setupPassiveRestart();
-  const persisted = await setup.persistence.getSession?.("session");
+  const persisted = await setup.persistence.getSession("session");
   if (!persisted) {
     throw new Error("Expected a persisted restart release");
   }
@@ -2256,7 +2256,7 @@ test("restart-recovery activity survives a daemon restart during the device rest
     expect(String(await attempt.result)).toContain("Cannot safely recover session");
     sessions.recordToolCallEnded("session");
     await flush();
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       expires_at_ms: 60_000 + RESTART_TEST_IDLE_MS,
     });
   } finally {
@@ -2298,7 +2298,7 @@ test("a quiet client loses device-restart recovery two minutes after its last ca
       .catch((error: unknown) => error);
     expect(lapsed).toBeInstanceOf(TerminalSessionError);
     expect((lapsed as TerminalSessionError).release.releaseReason).toBe("expired");
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       status: "expired",
       release_reason: "expired",
     });
@@ -2322,7 +2322,7 @@ test("a resolved old-serial replacement keeps recovery pending despite another u
       name: "SessionRecoveryAssignmentError",
       details: { code: "session_recovery_pending", retryable: true },
     });
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
   } finally {
@@ -3738,7 +3738,7 @@ test("idle expiry consumes a recovery capture and preserves its prior terminal r
     await flush();
     expect(releaseDevice).toHaveBeenCalledTimes(1);
     expect(releaseDevice).toHaveBeenCalledWith(original.deviceId, "session");
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: "device-disconnected:test",
     });
     expect(pool.getDevice(original.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
@@ -3817,7 +3817,7 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     expect(sessions.getSession("session")).toBeNull();
 
     // The holder stopped this device; cancellation must not create a recovery handoff.
-    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
+    expect((await persistence.getSession("session"))?.release_reason).toBe("explicit-release");
 
     // Re-provision the AVD and bind a fresh session, then simulate a
     // genuine loss. maxAttempts is 1, so this only recovers if the
@@ -3866,7 +3866,7 @@ test("holder stop during detached ADB-reset recovery leaves no restart handoff",
     manager.bootedDevices = [];
     timer.advanceTime(1_000);
     await expect(recovery).resolves.toBe(false);
-    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
+    expect((await persistence.getSession("session"))?.release_reason).toBe("explicit-release");
     expect(sessions.getSession("session")).toBeNull();
     await pool.releaseAdbServerResetCohortReservations(detached.devices);
     manager.bootedDevices = [original];
@@ -4006,7 +4006,7 @@ test("terminal teardown wins over a joined device-restart release settlement", a
     await flush();
     finishSetup.resolve();
     await Promise.all([setup, terminal, recovery]);
-    expect(await persistence.getSession?.("session")).toMatchObject({
+    expect(await persistence.getSession("session")).toMatchObject({
       release_reason: "heartbeat-timeout",
     });
     expect(await pool.waitForEmulatorLossIncident(incident!, 0)).toMatchObject({

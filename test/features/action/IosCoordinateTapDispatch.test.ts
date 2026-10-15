@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   dispatchIosCoordinateTap,
-  withPartialIosDoubleTapNote,
+  dispatchIosDoubleTap,
   type IosCoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
@@ -47,6 +47,16 @@ function scriptedClient(options: {
   const signals: Array<AbortSignal | undefined> = [];
   return {
     signals,
+    requestDoubleTapCoordinates: async (_x, _y, _t, _frame, signal, onDispatch) => {
+      signals.push(signal);
+      if (options.dispatch) {
+        onDispatch?.();
+      }
+      if (options.rejectWith) {
+        throw options.rejectWith;
+      }
+      return options.reply ?? { success: true };
+    },
     requestTapCoordinates: async (_x, _y, _d, _t, _p, _frame, signal, onDispatch) => {
       signals.push(signal);
       if (options.dispatch) {
@@ -185,41 +195,45 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
     expect(typeof seen[0]?.[7]).toBe("function");
   });
 
-  test("a partially applied double tap keeps the one-tap-delivered note only when unconfirmed", async () => {
-    const unconfirmed = await dispatchIosCoordinateTap(
+  test("an unanswered atomic double tap does not claim a partial count", async () => {
+    const error = await dispatchIosDoubleTap(
       scriptedClient({
         dispatch: true,
         reply: { success: false, error: "Tap timed out", dispatched: true, acknowledged: false },
       }),
       1,
       2,
-      50,
-    ).catch((error: unknown) => withPartialIosDoubleTapNote(error));
-    expect((unconfirmed as Error).message).toContain(INDETERMINATE);
-    expect((unconfirmed as Error).message).toContain(
-      "Double tap partially applied: one tap was delivered; the second tap was not confirmed.",
-    );
-    const plain = new ActionableError("CtrlProxy iOS second tap failed: Element gone");
-    expect(withPartialIosDoubleTapNote(plain)).toBe(plain);
+    ).catch((error: unknown) => error);
+    expect((error as Error).message).toContain(INDETERMINATE);
+    expect((error as Error).message).not.toContain("one tap was delivered");
   });
 });
 
-describe("iOS CtrlProxy tap transport (#9971)", () => {
+describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doubleTap) => {
   const tap = (
     h: ReturnType<typeof createIosDelegateHarness>,
     signal?: AbortSignal,
     onDispatch?: () => void,
   ) =>
-    new CtrlProxyGestures(h.context).requestTapCoordinates(
-      1,
-      2,
-      50,
-      50,
-      undefined,
-      undefined,
-      signal,
-      onDispatch,
-    );
+    doubleTap
+      ? new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(
+          1,
+          2,
+          50,
+          undefined,
+          signal,
+          onDispatch,
+        )
+      : new CtrlProxyGestures(h.context).requestTapCoordinates(
+          1,
+          2,
+          50,
+          50,
+          undefined,
+          undefined,
+          signal,
+          onDispatch,
+        );
 
   test("a timeout after the write is dispatched and unacknowledged", async () => {
     const h = createIosDelegateHarness();
@@ -369,7 +383,10 @@ describe("tapAt on iOS (#9971)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
-    observe.setObserveResult(observation(100, 200, "epoch:1"));
+    observe.setObserveResult({
+      ...observation(100, 200, "epoch:1"),
+      display: { key: "0", role: "unknown", generation: 0 },
+    });
     const unusedAndroid = { requestTapCoordinates: async () => ({ success: true }) };
     const tapAt = new TapAtCoordinate(IOS_DEVICE, new FakeAdbExecutor(), {
       timer,
@@ -382,6 +399,57 @@ describe("tapAt on iOS (#9971)", () => {
     tapAt.observeScreen = observe;
     return tapAt;
   }
+
+  test.each([undefined, "active"])(
+    "atomic double tap on display %s sends once without a gap",
+    async (display) => {
+      const client = new FakeIOSCtrlProxy();
+      const single = spyOn(client, "requestTapCoordinates");
+      const double = spyOn(client, "requestDoubleTapCoordinates");
+      const tapAt = createIosTapAt(client);
+      const timer = tapAt["timer"] as FakeTimer;
+      const controller = new AbortController();
+      const result = await tapAt.execute(
+        { x: 10, y: 20, action: "doubleTap", display },
+        undefined,
+        controller.signal,
+      );
+      expect(result.success).toBe(true);
+      expect(double).toHaveBeenCalledTimes(1);
+      expect(single).toHaveBeenCalledTimes(0);
+      expect(double).toHaveBeenCalledWith(
+        10,
+        20,
+        undefined,
+        "epoch:1",
+        controller.signal,
+        expect.any(Function),
+      );
+      // Explicit-display settling may sleep after delivery; there is no double-tap gap.
+      expect(timer.getSleepHistory()).not.toContain(200);
+    },
+  );
+
+  test.each([undefined, "active"])(
+    "confirmed atomic double tap counts both taps before late cancellation on display %s",
+    async (display) => {
+      const client = new FakeIOSCtrlProxy();
+      const controller = new AbortController();
+      spyOn(client, "requestDoubleTapCoordinates").mockImplementation(async () => {
+        controller.abort();
+        return { success: true, totalTimeMs: 1 };
+      });
+      const tapAt = createIosTapAt(client);
+      const result = await tapAt.execute(
+        { x: 10, y: 20, action: "doubleTap", display },
+        undefined,
+        controller.signal,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("cancel");
+      expect(result.error).not.toContain("one tap was delivered");
+    },
+  );
 
   afterEach(() => {
     displayTransitions.reset(IOS_DEVICE.deviceId);
@@ -442,7 +510,7 @@ describe("tapAt on iOS (#9971)", () => {
     );
   });
 
-  test("the request's signal reaches the first and the second tap", async () => {
+  test("the request's signal reaches the atomic double tap", async () => {
     const client = scriptedClient({ dispatch: true });
     const tapAt = createIosTapAt(client);
     const controller = new AbortController();
@@ -452,24 +520,23 @@ describe("tapAt on iOS (#9971)", () => {
       controller.signal,
     );
     expect(result.success).toBe(true);
-    expect(client.signals).toEqual([controller.signal, controller.signal]);
+    expect(client.signals).toEqual([controller.signal]);
   });
 
-  test("an unconfirmed second tap keeps the one-tap-delivered note", async () => {
-    let calls = 0;
-    const client: IosCoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _d, _t, _p, _frame, _signal, onDispatch) => {
-        onDispatch?.();
-        calls++;
-        return calls === 1
-          ? { success: true }
-          : { success: false, error: "Tap timed out", dispatched: true, acknowledged: false };
+  test("an unconfirmed atomic double tap makes no partial delivery claim", async () => {
+    const client = scriptedClient({
+      dispatch: true,
+      reply: {
+        success: false,
+        error: "Tap timed out",
+        dispatched: true,
+        acknowledged: false,
       },
-    };
+    });
     const result = await createIosTapAt(client).execute({ x: 10, y: 20, action: "doubleTap" });
     expect(result.success).toBe(false);
     expect(result.error).toContain(INDETERMINATE);
-    expect(result.error).toContain("one tap was delivered");
+    expect(result.error).not.toContain("one tap was delivered");
   });
 });
 
@@ -563,26 +630,22 @@ describe("tapOn on iOS (#9971)", () => {
     }
   });
 
-  test("an unconfirmed second tap of a double tap notes that one tap was delivered", async () => {
+  test("an unanswered double tap has an indeterminate outcome without a partial count", async () => {
     const client = new FakeIOSCtrlProxy();
     const { tapOn, instance } = createTapOn(client);
-    let calls = 0;
-    spyOn(client, "requestTapCoordinates").mockImplementation(async () => {
-      calls++;
-      return calls === 1
-        ? { success: true, totalTimeMs: 1 }
-        : {
-            success: false,
-            totalTimeMs: 5000,
-            error: "Tap timed out after 5000ms",
-            dispatched: true,
-            acknowledged: false,
-          };
+    client.setTapResult({
+      success: false,
+      totalTimeMs: 5000,
+      error: "Tap timed out",
+      dispatched: true,
+      acknowledged: false,
     });
     try {
       await expect(
         tapOn["executeiOSTapWithCoordinates"]("doubleTap", point.x, point.y, 1000),
-      ).rejects.toThrow("Double tap partially applied: one tap was delivered");
+      ).rejects.toThrow(INDETERMINATE);
+      expect(client.doubleTapHistory).toEqual([point]);
+      expect(client.getTapHistory()).toEqual([]);
     } finally {
       instance.mockRestore();
     }

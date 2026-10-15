@@ -1,0 +1,9 @@
+name: parameter-substitution
+description: Plan whose text comes from parameters, used by the parameter substitution unit tests
+steps:
+  - tool: inputText
+    text: "${quoted}"
+    label: Quoted placeholder
+  - tool: inputText
+    text: ${plain}
+    label: Unquoted placeholder

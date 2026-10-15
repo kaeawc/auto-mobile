@@ -86,6 +86,9 @@ enum PrototypePagerOptions {
         if let child = node["child"] {
             try visit(child, path: "\(path).child", verticalScrollAncestor: insideVerticalScroll)
         }
+        for (screen, screenPath) in PrototypeStacks.screenChildren(in: node, path: path) {
+            try visit(screen, path: screenPath, verticalScrollAncestor: insideVerticalScroll)
+        }
     }
 }
 

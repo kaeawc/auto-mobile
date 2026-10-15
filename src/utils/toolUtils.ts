@@ -21,6 +21,10 @@ export const stringifyToolResponse = (content: unknown): string => {
   return JSON.stringify(content, stripAccessibilityExtras);
 };
 
+const toolTextContent = (payload: unknown): Array<{ type: "text"; text: string }> => [
+  { type: "text", text: stringifyToolResponse(payload) },
+];
+
 /**
  * Interface for tool response formatter
  */
@@ -59,12 +63,7 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
     }>;
   } {
     const response: ReturnType<ToolResponseFormatter["createJSONToolResponse"]> = {
-      content: [
-        {
-          type: "text",
-          text: stringifyToolResponse(content),
-        },
-      ],
+      content: toolTextContent(content),
     };
     return content !== null && typeof content === "object" && content.success === false
       ? markToolFailure(response)
@@ -150,12 +149,7 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
       ? (Object.fromEntries(Object.entries(content)) as T)
       : content;
   const response: StructuredToolResponse<T> = {
-    content: [
-      {
-        type: "text",
-        text: stringifyToolResponse(structuredContent),
-      },
-    ],
+    content: toolTextContent(structuredContent),
     structuredContent,
   };
   if (content && typeof content === "object") {

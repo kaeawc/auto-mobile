@@ -616,6 +616,7 @@ export class Idle {
       if (stdout === null) {
         return {
           isStable: false,
+          frameStatsUnavailable: true,
           shouldUpdateLastNonIdleTime: true,
           updatedPrevMissedVsync: prevMissedVsync,
           updatedPrevSlowUiThread: prevSlowUiThread,
@@ -660,10 +661,11 @@ export class Idle {
       };
     } catch (err) {
       options.signal?.throwIfAborted();
-      // Just continue polling on error
+      // A diagnostic read failure supplies no stability evidence; continue polling.
       logger.info(`[AwaitIdle] Error checking frame stats: ${err}`);
       return {
         isStable: false,
+        frameStatsUnavailable: true,
         shouldUpdateLastNonIdleTime: true,
         updatedPrevMissedVsync: prevMissedVsync,
         updatedPrevSlowUiThread: prevSlowUiThread,

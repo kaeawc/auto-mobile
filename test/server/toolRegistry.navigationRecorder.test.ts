@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
+import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { createNavigationGraphResolver } from "../../src/features/navigation/deviceNavigationGraph";
@@ -127,7 +128,7 @@ describe("navigation recorder handler outcomes", () => {
     { success: false },
     { isError: true, content: [{ type: "text", text: "element not found" }] },
     { structuredContent: { success: false } },
-    { content: [{ type: "text", text: '{"success":false}' }] },
+    createJSONToolResponse({ success: false }),
   ])("failed result %j cannot label an unrelated transition", async (response) => {
     registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => response);
     await registry.getTool("tapOn")!.handler({ text: "Does not exist" });

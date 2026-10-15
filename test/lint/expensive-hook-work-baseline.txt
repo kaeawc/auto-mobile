@@ -84,7 +84,6 @@ test/scripts/aggregateEgressBaseline.test.ts	recursive-rm
 test/scripts/aggregateEgressBaseline.test.ts	temp-dir
 test/scripts/androidVideoBaselineGate.test.ts	recursive-rm
 test/scripts/androidVideoBaselineGate.test.ts	temp-dir
-test/scripts/copyDbRuntimeFiles.test.ts	recursive-rm
 test/scripts/smokeInstalledBundledDeps.test.ts	recursive-rm
 test/scripts/trimBundledDeps.test.ts	recursive-rm
 test/scripts/tsImportDeps.test.ts	recursive-rm

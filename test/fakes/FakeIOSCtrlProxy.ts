@@ -746,6 +746,27 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  readonly doubleTapHistory: Array<{ x: number; y: number }> = [];
+
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    _timeoutMs?: number,
+    _frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    signal?.throwIfAborted();
+    await this.applyDelay("tap");
+    this.checkFailure("tap");
+    this.doubleTapHistory.push({ x, y });
+    return this.settleDispatch<CtrlProxyTapResult>(
+      this.tapResult ?? { success: true, totalTimeMs: 50 },
+      onDispatch,
+      signal,
+    );
+  }
+
   async requestTapCoordinates(
     x: number,
     y: number,

@@ -48,7 +48,7 @@ describe("the row of a released session (#11557)", () => {
     manager.stopCleanupTimer();
   });
 
-  const row = async () => await store.getSession?.(SESSION);
+  const row = async () => await store.getSession(SESSION);
 
   async function planReleaseWithFailingWrite(failures: number): Promise<void> {
     await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);

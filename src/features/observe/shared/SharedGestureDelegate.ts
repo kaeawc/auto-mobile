@@ -42,6 +42,7 @@ export interface PinchRequest {
 
 /** Everything `request_tap_coordinates` needs; the tap twin of `PinchRequest`. */
 export interface TapRequest {
+  doubleTap?: true;
   x: number;
   y: number;
   duration: number;
@@ -142,6 +143,7 @@ export class SharedGestureDelegate {
         frameContext: tap.frameContext,
         ...displayParams,
         ...this.tapDiagnosticParams(),
+        ...(tap.doubleTap ? { doubleTap: true } : {}),
       }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",

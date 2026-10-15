@@ -1,0 +1,46 @@
+import { describe, expect, test } from "bun:test";
+import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
+
+describe("ProxySessionState", () => {
+  test("starts with empty collections and undefined bindings", () => {
+    const state = new ProxySessionState();
+
+    expect(state.notFoundWindows.size).toBe(0);
+    expect(state.notFoundStopped.size).toBe(0);
+    expect(state.otherHeldSessions.size).toBe(0);
+    expect(state.stallHandovers.size).toBe(0);
+    expect(state.claimableSessions.size).toBe(0);
+    expect(state.boundSessionUuid).toBeUndefined();
+    expect(state.boundSessionUuidAt).toBeUndefined();
+    expect(state.terminalBoundSession).toBeUndefined();
+  });
+
+  test("owns collections independently for each instance", () => {
+    const first = new ProxySessionState();
+    const second = new ProxySessionState();
+
+    expect(first.notFoundWindows).not.toBe(second.notFoundWindows);
+    expect(first.notFoundStopped).not.toBe(second.notFoundStopped);
+    expect(first.otherHeldSessions).not.toBe(second.otherHeldSessions);
+    expect(first.stallHandovers).not.toBe(second.stallHandovers);
+    expect(first.claimableSessions).not.toBe(second.claimableSessions);
+  });
+
+  test("shares scalar writes through references to the same state", () => {
+    const state = new ProxySessionState();
+    const reference = state;
+
+    reference.boundSessionUuid = "session";
+    reference.boundSessionUuidAt = 123;
+    reference.terminalBoundSession = {
+      sessionUuid: "session",
+      reason: "released",
+      fromResultMint: false,
+    };
+
+    expect(state.boundSessionUuid).toBe("session");
+    expect(state.boundSessionUuidAt).toBe(123);
+    expect(state.terminalBoundSession).toBe(reference.terminalBoundSession);
+    expect(state.terminalBoundSession?.reason).toBe("released");
+  });
+});

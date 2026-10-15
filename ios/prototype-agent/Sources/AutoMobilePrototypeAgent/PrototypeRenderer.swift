@@ -995,6 +995,18 @@ private struct SpanLinksModifier: ViewModifier {
 }
 
 @MainActor
+private final class TapResolverState: ObservableObject {
+    var disambiguator = PrototypeTapDisambiguator()
+    var pendingTask: Task<Void, Never>?
+
+    func cancel() {
+        pendingTask?.cancel()
+        pendingTask = nil
+        disambiguator = PrototypeTapDisambiguator()
+    }
+}
+
+@MainActor
 private struct TapModifier: ViewModifier {
     let actions: [PrototypeAction]?
     let longPress: [PrototypeAction]?
@@ -1004,6 +1016,7 @@ private struct TapModifier: ViewModifier {
     let style: Style?
 
     @GestureState private var pressed = false
+    @StateObject private var tapResolver = TapResolverState()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -1027,6 +1040,7 @@ private struct TapModifier: ViewModifier {
             )
             .accessibilityAddTraits(.isButton)
             .disabled(!model.isEnabled(node))
+            .onDisappear { tapResolver.cancel() }
         } else {
             content
         }
@@ -1053,6 +1067,37 @@ private struct TapModifier: ViewModifier {
                 })
             case .singleTap:
                 AnyView(view.onTapGesture { model.activate(.node(node)) })
+            case .tapResolver:
+                AnyView(view.onTapGesture { resolveTap() })
+            }
+        }
+    }
+
+    private func resolveTap() {
+        guard model.isEnabled(node) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        // A busy main actor can deliver the next tap before the expiry task resumes.
+        if tapResolver.disambiguator.expire(at: now) {
+            model.activate(.node(node))
+        }
+        switch tapResolver.disambiguator.tap(at: now) {
+        case .fireDouble:
+            tapResolver.pendingTask?.cancel()
+            tapResolver.pendingTask = nil
+            model.run(doubleTap ?? [])
+        case .deferSingle:
+            tapResolver.pendingTask?.cancel()
+            tapResolver.pendingTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(PrototypeTapDisambiguator.doubleTapWindow * 1_000_000_000))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                if tapResolver.disambiguator.flush() {
+                    tapResolver.pendingTask = nil
+                    model.activate(.node(node))
+                }
             }
         }
     }

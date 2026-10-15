@@ -17,6 +17,39 @@ final class GestureDeliveryRouteTests: XCTestCase {
         )
     }
 
+    func testDoubleTapUsesTwoSynthesizedContactsWithAnInjectedGap() throws {
+        var events: [String] = []
+        let delivered = try UnpinnedGestureSynthesis.tap(doubleTap: true, deliver: {
+            events.append("tap")
+            return GestureDeliveryRoute.resolve(target: self.unpinned, forced: nil, geometry: self.geometry())
+                == .synthesizedEventRecord(interfaceOrientation: 1)
+        }, wait: { gap in
+            XCTAssertEqual(gap, 0.05)
+            events.append("gap")
+        })
+        XCTAssertTrue(delivered)
+        XCTAssertEqual(events, ["tap", "gap", "tap"])
+    }
+
+    func testDoubleTapKeepsCoordinateRouteWhenSynthesisDoesNotApply() throws {
+        var contacts = 0
+        XCTAssertFalse(try UnpinnedGestureSynthesis.tap(doubleTap: true, deliver: {
+            contacts += 1
+            return GestureDeliveryRoute.resolve(target: .keepPinned, forced: nil, geometry: self.geometry())
+                != .xcuiCoordinate
+        }, wait: { _ in XCTFail("coordinate route must not wait") }))
+        XCTAssertEqual(contacts, 1)
+    }
+
+    func testDoubleTapDoesNotFallbackAfterFirstSynthesizedContact() {
+        var contacts = 0
+        XCTAssertThrowsError(try UnpinnedGestureSynthesis.tap(doubleTap: true, deliver: {
+            contacts += 1
+            return contacts == 1
+        }, wait: { _ in }))
+        XCTAssertEqual(contacts, 2)
+    }
+
     func testSynthesizesForUnpinnedFullScreenPortraitApp() {
         XCTAssertEqual(
             GestureDeliveryRoute.resolve(target: unpinned, forced: nil, geometry: geometry()),

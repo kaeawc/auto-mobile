@@ -9,6 +9,7 @@ public struct RequestTapCoordinates: Decodable, Sendable {
     public var x: Double
     public var y: Double
     public var duration: Int?
+    public var doubleTap: Bool?
     public var frameContext: String?
     public var diagnostics: Bool?
     // Keep unknown strings decodable; the performer logs and ignores them.

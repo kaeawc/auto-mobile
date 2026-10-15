@@ -41,7 +41,7 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
 
     await manager.createSession("plain-session", "emulator-5554", "android");
 
-    expect((await persistence.getSession?.("plain-session"))?.daemon_session_id).toBe("daemon-a");
+    expect((await persistence.getSession("plain-session"))?.daemon_session_id).toBe("daemon-a");
   });
 
   test("a rehydrated session is re-owned by the current daemon, not the dead one", async () => {
@@ -79,9 +79,7 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
     expect(restarted.getSession("restarted-session")?.persistenceMetadata?.daemonSessionId).toBe(
       "daemon-b",
     );
-    expect((await persistence.getSession?.("restarted-session"))?.daemon_session_id).toBe(
-      "daemon-b",
-    );
+    expect((await persistence.getSession("restarted-session"))?.daemon_session_id).toBe("daemon-b");
   });
 
   test("the daemon wires its own id into its session manager", async () => {

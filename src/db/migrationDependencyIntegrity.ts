@@ -2,14 +2,13 @@
  * Recognises and reframes the startup-migration failure that occurs when a
  * package extraction is incomplete (issue #2833).
  *
- * The migration modules ship as raw `.ts` files and are loaded from disk at
- * runtime by kysely's `FileMigrationProvider` via dynamic `import()`. Several of
- * them do a *runtime* value import (`import { sql } from "kysely"`), so the
- * runtime resolves `kysely` relative to the migrations folder on disk. When a
- * `bunx` extraction's `node_modules` is half-linked (the shared bun cache has
- * the package but it was never linked into this run's tree), that import throws
- * `Cannot find package 'kysely'` and the daemon's startup migration hard-fails
- * with a generic, non-actionable crash.
+ * The default static provider uses statically imported migration modules.
+ * Only an AUTOMOBILE_MIGRATIONS_DIR override (or its deprecated alias) loads
+ * modules from disk using kysely's FileMigrationProvider and dynamic import().
+ * Those modules may import runtime values such as `sql` from "kysely", resolved
+ * relative to the override folder. An incomplete bunx extraction can break that
+ * resolution or the package's own kysely import when node_modules is half-linked,
+ * producing `Cannot find package 'kysely'` during startup.
  *
  * This module maps that specific failure — a *known* migration runtime
  * dependency failing to resolve — to a distinct, clearly *recoverable* error

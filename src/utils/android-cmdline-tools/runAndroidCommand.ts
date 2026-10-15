@@ -1,4 +1,5 @@
 import type { HostChildProcess, HostSpawnOptions } from "../HostCommandExecutor";
+import { StringDecoder } from "node:string_decoder";
 import type { Timer } from "../SystemTimer";
 import { appendBounded } from "./appendBounded";
 
@@ -61,6 +62,8 @@ class AndroidCommandRun {
     stdoutTruncated: false,
     stderrTruncated: false,
   };
+  private readonly stdoutDecoder = new StringDecoder("utf8");
+  private readonly stderrDecoder = new StringDecoder("utf8");
 
   constructor(
     private readonly dependencies: AndroidCommandDependencies,
@@ -84,9 +87,21 @@ class AndroidCommandRun {
       request.timeoutMs,
     );
     request.onStart();
-    child.stdout?.on("data", (data) => this.capture("stdout", data.toString()));
-    child.stderr?.on("data", (data) => this.capture("stderr", data.toString()));
+    child.stdout?.on("data", (data) =>
+      this.capture("stdout", typeof data === "string" ? data : this.stdoutDecoder.write(data)),
+    );
+    child.stderr?.on("data", (data) =>
+      this.capture("stderr", typeof data === "string" ? data : this.stderrDecoder.write(data)),
+    );
     child.on("close", (code) => {
+      const stdoutTail = this.stdoutDecoder.end();
+      const stderrTail = this.stderrDecoder.end();
+      if (stdoutTail) {
+        this.capture("stdout", stdoutTail);
+      }
+      if (stderrTail) {
+        this.capture("stderr", stderrTail);
+      }
       this.settle(() => {
         if (this.terminationError) {
           this.reject(this.terminationError);

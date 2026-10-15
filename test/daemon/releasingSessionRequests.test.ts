@@ -291,7 +291,7 @@ describe("requests during device session release", () => {
         // The claim was accepted before the release ended admission: its owner was heard (#11646).
         hasReceivedHeartbeat: true,
       });
-      expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
+      expect((await persistence.getSession(sessionId))?.liveness_owner_token).toBeNull();
       const replacement = await manager.createSession("fresh-session", deviceId, "android");
       expect(replacement.livenessOwnerToken).toBeUndefined();
       expect(replacement.livenessOwnershipClaims).toBeUndefined();
@@ -413,7 +413,7 @@ describe("requests during device session release", () => {
       const { release } = await beginPhaseA(reason);
       // This persistence seam retains no recoverable row for tool admission.
       // A retained nonterminal row is eligible for recovery, pinned separately below.
-      persistence.getSession = undefined;
+      persistence.getSession = async () => undefined;
       let assignments = 0;
       let settled = false;
       const admission = manager
@@ -550,7 +550,7 @@ describe("requests during device session release", () => {
             ...notFound,
             releaseReason: "explicit-release",
           });
-          expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
+          expect(await h.persistence.getSession(sessionId)).toMatchObject({
             status: "released",
             release_reason: "explicit-release",
           });

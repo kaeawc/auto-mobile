@@ -762,6 +762,215 @@ describe("ManagedSlotReconciler", () => {
       });
     });
 
+    describe("empty-slot discovery cleanup", () => {
+      async function expectRemovedAndRetry() {
+        expect(await registry.getAssignment(key)).toBeNull();
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+        expect(provisioner.calls).toEqual([]);
+        const retry = expectReady(await reconciler.reconcile(request()));
+        expect(retry.disposition).toBe("created");
+        expect(retry.assignment.generation).toBe(1);
+      }
+
+      test.each([
+        ["cancelled", false],
+        ["timeout", false],
+        ["cancelled", true],
+        ["timeout", true],
+      ] as const)("%s after discovery (platform change: %s)", async (code, changePlatform) => {
+        if (changePlatform) {
+          await registry.initSlot(key, {
+            role: "app",
+            platform: "android",
+            requestedSpec: SPEC_18,
+          });
+        }
+        const controller = new AbortController();
+        inventory.beforeList = async () => {
+          if (code === "cancelled") {
+            controller.abort();
+          } else {
+            timer.advanceTime(60_001);
+          }
+        };
+        const failed = expectFailed(
+          await reconciler.reconcile(request(SPEC_18, { signal: controller.signal })),
+        );
+        expect(failed.failure).toEqual({
+          code,
+          retryable: true,
+          message:
+            code === "cancelled"
+              ? "Slot preparation was cancelled."
+              : "Slot preparation deadline passed.",
+          nextAction:
+            code === "cancelled"
+              ? "The preparation was cancelled; retry when needed."
+              : "Retry with a longer preparation timeout.",
+        });
+        inventory.beforeList = undefined;
+        await expectRemovedAndRetry();
+      });
+
+      test.each([false, true])(
+        "inventory throw preserves identity (platform change: %s)",
+        async (changePlatform) => {
+          if (changePlatform) {
+            await registry.initSlot(key, {
+              role: "app",
+              platform: "android",
+              requestedSpec: SPEC_18,
+            });
+          }
+          const original = new Error("inventory aborted");
+          inventory.beforeList = async () => {
+            throw original;
+          };
+          expect(await reconciler.reconcile(request()).catch((error: unknown) => error)).toBe(
+            original,
+          );
+          inventory.beforeList = undefined;
+          await expectRemovedAndRetry();
+        },
+      );
+
+      test("incomplete discovery removes the empty row", async () => {
+        inventory.complete = false;
+        const failed = expectFailed(await reconciler.reconcile(request()));
+        expect(failed.failure).toEqual({
+          code: "discovery_incomplete",
+          retryable: true,
+          message: "Device discovery was incomplete for an empty slot.",
+          nextAction: "Retry once device discovery completes; nothing destructive was done.",
+        });
+        inventory.complete = true;
+        await expectRemovedAndRetry();
+      });
+
+      test("platform-change creatability refusal removes the empty row", async () => {
+        await registry.initSlot(key, { role: "app", platform: "android", requestedSpec: SPEC_18 });
+        const checkCreatable = resolver.checkCreatable.bind(resolver);
+        resolver.checkCreatable = async () => ({
+          kind: "unsupported",
+          code: "spec_unsupported",
+          message: "creation catalog rejects this spec",
+        });
+        const failed = expectFailed(await reconciler.reconcile(request()));
+        expect(failed.failure).toEqual({
+          code: "spec_unsupported",
+          retryable: false,
+          message: "creation catalog rejects this spec",
+          nextAction: "Fix the requested spec; nothing was changed.",
+        });
+        resolver.checkCreatable = checkCreatable;
+        await expectRemovedAndRetry();
+      });
+
+      test.each(["cancelled", "timeout", "registry error"] as const)(
+        "%s thrown by adoption lookup preserves identity",
+        async (code) => {
+          const controller = new AbortController();
+          const original = new Error(code);
+          const listFreeDevices = registry.listFreeDevices.bind(registry);
+          registry.listFreeDevices = async () => {
+            if (code === "cancelled") {
+              controller.abort();
+            } else if (code === "timeout") {
+              timer.advanceTime(60_001);
+            }
+            throw original;
+          };
+          expect(
+            await reconciler
+              .reconcile(request(SPEC_18, { signal: controller.signal }))
+              .catch((error: unknown) => error),
+          ).toBe(original);
+          registry.listFreeDevices = listFreeDevices;
+          await expectRemovedAndRetry();
+        },
+      );
+
+      test("incomplete discovery keeps a peer journal protected row", async () => {
+        inventory.beforeList = async () => {
+          const opened = await registry.openSlotJournal(key, {
+            kind: "create",
+            phase: "creating",
+            owner: { daemonId: "peer", pid: 1002, processGenerationToken: "peer-start" },
+            target: {
+              oldStableId: null,
+              oldName: null,
+              newName: "peer-device",
+              newStableId: null,
+              requestedSpec: SPEC_18,
+              resolvedSpec: SPEC_18,
+              specFingerprint: null,
+            },
+            assignment: {
+              kind: "state",
+              expected: { generation: 0, stableDeviceId: null },
+              state: "provisioning",
+            },
+          });
+          expect(opened.kind).toBe("opened");
+        };
+        inventory.complete = false;
+        const remove = registry.removeUnboundSlot.bind(registry);
+        let removals = 0;
+        registry.removeUnboundSlot = async (...args) => {
+          removals += 1;
+          return await remove(...args);
+        };
+        const failed = expectFailed(await reconciler.reconcile(request()));
+        expect(failed.failure.code).toBe("discovery_incomplete");
+        expect(await registry.getAssignment(key)).toMatchObject({
+          generation: 0,
+          stableDeviceId: null,
+          state: "provisioning",
+        });
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+        expect(provisioner.calls).toEqual([]);
+        expect(removals).toBe(1);
+      });
+
+      test("cleanup throwing preserves the exact discovery error", async () => {
+        const original = new Error("discovery unavailable");
+        inventory.beforeList = async () => {
+          throw original;
+        };
+        let removals = 0;
+        registry.removeUnboundSlot = async () => {
+          removals += 1;
+          throw new Error("registry unavailable");
+        };
+        expect(await reconciler.reconcile(request()).catch((error: unknown) => error)).toBe(
+          original,
+        );
+        expect(removals).toBe(1);
+        expect(provisioner.calls).toEqual([]);
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+        expect(await registry.getAssignment(key)).toMatchObject({
+          generation: 0,
+          stableDeviceId: null,
+        });
+      });
+
+      test("incomplete discovery never deletes an assigned row", async () => {
+        await seedAssigned();
+        const before = await registry.getAssignment(key);
+        inventory.devices = [];
+        inventory.complete = false;
+        registry.removeUnboundSlot = async () => {
+          throw new Error("must not remove assigned row");
+        };
+        const failed = expectFailed(await reconciler.reconcile(request()));
+        expect(failed.failure.code).toBe("discovery_incomplete");
+        expect(await registry.getAssignment(key)).toEqual(before);
+        expect(before?.generation).toBe(1);
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+        expect(provisioner.calls).toEqual([]);
+      });
+    });
+
     test.each(["cancelled", "timeout"] as const)(
       "%s at the pre-journal budget guard removes the never-bound slot",
       async (code) => {

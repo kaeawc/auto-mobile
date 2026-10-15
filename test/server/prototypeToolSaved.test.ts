@@ -311,7 +311,7 @@ describe("prototype saved actions", () => {
     expect(proxy.deleteRequests).toEqual(["demo"]);
   });
   test.each(["save", "listSaved", "deleteSaved"] as const)(
-    "iOS %s refuses before agent lookup",
+    "physical iOS %s refuses before agent lookup",
     async (action) => {
       for (const isConnected of [true, false]) {
         connected = isConnected;

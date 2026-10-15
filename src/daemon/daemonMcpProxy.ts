@@ -32,6 +32,33 @@ export {
   type BuildMismatchReason,
 } from "./proxy/daemonErrors";
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
+import {
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  decideNotFoundAnswer,
+  isRecoverableHandoffOfOwnedSession,
+  type NotFoundAnswerOutcome,
+} from "./proxy/notFoundDecision";
+export {
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  UNREHYDRATED_HANDOFF,
+  decideNotFoundAnswer,
+  type NotFoundAnswerOutcome,
+  type NotFoundAnswerFacts,
+} from "./proxy/notFoundDecision";
+import {
+  reportedOwnerHold,
+  isLivenessOwnerConflictError,
+  isDaemonInstanceChangedError,
+  isLivenessOwnershipLostError,
+  ackDaemonInstance,
+} from "./proxy/livenessErrorPredicates";
+import {
+  heartbeatIntervalMs,
+  heartbeatRequestTimeoutMs,
+  resolveLivenessOwnerToken,
+  stableLivenessOwnerToken,
+  heartbeatLeashMs,
+} from "./proxy/heartbeatCadence";
 export {
   REUSE_CRITICAL_OPTION_KEYS,
   STARTUP_OPTION_DEFICIT_KEYS,
@@ -82,23 +109,17 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "./constants";
+import { getSessionIdleTimeoutMs } from "./sessionLivenessWindows";
 import {
-  getSessionIdleTimeoutMs,
-  NO_HEARTBEAT_RELEASE_BUDGET_MS,
-  PROXY_HEARTBEAT_INTERVAL_MS,
-} from "./sessionLivenessWindows";
-import {
-  DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   releaseReasonFromError,
   daemonInstanceFromError,
-  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
+  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
-  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
   type DaemonOptions,
@@ -134,29 +155,17 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import type { IdGenerator } from "../utils/IdGenerator";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import {
-  getDefaultSessionHeartbeatTimeoutMs,
-  SESSION_REHYDRATION_DEADLINE_MS,
-  type SessionReleaseSnapshot,
-} from "./sessionManager";
+import { type SessionReleaseSnapshot } from "./sessionManager";
 
-/**
- * How long the proxy keeps heartbeating a session the daemon answers not-found for with a
- * recoverable reason (#11461): the restarted daemon's rehydration deadline, plus the time it then
- * gives the session's owner to return before releasing it. Past it the recovery this waits for
- * can no longer be met by a heartbeat, and only a tool call restores the session.
- */
 const {
   ManagedExecutionRegistrationError,
   DaemonPreflightConnectionError,
   HeldSessionNotFoundError,
 } = daemonInternalErrors;
 
-export const RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS =
-  SESSION_REHYDRATION_DEADLINE_MS + NO_HEARTBEAT_RELEASE_BUDGET_MS;
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
 import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
@@ -185,8 +194,8 @@ import {
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import {
-  isRecoverableDaemonReleaseReason,
   isRecoverableDaemonHandoffReason,
+  isRecoverableDaemonReleaseReason,
   sessionReleaseReasonFamily,
   SESSION_NOT_FOUND_REASON,
   IDLE_WINDOW_RELEASE_REASON,
@@ -212,7 +221,6 @@ import {
 } from "./proxyLivenessRecovery";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 /** The client name a managed slot proxy registers its re-bound connection under (#11178). */
 const MANAGED_SLOT_PROXY_CLIENT_NAME = "auto-mobile-managed-slot-proxy";
@@ -368,68 +376,14 @@ export function resourceUriNamesSession(uri: string): boolean {
   return /^automobile:(?:device-session|observation\/session)\/[^/?#]+/.test(uri);
 }
 
-function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
-  const configuredTimeout = config.heartbeatTimeoutMs;
-  const configuredInterval = config.heartbeatIntervalMs;
-  if (
-    configuredTimeout !== undefined &&
-    (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0)
-  ) {
-    throw new Error("heartbeat timeout must be a positive finite number");
-  }
-  const interval =
-    configuredInterval ??
-    (configuredTimeout === undefined
-      ? DAEMON_MCP_HEARTBEAT_INTERVAL_MS
-      : Math.max(1, Math.floor(configuredTimeout / 2)));
-  if (!Number.isFinite(interval) || interval <= 0) {
-    throw new Error("heartbeat interval must be a positive finite number");
-  }
-  return Math.max(1, interval);
-}
+const NO_HANDOFFS: ReadonlySet<string> = new Set();
 
-/** The owner's hold a conflict refusal reports (#10701); absent from an older daemon. */
-function reportedOwnerHold(error: unknown): ReportedOwnerHold | undefined {
-  if (error === null || typeof error !== "object" || !("livenessOwnerHold" in error)) {
-    return undefined;
-  }
-  const hold = error.livenessOwnerHold;
-  return hold !== null &&
-    typeof hold === "object" &&
-    "holdRemainingMs" in hold &&
-    typeof hold.holdRemainingMs === "number"
-    ? { holdRemainingMs: hold.holdRemainingMs }
-    : undefined;
-}
-
-function isLivenessOwnerConflictError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-  );
-}
-
-/** A probe heartbeat reached a daemon process other than the one that stalled (#10989). */
-function isDaemonInstanceChangedError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === DAEMON_INSTANCE_CHANGED_CODE
-  );
-}
-
-/** The daemon process a heartbeat acknowledgement reports, when it reports one (#10989). */
-function ackDaemonInstance(ack: unknown): string | undefined {
-  return ack !== null &&
-    typeof ack === "object" &&
-    "daemonInstance" in ack &&
-    typeof ack.daemonInstance === "string" &&
-    ack.daemonInstance.length > 0
-    ? ack.daemonInstance
-    : undefined;
+/** The latest binding's keeper heartbeat while it is in flight. */
+interface LatestHeartbeatAsk {
+  /** It was answered not-found, so any further answer is to the second ask. */
+  notFound: boolean;
+  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
+  handoff: boolean;
 }
 
 /**
@@ -468,170 +422,6 @@ function withResumedNotice(
   };
 }
 
-/** The daemon answered that this token no longer owns liveness (#10050, #10260). */
-function isLivenessOwnershipLostError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
-      error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
-  );
-}
-
-/**
- * What a not-found heartbeat answer means for the session it names (#11570). Decided by
- * {@link decideNotFoundAnswer} alone, for the latest binding and every held session alike.
- *
- * - `ended`: the daemon named a release that is not a recoverable handoff of a session this proxy
- *   owns. Terminal for that session only, under that reason.
- * - `awaited`: the session is inside its window (`windowSince`): it keeps being heartbeated, each
- *   heartbeat claiming again, and the connection is never reset for it. `handoff`: the answer is
- *   the first of that handoff, which opens the window now.
- * - `ask-again`: the latest binding, on a connection that had answered before and outside any
- *   window: asked once more on a fresh connection. `handoff`: the daemon named a recoverable
- *   handoff, so the daemon that answers there may be its successor.
- * - `stopped`: no longer heartbeated until a tool call reaches it again; never fenced.
- */
-export type NotFoundAnswerOutcome =
-  | { kind: "ended"; reason: string }
-  | { kind: "awaited"; windowSince: number; handoff?: string }
-  | { kind: "ask-again"; handoff: boolean }
-  | { kind: "stopped" };
-
-/**
- * The handoff a session's answer with no reason belongs to: a daemon the proxy just connected to
- * that has not rehydrated the session yet. A not-found answer names no daemon instance, so every
- * such answer is the same handoff until the daemon acknowledges the session again.
- */
-export const UNREHYDRATED_HANDOFF = "unrehydrated";
-
-/** Everything the outcome of a not-found heartbeat answer depends on. */
-export interface NotFoundAnswerFacts {
-  /** The release reason the daemon gave with the answer, when it gave one. */
-  releaseReason: string | undefined;
-  /** The proxy owns the session: only an owned session is handed back after a recoverable release. */
-  owned: boolean;
-  /**
-   * The answer is the session's first on a connection that was established while the proxy held
-   * it: the daemon behind it may have restarted and not rehydrated the session yet.
-   */
-  establishes: boolean;
-  /** Positive evidence: this session last heard a different reported daemon process instance. */
-  answeredByOtherDaemon: boolean;
-  /** When the session's latest window opened, while it has had one (open or expired). */
-  windowSince: number | undefined;
-  /**
-   * The handoffs the session already got its window for, since the daemon last acknowledged it
-   * or admitted a call under it.
-   */
-  handoffs: ReadonlySet<string>;
-  now: number;
-  /** The heartbeat may be asked once more on a fresh connection (the latest binding's first ask). */
-  mayAskAgain: boolean;
-}
-
-/**
- * Whether a release the daemon reports leaves the session with its owner: only a recoverable
- * handoff (`device-restart:<id>`, a daemon shutdown or restart) of a session this proxy owns,
- * because the daemon hands that session back to the next call.
- */
-function isRecoverableHandoffOfOwnedSession(
-  releaseReason: string | undefined,
-  owned: boolean,
-): boolean {
-  return releaseReason !== undefined && owned && isRecoverableDaemonReleaseReason(releaseReason);
-}
-
-/**
- * The one decision for a not-found heartbeat answer, from the session's own state (#11570).
- *
- * A window belongs to a HANDOFF, never to a connection. A handoff is identified by the
- * recoverable release reason the daemon names (#11461), or, for an answer with no reason that is
- * the session's first on a just-established connection or reports another daemon instance, by
- * {@link UNREHYDRATED_HANDOFF} (#11529, #11557). The first answer of a handoff opens one window of
- * {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}; no later answer of the same handoff opens or
- * extends one, whatever connection it arrives on (a reconnect by liveness recovery or to ask
- * again reaches the same daemon as far as the answer can tell). So a session that is not
- * acknowledged is heartbeated for at most one window per distinct handoff it was actually told
- * of. Inside a window every answer that does not end the session is awaited. Outside one the
- * session is stopped; the latest binding is first asked once more on a fresh connection when it
- * has had no window at all, or when the answer names a handoff it has had no window for yet.
- */
-export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswerOutcome {
-  const { releaseReason, owned, windowSince, now } = facts;
-  const establishes = notFoundAnswerEstablishes(facts);
-  const recoverable = isRecoverableHandoffOfOwnedSession(releaseReason, owned);
-  if (releaseReason !== undefined && !recoverable) {
-    return { kind: "ended", reason: releaseReason };
-  }
-  const open =
-    windowSince !== undefined && now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
-  const handoff = newHandoffOf(facts, recoverable);
-  if (handoff !== undefined) {
-    // A connection that had answered before named the handoff: the daemon is going away or
-    // handing the session back, so the latest binding asks on a fresh one first.
-    return recoverable && !open && !establishes && facts.mayAskAgain
-      ? { kind: "ask-again", handoff: true }
-      : { kind: "awaited", windowSince: now, handoff };
-  }
-  if (open) {
-    return { kind: "awaited", windowSince };
-  }
-  return windowSince === undefined && facts.mayAskAgain
-    ? { kind: "ask-again", handoff: false }
-    : { kind: "stopped" };
-}
-
-/** Both the connection and a changed process instance provide positive establishment evidence. */
-function notFoundAnswerEstablishes(facts: NotFoundAnswerFacts): boolean {
-  return facts.establishes || facts.answeredByOtherDaemon;
-}
-
-/**
- * The handoff a not-found answer that does not end its session tells of, when the session has
- * had no window for it yet: the recoverable release the daemon names, or, with no reason, the
- * one {@link UNREHYDRATED_HANDOFF} when the answer is the session's first on a connection just
- * established or it reports another daemon instance. Undefined for a handoff it already had its
- * window for, and for an answer with no reason on a connection that had answered before and no
- * evidence of another daemon, which tells of none.
- */
-function newHandoffOf(facts: NotFoundAnswerFacts, recoverable: boolean): string | undefined {
-  const handoff = recoverable
-    ? `release:${facts.releaseReason}`
-    : facts.owned && notFoundAnswerEstablishes(facts)
-      ? UNREHYDRATED_HANDOFF
-      : undefined;
-  return handoff === undefined || facts.handoffs.has(handoff) ? undefined : handoff;
-}
-
-const NO_HANDOFFS: ReadonlySet<string> = new Set();
-
-/** The latest binding's keeper heartbeat while it is in flight. */
-interface LatestHeartbeatAsk {
-  /** It was answered not-found, so any further answer is to the second ask. */
-  notFound: boolean;
-  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
-  handoff: boolean;
-}
-
-/** The heartbeat request timeout: how long a heartbeat is given before it counts as unanswered. */
-function heartbeatRequestTimeoutMs(leaseMs: number, intervalMs: number): number {
-  return Math.max(1, Math.min(Math.floor(leaseMs / 2), intervalMs * 2));
-}
-
-/** The harness-supplied stable owner token when given, otherwise a per-process one (#10050). */
-function resolveLivenessOwnerToken(config: DaemonMcpProxyConfig): string {
-  const suppliedToken = config.livenessOwnerToken?.trim();
-  return suppliedToken ? suppliedToken : (config.idGenerator ?? defaultIdGenerator).next();
-}
-
-/** The harness-supplied stable owner token, or undefined when this proxy minted its own. */
-function stableLivenessOwnerToken(config: DaemonMcpProxyConfig): string | undefined {
-  const suppliedToken = config.livenessOwnerToken?.trim();
-  return suppliedToken ? suppliedToken : undefined;
-}
-
 /** A live session the daemon reports this proxy's stable token owns (#10990). */
 const tokenOwnedSessionSchema = z.object({
   sessionId: z.string().min(1),
@@ -655,11 +445,6 @@ function parseTokenOwnedSessions(result: unknown): TokenOwnedSession[] {
     const session = tokenOwnedSessionSchema.safeParse(entry);
     return session.success ? [session.data] : [];
   });
-}
-
-/** The heartbeat lease the proxy believes the daemon enforces on the sessions it holds. */
-function heartbeatLeashMs(config: DaemonMcpProxyConfig): number {
-  return config.heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs();
 }
 
 /**

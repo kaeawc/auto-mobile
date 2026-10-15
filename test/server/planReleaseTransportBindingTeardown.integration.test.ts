@@ -4,9 +4,20 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import type { ToolCapability } from "../../src/features/toolSelection/SessionToolSelectionService";
 import {
-  resetSessionScreenshotResourceDependencies,
-  setSessionScreenshotResourceDependencies,
+  registerObservationResources,
+  type ObservationResourceDependencies,
 } from "../../src/server/observationResources";
+
+let deps: ObservationResourceDependencies = {};
+function useSessionScreenshotResourceDependencies(
+  value: ObservationResourceDependencies["sessionScreenshotResourceDependencies"] | null,
+): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: value ?? undefined };
+  registerObservationResources(deps);
+}
+function clearSessionScreenshotResourceDependencies(): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: undefined };
+}
 
 // End-to-end coverage for the server-side SessionToolBinding teardown wired into
 // createMcpServer (issue #4611 Gap D). A transport seeded with a released-able
@@ -23,7 +34,7 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
       await fixture.teardown();
       fixture = undefined;
     }
-    resetSessionScreenshotResourceDependencies();
+    clearSessionScreenshotResourceDependencies();
   });
 
   // Narrow the released session so the whole "clipboard" capability is disabled
@@ -54,7 +65,7 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
   });
 
   test("a session release preserves typed fresh screenshot failures for the same transport", async () => {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => undefined,
       createScreenshotService: () => {
         throw new Error("inactive sessions must not capture screenshots");

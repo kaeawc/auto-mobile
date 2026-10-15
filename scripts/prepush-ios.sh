@@ -30,7 +30,7 @@ attestation_head=""
 if [[ -e "${project_root}/.git" ]]; then
   attestation_head="$(git -C "${project_root}" rev-parse HEAD 2>/dev/null || true)"
 elif [[ -d "${project_root}/.jj" ]]; then
-  attestation_head="$(cd "${project_root}" && jj log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+  attestation_head="$(jj -R "${project_root}" log -r @- --no-graph -T commit_id 2>/dev/null || true)"
 fi
 # Failure to capture initial cleanliness must suppress the attestation.
 attestation_start="$(bun "${project_root}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane ios 2>/dev/null || true)"

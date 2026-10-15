@@ -22,9 +22,9 @@ import os
         }
 
         /// `catchingObjCException` for methods that cannot propagate errors: a caught
-        /// `NSException` is logged and `fallback` returned. The reference's
-        /// `runOnMainThreadNonThrowing`; the `main.sync` hop is gone (we run on main) but
-        /// the XCUITest `NSException` guard remains necessary.
+        /// `NSException` is logged and `fallback` returned. The `main.sync` hop of the
+        /// reference is gone (we run on main) but the XCUITest `NSException` guard
+        /// remains necessary.
         func catchingObjCExceptionNonThrowing<T>(_ block: () -> T, fallback: T) -> T {
             do {
                 return try catchingObjCException(block)

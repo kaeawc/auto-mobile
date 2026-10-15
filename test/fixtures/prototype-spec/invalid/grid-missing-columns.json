@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "flow-grid",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "grid",
+      "children": []
+    }
+  },
+  "expectedPath": "root.columns"
+}

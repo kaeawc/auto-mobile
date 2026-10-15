@@ -38,6 +38,30 @@ class PrototypeRenderModelTest {
   }
 
   @Test
+  fun `rich text exposes the same plain label and node style as equivalent plain text`() {
+    val style = PrototypeStyle(textAlign = "center", maxLines = 2, lineHeight = 22.0)
+    val plain =
+      PrototypeTextNode(
+        text = "Hello world",
+        style = style,
+        testTag = "label",
+        contentDescription = "Greeting",
+      )
+    val rich =
+      plain.copy(
+        text = null,
+        spans = listOf(PrototypeTextSpan("Hello "), PrototypeTextSpan("world")),
+      )
+    val expected = mapPrototypeSpec(spec(plain)).root
+    val actual = mapPrototypeSpec(spec(rich)).root
+    assertEquals(expected.text, actual.text)
+    assertEquals(expected.contentDescription, actual.contentDescription)
+    assertEquals(expected.testTag, actual.testTag)
+    assertEquals(expected.style, actual.style)
+    assertEquals(expected.role, actual.role)
+  }
+
+  @Test
   fun `all static primitives expose roles text and tags`() {
     val nodes =
       listOf(

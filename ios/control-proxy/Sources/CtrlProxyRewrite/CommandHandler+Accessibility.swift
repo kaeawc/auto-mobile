@@ -160,20 +160,13 @@ extension CommandHandler {
     {
         let enabled = request.enabled
 
-        do {
+        return await respond(requestId: request.requestId, startTime: startTime) {
             // `setVoiceOver` is `@MainActor` (it drives XCUITest); `await` hops this async
             // `Sendable` handler onto the main actor, like its other UI-collaborator calls.
             try await voiceOverToggle.setVoiceOver(enabled: enabled)
             return VoiceOverSetResponse(
                 requestId: request.requestId,
                 success: true,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return VoiceOverSetResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
@@ -185,27 +178,15 @@ extension CommandHandler {
     )
         async -> HingeAngleResponse
     {
-        guard request.angle.isFinite, (0 ... 180).contains(request.angle) else {
-            return HingeAngleResponse(
-                requestId: request.requestId,
-                success: false,
-                error: "Hinge angle must be a finite number from 0 to 180 degrees.",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        do {
+        return await respond(requestId: request.requestId, startTime: startTime) {
+            guard request.angle.isFinite, (0 ... 180).contains(request.angle) else {
+                throw VerbatimLocalizedError(message: "Hinge angle must be a finite number from 0 to 180 degrees.")
+            }
             try await hingeAngleSetter.setHingeAngle(request.angle)
             return HingeAngleResponse(
                 requestId: request.requestId,
                 success: true,
                 angle: request.angle,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return HingeAngleResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }

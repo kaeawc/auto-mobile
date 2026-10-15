@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": 1
+    },
+    "root": {
+      "type": "slider",
+      "stateKey": "value",
+      "checks": [
+        {
+          "min": 5,
+          "message": "Min"
+        },
+        {
+          "max": 3,
+          "message": "Max"
+        }
+      ],
+      "min": 0,
+      "max": 100
+    }
+  },
+  "expectedPath": "root.checks[1].max"
+}

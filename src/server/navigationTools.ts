@@ -102,12 +102,7 @@ function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
     : NavigationGraphManager.getInstance();
 }
 
-// Injection seam for the navigateTo handler (mirrors the tapAny factory seam
-// in interactionTools.ts). Lets a unit test exercise the registered handler
-// wiring with a fake NavigateTo whose execute() returns a chosen
-// success/failure result, instead of spying on the class prototype (#6251
-// review — a prototype spy is a process-global patch that can leak into
-// unrelated tests running in the same process).
+// Narrow executor interface for per-handler dependency injection.
 export type NavigateToLike = Pick<NavigateTo, "execute">;
 
 function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): NavigateToLike {
@@ -124,72 +119,70 @@ function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): Na
   );
 }
 
-let navigateToFactory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike =
-  createDefaultNavigateTo;
-
-export function setNavigateToFactory(
-  factory: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike,
-): void {
-  navigateToFactory = factory;
+export interface NavigateToHandlerDependencies {
+  navigateToFactory?: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike;
 }
 
-export function resetNavigateToFactory(): void {
-  navigateToFactory = createDefaultNavigateTo;
-}
-
-export const navigateToHandler = async (
-  device: BootedDevice,
-  args: NavigateToArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-) => {
-  try {
-    throwIfAborted(signal);
-    const navigateTo = navigateToFactory(device, args);
-    const options: NavigateToOptions = {
-      ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
-        ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
-        : {}),
-      ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
-        ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
-        : {}),
-      targetScreen: args.targetScreen,
-      platform: args.platform || device.platform,
-      sessionUuid: args.sessionUuid,
-    };
-    const result = await navigateTo.execute(options, progress, signal);
-    throwIfAborted(signal);
-
-    if (result.success) {
-      return createJSONToolResponse({
-        message: result.message || `Navigated to ${args.targetScreen}`,
-        ...result,
-      });
-    } else {
-      // A failed navigation must not read as a completed one: mark the MCP
-      // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
-      return {
-        ...createJSONToolResponse({
-          error: result.error || "Navigation failed",
-          ...result,
-        }),
-        isError: true as const,
+export function createNavigateToHandler({
+  navigateToFactory = createDefaultNavigateTo,
+}: NavigateToHandlerDependencies = {}) {
+  return async (
+    device: BootedDevice,
+    args: NavigateToArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    try {
+      throwIfAborted(signal);
+      const navigateTo = navigateToFactory(device, args);
+      const options: NavigateToOptions = {
+        ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
+          ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
+          : {}),
+        ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
+          ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
+          : {}),
+        targetScreen: args.targetScreen,
+        platform: args.platform || device.platform,
+        sessionUuid: args.sessionUuid,
       };
+      const result = await navigateTo.execute(options, progress, signal);
+      throwIfAborted(signal);
+
+      if (result.success) {
+        return createJSONToolResponse({
+          message: result.message || `Navigated to ${args.targetScreen}`,
+          ...result,
+        });
+      } else {
+        // A failed navigation must not read as a completed one: mark the MCP
+        // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
+        return {
+          ...createJSONToolResponse({
+            error: result.error || "Navigation failed",
+            ...result,
+          }),
+          isError: true as const,
+        };
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      throw toActionableError(error, `Failed to navigate`);
     }
-  } catch (error) {
-    throwIfAborted(signal);
-    throw toActionableError(error, `Failed to navigate`);
-  }
-};
+  };
+}
+
+export const navigateToHandler = createNavigateToHandler();
 
 // Register navigation tools
-interface NavigationToolDependencies {
+export interface NavigationToolDependencies extends NavigateToHandlerDependencies {
   installedAppsFactory?: (
     device: BootedDevice,
   ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
 }
 
 export function registerNavigationTools({
+  navigateToFactory,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
@@ -242,7 +235,7 @@ export function registerNavigationTools({
     "navigateTo",
     "Navigate to screen using navigation graph",
     navigateToSchema,
-    navigateToHandler,
+    createNavigateToHandler({ navigateToFactory }),
     { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
   );
 

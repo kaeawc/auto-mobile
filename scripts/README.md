@@ -2,6 +2,14 @@
 
 This directory contains build, validation, and utility scripts for the AutoMobile project.
 
+## Script References
+
+Fast Validation checks that every tracked script under `scripts/` has an inbound reference.
+Unused scripts belong in `conventions/unreferenced-scripts-allowlist.txt` with a reason.
+When adding a script, wire it into a workflow, `package.json`, another script, or documentation.
+Python modules ending in `.py` under `scripts/github/` and `scripts/manual-test/python/` count as
+referenced through discovery when the root contains `pyproject.toml`, `requirements*.txt`, or `uv.lock`.
+
 ## MCP Context Management
 
 ### Context Estimation

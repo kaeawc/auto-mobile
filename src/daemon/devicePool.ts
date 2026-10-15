@@ -1,3 +1,13 @@
+import {
+  MultiDeviceAllocationQueue,
+  describeMultiDeviceAllocationAttempts,
+  type MultiDeviceAllocationBlock,
+  type MultiDeviceAllocationTicket,
+  type MultiDeviceAllocationOutcome,
+} from "./multiDeviceAllocation";
+import { ForeignClaims } from "./foreignClaims";
+import { ConnectionOwnership } from "./connectionOwnership";
+import { DeviceAutoStart } from "./deviceAutoStart";
 import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
@@ -76,7 +86,6 @@ import {
   isSameHolderSession,
   MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -344,121 +353,6 @@ function refreshFailureContext(failure: string | Error | undefined): string {
   return reason === undefined
     ? ""
     : `Could not refresh device list: ${truncateBodyText(reason.split(/[\r\n\u2028\u2029]/, 1)[0], 256)}.\n`;
-}
-
-/**
- * Why the last round of a multi-device allocation did not complete:
- * `queued` \u2014 an earlier conflicting request was still waiting (no attempt made);
- * `busy` \u2014 too few matching devices were idle to claim (no attempt made);
- * `contention` \u2014 an attempt was made and released its claims to retry.
- */
-type MultiDeviceAllocationBlock = "queued" | "busy" | "contention";
-
-interface MultiDeviceAllocationTicket {
-  requests: DeviceAllocationRequest[];
-  /**
-   * Sessions that already held a pooled device when the ticket last checked
-   * whether it can claim (on enqueue and before each claim check, never while
-   * its own attempt is in flight). Their devices are never rolled back, so they
-   * stay held while it waits.
-   */
-  heldSessionIds?: ReadonlySet<string>;
-}
-
-/** A queued ticket whose pre-existing session pins a device. */
-interface PinnedDeviceHolder {
-  ticket: MultiDeviceAllocationTicket;
-  sessionId: string;
-}
-
-/** A deadlocked claim's candidate device pinned by other waiting tickets. */
-interface PinnedDeviceWait {
-  request: DeviceAllocationRequest;
-  deviceId: string;
-  holders: PinnedDeviceHolder[];
-}
-
-/** Why a deadlocked ticket waits: its edges in the wait-for graph. */
-interface DeadlockWait {
-  /** Earlier conflicting deadlocked tickets it is queued behind. */
-  queuedBehind: MultiDeviceAllocationTicket[];
-  /** Pinned devices it needs; empty when unpinned supply alone could serve it. */
-  blockedOn: PinnedDeviceWait[];
-}
-
-/** Whether each claim (a list of candidate IDs) can get a distinct device. */
-function hasCompleteMatching(candidates: readonly (readonly string[])[]): boolean {
-  const owner = new Map<string, number>();
-  const augment = (index: number, seen: Set<string>): boolean =>
-    candidates[index].some((deviceId) => {
-      if (seen.has(deviceId)) {
-        return false;
-      }
-      seen.add(deviceId);
-      const current = owner.get(deviceId);
-      if (current === undefined || augment(current, seen)) {
-        owner.set(deviceId, index);
-        return true;
-      }
-      return false;
-    });
-  return candidates.every((_, index) => augment(index, new Set()));
-}
-
-/** Nodes that reach `start` and are reachable from it, including `start`. */
-function stronglyConnectedWith<T>(start: T, successors: (node: T) => readonly T[]): Set<T> {
-  const reachableFrom = (from: T) => {
-    const seen = new Set<T>();
-    const pending = [...successors(from)];
-    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-      if (!seen.has(next)) {
-        seen.add(next);
-        pending.push(...successors(next));
-      }
-    }
-    return seen;
-  };
-  const forward = reachableFrom(start);
-  if (!forward.has(start)) {
-    return new Set([start]);
-  }
-  return new Set([...forward].filter((node) => node === start || reachableFrom(node).has(start)));
-}
-
-function describePinnedWait({ deviceId, holders }: PinnedDeviceWait): string {
-  return `'${deviceId}' (session '${holders[0].sessionId}')`;
-}
-
-/** Pinned devices each claim waits on, described for an error message. */
-function groupPinnedWaits(
-  waits: readonly PinnedDeviceWait[],
-): Array<{ request: DeviceAllocationRequest; devices: string }> {
-  const byRequest = new Map<DeviceAllocationRequest, string[]>();
-  for (const wait of waits) {
-    byRequest.set(wait.request, [...(byRequest.get(wait.request) ?? []), describePinnedWait(wait)]);
-  }
-  return [...byRequest].map(([request, devices]) => ({ request, devices: devices.join(", ") }));
-}
-
-interface MultiDeviceAllocationOutcome<T> {
-  success: boolean;
-  value?: T;
-  attempts: number;
-  lastBlock?: MultiDeviceAllocationBlock;
-}
-
-/** Attempt count for a timeout message, with why no attempt was made when zero (#9950). */
-function describeMultiDeviceAllocationAttempts(
-  outcome: Pick<MultiDeviceAllocationOutcome<unknown>, "attempts" | "lastBlock">,
-): string {
-  const count = `${outcome.attempts} attempts`;
-  if (outcome.lastBlock === "queued") {
-    return `${count}; still queued behind an earlier multi-device request that was waiting for devices`;
-  }
-  if (outcome.lastBlock === "busy") {
-    return `${count}; too few matching devices were idle to attempt allocation`;
-  }
-  return count;
 }
 
 /**
@@ -1000,14 +894,6 @@ export interface DevicePoolDependencies {
   deviceSessionContinuityEnabled?: boolean;
 }
 
-/** Managed identity includes the name: iOS creation is excluded before its UDID is recorded. */
-function managedRefForImage(image: DeviceInfo): ManagedDeviceRef {
-  return {
-    platform: image.platform,
-    stableIds: [image.name, image.deviceId],
-  };
-}
-
 function createAdbServerResetQuarantine(
   port: AdbServerResetQuarantinePoolPort,
   factory?: DevicePoolDependencies["adbServerResetQuarantineFactory"],
@@ -1129,10 +1015,10 @@ export class DevicePool {
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
-  // Tickets begin after preflight. Only platform-disjoint requests may
-  // overtake earlier waiters; new partial claims are released before waiting.
-  private readonly multiDeviceAllocationQueue: MultiDeviceAllocationTicket[] = [];
-  private readonly multiDeviceAllocationWaiters = new Set<() => void>();
+  private readonly multiDeviceAllocations = this.createMultiDeviceAllocationQueue();
+  private readonly foreignClaims = this.createForeignClaims();
+  private readonly connectionOwnership = this.createConnectionOwnership();
+  private readonly deviceAutoStart = this.createDeviceAutoStart();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -1169,8 +1055,6 @@ export class DevicePool {
   private androidAliasAppliedObservation = 0;
   private androidAliasRetirement = 0;
   private androidAliasAppliedDevices: BootedDevice[] = [];
-  private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
-  private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -1346,15 +1230,6 @@ export class DevicePool {
   }>();
   private rehydrationReservationsStopped = false;
   private readonly intentionallyCancelledRecoverySessions = new WeakSet<Session>();
-  /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
-  private readonly loggedForeignDeviceOwners = new Map<string, number>();
-  /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
-  private readonly claimedDeviceIds = new Map<string, ForeignDeviceOwnership>();
-  /** `${platform}:${deviceId}` -> the latest foreign-claim read, shared within its max age. */
-  private readonly foreignClaimSnapshots = new Map<
-    string,
-    { readAt: number; verdict: Promise<{ ownerPid: number | undefined; unreadable: boolean }> }
-  >();
 
   constructor({
     env,
@@ -1566,6 +1441,125 @@ export class DevicePool {
     await releaseSessionAndDevice(this.sessionManager, this, assignedDevice, sessionId, reason, {
       release: () =>
         this.sessionManager.releaseSessionIfOwned(sessionId, session, assignedDevice, reason),
+    });
+  }
+
+  private createMultiDeviceAllocationQueue(): MultiDeviceAllocationQueue {
+    // Field initialization precedes dependency setup; defer reads until queue use.
+    const pool = this;
+    return new MultiDeviceAllocationQueue({
+      get timer() {
+        return pool.timer;
+      },
+      getAbortSignal,
+      raceWithDeadline,
+      get DEVICE_WAIT_INTERVAL_MS() {
+        return pool.DEVICE_WAIT_INTERVAL_MS;
+      },
+      deviceHeldByExistingSession: (sessionId) => this.deviceHeldByExistingSession(sessionId),
+      heldDeviceDisqualification: (request, device) =>
+        this.heldDeviceDisqualification(request, device),
+      getDevicesMatchingCriteria: (criteria) => this.getDevicesMatchingCriteria(criteria),
+      hasPendingAndroidRecoveryMatching: (criteria) =>
+        this.hasPendingAndroidRecoveryMatching(criteria),
+      potentialSupplyFor: (request) => this.potentialSupplyFor(request),
+      criteriaMatcher: {
+        formatCriteriaSummary: (criteria) => this.criteriaMatcher.formatCriteriaSummary(criteria),
+      },
+    });
+  }
+
+  private createForeignClaims(): ForeignClaims {
+    // Field initialization precedes dependency setup; defer reads until claims use.
+    const pool = this;
+    return new ForeignClaims({
+      get foreignDeviceOwnership() {
+        return pool.foreignDeviceOwnership;
+      },
+      get iosForeignDeviceOwnership() {
+        return pool.iosForeignDeviceOwnership;
+      },
+      get timer() {
+        return pool.timer;
+      },
+      getDevice: (deviceId) => this.devices.get(deviceId),
+      getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
+    });
+  }
+
+  private createConnectionOwnership(): ConnectionOwnership {
+    // Field initialization precedes dependency setup; defer reads until claims use.
+    return new ConnectionOwnership({
+      foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
+      getDevice: (deviceId) => this.devices.get(deviceId),
+    });
+  }
+
+  private createDeviceAutoStart(): DeviceAutoStart {
+    // Field initialization precedes dependency setup; defer reads until auto-start use.
+    const pool = this;
+    return new DeviceAutoStart({
+      get criteriaMatcher() {
+        return pool.criteriaMatcher;
+      },
+      get deviceManager() {
+        return pool.deviceManager;
+      },
+      get timer() {
+        return pool.timer;
+      },
+      get foreignDeviceOwnership() {
+        return pool.foreignDeviceOwnership;
+      },
+      get managedSlotExclusion() {
+        return pool.managedSlotExclusion;
+      },
+      get runtimeIdentity() {
+        return pool.runtimeIdentity;
+      },
+      get lifecycleCoordinator() {
+        return pool.lifecycleCoordinator;
+      },
+      get recoveringAndroidImages() {
+        return pool.recoveringAndroidImages;
+      },
+      get assignmentMutex() {
+        return pool.assignmentMutex;
+      },
+      get adbServerResetRecoveryReservations() {
+        return pool.adbServerResetRecoveryReservations;
+      },
+      refreshDevicesWithOutcome: () => this.refreshDevicesWithOutcome(),
+      refreshDevices: () => this.refreshDevices(),
+      refreshForeignOwnership: () => this.refreshForeignOwnership(),
+      trackStartedDeviceProcess: (device, childProcess) =>
+        this.trackStartedDeviceProcess(device, childProcess),
+      stopEmulatorProcess: (childProcess, retainLeaseUntil) =>
+        this.stopEmulatorProcess(childProcess, retainLeaseUntil),
+      getUnownedDevicesMatchingCriteria: (criteria) =>
+        this.getUnownedDevicesMatchingCriteria(criteria),
+      getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
+      getDevice: (deviceId) => this.devices.get(deviceId),
+      deviceHeldByExistingSession: (sessionId) => this.deviceHeldByExistingSession(sessionId),
+      addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
+        this.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
+      waitForDeviceReadyOrCancel: (
+        device,
+        childProcess,
+        timeoutMs,
+        signal,
+        timer,
+        cancelOwnedBoot,
+      ) =>
+        waitForDeviceReadyOrCancel(
+          this.deviceManager,
+          device,
+          childProcess,
+          timeoutMs,
+          signal,
+          timer,
+          cancelOwnedBoot,
+        ),
     });
   }
 
@@ -3021,7 +3015,7 @@ export class DevicePool {
 
       this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
 
-      this.enqueueMultiDeviceAllocationTicket(ticket);
+      this.multiDeviceAllocations.enqueue(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
       const assigned = new Set<string>();
       let firstWaitLogged = false;
@@ -3145,7 +3139,7 @@ export class DevicePool {
 
       return result.value!;
     } finally {
-      this.removeMultiDeviceAllocationTicket(ticket);
+      this.multiDeviceAllocations.remove(ticket);
     }
   }
 
@@ -3266,7 +3260,7 @@ export class DevicePool {
 
       // There is no configured pool maximum. A short current inventory may
       // grow through another flow, so preserve waiting for additional devices.
-      this.enqueueMultiDeviceAllocationTicket(ticket);
+      this.multiDeviceAllocations.enqueue(ticket);
 
       let attemptCount = 0;
       let allocationCompleted = false;
@@ -3356,7 +3350,7 @@ export class DevicePool {
 
       return assignments;
     } finally {
-      this.removeMultiDeviceAllocationTicket(ticket);
+      this.multiDeviceAllocations.remove(ticket);
     }
   }
 
@@ -3423,38 +3417,6 @@ export class DevicePool {
     return true;
   }
 
-  private multiDeviceAllocationBlock(
-    ticket: MultiDeviceAllocationTicket,
-  ): MultiDeviceAllocationBlock {
-    return this.isQueuedBehindConflictingRequest(ticket) ? "queued" : "busy";
-  }
-
-  private isQueuedBehindConflictingRequest(ticket: MultiDeviceAllocationTicket): boolean {
-    return this.earlierConflictingTickets(ticket).length > 0;
-  }
-
-  /** Earlier queued tickets that `ticket` must wait behind. */
-  private earlierConflictingTickets(
-    ticket: MultiDeviceAllocationTicket,
-  ): MultiDeviceAllocationTicket[] {
-    const earlier = this.multiDeviceAllocationQueue.slice(
-      0,
-      this.multiDeviceAllocationQueue.indexOf(ticket),
-    );
-    // Comparing live candidate IDs alone misses devices joining later. Use a
-    // conservative platform-disjoint rule across both APIs, including wildcards.
-    return earlier.filter((waiter) =>
-      waiter.requests.some((prior) =>
-        ticket.requests.some(
-          (request) =>
-            !prior.criteria?.platform ||
-            !request.criteria?.platform ||
-            prior.criteria.platform === request.criteria.platform,
-        ),
-      ),
-    );
-  }
-
   private canClaimMultiDeviceAllocation(ticket: MultiDeviceAllocationTicket): boolean {
     // Sessions that already hold a pooled device need no new claim and must
     // survive rollback; anything else (including a session whose device left
@@ -3474,7 +3436,7 @@ export class DevicePool {
     if (claims.length === 0) {
       return true;
     }
-    if (this.isQueuedBehindConflictingRequest(ticket)) {
+    if (this.multiDeviceAllocations.isQueuedBehindConflictingRequest(ticket)) {
       return false;
     }
     const available = new Set<string>();
@@ -3526,7 +3488,7 @@ export class DevicePool {
     let lastBlock: MultiDeviceAllocationBlock | undefined;
     while (true) {
       if (waited) {
-        await this.waitForMultiDeviceRetry(deadlineMs);
+        await this.multiDeviceAllocations.waitForMultiDeviceRetry(deadlineMs);
         const refreshed = await this.refreshMultiDeviceInventory(ticket);
         if (refreshed) {
           setRefreshFailure(refreshed.failure);
@@ -3540,10 +3502,10 @@ export class DevicePool {
       await this.refreshForeignOwnership();
       // A session may gain or lose its device while the ticket waits (e.g.
       // session-preserving recovery), so deadlock analysis reads a fresh pin.
-      this.recordHeldSessions(ticket);
+      this.multiDeviceAllocations.recordHeldSessions(ticket);
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
-        lastBlock = this.multiDeviceAllocationBlock(ticket);
-        this.throwIfMultiDeviceAllocationDeadlocked(ticket);
+        lastBlock = this.multiDeviceAllocations.multiDeviceAllocationBlock(ticket);
+        this.multiDeviceAllocations.throwIfMultiDeviceAllocationDeadlocked(ticket);
         if (this.timer.now() >= deadlineMs) {
           return { success: false, attempts, lastBlock };
         }
@@ -3580,39 +3542,6 @@ export class DevicePool {
     return undefined;
   }
 
-  private async waitForMultiDeviceRetry(deadlineMs: number): Promise<void> {
-    const delay = Math.min(this.DEVICE_WAIT_INTERVAL_MS, deadlineMs - this.timer.now());
-    if (delay <= 0) {
-      return;
-    }
-    let handle: NodeJS.Timeout | undefined;
-    let wake: (() => void) | undefined;
-    try {
-      await raceWithDeadline(
-        () =>
-          new Promise<void>((resolve) => {
-            wake = resolve;
-            this.multiDeviceAllocationWaiters.add(resolve);
-            handle = this.timer.setTimeout(resolve, delay);
-          }),
-        { timer: this.timer, signal: getAbortSignal(), label: "Multi-device allocation wait" },
-      );
-    } finally {
-      if (wake) {
-        this.multiDeviceAllocationWaiters.delete(wake);
-      }
-      if (handle !== undefined) {
-        this.timer.clearTimeout(handle);
-      }
-    }
-  }
-
-  private notifyMultiDeviceAllocationWaiters(): void {
-    for (const wake of this.multiDeviceAllocationWaiters) {
-      wake();
-    }
-  }
-
   private assertMultiDeviceCapacity(
     stats: ReturnType<DevicePool["getStatsForPlatform"]>,
     requiredCount: number,
@@ -3643,20 +3572,6 @@ export class DevicePool {
     }
   }
 
-  private enqueueMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
-    this.recordHeldSessions(ticket);
-    this.multiDeviceAllocationQueue.push(ticket);
-  }
-
-  /** Snapshots which of the ticket's sessions hold a pooled device right now. */
-  private recordHeldSessions(ticket: MultiDeviceAllocationTicket): void {
-    ticket.heldSessionIds = new Set(
-      ticket.requests
-        .map((request) => request.sessionId)
-        .filter((sessionId) => this.deviceHeldByExistingSession(sessionId) !== undefined),
-    );
-  }
-
   /**
    * Whether a device could serve a claim once its holder releases it. Error,
    * unhealthy and unassignable transport-alias devices never pass
@@ -3679,233 +3594,6 @@ export class DevicePool {
     return this.getDevicesMatchingCriteria(request.criteria).filter((device) =>
       this.isPotentialAllocationSupply(device),
     );
-  }
-
-  /**
-   * Devices pinned by queued tickets' pre-existing sessions, by device ID. A
-   * session may have several queued tickets; each is a holder, in queue order,
-   * so the earliest-queued one is named first.
-   */
-  private pinnedDevicesByTicket(): Map<string, PinnedDeviceHolder[]> {
-    const pinned = new Map<string, PinnedDeviceHolder[]>();
-    for (const ticket of this.multiDeviceAllocationQueue) {
-      for (const sessionId of ticket.heldSessionIds ?? []) {
-        const device = this.deviceHeldByExistingSession(sessionId);
-        if (device) {
-          pinned.set(device.id, [...(pinned.get(device.id) ?? []), { ticket, sessionId }]);
-        }
-      }
-    }
-    return pinned;
-  }
-
-  /**
-   * Claims a queued ticket still waits on, or undefined when it is not waiting
-   * for devices this analysis can reason about: it claims nothing, a held
-   * device is disqualified (the attempt fails fast instead), or a claim has no
-   * candidate yet or a pending recovery (inventory may still change).
-   */
-  private unmetMultiDeviceClaims(
-    ticket: MultiDeviceAllocationTicket,
-  ): DeviceAllocationRequest[] | undefined {
-    const claims: DeviceAllocationRequest[] = [];
-    for (const request of ticket.requests) {
-      const held = this.deviceHeldByExistingSession(request.sessionId);
-      if (held && this.heldDeviceDisqualification(request, held)) {
-        return undefined;
-      }
-      if (!held || !ticket.heldSessionIds?.has(request.sessionId)) {
-        claims.push(request);
-      }
-    }
-    const unknowable = claims.some(
-      (request) =>
-        this.getDevicesMatchingCriteria(request.criteria).length === 0 ||
-        this.hasPendingAndroidRecoveryMatching(request.criteria),
-    );
-    return claims.length === 0 || unknowable ? undefined : claims;
-  }
-
-  /**
-   * Whether `ticket` cannot fill its claims (one distinct device each) without
-   * a device pinned by a ticket in `blockers`, yet could with them. Idle,
-   * recovering, in-flight and non-waiting sessions' devices may free up, so
-   * they count as supply; the ticket's own pinned devices never do, nor do
-   * devices allocation can never use (error, unhealthy, unassignable).
-   */
-  private isDeviceBlockedBy(
-    ticket: MultiDeviceAllocationTicket,
-    claims: readonly DeviceAllocationRequest[],
-    blockers: ReadonlySet<MultiDeviceAllocationTicket>,
-    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
-  ): boolean {
-    const pinnedBy = (deviceId: string, by: (other: MultiDeviceAllocationTicket) => boolean) =>
-      (pinned.get(deviceId) ?? []).some((holder) => by(holder.ticket));
-    const candidates = claims.map((request) =>
-      this.potentialSupplyFor(request)
-        .map((device) => device.id)
-        .filter((deviceId) => !pinnedBy(deviceId, (other) => other === ticket)),
-    );
-    const supply = candidates.map((ids) =>
-      ids.filter((deviceId) => !pinnedBy(deviceId, (other) => blockers.has(other))),
-    );
-    return !hasCompleteMatching(supply) && hasCompleteMatching(candidates);
-  }
-
-  /**
-   * Waiting tickets that can never complete (greatest fixpoint): each is queued
-   * behind a conflicting member, or is short of devices that only members pin.
-   */
-  private findDeadlockedTickets(
-    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
-  ): Map<MultiDeviceAllocationTicket, DeviceAllocationRequest[]> {
-    const claimsByTicket = new Map(
-      this.multiDeviceAllocationQueue.flatMap((ticket) => {
-        const claims = this.unmetMultiDeviceClaims(ticket);
-        return claims ? [[ticket, claims] as const] : [];
-      }),
-    );
-    const deadlocked = new Set(claimsByTicket.keys());
-    const stuck = (ticket: MultiDeviceAllocationTicket) =>
-      this.earlierConflictingTickets(ticket).some((other) => deadlocked.has(other)) ||
-      this.isDeviceBlockedBy(ticket, claimsByTicket.get(ticket) ?? [], deadlocked, pinned);
-    let changed = true;
-    while (changed) {
-      const released = [...deadlocked].filter((ticket) => !stuck(ticket));
-      released.forEach((ticket) => deadlocked.delete(ticket));
-      changed = released.length > 0;
-    }
-    return new Map([...deadlocked].map((ticket) => [ticket, claimsByTicket.get(ticket) ?? []]));
-  }
-
-  /** Why each deadlocked ticket waits: its edges in the wait-for graph. */
-  private deadlockWaits(
-    deadlocked: ReadonlyMap<MultiDeviceAllocationTicket, DeviceAllocationRequest[]>,
-    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
-  ): Map<MultiDeviceAllocationTicket, DeadlockWait> {
-    const members = new Set(deadlocked.keys());
-    const pinnedWaits = (ticket: MultiDeviceAllocationTicket, request: DeviceAllocationRequest) =>
-      this.potentialSupplyFor(request).flatMap((device) => {
-        const holders = (pinned.get(device.id) ?? []).filter(
-          (holder) => holder.ticket !== ticket && members.has(holder.ticket),
-        );
-        return holders.length > 0 ? [{ request, deviceId: device.id, holders }] : [];
-      });
-    return new Map(
-      [...deadlocked].map(([ticket, claims]) => {
-        const wait: DeadlockWait = {
-          queuedBehind: this.earlierConflictingTickets(ticket).filter((other) =>
-            members.has(other),
-          ),
-          blockedOn: this.isDeviceBlockedBy(ticket, claims, members, pinned)
-            ? claims.flatMap((request) => pinnedWaits(ticket, request))
-            : [],
-        };
-        return [ticket, wait] as const;
-      }),
-    );
-  }
-
-  /**
-   * Fails a multi-device request that is in a cross-session cycle (#9950) of
-   * the wait-for graph between queued requests: an edge runs to a request that
-   * pins a device this one needs and cannot get elsewhere (counting devices, so
-   * several claims cannot share one), or to an earlier conflicting request this
-   * one is queued behind. Held devices are never released while a request
-   * waits, so no request in the cycle could complete before its timeout. Only
-   * the most recently queued member of the cycle fails, so earlier requests keep
-   * their place; requests merely waiting on a cycle keep waiting.
-   */
-  private throwIfMultiDeviceAllocationDeadlocked(ticket: MultiDeviceAllocationTicket): void {
-    const pinned = this.pinnedDevicesByTicket();
-    const deadlocked = this.findDeadlockedTickets(pinned);
-    if (!deadlocked.has(ticket)) {
-      return;
-    }
-    const waits = this.deadlockWaits(deadlocked, pinned);
-    const successors = (from: MultiDeviceAllocationTicket) => {
-      const wait = waits.get(from);
-      return [
-        ...(wait?.queuedBehind ?? []),
-        ...(wait?.blockedOn ?? []).flatMap(({ holders }) => holders.map((h) => h.ticket)),
-      ];
-    };
-    const cycle = stronglyConnectedWith(ticket, successors);
-    const queueIndex = (other: MultiDeviceAllocationTicket) =>
-      this.multiDeviceAllocationQueue.indexOf(other);
-    if (cycle.size < 2 || [...cycle].some((other) => queueIndex(other) > queueIndex(ticket))) {
-      return;
-    }
-    const others = [...cycle]
-      .filter((other) => other !== ticket)
-      .sort((a, b) => queueIndex(a) - queueIndex(b));
-    throw new ActionableError(this.formatAllocationDeadlock(ticket, others, cycle, waits));
-  }
-
-  private formatAllocationDeadlock(
-    ticket: MultiDeviceAllocationTicket,
-    others: readonly MultiDeviceAllocationTicket[],
-    cycle: ReadonlySet<MultiDeviceAllocationTicket>,
-    waits: ReadonlyMap<MultiDeviceAllocationTicket, DeadlockWait>,
-  ): string {
-    const held = (member: MultiDeviceAllocationTicket) => {
-      const devices = [...(member.heldSessionIds ?? [])].flatMap((sessionId) => {
-        const device = this.deviceHeldByExistingSession(sessionId);
-        return device ? [`'${device.id}' (session '${sessionId}')`] : [];
-      });
-      return devices.length > 0 ? devices.join(", ") : "no devices";
-    };
-    const sessions = (member: MultiDeviceAllocationTicket) =>
-      member.requests.map((request) => `'${request.sessionId}'`).join(", ");
-    const inCycle = (member: MultiDeviceAllocationTicket) => {
-      const wait = waits.get(member);
-      return {
-        blockedOn: (wait?.blockedOn ?? []).flatMap((entry) => {
-          const holders = entry.holders.filter((holder) => cycle.has(holder.ticket));
-          return holders.length > 0 ? [{ ...entry, holders }] : [];
-        }),
-        queued: (wait?.queuedBehind ?? []).filter((other) => cycle.has(other)),
-      };
-    };
-    const own = inCycle(ticket);
-    const claimLines = groupPinnedWaits(own.blockedOn).map(
-      ({ request, devices }) =>
-        `Session '${request.sessionId}'${this.criteriaMatcher.formatCriteriaSummary(request.criteria)} ` +
-        `is waiting for ${devices}, held by waiting requests.\n`,
-    );
-    const queueLines = own.queued.map(
-      (other) =>
-        `It is queued behind the earlier waiting request for sessions ${sessions(other)}.\n`,
-    );
-    const otherLines = others.map((other) => {
-      const wait = inCycle(other);
-      const devices = [...new Set(wait.blockedOn.map(describePinnedWait))].join(", ");
-      return (
-        `The waiting request for sessions ${sessions(other)} holds ${held(other)}` +
-        (devices ? ` and is waiting for ${devices}` : "") +
-        (wait.queued.length > 0 ? " and is queued behind another of these requests" : "") +
-        ".\n"
-      );
-    });
-    return (
-      `Cannot allocate devices: this request is deadlocked with other waiting multi-device requests.\n` +
-      `This request's sessions hold ${held(ticket)}.\n` +
-      [...claimLines, ...queueLines, ...otherLines].join("") +
-      `Held devices are not released while a request waits, so none of these requests could finish ` +
-      `before its allocation timeout. Failing now instead of waiting it out.\n` +
-      `Suggestions:\n` +
-      `  - Run these plans one after another instead of concurrently\n` +
-      `  - Release one of the sessions holding these devices and retry\n` +
-      `  - Start another matching device so each request can claim an idle one`
-    );
-  }
-
-  private removeMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
-    const index = this.multiDeviceAllocationQueue.indexOf(ticket);
-    if (index >= 0) {
-      this.multiDeviceAllocationQueue.splice(index, 1);
-      this.notifyMultiDeviceAllocationWaiters();
-    }
   }
 
   /**
@@ -3932,45 +3620,7 @@ export class DevicePool {
     deadlineMs: number,
     platform?: Platform,
   ): Promise<number> {
-    if (!platform || requiredCount <= 0) {
-      return 0;
-    }
-
-    let started = 0;
-    try {
-      const candidates = await this.getStartableDeviceImageCandidates(platform);
-      if (candidates.length === 0) {
-        return 0;
-      }
-
-      const toStart = candidates.slice(0, requiredCount);
-
-      for (const device of toStart) {
-        const label = device.deviceId ?? device.name;
-        logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
-        const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
-        if (remainingTimeoutMs <= 0) {
-          break;
-        }
-        const ready = await this.startAndPublishAdditionalDevice(
-          device,
-          label,
-          deadlineMs,
-          device.platform,
-        );
-        if (ready) {
-          started++;
-        }
-      }
-
-      return started;
-    } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        await this.rethrowCapacityRefusal(error, started);
-      }
-      logger.warn(`[DevicePool] Failed to start additional devices: ${error}`);
-      return started;
-    }
+    return this.deviceAutoStart.startAdditionalDevices(requiredCount, deadlineMs, platform);
   }
 
   /**
@@ -3982,13 +3632,7 @@ export class DevicePool {
     error: BootCapacityExhaustedError,
     started: number,
   ): Promise<never> {
-    logger.warn(
-      `[DevicePool] Boot capacity exhausted after starting ${started} device(s): ${error.message}`,
-    );
-    if (started > 0) {
-      await this.refreshDevicesWithOutcome();
-    }
-    throw error;
+    return this.deviceAutoStart.rethrowCapacityRefusal(error, started);
   }
 
   /**
@@ -4006,70 +3650,16 @@ export class DevicePool {
     deadlineMs: number,
     platform: Platform,
   ): Promise<DevicePoolBootedDevice | null> {
-    const startResult = await this.runCoordinatedDeviceStart(
+    return this.deviceAutoStart.startAndPublishAdditionalDevice(
       device,
+      label,
       deadlineMs,
-      "start",
-      async ({ process: childProcess, outcome }, signal, retainLeaseUntil) => {
-        if (
-          device.platform === "android" &&
-          outcome !== "launched" &&
-          !(await this.canAdoptUnlaunchedEmulator(device, outcome))
-        ) {
-          return null;
-        }
-        const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
-        if (readinessTimeoutMs <= 0) {
-          logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
-          await this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil);
-          return null;
-        }
-        const ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(
-            this.deviceManager,
-            device,
-            childProcess,
-            readinessTimeoutMs,
-            signal,
-            this.timer,
-            () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
-          ),
-          device,
-        );
-        if (
-          device.platform === "android" &&
-          outcome !== "launched" &&
-          (await this.refusesForeignOwnedEmulator(device, ready.deviceId))
-        ) {
-          return null;
-        }
-        return { ready, childProcess };
-      },
+      platform,
     );
-    if (!startResult) {
-      if (startResult === undefined && platform === "android") {
-        // Rediscover the winner after releasing the lifecycle lease.
-        await this.refreshDevices();
-      }
-      return null;
-    }
-    // Start readiness and the lifecycle lease settle before assignmentMutex: never
-    // acquire the pool assignment lock while holding a start lease. The pool
-    // publish and process association share one assignment turn.
-    await this.assignmentMutex.runExclusive(async () => {
-      await this.addDevice(
-        startResult.ready,
-        device,
-        false,
-        this.runtimeIdentity.identityEvidenceForBootedDevice(startResult.ready),
-      );
-      await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
-    });
-    return startResult.ready;
   }
 
   private remainingStartDeadline(deadlineMs: number): number {
-    return Math.max(0, deadlineMs - this.timer.now());
+    return this.deviceAutoStart.remainingStartDeadline(deadlineMs);
   }
 
   private async runCoordinatedDeviceStart<T>(
@@ -4082,81 +3672,7 @@ export class DevicePool {
       retainLeaseUntil: (settlement: Promise<unknown>) => void,
     ) => Promise<T>,
   ): Promise<T | undefined> {
-    const timeoutMs = this.remainingStartDeadline(deadlineMs);
-    const controller = new AbortController();
-    const timeoutError = new ActionableError(
-      `Device pool start deadline elapsed for ${device.deviceId ?? device.name}`,
-    );
-    const timeoutHandle = this.timer.setTimeout(() => {
-      controller.abort(timeoutError);
-    }, timeoutMs);
-    const identity =
-      device.platform === "ios" && !device.deviceId
-        ? { kind: "selector" as const, platform: "ios" as const, selector: device.name }
-        : {
-            kind: "stable" as const,
-            platform: device.platform,
-            stableId: device.platform === "android" ? device.name : device.deviceId!,
-          };
-    const lifecycleLease = await this.lifecycleCoordinator
-      .reserve(identity, { operation, deadlineMs, signal: controller.signal })
-      .catch((error: unknown) => {
-        // The finally below only owns the timer once the lease is held (#11123).
-        this.timer.clearTimeout(timeoutHandle);
-        throw error;
-      });
-    const signal = AbortSignal.any([controller.signal, lifecycleLease.signal]);
-    let retainedLeaseSettlement: Promise<unknown> | undefined;
-    const retainLeaseUntil = (settlement: Promise<unknown>): void => {
-      retainedLeaseSettlement = retainedLeaseSettlement
-        ? Promise.all([retainedLeaseSettlement, settlement])
-        : settlement;
-    };
-    try {
-      // Recovery claimed before candidate selection is suppressed there. When
-      // recovery or another start claims after selection, acquisition waits for
-      // its lease; revalidate under that lease to join the winner's boot instead
-      // of launching the same AVD again (#8381).
-      // Every Android start, including uncontended starts, re-runs the existing
-      // candidate path: one listDeviceImages and (when images exist) one
-      // getBootedDevices. Android images with unknown running state are excluded.
-      // Keep the funnelled post-skip refresh outside the lifecycle lease.
-      if (device.platform === "android" && operation === "start") {
-        const candidates = await this.getStartableDeviceImageCandidates("android");
-        const pooled = this.getDevicesByPlatform("android");
-        if (
-          !candidates.some(
-            (candidate) =>
-              this.criteriaMatcher.getDeviceImageKey(candidate) ===
-              this.criteriaMatcher.getDeviceImageKey(device),
-          ) ||
-          this.isAutoStartSuppressed(device) ||
-          pooled.some(
-            (entry) =>
-              entry.id === device.deviceId || (entry.avdName ?? entry.name) === device.name,
-          )
-        ) {
-          return undefined;
-        }
-      }
-      const start = await this.startCoordinatedDeviceProcess(
-        device,
-        deadlineMs,
-        signal,
-        retainLeaseUntil,
-      );
-      return await action(start, signal, retainLeaseUntil);
-    } finally {
-      if (retainedLeaseSettlement) {
-        void retainedLeaseSettlement.then(
-          () => lifecycleLease.release(),
-          () => lifecycleLease.release(),
-        );
-      } else {
-        lifecycleLease.release();
-      }
-      this.timer.clearTimeout(timeoutHandle);
-    }
+    return this.deviceAutoStart.runCoordinatedDeviceStart<T>(device, deadlineMs, operation, action);
   }
 
   /**
@@ -4170,28 +3686,19 @@ export class DevicePool {
     signal: AbortSignal,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
   ): Promise<DeviceStartResult> {
-    try {
-      return await runWithAbortSignal(signal, () =>
-        this.startDeviceWithOutcome(device, deadlineMs),
-      );
-    } catch (error) {
-      if (isEmulatorLaunchCancelledError(error) && error.process) {
-        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
-      }
-      throw error;
-    }
+    return this.deviceAutoStart.startCoordinatedDeviceProcess(
+      device,
+      deadlineMs,
+      signal,
+      retainLeaseUntil,
+    );
   }
 
   private async startDeviceWithOutcome(
     device: DeviceInfo,
     deadlineMs: number,
   ): Promise<DeviceStartResult> {
-    const timeoutMs = this.remainingStartDeadline(deadlineMs);
-    if (this.deviceManager.startDeviceWithOutcome) {
-      return this.deviceManager.startDeviceWithOutcome(device, timeoutMs);
-    }
-    const process = await this.deviceManager.startDevice(device, timeoutMs);
-    return { process, outcome: process ? "launched" : "already-running" };
+    return this.deviceAutoStart.startDeviceWithOutcome(device, deadlineMs);
   }
 
   /**
@@ -4207,27 +3714,7 @@ export class DevicePool {
     device: DeviceInfo,
     outcome: DeviceStartResult["outcome"],
   ): Promise<boolean> {
-    const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
-    if (!discovery.succeededPlatforms.has("android")) {
-      // An incomplete adb listing cannot prove the emulator is ours to adopt (or
-      // free of a foreign lease); refuse rather than wait on it (#11103).
-      logger.warn(
-        `[DevicePool] Android discovery was incomplete; not adopting AVD '${device.name}' for allocation`,
-      );
-      return false;
-    }
-    const visible = discovery.devices.find((booted) => booted.name === device.name);
-    if (visible) {
-      return !(await this.refusesForeignOwnedEmulator(device, visible.deviceId));
-    }
-    if (outcome === "duplicate-of-external") {
-      logger.warn(
-        `[DevicePool] AVD '${device.name}' is running in another process that this daemon's adb cannot see; not adopting it for allocation`,
-      );
-      return false;
-    }
-    // Still booting, or booting in this process: readiness names it, then the lease is checked.
-    return true;
+    return this.deviceAutoStart.canAdoptUnlaunchedEmulator(device, outcome);
   }
 
   /**
@@ -4240,18 +3727,7 @@ export class DevicePool {
     device: DeviceInfo,
     deviceId: string,
   ): Promise<boolean> {
-    if (!this.foreignDeviceOwnership) {
-      return false;
-    }
-    await this.foreignDeviceOwnership.refresh([deviceId]);
-    const ownerPid = this.foreignDeviceOwnership.foreignOwnerPid(deviceId);
-    if (ownerPid === undefined && !this.foreignDeviceOwnership.foreignClaimUnreadable?.(deviceId)) {
-      return false;
-    }
-    logger.warn(
-      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process${ownerPid === undefined ? "" : ` (PID ${ownerPid})`}; not adopting it for allocation`,
-    );
-    return true;
+    return this.deviceAutoStart.refusesForeignOwnedEmulator(device, deviceId);
   }
 
   private async cancelCoordinatedDeviceStart(
@@ -4259,72 +3735,18 @@ export class DevicePool {
     childProcess: ChildProcess | null,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    if (device.platform === "android") {
-      await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
-      return;
-    }
-    childProcess?.kill();
+    return this.deviceAutoStart.cancelCoordinatedDeviceStart(
+      device,
+      childProcess,
+      retainLeaseUntil,
+    );
   }
 
   private async startAdditionalDevicesForCriteria(
     requests: DeviceAllocationRequest[],
     deadlineMs: number,
   ): Promise<number> {
-    const reservedDeviceIds = new Set<string>();
-    const excludedImageIds = new Set<string>();
-    let started = 0;
-    let refreshed = false;
-
-    // A session that already holds a device (an executePlan base session) uses that device, so
-    // it can never stand in for another label's request.
-    const unheldRequests = requests.filter((request) => {
-      const held = this.deviceHeldByExistingSession(request.sessionId);
-      if (held) {
-        reservedDeviceIds.add(held.id);
-      }
-      return !held;
-    });
-    const findExisting = (request: DeviceAllocationRequest) =>
-      this.getUnownedDevicesMatchingCriteria(request.criteria).find(
-        (device) => device.status !== "error" && !reservedDeviceIds.has(device.id),
-      );
-
-    for (const request of unheldRequests) {
-      const existing = findExisting(request);
-      if (existing) {
-        reservedDeviceIds.add(existing.id);
-        continue;
-      }
-
-      const outcome = await this.startAdditionalDeviceMatchingCriteria(
-        request.criteria,
-        excludedImageIds,
-        deadlineMs,
-        async () => {
-          if (refreshed) {
-            return undefined;
-          }
-          // A booted device can be missing from the pool, e.g. dropped after a reboot until
-          // something acquires it. Re-discover once before cold-booting an AVD (mt-0083 D2).
-          refreshed = true;
-          await this.refreshDevicesWithOutcome();
-          await this.refreshForeignOwnership();
-          return findExisting(request);
-        },
-      ).catch((error: unknown) =>
-        error instanceof BootCapacityExhaustedError
-          ? this.rethrowCapacityRefusal(error, started)
-          : Promise.reject(error),
-      );
-      if (outcome) {
-        reservedDeviceIds.add(outcome.device.id);
-        if (outcome.started) {
-          started++;
-        }
-      }
-    }
-
-    return started;
+    return this.deviceAutoStart.startAdditionalDevicesForCriteria(requests, deadlineMs);
   }
 
   /**
@@ -4337,52 +3759,12 @@ export class DevicePool {
     deadlineMs: number,
     rediscover: () => Promise<PooledDevice | undefined>,
   ): Promise<{ device: PooledDevice; started: boolean } | null> {
-    if (!criteria?.platform) {
-      return null;
-    }
-
-    try {
-      const candidates = await this.getStartableDeviceImageCandidates(
-        criteria.platform,
-        criteria,
-        excludedImageIds,
-      );
-      const device = candidates[0];
-      if (!device) {
-        return null;
-      }
-      const rediscovered = await rediscover();
-      if (rediscovered) {
-        return { device: rediscovered, started: false };
-      }
-
-      const label = device.deviceId ?? device.name;
-      logger.info(
-        `[DevicePool] Starting ${device.platform} device ${label} for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}`,
-      );
-      excludedImageIds.add(this.criteriaMatcher.getDeviceImageKey(device));
-      const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
-      if (remainingTimeoutMs <= 0) {
-        return null;
-      }
-      const ready = await this.startAndPublishAdditionalDevice(
-        device,
-        label,
-        deadlineMs,
-        criteria.platform,
-      );
-      const pooled = ready ? this.devices.get(ready.deviceId) : undefined;
-      return pooled ? { device: pooled, started: true } : null;
-    } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        // The caller fails the allocation with the typed refusal (#11236).
-        throw error;
-      }
-      logger.warn(
-        `[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`,
-      );
-      return null;
-    }
+    return this.deviceAutoStart.startAdditionalDeviceMatchingCriteria(
+      criteria,
+      excludedImageIds,
+      deadlineMs,
+      rediscover,
+    );
   }
 
   /**
@@ -4391,14 +3773,7 @@ export class DevicePool {
    * so an incomplete scan refuses with a retryable error (#11103).
    */
   private async listBootedDevicesForStart(platform: Platform): Promise<BootedDevice[]> {
-    const discovery = await this.deviceManager.getBootedDevicesDetailed(platform);
-    if (!discovery.succeededPlatforms.has(platform)) {
-      throw new BootedDeviceDiscoveryIncompleteError(
-        platform,
-        discovery.discoveryErrors?.[platform],
-      );
-    }
-    return discovery.devices;
+    return this.deviceAutoStart.listBootedDevicesForStart(platform);
   }
 
   private async getStartableDeviceImageCandidates(
@@ -4406,43 +3781,11 @@ export class DevicePool {
     criteria?: DeviceAllocationCriteria,
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
-    if (this.managedSlotExclusion) {
-      await this.managedSlotExclusion.refresh({ requireCurrent: true });
-    }
-    const availableImages = await this.deviceManager.listDeviceImages(platform);
-    if (availableImages.length === 0) {
-      return [];
-    }
-
-    const bootedDevices = await this.listBootedDevicesForStart(platform);
-    const bootedIds = new Set(bootedDevices.map((device) => device.deviceId));
-    const bootedNames = new Set(bootedDevices.map((device) => device.name));
-    const candidates: DeviceInfo[] = [];
-
-    for (const image of availableImages) {
-      if (!this.criteriaMatcher.deviceImageMatchesCriteria(image, criteria)) {
-        continue;
-      }
-      if (!this.criteriaMatcher.isStartableDeviceImage(image)) {
-        continue;
-      }
-      if (excludedImageIds.has(this.criteriaMatcher.getDeviceImageKey(image))) {
-        continue;
-      }
-      if (this.isExcludedFromAutoStart(image)) {
-        continue;
-      }
-      if (image.deviceId && bootedIds.has(image.deviceId)) {
-        continue;
-      }
-      const running = await this.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
-      if (running) {
-        continue;
-      }
-      candidates.push(image);
-    }
-
-    return candidates;
+    return this.deviceAutoStart.getStartableDeviceImageCandidates(
+      platform,
+      criteria,
+      excludedImageIds,
+    );
   }
 
   private async isDeviceImageRunningForCandidate(
@@ -4450,38 +3793,16 @@ export class DevicePool {
     bootedIds: Set<string>,
     bootedNames: Set<string>,
   ): Promise<boolean> {
-    if (
-      image.platform === "android" &&
-      ((image.deviceId !== undefined && bootedIds.has(image.deviceId)) ||
-        bootedNames.has(image.name))
-    ) {
-      return true;
-    }
-    if (image.isRunning === true) {
-      return true;
-    }
-    if (image.isRunningStateKnown !== false) {
-      return image.deviceId ? bootedIds.has(image.deviceId) : bootedNames.has(image.name);
-    }
-    return await this.deviceManager.isDeviceImageRunning(image);
+    return this.deviceAutoStart.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
   }
 
   /** Suppressed, or held by a managed slot: generic auto-start never boots a slot's device (#11174). */
   private isExcludedFromAutoStart(image: DeviceInfo): boolean {
-    return (
-      this.isAutoStartSuppressed(image) ||
-      this.managedSlotExclusion?.holderOf(managedRefForImage(image)) !== undefined
-    );
+    return this.deviceAutoStart.isExcludedFromAutoStart(image);
   }
 
   private isAutoStartSuppressed(image: DeviceInfo): boolean {
-    return (
-      this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image)) ||
-      this.suppressedAutoStartDeviceImageKeys.has(`${image.platform}:${image.name}`) ||
-      (image.platform === "android" &&
-        (this.recoveringAndroidImages.has(image.name) ||
-          this.adbServerResetRecoveryReservations.has(image.name)))
-    );
+    return this.deviceAutoStart.isAutoStartSuppressed(image);
   }
 
   private hasPendingAndroidRecovery(platform?: Platform): boolean {
@@ -5804,29 +5125,14 @@ export class DevicePool {
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {
-    const imageKey = `${device.platform}:${device.avdName ?? device.name}`;
-    this.suppressedAutoStartDeviceImageKeys.add(device.id);
-    this.suppressedAutoStartDeviceImageKeys.add(imageKey);
-    this.suppressedAutoStartImageKeyByDeviceId.set(device.id, imageKey);
+    return this.deviceAutoStart.suppressAutoStartForDevice(device);
   }
 
   private clearAutoStartSuppressionForBootedDevice(
     device: BootedDevice,
     sourceImage?: DeviceInfo,
   ): void {
-    const rememberedImageKey = this.suppressedAutoStartImageKeyByDeviceId.get(device.deviceId);
-    const observedImageKey = `${device.platform}:${device.name}`;
-    const authoritativeImageKey =
-      sourceImage?.platform === device.platform
-        ? `${sourceImage.platform}:${sourceImage.name}`
-        : observedImageKey;
-    this.suppressedAutoStartDeviceImageKeys.delete(device.deviceId);
-    this.suppressedAutoStartDeviceImageKeys.delete(observedImageKey);
-    this.suppressedAutoStartDeviceImageKeys.delete(authoritativeImageKey);
-    if (rememberedImageKey === authoritativeImageKey) {
-      this.suppressedAutoStartDeviceImageKeys.delete(rememberedImageKey);
-      this.suppressedAutoStartImageKeyByDeviceId.delete(device.deviceId);
-    }
+    return this.deviceAutoStart.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
   }
 
   /**
@@ -6332,44 +5638,22 @@ export class DevicePool {
    * assignment.
    */
   private async publishDeviceClaim(deviceId: string): Promise<boolean> {
-    const ownership = this.foreignOwnershipFor(this.devices.get(deviceId)?.platform);
-    if (!ownership) {
-      return true;
-    }
-    if (!(await ownership.claim(deviceId))) {
-      return false;
-    }
-    this.claimedDeviceIds.set(deviceId, ownership);
-    // The claim is this daemon's, not one session's: a session that took the device since
-    // depends on it, so it is only withdrawn when nothing here holds the device (#11565).
-    if (!this.devices.get(deviceId)?.sessionId) {
-      this.releaseDeviceClaim(deviceId);
-    }
-    return true;
+    return this.connectionOwnership.publishDeviceClaim(deviceId);
   }
 
   /** Withdraw this daemon's claim once no session of this daemon holds the device. */
   private releaseDeviceClaim(deviceId: string): void {
-    const ownership = this.claimedDeviceIds.get(deviceId);
-    if (ownership) {
-      this.claimedDeviceIds.delete(deviceId);
-      ownership.release(deviceId);
-    }
+    this.connectionOwnership.releaseDeviceClaim(deviceId);
   }
 
   /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
   private foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {
-    if (platform === "android") {
-      return this.foreignDeviceOwnership;
-    }
-    return platform === "ios" ? this.iosForeignDeviceOwnership : undefined;
+    return this.foreignClaims.foreignOwnershipFor(platform);
   }
 
   /** Whether allocation for `platform` (either, when unset) must honour other daemons' claims. */
   private tracksForeignOwnership(platform?: Platform): boolean {
-    return platform === undefined
-      ? this.foreignDeviceOwnership !== undefined || this.iosForeignDeviceOwnership !== undefined
-      : this.foreignOwnershipFor(platform) !== undefined;
+    return this.foreignClaims.tracksForeignOwnership(platform);
   }
 
   /**
@@ -6382,39 +5666,15 @@ export class DevicePool {
    * share one read of the device's ownership, and so at most one relinquish request to its peer,
    * instead of a status query and a relinquish round trip each. A bind always reads afresh.
    */
-  async assertNotClaimedByForeignDaemon(
+  // Not `async`: wrapping the delegate's promise in an async function adds microtask hops that
+  // fake-time settle helpers (readToolsExplicitDeviceIdRule) count; return it directly.
+  assertNotClaimedByForeignDaemon(
     deviceId: string,
     platform: Platform,
     remedy?: string,
     maxAgeMs = 0,
   ): Promise<void> {
-    const ownership = this.foreignOwnershipFor(platform);
-    if (!ownership || this.devices.get(deviceId)?.sessionId) {
-      return;
-    }
-    const key = `${platform}:${deviceId}`;
-    const cached = this.foreignClaimSnapshots.get(key);
-    const snapshot =
-      cached && this.timer.now() - cached.readAt < maxAgeMs
-        ? cached
-        : { readAt: this.timer.now(), verdict: this.readForeignClaim(ownership, deviceId) };
-    if (snapshot !== cached) {
-      this.foreignClaimSnapshots.set(key, snapshot);
-      // A failed read is not a verdict: the next call reads again.
-      void snapshot.verdict.catch((error: unknown) => {
-        // The awaiting caller surfaces the error; here it only drops the unusable snapshot.
-        logger.debug(
-          `[DevicePool] foreign-claim read of ${deviceId} failed: ${errorMessage(error)}`,
-        );
-        if (this.foreignClaimSnapshots.get(key) === snapshot) {
-          this.foreignClaimSnapshots.delete(key);
-        }
-      });
-    }
-    const { ownerPid, unreadable } = await snapshot.verdict;
-    if (ownerPid !== undefined || unreadable) {
-      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
-    }
+    return this.foreignClaims.assertNotClaimedByForeignDaemon(deviceId, platform, remedy, maxAgeMs);
   }
 
   /** Who else holds `deviceId` right now, after asking an idle lease-only peer to let go. */
@@ -6422,16 +5682,7 @@ export class DevicePool {
     ownership: ForeignDeviceOwnership,
     deviceId: string,
   ): Promise<{ ownerPid: number | undefined; unreadable: boolean }> {
-    await ownership.refresh([deviceId]);
-    if (ownership.foreignOwnerPid(deviceId) !== undefined) {
-      // A peer that only holds an idle CtrlProxy forwarding lease is asked to give it up before
-      // the device is refused; it stays the owner when it declines (#11349).
-      await ownership.relinquishIdleLease?.(deviceId);
-    }
-    return {
-      ownerPid: ownership.foreignOwnerPid(deviceId),
-      unreadable: ownership.foreignClaimUnreadable?.(deviceId) === true,
-    };
+    return this.foreignClaims.readForeignClaim(ownership, deviceId);
   }
 
   /**
@@ -6444,9 +5695,7 @@ export class DevicePool {
     for (const sessionId of [...this.rehydrationReservations.keys()]) {
       this.releaseRehydrationReservation(sessionId, true);
     }
-    for (const deviceId of [...this.claimedDeviceIds.keys()]) {
-      this.releaseDeviceClaim(deviceId);
-    }
+    this.connectionOwnership.releaseAll();
   }
 
   /**
@@ -6581,9 +5830,7 @@ export class DevicePool {
   }
 
   private countForeignDrivenDevices(platform?: Platform): number {
-    return this.getDevicesByPlatform(platform).filter((device) =>
-      this.isDrivenByForeignDaemon(device),
-    ).length;
+    return this.foreignClaims.countForeignDrivenDevices(platform);
   }
 
   private recordCriteriaAssignment(
@@ -7483,7 +6730,7 @@ export class DevicePool {
     }
     this.releaseDeviceClaim(deviceId);
     this.lastReleasedDeviceId = deviceId;
-    this.notifyMultiDeviceAllocationWaiters();
+    this.multiDeviceAllocations.notify();
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
     this.notifyDeviceStateChanged(device);
@@ -7961,7 +7208,7 @@ export class DevicePool {
       return;
     }
     if (await ownership.claim(replacementDevice.id)) {
-      this.claimedDeviceIds.set(replacementDevice.id, ownership);
+      this.connectionOwnership.recordClaim(replacementDevice.id, ownership);
       return;
     }
     await ownership.refresh([replacementDevice.id]);
@@ -8130,7 +7377,7 @@ export class DevicePool {
   ): Promise<ShutdownDeviceReservation> {
     const { device } = reservation;
     const ownership = this.foreignOwnershipFor(device.platform);
-    if (!ownership || this.claimedDeviceIds.has(device.id)) {
+    if (!ownership || this.connectionOwnership.hasClaim(device.id)) {
       // No claims tracked for this platform, or a session of this daemon already claims it.
       return reservation;
     }
@@ -8144,7 +7391,7 @@ export class DevicePool {
           } finally {
             // Release may be called more than once; withdraw once, and never a claim a session
             // of this daemon published since.
-            if (!withdrawn && !this.claimedDeviceIds.has(device.id)) {
+            if (!withdrawn && !this.connectionOwnership.hasClaim(device.id)) {
               ownership.release(device.id);
             }
             withdrawn = true;
@@ -10862,23 +10109,7 @@ export class DevicePool {
    * holds no session on it, so multi-device allocation must not hand it to a plan.
    */
   private isDrivenByForeignDaemon(device: PooledDevice): boolean {
-    if (device.sessionId !== null) {
-      return false;
-    }
-    const ownership = this.foreignOwnershipFor(device.platform);
-    const ownerPid = ownership?.foreignOwnerPid(device.id);
-    if (ownerPid === undefined) {
-      this.loggedForeignDeviceOwners.delete(device.id);
-      // An unreadable claim names no owner but is not free either.
-      return ownership?.foreignClaimUnreadable?.(device.id) === true;
-    }
-    if (this.loggedForeignDeviceOwners.get(device.id) !== ownerPid) {
-      this.loggedForeignDeviceOwners.set(device.id, ownerPid);
-      logger.info(
-        `[DevicePool] Not allocating ${device.id}: another AutoMobile process (PID ${ownerPid}) drives it`,
-      );
-    }
-    return true;
+    return this.foreignClaims.isDrivenByForeignDaemon(device);
   }
 
   /**

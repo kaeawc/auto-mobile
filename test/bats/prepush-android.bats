@@ -216,6 +216,57 @@ SCRIPT
   fi
 }
 
+@test "uses Android debug compile task for convention Android library plugin" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/config/detekt" "${fixture_repo}/android/auto-mobile-sdk/src/main/kotlin"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'config: initial' > "${fixture_repo}/android/config/detekt/detekt.yml"
+  printf '%s\n' 'plugins { id("automobile.android-library") }' > "${fixture_repo}/android/auto-mobile-sdk/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/auto-mobile-sdk/src/main/kotlin/X.kt"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial Android module and Detekt config"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'config: changed' > android/config/detekt/detekt.yml
+  printf '%s\n' '// changed Kotlin source' >> android/auto-mobile-sdk/src/main/kotlin/X.kt
+  git add android/config/detekt/detekt.yml android/auto-mobile-sdk/src/main/kotlin/X.kt
+  git commit -qm "change Kotlin source and Detekt config"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx 'detektMain' "${invocations_file}"
+  grep -qx 'detektTest' "${invocations_file}"
+  grep -qx ':auto-mobile-sdk:compileDebugKotlin' "${invocations_file}"
+  if grep -qx ':auto-mobile-sdk:compileKotlin' "${invocations_file}"; then
+    false
+  fi
+  grep -qx ':auto-mobile-sdk:apiCheck' "${invocations_file}"
+  if grep -qx ':auto-mobile-sdk:detekt' "${invocations_file}"; then
+    false
+  fi
+}
+
 @test "accepts a repository root reached through a symlink" {
   fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
   symlink_parent="$(cd "$(mktemp -d)" && pwd -P)"
@@ -501,4 +552,39 @@ SCRIPT
   [ "$status" -eq 0 ]
   grep -qx ':source:compileKotlin' "${invocations_file}"
   grep -qx ':destination:compileKotlin' "${invocations_file}"
+}
+
+@test "attests Android partial scope and records tests without sources as skipped" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+  mkdir -p "${fixture_repo}/android/foo/src/main/kotlin" "${fixture_repo}/scripts/ci"
+  copy_prepush_fixture
+  printf '#!/bin/bash\nexit 0\n' > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh"
+  printf '#!/bin/bash\nexit 0\n' > "${fixture_repo}/android/gradlew"
+  cat > "${fixture_repo}/scripts/ci/record-attestations.sh" <<'SCRIPT'
+#!/bin/bash
+printf '%s\n' "$@" > "$ATTESTATION_ARGS_FILE"
+SCRIPT
+  chmod +x "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" "${fixture_repo}/android/gradlew" "${fixture_repo}/scripts/ci/record-attestations.sh"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/foo/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/foo/src/main/kotlin/X.kt"
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm initial
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' '// changed' >> android/foo/src/main/kotlin/X.kt
+  git add android/foo/src/main/kotlin/X.kt
+  git commit -qm change
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" ATTESTATION_ARGS_FILE="${invocations_file}" \
+    /bin/bash "${fixture_repo}/${SCRIPT}"
+  [ "$status" -eq 0 ]
+  grep -qx partial "${invocations_file}"
+  grep -Fx 'scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job' "${invocations_file}"
+  grep -Fx 'Android unit tests=skip:0' "${invocations_file}"
 }

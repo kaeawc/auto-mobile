@@ -5,8 +5,122 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 
 class StorageProtocolTest {
+
+  @Test
+  fun `storage_changed frame decodes device fields without legacy data`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"theme","value":"dark","valueType":"STRING","previousValue":"light","changeType":"modify","eventTimestamp":222,"sequenceNumber":3}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(111L, event.timestamp)
+    assertEquals("com.example", event.packageName)
+    assertEquals("prefs.xml", event.fileName)
+    assertEquals("theme", event.key)
+    assertEquals(JsonPrimitive("dark"), event.value)
+    assertEquals("STRING", event.valueType)
+    assertEquals(JsonPrimitive("light"), event.previousValue)
+    assertEquals("modify", event.changeType)
+    assertEquals(222L, event.eventTimestamp)
+    assertEquals(3L, event.sequenceNumber)
+    assertNull(event.data)
+  }
+
+  @Test
+  fun `storage_changed frame decodes INT values as bare numbers`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"counter","value":42,"valueType":"INT","previousValue":41}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(JsonPrimitive(42), event.value)
+    assertEquals(JsonPrimitive(41), event.previousValue)
+  }
+
+  @Test
+  fun `storage_changed frame decodes BOOLEAN values as bare booleans`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"enabled","value":true,"valueType":"BOOLEAN","previousValue":false}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(JsonPrimitive(true), event.value)
+    assertEquals(JsonPrimitive(false), event.previousValue)
+  }
+
+  @Test
+  fun `storage_changed frame decodes finite FLOAT values as bare numbers`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"ratio","value":1.5,"valueType":"FLOAT","previousValue":0.5}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(JsonPrimitive(1.5), event.value)
+    assertEquals(JsonPrimitive(0.5), event.previousValue)
+  }
+
+  @Test
+  fun `storage_changed frame decodes STRING_SET values as arrays`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"tags","value":["a","b"],"valueType":"STRING_SET","previousValue":["a"]}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))), event.value)
+    assertEquals(JsonArray(listOf(JsonPrimitive("a"))), event.previousValue)
+  }
+
+  @Test
+  fun `storage_changed frame preserves LONG values as quoted strings`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"counter","value":"9223372036854775807","valueType":"LONG","previousValue":"-9223372036854775808"}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals(JsonPrimitive(Long.MAX_VALUE.toString()), event.value)
+    assertEquals(JsonPrimitive(Long.MIN_VALUE.toString()), event.previousValue)
+  }
+
+  @Test
+  fun `storage_changed frame decodes explicit null values`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"theme","value":null,"valueType":"UNKNOWN","previousValue":null}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertNull(event.value)
+    assertNull(event.previousValue)
+  }
+
+  @Test
+  fun `legacy storage_changed frame retains data and defaults new fields`() {
+    val frame =
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","data":"{}"}"""
+
+    val event = Json.decodeFromString(WebSocketResponse.serializer(), frame)
+
+    assertIs<StorageChangedEvent>(event)
+    assertEquals("{}", event.data)
+    assertNull(event.key)
+    assertNull(event.value)
+    assertNull(event.valueType)
+    assertNull(event.previousValue)
+    assertNull(event.changeType)
+    assertNull(event.eventTimestamp)
+    assertNull(event.sequenceNumber)
+  }
 
   // =============================================================================
   // Request Serialization Tests

@@ -12,7 +12,7 @@ import os
 ///
 /// Rewrite archetype — `@MainActor`. Every gesture ultimately drives XCUITest on the
 /// main thread. The reference hopped onto main per operation with `DispatchQueue.main.sync`
-/// (`runOnMainThread` / `runOnMainThreadNonThrowing`); isolating the whole class to the
+/// (`runOnMainThread`); isolating the whole class to the
 /// main actor removes those hops — each public method already runs there. `NSException`s
 /// XCUITest can still raise are caught by `catchingObjCException` (throwing) and the
 /// private `catchingObjCExceptionNonThrowing` (log + fallback), the rewrite's expression

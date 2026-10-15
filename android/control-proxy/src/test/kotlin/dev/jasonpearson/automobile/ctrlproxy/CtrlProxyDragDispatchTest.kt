@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.os.Handler
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.RequestDrag
 import java.time.Duration
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
@@ -181,16 +182,18 @@ class CtrlProxyDragDispatchTest {
   @Test
   fun `stale frame context rejects before injecting a pointer`() {
     fixture.actions.requestDrag(
-      "stale",
-      10.0,
-      20.0,
-      100.0,
-      200.0,
-      500L,
-      1_000L,
-      100L,
-      fixture.freshFrameContext() + ":stale",
-      7,
+      RequestDrag(
+        requestId = "stale",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = 500L,
+        dragDurationMs = 1_000L,
+        holdDurationMs = 100L,
+        frameContext = fixture.freshFrameContext() + ":stale",
+        displayId = 7,
+      ),
     )
     assertTrue(shadow.attempts.isEmpty())
   }
@@ -198,7 +201,18 @@ class CtrlProxyDragDispatchTest {
   @Test
   @Config(sdk = [25])
   fun `pre API 26 keeps a single legacy stroke`() {
-    fixture.actions.requestDrag("legacy", 10.0, 20.0, 100.0, 200.0, 500L, 1_000L, 100L)
+    fixture.actions.requestDrag(
+      RequestDrag(
+        requestId = "legacy",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = 500L,
+        dragDurationMs = 1_000L,
+        holdDurationMs = 100L,
+      ),
+    )
     val description = shadow.attempts.single().gesture
     assertEquals(1, description.strokeCount)
     assertEquals(1_600L, description.getStroke(0).duration)
@@ -210,16 +224,18 @@ class CtrlProxyDragDispatchTest {
 
   private fun drag(press: Long = 600L, hold: Long = 100L) {
     fixture.actions.requestDrag(
-      "drag",
-      10.0,
-      20.0,
-      100.0,
-      200.0,
-      press,
-      300L,
-      hold,
-      fixture.freshFrameContext(),
-      7,
+      RequestDrag(
+        requestId = "drag",
+        x1 = 10.0,
+        y1 = 20.0,
+        x2 = 100.0,
+        y2 = 200.0,
+        pressDurationMs = press,
+        dragDurationMs = 300L,
+        holdDurationMs = hold,
+        frameContext = fixture.freshFrameContext(),
+        displayId = 7,
+      ),
     )
   }
 

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "2026-01-01"
+    },
+    "root": {
+      "type": "datePicker",
+      "stateKey": "value",
+      "checks": [
+        {
+          "message": "Bad",
+          "pattern": "a"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.checks[0].pattern"
+}

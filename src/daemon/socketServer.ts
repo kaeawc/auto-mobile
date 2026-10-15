@@ -8775,9 +8775,30 @@ export class UnixSocketServer {
               );
             },
             socketSessionId,
-          ).catch((error: unknown) =>
-            this.textForwardFailure(liveDeadlineKey, request.params.name, error),
-          );
+          ).catch(async (error: unknown) => {
+            const state = getLiveTextRequestState(liveDeadlineKey);
+            if (!state?.hasPending()) {
+              return this.textForwardFailure(liveDeadlineKey, request.params.name, error);
+            }
+            const indeterminate = state.timeoutError(error)!;
+            const remainingMs = deadline.value - this.timer.now();
+            if (remainingMs > 0) {
+              try {
+                await raceWithDeadline(state.settled(), {
+                  timeoutMs: remainingMs,
+                  timer: this.timer,
+                  label: "Dispatched text settlement",
+                });
+              } catch (waitError) {
+                // Settlement is best-effort within the original deadline; preserve the indeterminate answer.
+                logger.debug("Dispatched text settlement wait ended", waitError);
+              }
+            }
+            return shapeToolCallError(indeterminate, {
+              toolName: request.params.name,
+              source: "MCP",
+            });
+          });
         } finally {
           cleanup();
         }

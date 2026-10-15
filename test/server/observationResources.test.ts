@@ -10,10 +10,7 @@ import {
   RESOURCE_URIS,
   readObservationScreenshotBytes,
   registerObservationResources,
-  resetSessionScreenshotResourceDependencies,
-  resetScreenshotFileSystem,
-  setSessionScreenshotResourceDependencies,
-  setScreenshotFileSystem,
+  type ObservationResourceDependencies,
 } from "../../src/server/observationResources";
 import {
   getScreenshotStateStore,
@@ -33,6 +30,26 @@ import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
+
+let deps: ObservationResourceDependencies = {};
+function useScreenshotFileSystem(
+  value: ObservationResourceDependencies["screenshotFileSystem"] | null,
+): void {
+  deps = { ...deps, screenshotFileSystem: value ?? undefined };
+  registerObservationResources(deps);
+}
+function useSessionScreenshotResourceDependencies(
+  value: ObservationResourceDependencies["sessionScreenshotResourceDependencies"] | null,
+): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: value ?? undefined };
+  registerObservationResources(deps);
+}
+function clearScreenshotFileSystem(): void {
+  deps = { ...deps, screenshotFileSystem: undefined };
+}
+function clearSessionScreenshotResourceDependencies(): void {
+  deps = { ...deps, sessionScreenshotResourceDependencies: undefined };
+}
 
 /** Resolves once the microtask queue has drained, to detect a pending promise. */
 async function settleSentinel(): Promise<"still-pending"> {
@@ -63,7 +80,7 @@ function activeSession(device: BootedDevice = sessionDevice) {
 }
 
 function readTemplate(uri: string, context: ResourceReadContext = { sessionUuid }) {
-  registerObservationResources();
+  registerObservationResources(deps);
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
   const { template, params } = match!;
@@ -75,7 +92,7 @@ function readTemplate(uri: string, context: ResourceReadContext = { sessionUuid 
 }
 
 function readLatestScreenshot(context?: ResourceReadContext) {
-  registerObservationResources();
+  registerObservationResources(deps);
   return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_SCREENSHOT)!.handler(context);
 }
 
@@ -117,8 +134,8 @@ describe("session screenshot resources", () => {
   afterEach(() => {
     RealObserveScreen.clearCache();
     clearDirectSessionDevices();
-    resetSessionScreenshotResourceDependencies();
-    resetScreenshotFileSystem();
+    clearSessionScreenshotResourceDependencies();
+    clearScreenshotFileSystem();
   });
 
   test("returns the actual MIME type for the latest cached screenshot", async () => {
@@ -131,7 +148,7 @@ describe("session screenshot resources", () => {
     for (const fixture of imageFixtures) {
       const screenshotPath = `/tmp/latest.${fixture.extension}`;
       getScreenshotStateStore().update(sessionDevice.deviceId, screenshotPath);
-      setScreenshotFileSystem({
+      useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => fixture.bytes,
       });
@@ -144,7 +161,7 @@ describe("session screenshot resources", () => {
   });
 
   test("registers session-scoped cached and fresh screenshot templates", () => {
-    registerObservationResources();
+    registerObservationResources(deps);
 
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.SESSION_OBSERVATION)).toBeDefined();
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.SESSION_SCREENSHOT)).toBeDefined();
@@ -169,7 +186,7 @@ describe("session screenshot resources", () => {
       viewHierarchy: "only-other-device",
     };
     await observeScreen.cacheObserveResult(observed);
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () => createTrackedScreenshot({ success: false }),
     });
@@ -203,7 +220,7 @@ describe("session screenshot resources", () => {
   test("rejects session resource reads outside the caller's bound session", async () => {
     let resolveCalls = 0;
     let screenshotServiceCalls = 0;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         resolveCalls++;
         return activeSession();
@@ -240,12 +257,12 @@ describe("session screenshot resources", () => {
     await observeScreen.cacheObserveResult(observeScreen.createBaseResult());
     const image = Buffer.from("owned session screenshot");
     getScreenshotStateStore().update(sessionDevice.deviceId, "/tmp/owned-session.png");
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () =>
         createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -267,7 +284,7 @@ describe("session screenshot resources", () => {
 
   test("rejects session resource reads without a bound session", async () => {
     let resolveCalls = 0;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         resolveCalls++;
         return activeSession();
@@ -284,14 +301,14 @@ describe("session screenshot resources", () => {
   test("returns a fresh PNG capture for an active session", async () => {
     const image = Buffer.from("fresh screenshot");
     let captureDevice: BootedDevice | undefined;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: (device) => {
         captureDevice = device;
         return createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" });
       },
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -310,12 +327,12 @@ describe("session screenshot resources", () => {
     for (const fixture of imageFixtures) {
       const image = fixture.bytes;
       const screenshotPath = `/tmp/fresh.${fixture.extension}`;
-      setSessionScreenshotResourceDependencies({
+      useSessionScreenshotResourceDependencies({
         resolveActiveSession: () => activeSession(),
         createScreenshotService: () =>
           createTrackedScreenshot({ success: true, path: screenshotPath }),
       });
-      setScreenshotFileSystem({
+      useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => image,
       });
@@ -328,7 +345,7 @@ describe("session screenshot resources", () => {
   });
 
   test("returns a typed non-retryable failure when no fresh screenshot session is active", async () => {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => undefined,
       createScreenshotService: () => createTrackedScreenshot({ success: false }),
     });
@@ -345,7 +362,7 @@ describe("session screenshot resources", () => {
 
   test("does not authorize a replacement session from a released session identity", async () => {
     let screenshotServiceCalls = 0;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () => {
         screenshotServiceCalls++;
@@ -362,7 +379,7 @@ describe("session screenshot resources", () => {
   });
 
   test("returns a typed retryable failure when fresh screenshot capture fails", async () => {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () =>
         createTrackedScreenshot({
@@ -384,7 +401,7 @@ describe("session screenshot resources", () => {
   test("returns a typed non-retryable failure when fresh screenshot capture is cancelled", async () => {
     const controller = new AbortController();
     controller.abort();
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () =>
         createTrackedScreenshot({
@@ -406,7 +423,7 @@ describe("session screenshot resources", () => {
   });
 
   test("returns a typed non-retryable failure when the fresh screenshot cannot be read", async () => {
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () =>
         createTrackedScreenshot({
@@ -414,7 +431,7 @@ describe("session screenshot resources", () => {
           path: "/tmp/fresh.png",
         }),
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => {
         throw new Error("EACCES: permission denied");
@@ -437,7 +454,7 @@ describe("session screenshot resources", () => {
     const pendingRead = new Promise<Buffer>((resolve) => {
       resolveRead = resolve;
     });
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () =>
         createTrackedScreenshot({
@@ -445,7 +462,7 @@ describe("session screenshot resources", () => {
           path: "/tmp/fresh.png",
         }),
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: () => pendingRead,
     });
@@ -469,7 +486,7 @@ describe("session screenshot resources", () => {
     const pendingRead = new Promise<Buffer>((resolve) => {
       resolveRead = resolve;
     });
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => (owned ? activeSession() : undefined),
       createScreenshotService: () =>
         createTrackedScreenshot({
@@ -477,7 +494,7 @@ describe("session screenshot resources", () => {
           path: "/tmp/fresh.png",
         }),
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: () => pendingRead,
     });
@@ -502,7 +519,7 @@ describe("session screenshot resources", () => {
     const image = Buffer.from("fresh screenshot");
     let freshCaptureCount = 0;
     let freshTrackerOptions: ScreenshotJobOptions | undefined;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () => ({
         ...createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
@@ -519,7 +536,7 @@ describe("session screenshot resources", () => {
         },
       }),
     });
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -539,7 +556,7 @@ describe("session screenshot resources", () => {
   test("forwards the resource read cancellation signal to the fresh capture", async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | undefined;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
       createScreenshotService: () => ({
         ...createTrackedScreenshot({ success: false, error: "cancelled" }),
@@ -564,7 +581,7 @@ describe("session screenshot resources", () => {
 
   test("rejects a fresh capture when the session no longer owns its device", async () => {
     let reads = 0;
-    setSessionScreenshotResourceDependencies({
+    useSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         reads += 1;
         return reads === 1 ? activeSession() : undefined;
@@ -622,18 +639,18 @@ describe("unscoped latest observation resources", () => {
     resetObserveCacheStore();
     ScreenshotJobTracker.clear();
     resetScreenshotStateStore();
-    resetScreenshotFileSystem();
+    clearScreenshotFileSystem();
     ScreenshotJobTracker.resetTimer();
     clearDirectSessionDevices();
   });
 
   function readLatestObservation(context?: ResourceReadContext) {
-    registerObservationResources();
+    registerObservationResources(deps);
     return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_OBSERVATION)!.handler(context);
   }
 
   function readObservationScreenshot(deviceId: string, observationId: string) {
-    registerObservationResources();
+    registerObservationResources(deps);
     const uri = `automobile:observation/${deviceId}/${observationId}/screenshot`;
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
@@ -669,7 +686,7 @@ describe("unscoped latest observation resources", () => {
   }
 
   test("registers the observation-identity-scoped screenshot template", () => {
-    registerObservationResources();
+    registerObservationResources(deps);
 
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.OBSERVATION_SCREENSHOT)).toBeDefined();
   });
@@ -706,7 +723,7 @@ describe("unscoped latest observation resources", () => {
       observationId,
       "/tmp/device-a.png",
     );
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -732,17 +749,23 @@ describe("unscoped latest observation resources", () => {
         observationId,
         "/tmp/device-a-bytes.png",
       );
-      setScreenshotFileSystem({
+      useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => image,
       });
-      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, observationId));
+      const result = await readObservationScreenshotBytes(
+        uriFor(deviceA.deviceId, observationId),
+        deps,
+      );
       expect(result).toEqual({ bytes: image, mimeType: "image/png" });
     });
 
     test("applies the resource's superseded or evicted check", async () => {
       await cacheObservationFor(deviceA, "device-a-hierarchy");
-      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, "evicted"));
+      const result = await readObservationScreenshotBytes(
+        uriFor(deviceA.deviceId, "evicted"),
+        deps,
+      );
       expect(result).toMatchObject({
         error: expect.stringContaining("unknown or has been superseded"),
       });
@@ -750,7 +773,10 @@ describe("unscoped latest observation resources", () => {
 
     test("reports a capture that produced no screenshot", async () => {
       const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
-      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, observationId));
+      const result = await readObservationScreenshotBytes(
+        uriFor(deviceA.deviceId, observationId),
+        deps,
+      );
       expect(result).toMatchObject({ error: expect.stringContaining("No screenshot available") });
     });
 
@@ -761,7 +787,7 @@ describe("unscoped latest observation resources", () => {
         "file:///etc/passwd",
         "automobile:observation/a/b/c/screenshot",
       ]) {
-        expect(await readObservationScreenshotBytes(uri)).toMatchObject({
+        expect(await readObservationScreenshotBytes(uri, deps)).toMatchObject({
           error: expect.stringContaining("not an observation screenshot URI"),
         });
       }
@@ -778,7 +804,7 @@ describe("unscoped latest observation resources", () => {
     );
     ScreenshotJobTracker.setTimer(new FakeTimer());
     ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -819,7 +845,7 @@ describe("unscoped latest observation resources", () => {
       return { success: true, path: "/tmp/device-a-pending.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -886,7 +912,7 @@ describe("unscoped latest observation resources", () => {
       return { success: true, path: "/tmp/device-a-after-job.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -922,7 +948,7 @@ describe("unscoped latest observation resources", () => {
       { queueAfterPending: true },
     );
     ScreenshotJobTracker.setTimer(new FakeTimer());
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
     });
@@ -956,7 +982,7 @@ describe("unscoped latest observation resources", () => {
       return { success: true, path: "/tmp/device-a-current.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => (path === "/tmp/device-a-prior.png" ? priorImage : currentImage),
     });
@@ -1007,7 +1033,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/stale.png");
     ScreenshotJobTracker.setTimer(timer);
     ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => Buffer.from("stale screenshot"),
     });
@@ -1037,7 +1063,7 @@ describe("unscoped latest observation resources", () => {
       observation.observationId,
       "/tmp/wireless.png",
     );
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => Buffer.from("89504e470d0a1a0a", "hex"),
     });
@@ -1078,7 +1104,7 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
     await cacheObservationFor(deviceB, "device-b-hierarchy");
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => Buffer.from("89504e470d0a1a0a", "hex"),
     });
@@ -1118,7 +1144,7 @@ describe("unscoped latest observation resources", () => {
     ScreenshotJobTracker.setTimer(new FakeTimer());
 
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1146,7 +1172,7 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1171,7 +1197,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
 
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1202,7 +1228,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
 
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1235,7 +1261,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
 
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1253,7 +1279,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
 
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1281,7 +1307,7 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1307,7 +1333,7 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);
@@ -1332,7 +1358,7 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
     const readPaths: string[] = [];
-    setScreenshotFileSystem({
+    useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => {
         readPaths.push(path);

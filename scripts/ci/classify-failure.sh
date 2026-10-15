@@ -252,7 +252,7 @@ diagnose_log_failure() {
         else if (line ~ /^error:/ && uherr == "") uherr=line
         if (line ~ /^[-]+$/ && (uhpath != "" || uherr != "")) flush_unhandled()
       }
-      if (line ~ /^error:/) assertion=line; sub(/^error:[[:space:]]*/,"",assertion)
+      if (line ~ /^error:/) { assertion=line; sub(/^error:[[:space:]]*/,"",assertion) }
       if (line ~ /^\(pass\)/ || line ~ /^\(fail\)/) {
         if (line ~ /^\(fail\)/) {
           name=line; sub(/^\(fail\)[[:space:]]*/,"",name); sub(/[[:space:]]+\[[^]]*\][[:space:]]*$/, "", name)
@@ -261,11 +261,12 @@ diagnose_log_failure() {
           frame=""; assertion=""
         } else { frame=""; assertion="" }
       }
-      if (line ~ /^at / && line ~ /:[0-9]+:[0-9]+\)?$/) {
-        fr=line; sub(/^at /,"",fr); sub(/^<anonymous> \(/,"",fr); sub(/\)$/, "", fr); sub(/:[0-9]+$/, "", fr)
+      if (line ~ /^[[:space:]]*at / && line ~ /:[0-9]+:[0-9]+\)?$/) {
+        fr=line; sub(/^[[:space:]]*at /,"",fr)
+        if (fr ~ /\([^()]*:[0-9]+:[0-9]+\)$/) { sub(/^.*\(/,"",fr); sub(/\)$/,"",fr) }
+        sub(/:[0-9]+$/, "", fr)
         if (index(fr,".test.")) frame=pathnorm(fr)
         else if (frame == "") frame=pathnorm(fr)
-        if (frame ~ /:[0-9]+$/) {} else { match(line, /:[0-9]+:[0-9]+\)?$/); frame=pathnorm(fr); sub(/:[0-9]+$/, "", frame) }
       }
       if (line ~ /^FAIL: .* shard [0-9]+ exited with status [0-9]+/) { exitline=line }
       if (line == "Segmentation fault" || line == "Killed" || line ~ /terminated by signal/) sigline=line
@@ -290,16 +291,16 @@ diagnose_log_failure() {
       if (exitline != "") {
         match(exitline,/shard [0-9]+/); shard=substr(exitline,RSTART+6,RLENGTH-6); match(exitline,/status [0-9]+/); status=substr(exitline,RSTART+7,RLENGTH-7)+0
         if(status>128 && status!=124) { n=status-128; sig="SIG" n; if(n==1)sig="SIGHUP"; else if(n==2)sig="SIGINT"; else if(n==6)sig="SIGABRT"; else if(n==9)sig="SIGKILL"; else if(n==11)sig="SIGSEGV"; else if(n==15)sig="SIGTERM"; addpart("shard " shard " killed by signal " sig " (status " status ")") }
-        else if(status>=1 && status<=127) addpart("shard " shard " exited with status " status " (not a signal kill)")
+        else if(status>=1 && status<=127 && np>0) addpart("shard " shard " exited with status " status " (not a signal kill)")
       }
-      if(sigline!="") addpart("signal evidence in log: " sigline)
+      if(sigline!="" && (exitline == "" || status>128 || status==124 || status==0 || status>127)) addpart("signal evidence in log: " sigline)
       for(i=1;i<=np;i++) printf "%s%s", (i==1?"":"; "), parts[i]
     }
   ' <<< "$1"
 }
 
 display_annotation() {
-  awk 'BEGIN { RS=""; ORS="" } { gsub(/[[:space:]]+/, " "); s=$0; if (length(s)>200) s=substr(s,1,197) "..."; print s }' <<< "$1"
+  awk 'BEGIN { ORS="" } { if (NR>1) s=s " "; s=s $0 } END { gsub(/[[:space:]]+/, " ", s); sub(/^ /,"",s); sub(/ $/,"",s); if (length(s)>200) s=substr(s,1,197) "..."; print s }' <<< "$1"
 }
 
 fetch_artifact_logs() {

@@ -82,6 +82,9 @@ case "$1 $2" in
       */check-runs/34/annotations*) annotation_response '[]' ;;
       */check-runs/37/annotations*) annotation_response '[]' ;;
       */check-runs/60/annotations*) annotation_response '[]' ;;
+      */check-runs/64/annotations*|*/check-runs/65/annotations*)
+        jq -n --arg message "$FAKE_ANNOTATION" '[{message:$message}]' | { if [[ "$gh_args" == *"--paginate"* ]]; then sed '1s/^/[/; $s/$/]/'; else cat; fi; }
+        ;;
       */check-runs/61/annotations*|*/check-runs/62/annotations*)
         annotation_fixture="$FIXTURE_DIR/host-integration-assertion-$( [[ "$gh_args" == *'/check-runs/61/'* ]] && printf ubuntu || printf windows ).log"
         annotation_text="$(awk '/^.*##\[error\]Received:/ { sub(/^.*##\[error\]/, ""); print; found=1; next } found { sub(/^[0-9-]+T[^ ]+Z /, ""); if ($0 ~ /^[[:space:]]+at /) { print; exit } print }' "$annotation_fixture")"
@@ -96,6 +99,8 @@ case "$1 $2" in
       */actions/jobs/61/logs) cat "$FIXTURE_DIR/host-integration-assertion-ubuntu.log" ;;
       */actions/jobs/62/logs) cat "$FIXTURE_DIR/host-integration-assertion-windows.log" ;;
       */actions/jobs/63/logs) printf '%s\n' "$FAKE_RUNNER_LOG" ;;
+      */actions/jobs/64/logs) printf '%s\n' "$FAKE_NO_TIMESTAMP_LOG" ;;
+      */actions/jobs/65/logs) cat "$FAKE_ORDINARY_EXIT_LOG" ;;
       */actions/jobs/44/logs) printf '%s\n' "$FAKE_XCTEST_LOG" ;;
       */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
@@ -125,6 +130,45 @@ case "$1 $2" in
 esac
 SHIM
   chmod +x "$FAKE_BIN/gh"
+}
+
+@test "parses host integration frames when timestamps are absent" {
+  fixture="$BATS_TEST_TMPDIR/no-timestamp-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Node Host Integration Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run host integration","conclusion":"failure"}]}]}
+JSON
+  # Derive a timestamp-free variant of the captured Ubuntu host integration log.
+  no_timestamp_log="$(sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+Z //' "$FIXTURE_DIR/host-integration-assertion-ubuntu.log")"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_NO_TIMESTAMP_LOG="$no_timestamp_log" bash "$SCRIPT" 603
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/db/keyedJsonConfigRepository.integration.test.ts:248"* ]]
+}
+
+@test "collapses multiline annotation whitespace before truncation" {
+  fixture="$BATS_TEST_TMPDIR/annotation-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  annotation=$'Received: {\n  nested: { value: true }\n}\n    at <anonymous>\n    more details'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION="$annotation" bash "$SCRIPT" 604
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == *"} at <anonymous>"* ]]
+  [[ "$output" != *$'}\nat'* ]]
+}
+
+@test "does not treat signal evidence as diagnosis when status is ordinary failure" {
+  fixture="$BATS_TEST_TMPDIR/ordinary-exit-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Node TypeScript Build and Test (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run unit tests","conclusion":"failure"}]}]}
+JSON
+  # Derive the contradictory signal-evidence case from the captured shard fixture's FAIL line.
+  ordinary_exit_log="$(sed -n '/^FAIL: unit shard 2 exited with status 1$/p' "$FIXTURE_DIR/unit-shard-enoent-unhandled.log")"
+  ordinary_exit_log+=$'\nKilled'
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ORDINARY_EXIT_LOG="$ordinary_exit_log" bash "$SCRIPT" 605
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"signal evidence in log"* ]]
 }
 
 @test "diagnoses captured ENOENT unit shard fixture without calling status 1 a signal" {
@@ -948,6 +992,6 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 0 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\ntest-ts: unit shard 0 passed on its retry\nFAIL: unit shard 1 exited with status 1' bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
-  [[ "$output" == *"INVESTIGATE — shard 1 exited with status 1 (not a signal kill)"* ]]
+  [[ "$output" == *"UNKNOWN"* ]]
   [[ "$output" != *"infra retry"* ]]
 }

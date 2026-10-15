@@ -85,7 +85,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     return await persistence.getSession(SESSION);
   }
 
-<<<<<<< HEAD
   const methodKeys = {
     upsertActiveSession: true,
     getSession: true,
@@ -235,8 +234,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     ).toEqual(["recoverable"]);
   });
 
-||||||| 69c6902cb5
-=======
   test("activity sequence accepts a backward wall step and rejects a delayed older write", async () => {
     const persistence = await create();
     await persistence.upsertActiveSession(record({ activitySeq: 1_000 }));
@@ -293,7 +290,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     expect(await rowOf(persistence)).toMatchObject({ activity_seq: 2, last_used_at_ms: 500 });
   });
 
->>>>>>> work/11497-stale-guard-monotonic
   test.each(["managed-execution", "heartbeat"])(
     "expired idle deadline recovery for %s",
     async (policy) => {

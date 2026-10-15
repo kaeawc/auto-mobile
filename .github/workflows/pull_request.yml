@@ -372,6 +372,8 @@ jobs:
             ios:
               - 'ios/**'
               - 'scripts/ios/**'
+              - 'test/fixtures/ios-contract/**'
+              - 'test/fixtures/ios-ctrlproxy-request-snapshots.json'
               - '.swiftformat'
               - '.swiftlint.yml'
 

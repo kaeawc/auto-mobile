@@ -17,7 +17,16 @@ final class ResponseContractFixtureTests: XCTestCase {
         encoder.outputFormatting = .sortedKeys
 
         func append(_ name: String, _ response: any WebSocketResponsePayload) throws {
-            let data = try response.encoded(with: encoder)
+            let productionResponse: any WebSocketResponsePayload
+            if var wsResponse = response as? WebSocketResponse, wsResponse.perfTiming == nil,
+               name != "runner_busy"
+            {
+                wsResponse = wsResponse.withPerfTiming(timing, totalTimeMs: 17)
+                productionResponse = wsResponse
+            } else {
+                productionResponse = response
+            }
+            let data = try productionResponse.encoded(with: encoder)
             var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             // Most production initializers own Date(). Normalize ONLY an emitted timestamp value;
             // do not insert a missing field, so dropping timestamp still changes the oracle.
@@ -247,6 +256,10 @@ final class ResponseContractFixtureTests: XCTestCase {
                                                           success: false, totalTimeMs: 17,
                                                           error: error.localizedDescription, errorCode: error.wireCode))
         }
+        try append("error_success_false_without_error", WebSocketResponse(
+            type: ResponseType.pressKeyResult.rawValue, timestamp: 1_700_000_000_000,
+            requestId: requestId, success: false, totalTimeMs: 17
+        ))
         let focusError = GesturePerformer.GestureError.focusQueryFailed(
             phase: "fixture phase",
             detail: "fixture detail"

@@ -36,12 +36,21 @@ commit_all() { git -C "$repo_dir" add -A; git -C "$repo_dir" commit -qm fixture;
 
 @test "self references and allow-list-only references do not count" {
   printf 'scripts/self.sh\n' > "$repo_dir/scripts/self.sh"
-  printf 'scripts/allow-only.sh  # reason\n' > "$repo_dir/scripts/conventions/unreferenced-scripts-allowlist.txt"
   printf 'scripts/allow-only.sh\n' > "$repo_dir/scripts/allow-only.sh"
   commit_all
   run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *"scripts/self.sh"* ]]
+  [[ "$output" == *"scripts/allow-only.sh"* ]]
+}
+
+@test "allow-listed script with no real reference passes without counting allow-list as a referrer" {
+  printf 'scripts/allow-only.sh\n' > "$repo_dir/scripts/allow-only.sh"
+  printf 'scripts/allow-only.sh  # reason\n' > "$repo_dir/scripts/conventions/unreferenced-scripts-allowlist.txt"
+  commit_all
+  run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All 2 scripts are referenced."* ]]
 }
 
 @test "allows an unreferenced script with a reason" {
@@ -59,7 +68,9 @@ commit_all() { git -C "$repo_dir" add -A; git -C "$repo_dir" commit -qm fixture;
   commit_all
   run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"STALE allow-list entry"* ]]
+  [[ "$output" == *"STALE allow-list entry: scripts/missing.sh"* ]]
+  [[ "$output" == *"STALE allow-list entry: scripts/now-used.sh"* ]]
+  [[ "$output" == *"STALE allow-list entry: scripts/no-reason.sh"* ]]
 }
 
 @test "test-only scripts pass and report" {
@@ -103,6 +114,16 @@ commit_all() { git -C "$repo_dir" add -A; git -C "$repo_dir" commit -qm fixture;
   commit_all
   run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
   [ "$status" -eq 0 ]
+}
+
+@test "non-Python file under a configured Python root is unreferenced" {
+  mkdir -p "$repo_dir/scripts/github"
+  printf 'name = "fixture"\n' > "$repo_dir/scripts/github/pyproject.toml"
+  printf '#!/bin/bash\n' > "$repo_dir/scripts/github/orphan.sh"
+  commit_all
+  run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"UNREFERENCED scripts/github/orphan.sh"* ]]
 }
 
 @test "counts extensionless imports and ignores scratch hits" {

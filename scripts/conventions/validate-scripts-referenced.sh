@@ -11,6 +11,8 @@ trap 'rm -rf "$tmp"' EXIT
 cd "$ROOT"
 
 git ls-files -- scripts | awk '/\.(sh|ts|py|mjs)$/ { print }' | sort -u > "$tmp/candidates"
+# git grep -o has no lookahead support; tokens ending in .ts can also be found
+# inside .tsx/.mts/.d.ts names. Keep the existing token scan and its limitation.
 # git grep -o emits path:token. Split at the first colon; repository paths cannot contain colons here.
 git grep -I -o -E '[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(sh|ts|py|mjs)' -- . ':!scratch/**' ":!$ALLOWLIST" 2>/dev/null \
   | awk 'index($0, ":") { file=substr($0,1,index($0,":")-1); token=substr($0,index($0,":")+1); print file "\t" token }' > "$tmp/refs" || :
@@ -20,16 +22,23 @@ git grep -I -o -E '(from[[:space:]]+"[^" ]+"|import[[:space:]]*\("[^" ]+"[[:spac
 if [[ ! -f "$ALLOWLIST" ]]; then : > "$tmp/allowlist"; else
   awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ { next } { path=$1; reason=""; if (match($0, /#[[:space:]]*[^[:space:]].*/)) reason=substr($0,RSTART); print path "\t" reason }' "$ALLOWLIST" > "$tmp/allowlist"
 fi
+: > "$tmp/python-roots"
+for root in scripts/github scripts/manual-test/python; do
+  if [[ -f "$root/pyproject.toml" || -f "$root/uv.lock" ]] || compgen -G "$root/requirements*.txt" >/dev/null; then
+    printf '%s\n' "$root" >> "$tmp/python-roots"
+  fi
+done
 
-awk -F '\t' -v allowfile="$tmp/allowlist" -v unref="$tmp/unreferenced" -v testonly="$tmp/testonly" -v stale="$tmp/stale" -v listed="$tmp/listed" -v countfile="$tmp/count" -v failures="$tmp/failures" '
-  FILENAME == ARGV[1] {
+awk -F '\t' -v allowfile="$tmp/allowlist" -v pythonroots="$tmp/python-roots" -v candidatefile="$tmp/candidates" -v refsfile="$tmp/refs" -v importsfile="$tmp/imports" -v unref="$tmp/unreferenced" -v testonly="$tmp/testonly" -v stale="$tmp/stale" -v listed="$tmp/listed" -v countfile="$tmp/count" -v failures="$tmp/failures" '
+  FILENAME == pythonroots { configured[$0]=1; next }
+  FILENAME == candidatefile {
     candidate[++nc]=$0; n=split($0,a,"/"); b=a[n]; basecount[b]++; basepath[b,basecount[b]]=$0
     if (b ~ /\.(ts|mjs)$/) { sub(/\.(ts|mjs)$/,"",b); stemcount[b]++; stempre[b,stemcount[b]]=$0; stemcandidate[b,stemcount[b]]=$0 }
-    # Python files in configured package roots are discovered by pytest/module import.
-    if ($0 ~ /^scripts\/github\// || $0 ~ /^scripts\/manual-test\/python\//) discovery[$0]=1
+    # Python modules in configured project roots are discovered by pytest/module import.
+    for (root in configured) if ($0 ~ ("^" root "/") && $0 ~ /\.py$/) discovery[$0]=1
     next
   }
-  FILENAME == ARGV[2] {
+  FILENAME == refsfile {
     file=$1; token=$2; normalized=token; while (normalized ~ /^\.\.?\//) sub(/^\.\.?\//,"",normalized); sub(/^\//,"",normalized)
     n=split(normalized,a,"/"); b=a[n]; suffix=normalized
     # Shell variables may prefix a repository-relative suffix (for example $SCRIPT_DIR/lib/x.ts).
@@ -38,7 +47,7 @@ awk -F '\t' -v allowfile="$tmp/allowlist" -v unref="$tmp/unreferenced" -v teston
     for (i=1;i<=basecount[b];i++) { c=basepath[b,i]; if (file != c && (normalized !~ /\// || c == normalized || c == suffix || c ~ ("/" suffix "$"))) refs[c,file]=1 }
     next
   }
-  FILENAME == ARGV[3] {
+  FILENAME == importsfile {
     file=$1; spec=$2; normalized=spec; while (normalized ~ /^\.\.?\//) sub(/^\.\.?\//,"",normalized); n=split(normalized,a,"/"); b=a[n]
     if (index(b,".")==0) for (i=1;i<=stemcount[b];i++) { c=stempre[b,i]; stempath=c; sub(/\.(ts|mjs)$/,"",stempath); if (file != c && (normalized !~ /\// || stempath == normalized || stempath ~ ("/" normalized "$"))) refs[c,file]=1 }
     next
@@ -56,7 +65,7 @@ awk -F '\t' -v allowfile="$tmp/allowlist" -v unref="$tmp/unreferenced" -v teston
     print nc > countfile
     for (p in state) if (state[p]=="UNREFERENCED" && !(p in allowed)) print "[scripts-referenced] UNREFERENCED " p ": reference it from a workflow, package.json script, other script, scripts/README.md, or docs, or add an allow-list line with a reason." > failures
   }
-' "$tmp/candidates" "$tmp/refs" "$tmp/imports" "$tmp/allowlist" > "$tmp/classification"
+' "$tmp/python-roots" "$tmp/candidates" "$tmp/refs" "$tmp/imports" "$tmp/allowlist" > "$tmp/classification"
 
 if $REPORT; then
   for file in "$tmp/unreferenced" "$tmp/testonly" "$tmp/listed"; do [[ -f "$file" ]] && sort "$file"; done

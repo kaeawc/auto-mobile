@@ -847,6 +847,7 @@ test/lint/processSafety.test.ts
 test/lint/rawControlBytesInSources.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
+test/lint/relativeImportCasing.test.ts
 test/lint/releaseReasonWireBuilders.test.ts
 test/lint/screenControlDocsParams.test.ts
 test/lint/serverToolTestSeamGuard.test.ts

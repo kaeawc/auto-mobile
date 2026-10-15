@@ -1,5 +1,6 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -233,8 +234,11 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     try {
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(true);
-      setDebugModeEnabled(true);
+      // Finish asynchronous flag initialization before server startup can launch it again.
+      await FeatureFlagService.getInstance().initialize();
       createMcpServer({ daemonMode: true });
+      // Enable debug tools after persisted flags have been applied.
+      setDebugModeEnabled(true);
 
       const schemaContent = await fs.readFile(schemaPath, "utf-8");
       const committed = JSON.parse(schemaContent) as ToolSchemaDefinition[];

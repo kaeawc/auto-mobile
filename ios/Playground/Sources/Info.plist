@@ -33,6 +33,10 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Playground only reads Photos authorization status for permission testing.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Playground only reads Photos add-only authorization status for permission testing.</string>
     <key>UIAppFonts</key>
     <array>
         <string>ShantellSans.ttf</string>

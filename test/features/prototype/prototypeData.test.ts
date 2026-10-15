@@ -235,7 +235,7 @@ test.each([
   [
     { data: "/n", key: "n", equals: 1 },
     "key",
-    "Exactly one of key, data, all, any, not is required",
+    "Exactly one of key, data, all, any, not, valid is required",
   ],
   [{ data: "/n" }, "equals", "Exactly one of equals, notEquals, gt, lt is required"],
   [{ data: "/n", equals: 1, gt: 0 }, "gt", "Exactly one of equals, notEquals, gt, lt is required"],

@@ -13,6 +13,7 @@ import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
+  stacks?: PrototypeEvent["stacks"];
   data?: PrototypeData;
   id?: string;
   all?: true;
@@ -49,8 +50,11 @@ export interface PrototypeLastResult {
 }
 export interface PrototypeEventState {
   pages: PrototypeEvent["pages"];
+  stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
   lastKnown: true;
+  context?: PrototypeEvent["context"];
+  contextTruncated?: true;
 }
 export interface AdoptedPrototype {
   data?: PrototypeData;
@@ -60,6 +64,7 @@ export interface AdoptedPrototype {
   hiddenReason?: PrototypeHiddenReason;
   appearance?: ShownPrototypeAppearance;
   pages: PrototypeEvent["pages"];
+  stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
 }
 export interface PrototypeStatus {
@@ -124,9 +129,12 @@ function shownData(
   action: PrototypeMutation,
   result: PrototypeResult,
   data: PrototypeData | undefined,
-): { data?: PrototypeData } {
-  return action === "show" && result.success && data !== undefined
-    ? { data: structuredClone(data) }
+): { data?: PrototypeData; stacks?: PrototypeEvent["stacks"] } {
+  return action === "show" && result.success
+    ? {
+        ...(data === undefined ? {} : { data: structuredClone(data) }),
+        ...(result.stacks ? { stacks: structuredClone(result.stacks) } : {}),
+      }
     : {};
 }
 
@@ -135,6 +143,45 @@ function shownData(
  * clear scopes; the cap bounds growth if a hook is missed, evicting the least recently recorded.
  */
 export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
+
+function eventSnapshot(event: PrototypeEvent): PrototypeEventState {
+  return {
+    pages: { ...event.pages },
+    ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
+    state: { ...event.state },
+    ...(event.context === undefined ? {} : { context: structuredClone(event.context) }),
+    ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
+    lastKnown: true,
+  };
+}
+
+function snapshotOverlay(snapshot: PrototypeEventState | undefined): Partial<PrototypeEventState> {
+  if (!snapshot) {
+    return {};
+  }
+  return {
+    pages: { ...snapshot.pages },
+    ...(snapshot.stacks ? { stacks: structuredClone(snapshot.stacks) } : {}),
+    state: { ...snapshot.state },
+    ...(snapshot.context === undefined ? {} : { context: structuredClone(snapshot.context) }),
+    ...(snapshot.contextTruncated === true ? { contextTruncated: true as const } : {}),
+    lastKnown: true as const,
+  };
+}
+
+/** One shown entry, overlaid with its last known snapshot when the device reported one. */
+function presenceWithSnapshot(
+  entry: PrototypeLastResult,
+  snapshot: PrototypeEventState | undefined,
+): PrototypeLastResult & Partial<PrototypeEventState> {
+  const { stacks, ...presence } = entry;
+  return {
+    ...presence,
+    ...(!snapshot && stacks ? { stacks: structuredClone(stacks) } : {}),
+    ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
+    ...snapshotOverlay(snapshot),
+  };
+}
 
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
@@ -151,20 +198,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
 
     return {
-      prototypes: Array.from(stored?.shown.values() ?? [], (entry) => {
-        const snapshot = entry.id ? stored?.snapshots?.get(entry.id) : undefined;
-        return {
-          ...entry,
-          ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
-          ...(snapshot
-            ? {
-                pages: { ...snapshot.pages },
-                state: { ...snapshot.state },
-                lastKnown: true as const,
-              }
-            : {}),
-        };
-      }),
+      prototypes: Array.from(stored?.shown.values() ?? [], (entry) =>
+        presenceWithSnapshot(entry, entry.id ? stored?.snapshots?.get(entry.id) : undefined),
+      ),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
   }
@@ -225,6 +261,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     stored.snapshots ??= new Map();
     stored.snapshots.set(prototype.id, {
       pages: { ...prototype.pages },
+      ...(prototype.stacks ? { stacks: structuredClone(prototype.stacks) } : {}),
       state: { ...prototype.state },
       lastKnown: true,
     });
@@ -247,11 +284,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       shown: new Map<string, PrototypeLastResult>(),
     };
     stored.pendingSnapshots ??= new Map();
-    const snapshot: PrototypeEventState = {
-      pages: { ...event.pages },
-      state: { ...event.state },
-      lastKnown: true,
-    };
+    const snapshot = eventSnapshot(event);
     stored.pendingSnapshots.set(event.id, snapshot);
     const shown = stored.shown.get(event.id);
     if (shown) {

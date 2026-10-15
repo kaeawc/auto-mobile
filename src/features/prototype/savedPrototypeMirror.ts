@@ -96,19 +96,19 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
     return this.serialize(() => this.writeEntry(serial, entry));
   }
   private async writeEntry(serial: string, entry: MirroredSavedPrototype): Promise<void> {
-    const directory = path.join(this.rootDir(), segment(serial));
-    const target = path.join(directory, segment(entry.id));
+    const directory = path.posix.join(this.rootDir(), segment(serial));
+    const target = path.posix.join(directory, segment(entry.id));
     const token = segment(this.ids.next());
-    const stage = path.join(directory, `.tmp-${token}`);
-    const backup = path.join(directory, `.old-${token}`);
+    const stage = path.posix.join(directory, `.tmp-${token}`);
+    const backup = path.posix.join(directory, `.old-${token}`);
     try {
-      await this.files.mkdir(path.join(stage, "assets"));
+      await this.files.mkdir(path.posix.join(stage, "assets"));
       const assets: z.infer<typeof assetSchema>[] = [];
       for (const [index, asset] of entry.assets.entries()) {
         if (asset.bytes === undefined || asset.mimeType === undefined) {
           assets.push({ id: asset.id, missing: true });
         } else {
-          await this.files.writeFile(path.join(stage, "assets", `${index}.bin`), asset.bytes);
+          await this.files.writeFile(path.posix.join(stage, "assets", `${index}.bin`), asset.bytes);
           assets.push({ id: asset.id, mimeType: asset.mimeType, index });
         }
       }
@@ -120,7 +120,7 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
         icon: entry.icon,
         assets,
       });
-      await this.files.writeFile(path.join(stage, "manifest.json"), JSON.stringify(manifest));
+      await this.files.writeFile(path.posix.join(stage, "manifest.json"), JSON.stringify(manifest));
       const replaced = (await this.files.sortedReaddirEntries(directory)).some(
         (item) => item.name === segment(entry.id),
       );
@@ -149,7 +149,7 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
   }
   remove(serial: string, id: string): Promise<void> {
     return this.serialize(() =>
-      this.files.rm(path.join(this.rootDir(), segment(serial), segment(id))),
+      this.files.rm(path.posix.join(this.rootDir(), segment(serial), segment(id))),
     );
   }
   list(serial: string): Promise<MirroredSavedPrototype[]> {
@@ -157,7 +157,7 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
   }
   private async readEntries(serial: string): Promise<MirroredSavedPrototype[]> {
     try {
-      const directory = path.join(this.rootDir(), segment(serial));
+      const directory = path.posix.join(this.rootDir(), segment(serial));
       const entries: MirroredSavedPrototype[] = [];
       for (const item of await this.files.sortedReaddirEntries(directory)) {
         const { name } = item;
@@ -169,7 +169,7 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
         ) {
           continue;
         }
-        const entry = await this.readEntry(path.join(directory, name), name);
+        const entry = await this.readEntry(path.posix.join(directory, name), name);
         if (entry) {
           entries.push(entry);
         }
@@ -190,7 +190,7 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
       const manifest = manifestSchema.parse(
         JSON.parse(
           new TextDecoder().decode(
-            await this.files.readFile(path.join(directory, "manifest.json")),
+            await this.files.readFile(path.posix.join(directory, "manifest.json")),
           ),
         ),
       );
@@ -207,7 +207,9 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
           assets.push({
             id: asset.id,
             mimeType: asset.mimeType,
-            bytes: await this.files.readFile(path.join(directory, "assets", `${asset.index}.bin`)),
+            bytes: await this.files.readFile(
+              path.posix.join(directory, "assets", `${asset.index}.bin`),
+            ),
           });
         } catch (error) {
           logger.warn(`[PROTOTYPE] Mirror asset unavailable: ${manifest.id}/${asset.id}`, error);

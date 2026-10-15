@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   FileNativeHelperRecordStore,
@@ -129,7 +129,11 @@ describe.skipIf(unsupported)("real native helper orphan sweep", () => {
     const owner = await start("sleep", ["60"]);
     const helper = await start("sleep", ["60"]);
     const store = new FileNativeHelperRecordStore(new FakeLogger());
-    store.write({ ...record(helper, owner), startIdentity: "deliberately-wrong" });
+    // A comparable (same scheme) but different generation is proof the pid was recycled; an
+    // incomparable token is retained as unverifiable (#12347).
+    const realIdentity = started.get(helper.pid!)!;
+    const wrongIdentity = `${realIdentity.slice(0, realIdentity.indexOf(":"))}:deliberately-wrong`;
+    store.write({ ...record(helper, owner), startIdentity: wrongIdentity });
     await killOwner(owner);
     expect((await sweep(store)).staleRecordsRemoved).toBe(1);
     expect(control.isRunning(helper.pid!)).toBe(true);
@@ -144,7 +148,9 @@ describe.skipIf(unsupported)("real native helper orphan sweep", () => {
     expect(store.list()).toEqual([]);
     expect(log.at("warn")).toHaveLength(1);
     expect(store.corruptRecordsSkipped).toBe(1);
-    expect(readFileSync(file, "utf8")).toBe("{broken");
+    // Corrupt records are quarantined, never deleted, so the bytes stay inspectable.
+    expect(existsSync(file)).toBe(false);
+    expect(readFileSync(`${file}.corrupt`, "utf8")).toBe("{broken");
   });
   test("reaps a registry-tracked helper after the real bun owner is SIGKILLed", async () => {
     const registryModule = resolve(

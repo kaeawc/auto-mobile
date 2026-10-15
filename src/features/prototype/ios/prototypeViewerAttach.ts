@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix } from "node:path";
 import { LineFramer } from "../../../daemon/socketServer/LineFramer";
 import type { BootedDevice } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
@@ -25,6 +25,9 @@ import {
   parsePrototypeViewerEndpoint,
   PROTOTYPE_VIEWER_ENDPOINT_RELATIVE_PATH,
 } from "./prototypeViewerEndpoint";
+
+// Simulator and prototype container paths are POSIX on every host OS.
+const { join } = posix;
 
 const REPLAY_LIMIT = 256;
 

@@ -28,6 +28,8 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
   "--split-adb-coordination": "Separate ADB coordination (default: batch shared/adb-servers).",
   "--daemon": "Select daemon N (default: all; required for stop/env).",
   "--protect": "Repeatable protected AVD/simulator name or serial/UDID for init (default: none).",
+  "--crash":
+    "Stop only: SIGKILL the recorded private daemon after socket and recorded process start identity confirmation; never delegates or signals children.",
   "--wait-ms": "Stop wait bound, integer >= 0 (default: 30000 ms).",
   "--device":
     "Repeatable shutdown target by device ID or unique name; checked batch-inferred devices require exact device ID (serial/UDID); an ambiguous selector stops nothing (ambiguous) (default: only batch-booted unprotected virtual devices with positive environment evidence).",

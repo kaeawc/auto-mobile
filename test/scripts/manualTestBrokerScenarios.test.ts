@@ -47,7 +47,7 @@ function evidence() {
     },
   };
 }
-test.each(brokerScenarios)(
+test.each(brokerScenarios.filter((s) => s.class === "fake"))(
   "fake scenario $name exercises the real broker",
   async (scenario: BrokerScenario) => {
     const fs = evidence();

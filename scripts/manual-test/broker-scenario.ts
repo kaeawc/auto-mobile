@@ -11,16 +11,20 @@ import {
 } from "./brokerScenarios";
 
 export function brokerScenarioHelp(): string {
-  return `broker-scenario.ts list | run <name> [--dry-run] [--device] [--batch-dir <path>]
+  return `broker-scenario.ts list | run <name> [--dry-run] [--device] [--crash] [--max-devices <1..4>] [--batch-dir <path>]
 Fake scenarios use an isolated in-memory SessionBroker with no devices or daemon.
 Evidence: <MT_BATCH or --batch-dir>/evidence/<scenario>/summary.json.
 Device scenarios require --device and an already-running private broker batch.
-Device scenarios are registered separately; none are registered in this step.`;
+Device execution requires an installed private-batch context adapter with proxy operations and authoritative resource-ledger samples.
+--device selects the device variant when a fake scenario has the same name.
+--crash is restricted to daemon-restart-with-live-sessions; --max-devices defaults to 2 (hard maximum 4).`;
 }
+export type BrokerDeviceContextFactory = NonNullable<BrokerScenario["createContext"]>;
 export async function runBrokerScenarioCli(
   argv: string[],
   env: Record<string, string | undefined>,
   log: (message: string) => void = console.log,
+  deviceContext?: BrokerDeviceContextFactory,
 ): Promise<number> {
   if (argv.length === 1 && ["--help", "-h", "help"].includes(argv[0])) {
     log(brokerScenarioHelp());
@@ -31,49 +35,76 @@ export async function runBrokerScenarioCli(
     return 0;
   }
   const [op, name, ...flags] = argv;
-  const scenario = brokerScenarios.find((entry) => entry.name === name);
-  if (op !== "run" || !scenario) {
+  if (op !== "run" || !brokerScenarios.some((entry) => entry.name === name)) {
     log(brokerScenarioHelp());
     return 2;
   }
   const seen = new Set<string>();
   let batchDir = env.MT_BATCH;
+  let maxDevices = 2;
   for (let index = 0; index < flags.length; index++) {
     const flag = flags[index];
-    if (seen.has(flag) || !["--dry-run", "--device", "--batch-dir"].includes(flag)) {
+    if (
+      seen.has(flag) ||
+      !["--dry-run", "--device", "--crash", "--max-devices", "--batch-dir"].includes(flag)
+    ) {
       log(`Unknown or duplicate scenario flag: ${flag}`);
       return 2;
     }
     seen.add(flag);
-    if (flag === "--batch-dir") {
+    if (flag === "--batch-dir" || flag === "--max-devices") {
       const value = flags[++index];
       if (!value || value.startsWith("--")) {
-        log("--batch-dir needs a path.");
+        log(`${flag} needs a value.`);
         return 2;
       }
-      batchDir = value;
+      if (flag === "--batch-dir") {
+        batchDir = value;
+      } else {
+        maxDevices = Number(value);
+      }
     }
+  }
+  const scenario =
+    brokerScenarios.find(
+      (entry) => entry.name === name && entry.class === (seen.has("--device") ? "device" : "fake"),
+    ) ?? brokerScenarios.find((entry) => entry.name === name)!;
+  if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > 4) {
+    log("--max-devices must be an integer from 1 to 4.");
+    return 2;
+  }
+  if (
+    seen.has("--crash") &&
+    (scenario.class !== "device" || name !== "daemon-restart-with-live-sessions")
+  ) {
+    log("--crash requires daemon-restart-with-live-sessions --device.");
+    return 2;
   }
   if (!batchDir) {
     log("Set MT_BATCH or --batch-dir for scenario evidence.");
     return 2;
   }
-  return runFakeScenario(
+  return executeScenario(
     scenario,
     resolve(batchDir),
-    seen.has("--dry-run"),
-    seen.has("--device"),
+    {
+      dryRun: seen.has("--dry-run"),
+      device: seen.has("--device"),
+      maxDevices,
+      crash: seen.has("--crash"),
+    },
     log,
+    deviceContext,
   );
 }
-async function runFakeScenario(
+async function executeScenario(
   scenario: BrokerScenario,
   batchDir: string,
-  dryRun: boolean,
-  device: boolean,
+  options: { dryRun: boolean; device: boolean; maxDevices: number; crash: boolean },
   log: (message: string) => void,
+  deviceContext?: BrokerDeviceContextFactory,
 ): Promise<number> {
-  if (scenario.class === "device" && !device) {
+  if (scenario.class === "device" && !options.device) {
     log("Device scenarios require --device.");
     return 2;
   }
@@ -85,7 +116,7 @@ async function runFakeScenario(
   };
   const harness =
     scenario.class === "device"
-      ? await scenario.createContext?.(batchDir, evidence)
+      ? await (deviceContext ?? scenario.createContext)?.(batchDir, evidence)
       : await (
           await import("../../test/helpers/fakeBrokerScenarioContext")
         ).createFakeBrokerScenarioContext(scenario, batchDir, evidence);
@@ -94,7 +125,7 @@ async function runFakeScenario(
     return 2;
   }
   try {
-    const summary = await runBrokerScenario(scenario, harness.context, { dryRun, device });
+    const summary = await runBrokerScenario(scenario, harness.context, options);
     log(JSON.stringify(summary, null, 2));
     return summary.outcome === "failed" ? 1 : 0;
   } finally {

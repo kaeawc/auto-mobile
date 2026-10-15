@@ -47,6 +47,8 @@ import {
   type PrivateDaemonSpec,
 } from "./privateDaemonEnv";
 
+import { createLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
+import type { LockOwnerGenerationProbe } from "../../src/utils/fileLock";
 import { privateDaemonStop } from "./privateDaemonStop";
 import {
   privateDaemonDevices,
@@ -73,6 +75,7 @@ export type PrivateDaemonCommand =
       extraFlags: string[];
       devices?: boolean;
       waitMs?: number;
+      crash?: boolean;
     };
 const optionsSchema = z
   .object({
@@ -132,6 +135,7 @@ interface ParsedValues {
   deviceSelectors: string[];
   dryRun: boolean;
   strict: boolean;
+  crash: boolean;
   bootCommand: string[];
 }
 function recordEnvironment(state: ParsedValues, flag: string, token: string): string | undefined {
@@ -277,12 +281,13 @@ function readBooleanFlag(op: string, flag: string, state: ParsedValues): boolean
   }
   const flags: Record<
     string,
-    { op: string; key: "split" | "dryRun" | "devices" | "strict" | "ledger" }
+    { op: string; key: "split" | "dryRun" | "devices" | "strict" | "ledger" | "crash" }
   > = {
     "--split-adb-coordination": { op: "init", key: "split" },
     "--dry-run": { op: "shutdown-devices", key: "dryRun" },
     "--devices": { op: "status", key: "devices" },
     "--ledger": { op: "devices", key: "ledger" },
+    "--crash": { op: "stop", key: "crash" },
     "--strict": { op: "preflight", key: "strict" },
   };
   const match = flags[flag];
@@ -364,6 +369,7 @@ export function parsePrivateDaemonArgs(
     deviceSelectors: [],
     dryRun: false,
     strict: false,
+    crash: false,
     bootCommand: [],
   };
   const error = readArguments(op, args, state);
@@ -412,7 +418,7 @@ function existingCommand(
     daemon,
     extraFlags: state.extraFlags,
     devices: state.devices,
-    ...(op === "stop" ? { waitMs } : {}),
+    ...(op === "stop" ? { waitMs, ...(state.crash ? { crash: true } : {}) } : {}),
   };
 }
 function deviceCommand(
@@ -452,6 +458,7 @@ function durationArgument(
 }
 export interface PrivateDaemonCliDeps {
   ids?: IdGenerator;
+  processGeneration?: LockOwnerGenerationProbe;
   timer: Timer;
   hostStats(): HostStats;
   bootLock: { tryAcquire(path: string, role: string): boolean; release(path: string): void };
@@ -761,6 +768,17 @@ async function runLifecycle(
     if (!record) {
       throw new Error(`${spec.name} started without a JSON pid file; inspect its launch log.`);
     }
+    const startIdentity = deps.processGeneration?.current(record.pid);
+    deps.writeFile(
+      join(spec.dir, "daemon-start.json"),
+      JSON.stringify({
+        pid: record.pid,
+        socketPath: spec.socketPath,
+        pidFilePath: spec.pidFilePath,
+        startIdentity,
+        startedAt: deps.timer.now(),
+      }),
+    );
     deps.writeFile(spec.plainPidFilePath, `${record.pid}\n`);
     deps.log(
       JSON.stringify({
@@ -811,7 +829,7 @@ async function runExistingBatch(
   const { options, specs } = batch;
   const selected = selectBatchSpecs(command, specs);
   if (command.op === "stop") {
-    return privateDaemonStop(selected[0], options, command.waitMs ?? 30000, deps);
+    return privateDaemonStop(selected[0], options, command.waitMs ?? 30000, deps, command.crash);
   }
   if (command.op === "devices" || command.op === "shutdown-devices") {
     return privateDaemonDevices(command, options, selected, deps);
@@ -920,6 +938,7 @@ export async function createPrivateDaemonDeps(): Promise<PrivateDaemonCliDeps> {
         tryAcquireExclusiveLock(path, { pid: process.pid, metadata: role }),
       release: (path) => releaseExclusiveLock(path, process.pid),
     },
+    processGeneration: createLockOwnerGenerationProbe({ sameVerdictTtlMs: 0 }),
     signalPid: (pid, signal) => {
       process.kill(pid, signal);
     },

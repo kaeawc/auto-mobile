@@ -1,3 +1,8 @@
+import {
+  brokerDeviceScenarios,
+  type BrokerDeviceScenarioOps,
+  type PrivateDaemonControl,
+} from "./brokerDeviceScenarios";
 import { strict as assert } from "node:assert";
 import { join } from "node:path";
 import type { SessionConfig } from "../../src/models/sessionConfig";
@@ -49,6 +54,10 @@ export interface BrokerScenarioContext {
   preflight(): Promise<boolean>;
   probe(): Promise<boolean>;
   fake?: BrokerScenarioFakeControls;
+  deviceOps?: BrokerDeviceScenarioOps;
+  privateDaemon?: PrivateDaemonControl;
+  maxDevices?: number;
+  crash?: boolean;
   record<T>(operation: string, request: unknown, action: () => Promise<T>): Promise<T>;
 }
 export interface BrokerScenario {
@@ -392,6 +401,7 @@ export const brokerScenarios: readonly BrokerScenario[] = [
     deviceOnlyAssertions: ["Live OS process identity and owner death"],
     run: pidReuse,
   },
+  ...brokerDeviceScenarios,
 ];
 export interface BrokerScenarioSummary {
   name: string;
@@ -416,7 +426,7 @@ export interface BrokerScenarioSummary {
 export async function runBrokerScenario(
   scenario: BrokerScenario,
   context: BrokerScenarioContext,
-  options: { dryRun?: boolean; device?: boolean } = {},
+  options: { dryRun?: boolean; device?: boolean; maxDevices?: number; crash?: boolean } = {},
 ): Promise<BrokerScenarioSummary> {
   const startedAt = context.timer.now();
   const firstRow = context.ledger.entries.length;
@@ -431,8 +441,11 @@ export async function runBrokerScenario(
     ledgerDeltas: [],
     deviceOnlyAssertions: scenario.deviceOnlyAssertions,
   };
+  let running = false;
   const ctx: BrokerScenarioContext = {
     ...context,
+    maxDevices: options.maxDevices ?? context.maxDevices ?? 2,
+    crash: options.crash ?? context.crash ?? false,
     record: async (operation, request, action) => {
       const row: BrokerScenarioSummary["requests"][number] = {
         operation,
@@ -455,7 +468,23 @@ export async function runBrokerScenario(
   };
   try {
     if (scenario.class === "device") {
+      assert(
+        Number.isInteger(ctx.maxDevices) && ctx.maxDevices! >= 1 && ctx.maxDevices! <= 4,
+        "--max-devices must be an integer from 1 to 4.",
+      );
+      if (ctx.deviceOps) {
+        assert(
+          Number.isInteger(ctx.deviceOps.totalDeviceCap) &&
+            ctx.deviceOps.totalDeviceCap >= 1 &&
+            ctx.deviceOps.totalDeviceCap <= ctx.maxDevices!,
+          "Batch capacity exceeds --max-devices.",
+        );
+      }
       assert(options.device, "Device scenarios require --device.");
+      assert(
+        !ctx.crash || scenario.name === "daemon-restart-with-live-sessions",
+        "--crash requires daemon-restart-with-live-sessions.",
+      );
       assert(
         await ctx.preflight(),
         "Device scenarios require an already-running private broker batch (preflight).",
@@ -467,6 +496,16 @@ export async function runBrokerScenario(
       );
     }
     if (!options.dryRun) {
+      if (scenario.class === "device" && ctx.deviceOps) {
+        // Refuse a new scenario until all earlier batch grants have authoritative receipts.
+        for (const row of ctx.ledger.devices()) {
+          assert(
+            ctx.ledger.hasEvent(row, "released") && ctx.ledger.hasEvent(row, "absent"),
+            "Previous scenario has an unverified release receipt/absence.",
+          );
+        }
+      }
+      running = true;
       await scenario.run(ctx);
     }
     summary.outcome = options.dryRun ? "dry-run" : "passed";
@@ -474,12 +513,33 @@ export async function runBrokerScenario(
     summary.error = errorMessage(error);
   } finally {
     try {
-      if (!options.dryRun) {
-        await ctx.fake?.cleanup();
+      if (!options.dryRun && (scenario.class === "fake" || running)) {
+        if (scenario.class === "device" && ctx.deviceOps) {
+          const cleanupErrors: string[] = [];
+          for (const c of [...ctx.clients].reverse()) {
+            try {
+              await ctx.record("proxy/close", { client: c.name }, () => ctx.deviceOps!.close(c));
+            } catch (error) {
+              // Continue closing sibling proxies; report every failure in the redacted summary.
+              cleanupErrors.push(errorMessage(error));
+            }
+          }
+          assert.equal(cleanupErrors.length, 0, cleanupErrors.join("; "));
+          for (const row of ctx.ledger.devices()) {
+            assert(
+              ctx.ledger.hasEvent(row, "absent"),
+              "Scenario left an unverified release receipt/absence.",
+            );
+          }
+        } else {
+          await ctx.fake?.cleanup();
+        }
       }
     } catch (error) {
       summary.outcome = "failed";
-      summary.error = errorMessage(error);
+      summary.error = summary.error
+        ? `${summary.error}; cleanup: ${errorMessage(error)}`
+        : errorMessage(error);
     }
     summary.durationMs = ctx.timer.now() - startedAt;
     summary.ledgerDeltas = ctx.ledger.entries.slice(firstRow);

@@ -99,6 +99,8 @@ data class PrototypeRequest(
    * The window type; changing it on a shown prototype adds a new window rather than relayouting.
    */
   val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
+  /** Names the window so the hierarchy can attribute it to this surface. */
+  val surfaceId: String? = null,
   /**
    * The prototype outlives its host session (#10494); non-fullscreen windows carry a close control.
    * The controller defaults persistent fullscreen specs to the bar unless chrome is explicit.
@@ -331,11 +333,13 @@ class DefaultPrototypeHost(
       if (destroyed || isBlocked() || request.isSuspended()) return@section false
       val current = window
       // An in-place update keeps the window's own display target; a fresh context per update would
-      // be created on every non-default-display request only to be discarded. A window's type
-      // cannot change after it is added, so a layer change attaches a new window like a display
-      // change.
+      // be created on every non-default-display request only to be discarded. A window's type and
+      // accessibility title are fixed at add time, so a layer or surface id change attaches a new
+      // window like a display change.
       val inPlace = current?.takeIf {
-        it.displayId == request.displayId && it.request.layer == request.layer
+        it.displayId == request.displayId &&
+          it.request.layer == request.layer &&
+          it.request.surfaceId == request.surfaceId
       }
       val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
       val params =
@@ -348,6 +352,7 @@ class DefaultPrototypeHost(
           imeLift(request),
           hasStackBack = request.hasStackBack,
           opaque = prototypeWindowOpaque(request),
+          surfaceId = request.surfaceId,
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -520,6 +525,7 @@ class DefaultPrototypeHost(
         imeLift(current.request),
         hasStackBack = current.request.hasStackBack,
         opaque = prototypeWindowOpaque(current.request),
+        surfaceId = current.request.surfaceId,
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)

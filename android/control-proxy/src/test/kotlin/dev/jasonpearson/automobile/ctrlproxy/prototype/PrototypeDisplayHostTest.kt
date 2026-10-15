@@ -204,6 +204,40 @@ class PrototypeDisplayHostTest {
     }
 
   @Test
+  fun `same display and layer surface replacement adds a new title before removing the old window`() =
+    runTest {
+      val inner = displays.connect(2)
+      val request = sheet(2).copy(surfaceId = "a")
+      assertTrue(host.show(request))
+      history.clear()
+      assertTrue(host.replace(request.copy(surfaceId = "b")))
+      assertEquals(listOf("add", "remove"), history)
+      assertEquals(
+        listOf("AutoMobile Prototype:a", "AutoMobile Prototype:b"),
+        inner.added.map { it.title },
+      )
+      assertEquals(1, inner.removals)
+      assertTrue(inner.updated.isEmpty())
+      assertTrue(host.relayout())
+      host.setOpacity(70)
+      assertTrue(inner.updated.isEmpty())
+      assertTrue(host.setTextFieldVisible(true))
+      assertEquals("AutoMobile Prototype:b", inner.updated.single().title)
+    }
+
+  @Test
+  fun `same surface id keeps same display and layer updates in place`() = runTest {
+    val inner = displays.connect(2)
+    val request = sheet(2).copy(surfaceId = "a")
+    assertTrue(host.show(request))
+    assertTrue(host.replace(request.copy(opacityPercent = 70)))
+    assertEquals("AutoMobile Prototype:a", inner.added.single().title)
+    assertEquals("AutoMobile Prototype:a", inner.updated.single().title)
+    assertEquals(0, inner.removals)
+    assertEquals(listOf(2), displays.opened)
+  }
+
+  @Test
   fun `an app layer window that cannot be opened attaches nothing`() = runTest {
     val error = runCatching { host.show(sheet(0).copy(layer = PrototypeWindowLayer.APP)) }
     assertEquals("Cannot attach an app-layer window", error.exceptionOrNull()?.message)

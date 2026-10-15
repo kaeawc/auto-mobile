@@ -174,9 +174,11 @@ class PrototypeController(
    * (`prototype_window_metadata_v1`). Null when nothing is showing or the render model cannot be
    * derived, so the host falls back to bounds. A snapshot read off the controller mutex.
    */
-  fun windowMetadata(): PrototypeWindowMetadata? {
-    // Multi-window metadata is a follow-up; report the most recently shown visible surface.
-    val surface = surfaces.values.lastOrNull { it.host.isShowing } ?: return null
+  fun windowMetadata(surfaceId: String? = null): PrototypeWindowMetadata? {
+    // Titled windows identify their surface; legacy windows use the most recently shown one.
+    val surface =
+      (if (surfaceId != null) surfaces[surfaceId]?.takeIf { it.host.isShowing }
+      else surfaces.values.lastOrNull { it.host.isShowing }) ?: return null
     val runtime = surface.runtime
     return try {
       val current = runtime.current
@@ -473,7 +475,12 @@ class PrototypeController(
   ): Surface {
     val validated = validate(spec)
     val request =
-      render(validated).copy(displayId = displayId, chrome = prototypeWindowChrome(validated))
+      render(validated)
+        .copy(
+          displayId = displayId,
+          chrome = prototypeWindowChrome(validated),
+          surfaceId = validated.id,
+        )
     requireDisplayAvailable(displayId)
     requireLayerPermitted(request.layer)
     val previous = surfaces[spec.id]

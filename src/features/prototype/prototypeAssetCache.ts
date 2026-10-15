@@ -63,7 +63,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
   private async readIndex(directory: string): Promise<Entry[]> {
     let bytes: Uint8Array;
     try {
-      bytes = await this.files.readFile(path.join(directory, "index.json"));
+      bytes = await this.files.readFile(path.posix.join(directory, "index.json"));
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -88,17 +88,17 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
 
   private async writeIndex(directory: string, entries: Entry[]): Promise<void> {
     await this.files.mkdir(directory);
-    const stage = path.join(directory, `index.json.${this.idGenerator.next()}.tmp`);
+    const stage = path.posix.join(directory, `index.json.${this.idGenerator.next()}.tmp`);
     await this.files.writeFile(stage, JSON.stringify(indexSchema.parse({ version: 1, entries })));
-    await this.files.rename(stage, path.join(directory, "index.json"));
+    await this.files.rename(stage, path.posix.join(directory, "index.json"));
   }
   private async cleanBlobs(directory: string, entries: Entry[]): Promise<void> {
-    const blobs = path.join(directory, "blobs");
+    const blobs = path.posix.join(directory, "blobs");
     await this.files.mkdir(blobs);
     const referenced = new Set(entries.map((entry) => entry.sha256));
     for (const blob of await this.files.sortedReaddirEntries(blobs)) {
       if (!referenced.has(blob.name)) {
-        await this.files.rm(path.join(blobs, blob.name));
+        await this.files.rm(path.posix.join(blobs, blob.name));
       }
     }
   }
@@ -110,7 +110,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
         logger.warn(`[PROTOTYPE] Asset ${snapshot.id} exceeds prototype asset cache byte limit`);
         return;
       }
-      const directory = path.join(this.rootDir(), segment(serial));
+      const directory = path.posix.join(this.rootDir(), segment(serial));
       const entries = (await this.readIndex(directory)).filter((entry) => entry.id !== snapshot.id);
       const hash = sha256(snapshot.bytes);
       entries.push({
@@ -132,11 +132,11 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
         }
         entries.splice(oldest, 1);
       }
-      const blobs = path.join(directory, "blobs");
+      const blobs = path.posix.join(directory, "blobs");
       await this.files.mkdir(blobs);
       const existing = await this.files.sortedReaddirEntries(blobs);
       if (!existing.some((blob) => blob.name === hash)) {
-        const destination = path.join(blobs, hash);
+        const destination = path.posix.join(blobs, hash);
         const stage = `${destination}.${this.idGenerator.next()}.tmp`;
         await this.files.writeFile(stage, snapshot.bytes);
         await this.files.rename(stage, destination);
@@ -147,7 +147,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
   }
   get(serial: string, id: string): Promise<PrototypeAssetUpload | undefined> {
     return this.serialize(async () => {
-      const directory = path.join(this.rootDir(), segment(serial));
+      const directory = path.posix.join(this.rootDir(), segment(serial));
       const entries = await this.readIndex(directory);
       const entry = entries.find((candidate) => candidate.id === id);
       if (!entry) {
@@ -155,7 +155,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
       }
       let bytes: Uint8Array;
       try {
-        bytes = await this.files.readFile(path.join(directory, "blobs", entry.sha256));
+        bytes = await this.files.readFile(path.posix.join(directory, "blobs", entry.sha256));
         if (bytes.length !== entry.size || sha256(bytes) !== entry.sha256) {
           throw new Error("Asset cache blob does not match its content hash or size");
         }
@@ -186,7 +186,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
     return this.serialize(
       async () =>
         new Set(
-          (await this.readIndex(path.join(this.rootDir(), segment(serial)))).map(
+          (await this.readIndex(path.posix.join(this.rootDir(), segment(serial)))).map(
             (entry) => entry.id,
           ),
         ),
@@ -194,7 +194,7 @@ export class FilePrototypeAssetCache implements PrototypeAssetCache {
   }
   remove(serial: string, id: string): Promise<void> {
     return this.serialize(async () => {
-      const directory = path.join(this.rootDir(), segment(serial));
+      const directory = path.posix.join(this.rootDir(), segment(serial));
       const entries = (await this.readIndex(directory)).filter((entry) => entry.id !== id);
       await this.writeIndex(directory, entries);
       await this.cleanBlobs(directory, entries);

@@ -66,6 +66,40 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
 }
 
 describe("scopeHierarchyToLayer (#9305)", () => {
+  test("three prototype windows are all scoped by window id", () => {
+    const hierarchy = capturedPrototypeHierarchy({
+      prototypeId: "a",
+      prototypePlacement: "fullscreen",
+    });
+    const prototype = hierarchy.windows!.find((window) => window.id === PROTOTYPE_WINDOW_ID)!;
+    const root = windowRoot(hierarchy, PROTOTYPE_WINDOW_ID);
+    const extra = [
+      { id: 9001, prototypeId: "b", prototypePlacement: "sheet" as const },
+      { id: 9002, prototypeId: "c", prototypePlacement: "floating" as const },
+    ];
+    hierarchy.windows = [
+      ...hierarchy.windows!.filter(
+        (window) => window.id === APP_WINDOW_ID || window.id === PROTOTYPE_WINDOW_ID,
+      ),
+      ...extra.map((window) => ({ ...prototype, ...window })),
+    ];
+    hierarchy.hierarchy = {
+      ...hierarchy.hierarchy,
+      node: [
+        ...windowRoots(hierarchy).filter(
+          (window) => window.windowId === APP_WINDOW_ID || window.windowId === PROTOTYPE_WINDOW_ID,
+        ),
+        ...extra.map((window) => ({ ...root, windowId: window.id })),
+      ],
+    };
+    const prototypeLayer = scopeHierarchyToLayer(hierarchy, "prototype");
+    expect(rootWindowIds(prototypeLayer)).toEqual([PROTOTYPE_WINDOW_ID, 9001, 9002]);
+    expect(prototypeLayer.windows!.map((window) => window.prototypeId)).toEqual(["a", "b", "c"]);
+    const appLayer = scopeHierarchyToLayer(hierarchy, "app");
+    expect(rootWindowIds(appLayer)).toEqual([APP_WINDOW_ID]);
+    expect(appLayer.windows!.map((window) => window.id)).toEqual([APP_WINDOW_ID]);
+  });
+
   test("the relabelled capture is recognized as having the prototype", () => {
     expect(hasOwnPrototype(captureWithPrototype())).toBe(true);
     expect(hasOwnPrototype(convertedCapture())).toBe(false);

@@ -12,7 +12,7 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
   failRenameTo: string | undefined;
   async mkdir(directory: string): Promise<void> {
     this.directories.add(directory);
-    const parent = path.dirname(directory);
+    const parent = path.posix.dirname(directory);
     if (parent !== directory) {
       await this.mkdir(parent);
     }
@@ -21,7 +21,7 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     if (this.failWrite || (this.failWriteTo && file.endsWith(this.failWriteTo))) {
       throw new Error("write failed");
     }
-    if (!this.directories.has(path.dirname(file))) {
+    if (!this.directories.has(path.posix.dirname(file))) {
       throw new Error("missing directory");
     }
     this.files.set(file, typeof data === "string" ? new TextEncoder().encode(data) : data.slice());
@@ -43,24 +43,24 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     return [
       ...new Set(
         [...this.directories, ...this.files.keys()]
-          .filter((file) => file !== directory && path.dirname(file) === directory)
-          .map((file) => path.basename(file)),
+          .filter((file) => file !== directory && path.posix.dirname(file) === directory)
+          .map((file) => path.posix.basename(file)),
       ),
     ]
       .sort(compareCodeUnits)
       .map((name) => ({
         name,
-        isDirectory: () => this.directories.has(path.join(directory, name)),
+        isDirectory: () => this.directories.has(path.posix.join(directory, name)),
       }));
   }
   async rm(target: string): Promise<void> {
     for (const file of this.files.keys()) {
-      if (file === target || file.startsWith(target + path.sep)) {
+      if (file === target || file.startsWith(target + path.posix.sep)) {
         this.files.delete(file);
       }
     }
     for (const directory of this.directories) {
-      if (directory === target || directory.startsWith(target + path.sep)) {
+      if (directory === target || directory.startsWith(target + path.posix.sep)) {
         this.directories.delete(directory);
       }
     }
@@ -82,9 +82,9 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     if (this.directories.has(to)) {
       throw new Error("target exists");
     }
-    const files = [...this.files].filter(([file]) => file.startsWith(from + path.sep));
+    const files = [...this.files].filter(([file]) => file.startsWith(from + path.posix.sep));
     const directories = [...this.directories].filter(
-      (dir) => dir === from || dir.startsWith(from + path.sep),
+      (dir) => dir === from || dir.startsWith(from + path.posix.sep),
     );
     await this.rm(from);
     for (const [file, bytes] of files) {

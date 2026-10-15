@@ -106,6 +106,7 @@ fun prototypeLayoutParams(
   imeLiftPx: Int = 0,
   hasStackBack: Boolean = false,
   opaque: Boolean = false,
+  surfaceId: String? = null,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -121,7 +122,7 @@ fun prototypeLayoutParams(
       else PixelFormat.TRANSLUCENT,
     )
     .apply {
-      title = PROTOTYPE_WINDOW_TITLE
+      title = prototypeWindowTitle(surfaceId)
       when (placement) {
         is PrototypePlacement.Fullscreen -> {
           width = match

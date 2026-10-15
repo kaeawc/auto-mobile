@@ -31,6 +31,13 @@ function harness() {
   };
 }
 describe("saved prototype mirror", () => {
+  test("fake filesystem keys are POSIX paths on every platform", async () => {
+    const { mirror, fs } = harness();
+    await mirror.record("emulator-5554", entry);
+    const keys = [...fs.files.keys(), ...fs.directories];
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.every((key) => key.startsWith("/") && !key.includes("\\"))).toBe(true);
+  });
   test("lists entries in sorted directory order regardless of write order", async () => {
     const { mirror } = harness();
     const ids = ["one", "two", "three"].sort((a, b) => {

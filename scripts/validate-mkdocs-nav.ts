@@ -29,6 +29,8 @@ const EXCLUDED_FILES = new Set([
   "design-docs/mcp/daemon/screen-control-mapping.md",
   "design-docs/plat/android/system-tray-lookfor.md",
   "design-docs/plat/android/accessibility-data-sensitive-windows.md",
+  "design-docs/plat/android/android-17-target-sdk-audit.md",
+  "design-docs/plat/android/android17-playground-audit.md",
   "release/ios-simulator-continuity.md",
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",

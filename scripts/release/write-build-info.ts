@@ -105,6 +105,7 @@ if (import.meta.main) {
     });
     const output = resolve(root, "dist/build-info.json");
     writeFileSync(output, `${JSON.stringify(info, null, 2)}\n`);
-    console.log(output);
+    // stderr: npm captures lifecycle stdout ahead of `npm pack --json` output.
+    console.error(output);
   }
 }

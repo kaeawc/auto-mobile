@@ -1,3 +1,8 @@
+import {
+  PROTOTYPE_ACTION_TYPES,
+  actionSchema,
+} from "../../../src/features/prototype/prototypeSpec";
+import { PROTOTYPE_EVENT_KINDS } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -17,8 +22,9 @@ const contractNodes = contract.definitions.node.variants as unknown as Record<
 
 /** The Zod node union, unwrapped from its lazy wrapper, keyed by node type. */
 function zodNodeShapes(): Map<string, string[]> {
-  const union = (prototypeNodeSchema as unknown as z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>)
-    .schema;
+  const union = (
+    prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
+  ).innerType().schema;
   const shapes = new Map<string, string[]>();
   for (const option of union.options as z.AnyZodObject[]) {
     const type = (option.shape.type as z.ZodEnum<[string]>).options[0];
@@ -29,6 +35,7 @@ function zodNodeShapes(): Map<string, string[]> {
 
 // Every node carries these; a node type added without one is the #10557 crossing again.
 const COMMON_NODE_FIELDS = [
+  "span",
   "id",
   "testTag",
   "contentDescription",
@@ -41,11 +48,28 @@ const COMMON_NODE_FIELDS = [
   "safeAreaPadding",
 ];
 
+const GESTURE_NODE_TYPES = ["box", "row", "column", "text", "image", "icon", "card"];
+const GESTURE_NODE_FIELDS = ["onLongPress", "onDoubleTap"];
+
 function spec(root: Record<string, unknown>, state: Record<string, unknown> = {}) {
   return { id: "panel", window: { placement: { type: "fullscreen" } }, state, root };
 }
 
 describe("prototype node contract parity", () => {
+  test("searchBar exposes its exact wire fields in both contracts", () => {
+    const candidate = spec(
+      {
+        type: "searchBar",
+        stateKey: "query",
+        activeKey: "active",
+        child: { type: "text", text: "Result" },
+      },
+      { query: "", active: true },
+    );
+    expect(validatePrototypeSpec(candidate).success).toBe(true);
+    expect(prototypeSpecSchema.safeParse(candidate).success).toBe(true);
+    expect(contractNodes.searchBar).toBeDefined();
+  });
   test("the Zod schema and the shared contract list the same node types", () => {
     expect([...zodNodeShapes().keys()].sort()).toEqual([...PROTOTYPE_NODE_TYPES].sort());
     expect(Object.keys(contractNodes).sort()).toEqual([...PROTOTYPE_NODE_TYPES].sort());
@@ -55,11 +79,17 @@ describe("prototype node contract parity", () => {
     const contractFields = Object.keys(contractNodes[type].fields).sort();
     expect(zodNodeShapes().get(type)).toEqual(contractFields);
     expect(contractFields).toEqual(expect.arrayContaining(COMMON_NODE_FIELDS));
+    for (const field of GESTURE_NODE_FIELDS) {
+      const supported = GESTURE_NODE_TYPES.includes(type);
+      expect(contractFields.includes(field)).toBe(supported);
+      expect(zodNodeShapes().get(type)?.includes(field)).toBe(supported);
+    }
   });
 
   test("style has the same fields in Zod and the contract", () => {
-    const union = (prototypeNodeSchema as unknown as z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>)
-      .schema;
+    const union = (
+      prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
+    ).innerType().schema;
     const box = (union.options as z.AnyZodObject[])[0];
     const style = (box.shape.style as z.ZodOptional<z.AnyZodObject>).unwrap();
     const contractStyle = contract.definitions.style.fields as unknown as ContractFields;
@@ -167,5 +197,47 @@ test("spec, repeat, and condition field sets stay in step with the data contract
     const candidate = { ...valid, root: { type: "text", text: "x", visibleWhen: condition } };
     expect(prototypeSpecSchema.safeParse(candidate).success).toBe(false);
     expect(validatePrototypeSpec(candidate).success).toBe(false);
+  }
+});
+
+test.each(["menu", "select"])("%s participates in common node contract parity", (type) => {
+  expect(PROTOTYPE_NODE_TYPES).toContain(type);
+  expect(Object.keys(contractNodes[type].fields)).toEqual(
+    expect.arrayContaining(COMMON_NODE_FIELDS),
+  );
+});
+
+test("stack actions and events agree with the shared contract", () => {
+  expect(Object.keys(contract.definitions.action.variants).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect(actionSchema.options.map((option) => option.shape.type.options[0]).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect([...contract.eventKinds].sort()).toEqual([...PROTOTYPE_EVENT_KINDS].sort());
+});
+
+test("emit context Zod and record contract agree on binding forms and entry limits", () => {
+  const candidate = (context: unknown) =>
+    spec({ type: "text", text: "x", onTap: [{ type: "emit", name: "pick", context }] });
+  for (const context of [
+    { a: { state: "count" } },
+    { a: { data: "/row" } },
+    { a: { value: [true, null] } },
+    {},
+    Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`e${i}`, { value: i }])),
+  ]) {
+    expect(prototypeSpecSchema.safeParse(candidate(context)).success).toBe(true);
+    expect(validatePrototypeSpec(candidate(context)).success).toBe(true);
+  }
+  for (const context of [
+    { "": { value: 1 } },
+    { a: { index: false } },
+    { a: { state: "x", value: 1 } },
+    { a: { unknown: 1 } },
+    Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`e${i}`, { value: i }])),
+  ]) {
+    expect(prototypeSpecSchema.safeParse(candidate(context)).success).toBe(false);
+    expect(validatePrototypeSpec(candidate(context)).success).toBe(false);
   }
 });

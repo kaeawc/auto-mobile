@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeImageNode
 import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 
 /**
  * What a nav item draws, decided without Compose or Android. An item's `image` takes precedence;
@@ -49,7 +50,10 @@ fun prototypeContentScale(name: String): ContentScale =
 private fun prototypeFontAssetReferences(node: PrototypeNode): List<String> =
   (listOfNotNull(node.style) + node.styleWhen.orEmpty().map { it.style }).mapNotNull {
     (it.fontFamily as? PrototypeFontFamily.Asset)?.id
-  }
+  } +
+    (node as? PrototypeTextNode)?.spans.orEmpty().mapNotNull {
+      (it.style?.fontFamily as? PrototypeFontFamily.Asset)?.id
+    }
 
 /**
  * Every asset id the tree references, in first-use order without repeats: `image` nodes and the

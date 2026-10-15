@@ -39,6 +39,8 @@ setup() {
     'set -euo pipefail' \
     'printf "%s\n" "${AUTOMOBILE_TRIM_BUNDLED_DEPS:-unset}" > "$PACK_ENV"' \
     'touch automobile-cleanroom-fixture.tgz' \
+    '[[ -z "${PACK_NOISE:-}" ]] || printf "%s\n" "$PACK_NOISE"' \
+    '[[ -z "${PACK_EMPTY:-}" ]] || { printf "[]\n"; exit 0; }' \
     'printf "%s\n" "[{\"filename\":\"automobile-cleanroom-fixture.tgz\"}]"' > "$FAKE_BIN/npm"
   chmod +x "$FAKE_BIN/npm"
 
@@ -84,6 +86,24 @@ setup() {
   [ "$(cat "$PACK_ENV")" = true ]
   [ "$(sed -n '2p' "$SMOKE_ARGS")" = "$CONSUMER_DIR/node_modules/@kaeawc/auto-mobile" ]
   [ "$(cat "$STEP_LOG")" = "$(printf 'assert\nsmoke')" ]
+}
+
+@test "lifecycle stdout ahead of npm pack JSON does not break the tarball parse" {
+  run env PATH="$FAKE_BIN:$PATH" ASSERT_ARGS="$ASSERT_ARGS" \
+    PACK_NOISE="/home/runner/work/auto-mobile/dist/build-info.json" \
+    CLEANROOM_CONSUMER_DIR="$CONSUMER_DIR" CLEANROOM_CACHE_DIR="$CACHE_DIR" \
+    MKTEMP_COUNTER="$COUNTER" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -Fq 'Packed artifact: automobile-cleanroom-fixture.tgz' "$LOG_FILE"
+}
+
+@test "pack output without exactly one tarball fails with a clear message" {
+  run env PATH="$FAKE_BIN:$PATH" ASSERT_ARGS="$ASSERT_ARGS" PACK_EMPTY=1 \
+    CLEANROOM_CONSUMER_DIR="$CONSUMER_DIR" CLEANROOM_CACHE_DIR="$CACHE_DIR" \
+    MKTEMP_COUNTER="$COUNTER" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exactly one tarball"* ]]
+  rm -f "$REPO_ROOT/automobile-cleanroom-fixture.tgz"
 }
 
 @test "smoke failure fails gate and cleans artifacts" {

@@ -507,6 +507,124 @@ Swift dictionary keys compare by canonical equivalence, unlike the host and Andr
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
 
+## Text field options
+
+Text fields render via SwiftUI and require `prototype_text_field_options_v1` for the
+optional host contract fields. The agent draws `variant: "outlined"` as a rounded outline
+around a standard SwiftUI TextField and draws a floating `label` as a non-animating caption
+above it. These substituted constructs produce `textField.variant` and `textField.label`
+platformNotes until `prototype_text_field_material_style_v1` is advertised (iOS does not
+advertise it today). `maxLength` draws a counter and produces no platform note.
+
+Open question: secure values remain in state and `change` events/`inspect`; this slice
+does not redact them. Platform implementation follows in a later pass.
+
+## Flow and grid contract (not device-verified)
+
+`prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support
+children and repeat, with normal node/depth budgets. Flow's optional integer
+`maxLines >= 1` clips overflow visually without removing hierarchy children.
+`style.spacing` is the item gap; finite nonnegative `style.runSpacing` is the
+line/row gap and has the same bounds as spacing (meaningful only on flow/grid).
+Grid requires integer `columns` in 1..12 or `{minWidth: dp}` (finite, > 0).
+Spacing applies to both axes unless runSpacing overrides the row gap. Grid is
+always non-lazy, preserves every child in the hierarchy, and never scrolls
+itself; authors wrap it in `scroll`. Row-major placement starts a new row when
+a child's span does not fit. Optional integer `span >= 1` is valid only on a
+direct grid child and cannot exceed fixed columns; the renderer clamps spans
+to the resolved runtime count. Shared fixtures define host validation behavior.
+
+### Optional pager layout
+
+The shared pager contract (#12071) adds `axis` (horizontal by default), `pageSpacing`
+(default 0), strict `peek: {start?, end?}` (each default 0; `{}` is a no-op), and
+`pageSize` (`"fill"` by default or strict `{dp}`). Distances are finite points on iOS:
+spacing and peek are 0..10000, and fixed size is 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Any explicit option requires `prototype_pager_options_v1`; the host refuses older agents
+with a relaunch hint. iOS renders non-default options with a native view-aligned ScrollView,
+lazy horizontal/vertical stacks, scroll content margins and viewport or fixed page frames.
+Pagers whose options all resolve to defaults (including explicit horizontal axis, zero
+spacing, empty or zero peek, and fill page size) retain the paged TabView / wrap-size drag path. A vertical pager cannot
+have any vertical scroll ancestor (omitted scroll axis is vertical). Current page means
+the first fully visible page; page events, placeholders and navigation bindings keep
+their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
+Indicator and carousel remain deferred.
+
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. A node with only `onLongPress` and/or `onDoubleTap` does not
+consume single taps: the nearest ancestor's `onTap` runs. All three lists may coexist. The
+single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
+fires immediately. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.
+
+## Search bar contract (#12069)
+
+The shared `searchBar` node requires a string `stateKey` initialized in state.
+It accepts optional `placeholder`, catalog `leadingIcon`, one or two
+`trailingActions` (`{icon, label, onTap?}` with a nonempty accessibility label),
+boolean-state `activeKey`, `variant` (`bar` by default or `docked`), `onSubmit`
+actions and a single `child`. A child requires activeKey; true shows it. Bar
+expands to fill its parent; docked stays in place with results under the field.
+Typing shares the text-field state-write and `change` event path; keyboard search
+runs onSubmit. A visible bar counts as a text field for focus and host sendKeys.
+All ordinary child/action validation and template walks apply.
+
+The later iOS agent implementation must advertise `prototype_search_bar_v1`.
+Until then the host refuses show and patch results using searchBar before any
+device request. SwiftUI draws the field in the prototype window: leading
+magnifying glass, text field, clear button when nonempty, and trailing actions.
+Do not use `.searchable`, which requires a NavigationStack. Icons map through the
+existing SF Symbols mapping and never use Android Material glyphs. `platformNotes`
+reports the drawn-field and SF Symbol differences. Results are ordinary observable
+child nodes inside the prototype window, not a separate popup/dialog or a lazy
+list that drops rows.
+
+## Rich text
+
+A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.
+Spans are strict `{text, style?, onTap?}` objects with nonempty, untrimmed text; whitespace is valid.
+Span style accepts only color, fontWeight, fontStyle, textDecoration, textSize, letterSpacing,
+fontFamily and background, with the same ranges as node style; background is a colour, never a gradient.
+There are no span ids, testTags, visibility conditions, nested spans or URLs.
+Each span uses the same state `{key}`, data `{data:/pointer}`, repeat `{item.field}` / `{index}`
+and component `{props.x}` binding as node text; span actions bind like node onTap actions.
+The resolved texts concatenate in order without separators: observe and accessibility show the
+full plain text (an explicit node contentDescription still overrides its accessible label).
+Spans do not count as nodes and require `prototype_rich_text_v1`; older devices are refused before show.
+A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
+On Android, activate it with `tapOn {accessibilityLink:"<span text>"}` or
+`tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}` without `layer`:
+these selectors act across windows because tapOn refuses layer with accessibilityLink/subtext (#9305).
+Use `tapAt` on the span bounds as the fallback.
+On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
+`rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+Owed device checks (later platform passes): advertise the capability only after renderer support;
+verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,
+Android semanticLinks and both selectors across windows, and iOS tapAt-only links plus platformNotes.
+The shared contract caps spans at 64 per text node. Host tests do not verify device rendering.
+
+## Menu and select
+
+`menu` and `select` require `prototype_menus_v1`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
+
+A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
+
+A `select` requires a string `stateKey` and 2–32 `{value,label}` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same `change` payload as `radioGroup`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable `use` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
+
+Rendering stays inside the prototype window on both platforms so `observe` and `tapOn` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in `platformNotes`. Menu icons use the existing SF Symbols mapping on iOS.
+
+The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
+
 ## Saved prototype on-disk layout (#12254)
 
 One saved prototype lives in the viewer app container:

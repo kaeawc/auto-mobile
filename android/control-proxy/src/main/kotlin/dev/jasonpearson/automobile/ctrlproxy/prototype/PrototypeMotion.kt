@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
+import dev.jasonpearson.automobile.protocol.PrototypeGridNode
 import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 
 /**
@@ -104,6 +106,8 @@ internal fun prototypeContainerAnimatesSize(node: PrototypeRenderNode): Boolean 
       is PrototypeBoxNode -> source.repeat != null
       is PrototypeRowNode -> source.repeat != null
       is PrototypeColumnNode -> source.repeat != null
+      is PrototypeFlowNode -> source.repeat != null
+      is PrototypeGridNode -> source.repeat != null
       else -> false
     }
   return repeats || prototypeChildrenChangeVisibility(node)

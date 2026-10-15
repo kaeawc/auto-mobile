@@ -304,6 +304,18 @@ enum PrototypePatch {
                 }
             }
         }
+        if case let .object(screens)? = get(node, "screens") {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if case let .object(child)? = screens[name] {
+                    result += tree(
+                        child,
+                        tokens: tokens + ["screens", name],
+                        path: PrototypeStacks.screenPath(path, name: name),
+                        insideRepeat: repeated
+                    )
+                }
+            }
+        }
         return result
     }
 
@@ -329,6 +341,13 @@ enum PrototypePatch {
             for (index, value) in children.enumerated() {
                 if case let .object(child) = value {
                     try checkSubtree(child, path: "\(path).children[\(index)]")
+                }
+            }
+        }
+        if case let .object(screens)? = get(node, "screens") {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if case let .object(child)? = screens[name] {
+                    try checkSubtree(child, path: PrototypeStacks.screenPath(path, name: name))
                 }
             }
         }

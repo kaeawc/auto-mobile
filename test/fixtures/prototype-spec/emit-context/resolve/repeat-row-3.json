@@ -1,0 +1,79 @@
+{
+  "name": "repeat-row-3",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": 1,
+            "active": true,
+            "title": "A"
+          },
+          {
+            "id": 2,
+            "active": false,
+            "title": "B"
+          },
+          {
+            "id": 3,
+            "active": true,
+            "title": "C"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Emit",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "pick",
+              "context": {
+                "id": {
+                  "item": "id"
+                },
+                "active": {
+                  "item": "active"
+                },
+                "title": {
+                  "item": "title"
+                },
+                "row": {
+                  "index": true
+                },
+                "liked": {
+                  "state": "liked_{item.id}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "state": {
+    "liked_3": true
+  },
+  "pages": {},
+  "data": {},
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "id": 3,
+      "active": true,
+      "title": "C",
+      "row": 2,
+      "liked": true
+    }
+  },
+  "repeatIndex": 2
+}

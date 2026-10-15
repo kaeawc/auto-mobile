@@ -179,6 +179,9 @@ enum PrototypeThemeModes {
         if let child = node.child {
             try visit(child, path: "\(path).child")
         }
+        for entry in node.type == "stack" ? node.childEntries(path: path) : [] {
+            try visit(entry.node, path: entry.path)
+        }
     }
 
     private static func style(_ style: Style?, _ path: String) throws {

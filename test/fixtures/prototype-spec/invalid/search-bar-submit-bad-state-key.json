@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "onSubmit": [
+        {
+          "type": "setState",
+          "key": "bad key",
+          "value": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onSubmit[0].key",
+  "expectedMessage": "Invalid key value"
+}

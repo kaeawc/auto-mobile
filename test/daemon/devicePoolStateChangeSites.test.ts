@@ -7,6 +7,7 @@ import { parseSync } from "oxc-parser";
 const POOL_FAMILY_FILES = [
   "src/daemon/devicePool.ts",
   "src/daemon/deviceReplacement.ts",
+  "src/daemon/explicitDeviceBind.ts",
   "src/daemon/missingDeviceLiveness.ts",
   "src/daemon/sessionPreservingRecovery.ts",
   "src/daemon/adbServerResetQuarantine.ts",

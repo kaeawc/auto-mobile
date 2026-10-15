@@ -376,7 +376,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "PooledDevice LRU order seeded for a newly discovered device, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.assignDeviceToBoundSession": {
+  "src/daemon/explicitDeviceBind.ts ExplicitDeviceBind.assignDeviceToBoundSession": {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },

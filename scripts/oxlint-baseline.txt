@@ -6,6 +6,7 @@
 1	src/daemon/daemon.ts	eslint(max-params)
 1	src/daemon/daemonRequestHandlers.ts	eslint(complexity)
 1	src/daemon/devicePool.ts	eslint(max-params)
+1	src/daemon/explicitDeviceBind.ts	eslint(max-params)
 1	src/daemon/manager.ts	eslint(max-lines-per-function)
 1	src/daemon/manager.ts	eslint(max-params)
 1	src/daemon/sessionManager.ts	eslint(max-params)

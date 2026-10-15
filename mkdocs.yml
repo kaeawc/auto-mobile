@@ -140,6 +140,7 @@ nav:
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
+      - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md

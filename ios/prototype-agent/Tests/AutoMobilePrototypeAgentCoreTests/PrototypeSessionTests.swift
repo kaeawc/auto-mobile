@@ -305,13 +305,14 @@ final class PrototypeSessionTests: XCTestCase {
             name: nil,
             payload: .array([.bool(true), .null]),
             state: ["k": .string("v")],
-            pages: ["p": 1]
+            pages: ["p": 1],
+            stacks: [:]
         )
         let data = try JSONSerialization.data(withJSONObject: event.wireObject(timestamp: 9), options: .sortedKeys)
         XCTAssertEqual(
             String(data: data, encoding: .utf8),
             #"{"id":"a","kind":"emit","name":null,"pages":{"p":1},"payload":[true,null],"#
-                + #""sequence":4,"state":{"k":"v"},"timestamp":9,"type":"prototype_event"}"#
+                + #""sequence":4,"stacks":{},"state":{"k":"v"},"timestamp":9,"type":"prototype_event"}"#
         )
     }
 

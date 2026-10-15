@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "variant": "popup"
+    }
+  },
+  "expectedPath": "root.variant",
+  "expectedMessage": "Invalid enum value"
+}

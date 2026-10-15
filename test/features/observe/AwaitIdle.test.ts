@@ -95,6 +95,54 @@ function createAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
 }
 
 describe("AwaitIdle missing frame stats", () => {
+  test("unavailable reads are neutral between no-frame polls", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const awaitIdle = createAwaitIdle(adb, timer);
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    let reads = 0;
+    const read = spyOn(adb, "executeCommand").mockImplementation(async () => {
+      if (++reads % 2 === 0) {
+        throw new Error("gfxinfo unavailable");
+      }
+      return { stdout: noFrameGfxinfoOutput, stderr: "" };
+    });
+    try {
+      const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+      expect(metrics?.stabilityWaitMs).toBeLessThan(2000);
+      expect(metrics).toHaveProperty("idleEndReason", "noFrameStats");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("valid final read clears noFrameStats and retains percentiles", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const awaitIdle = createAwaitIdle(adb, timer);
+    const state = await awaitIdle.initializeUiStabilityTracking("com.example.app", 8000);
+    // Switch only after the poll that triggers the early exit, on the final read.
+    let graceRead = false;
+    const read = spyOn(adb, "executeCommand").mockImplementation(async () => {
+      const final = graceRead;
+      if (timer.now() >= NO_FRAME_STATS_GRACE_MS) {
+        graceRead = true;
+      }
+      return { stdout: final ? validGfxinfoOutput : noFrameGfxinfoOutput, stderr: "" };
+    });
+    try {
+      const metrics = await awaitIdle.waitForUiStabilityWithState("com.example.app", 8000, state);
+      expect(metrics?.isStable).toBe(false);
+      expect(metrics?.stabilityWaitMs).toBeLessThan(2000);
+      expect(metrics?.percentile95thMs).toBe(15.7);
+      expect(metrics).not.toHaveProperty("idleEndReason");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   test("ends an 8000ms wait early after both the poll and elapsed grace", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

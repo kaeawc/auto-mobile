@@ -1,10 +1,81 @@
+import {
+  DaemonLifecycleReconciler,
+  runPreflightTransport,
+} from "./proxy/DaemonLifecycleReconciler";
+import {
+  DaemonToolOutcomeUnknownError,
+  LifecycleConnectionInFlightError,
+  DaemonVersionMismatchError,
+  DaemonBuildMismatchError,
+  DaemonAssetVersionMismatchError,
+  DaemonBoundSessionExpiredError,
+  DaemonSessionStalledError,
+  DaemonConnectionSessionReleasedError,
+  DaemonAmbiguousSessionSelectorError,
+  DaemonToolUnavailableError,
+  daemonInternalErrors,
+  type VersionMismatchReason,
+  type BuildMismatchReason,
+} from "./proxy/daemonErrors";
+export {
+  DaemonToolOutcomeUnknownError,
+  LifecycleConnectionInFlightError,
+  DaemonVersionMismatchError,
+  DaemonBuildMismatchError,
+  DaemonAssetVersionMismatchError,
+  DaemonBoundSessionExpiredError,
+  DaemonSessionStalledError,
+  DaemonConnectionSessionReleasedError,
+  DaemonAmbiguousSessionSelectorError,
+  DaemonToolUnavailableError,
+  type VersionMismatchReason,
+  type BuildMismatchReason,
+} from "./proxy/daemonErrors";
+import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
+import {
+  ProxySessionState,
+  type OtherHeldSession,
+  type StallHandoverRecord,
+  type TerminalBoundSession,
+} from "./proxy/ProxySessionState";
+import {
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  decideNotFoundAnswer,
+  isRecoverableHandoffOfOwnedSession,
+  type NotFoundAnswerOutcome,
+} from "./proxy/notFoundDecision";
+export {
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  UNREHYDRATED_HANDOFF,
+  decideNotFoundAnswer,
+  type NotFoundAnswerOutcome,
+  type NotFoundAnswerFacts,
+} from "./proxy/notFoundDecision";
+import {
+  reportedOwnerHold,
+  isLivenessOwnerConflictError,
+  isDaemonInstanceChangedError,
+  isLivenessOwnershipLostError,
+  ackDaemonInstance,
+} from "./proxy/livenessErrorPredicates";
+import {
+  heartbeatIntervalMs,
+  heartbeatRequestTimeoutMs,
+  resolveLivenessOwnerToken,
+  stableLivenessOwnerToken,
+  heartbeatLeashMs,
+} from "./proxy/heartbeatCadence";
+export {
+  REUSE_CRITICAL_OPTION_KEYS,
+  STARTUP_OPTION_DEFICIT_KEYS,
+  startupOptionDeficits,
+  mergeDaemonOptions,
+} from "./proxy/startupOptions";
 import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { isMcpQueueTimeoutError } from "./McpTimeoutError";
-import { assertDaemonNamespaceMatchesState } from "./sharedNamespaceGuard";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getRemovedToolHint } from "../models/removedTools";
-import { shellQuote } from "../utils/shellQuote";
 import {
   DaemonBoundSessionLostError,
   DaemonClient,
@@ -23,7 +94,6 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
-  DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
@@ -35,7 +105,6 @@ import {
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-  DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
@@ -46,26 +115,18 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "./constants";
+import { getSessionIdleTimeoutMs } from "./sessionLivenessWindows";
 import {
-  getSessionIdleTimeoutMs,
-  NO_HEARTBEAT_RELEASE_BUDGET_MS,
-  PROXY_HEARTBEAT_INTERVAL_MS,
-} from "./sessionLivenessWindows";
-import {
-  DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   releaseReasonFromError,
   daemonInstanceFromError,
-  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
+  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
-  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   PROGRESS_NOTIFICATION_METHOD,
-  RESOURCE_SUBSCRIBE_METHOD,
-  RESOURCE_UNSUBSCRIBE_METHOD,
   type DaemonNotification,
   type DaemonOptions,
   type DaemonStatus,
@@ -77,7 +138,6 @@ import {
 } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
-  DEVICE_SESSION_RECOVERY_PROMPT,
   declaresDeviceSessionInvalid,
   declaresDeviceSessionSuspect,
   readDeviceSessionSuspectRefusal,
@@ -100,27 +160,18 @@ import {
   toolSelectionProfileUuidFromResponse,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
-import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
-import { compareStrictNumericVersions } from "../server/deviceMatcher";
-import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import type { IdGenerator } from "../utils/IdGenerator";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import {
-  getDefaultSessionHeartbeatTimeoutMs,
-  SESSION_REHYDRATION_DEADLINE_MS,
-  type SessionReleaseSnapshot,
-} from "./sessionManager";
+import { type SessionReleaseSnapshot } from "./sessionManager";
 
-/**
- * How long the proxy keeps heartbeating a session the daemon answers not-found for with a
- * recoverable reason (#11461): the restarted daemon's rehydration deadline, plus the time it then
- * gives the session's owner to return before releasing it. Past it the recovery this waits for
- * can no longer be met by a heartbeat, and only a tool call restores the session.
- */
-export const RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS =
-  SESSION_REHYDRATION_DEADLINE_MS + NO_HEARTBEAT_RELEASE_BUDGET_MS;
+const {
+  ManagedExecutionRegistrationError,
+  DaemonPreflightConnectionError,
+  HeldSessionNotFoundError,
+} = daemonInternalErrors;
+
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
 import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
@@ -129,7 +180,6 @@ import {
   type BuildIdentity,
   buildIdentitiesMatch,
   buildIdentityFromStatus,
-  describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
@@ -144,21 +194,19 @@ import { RegistryRetryPacing } from "./managedSlots/registryRetryPacing";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
 import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
-import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
+import { McpOverloadError } from "./McpTimeoutError";
 import {
   getConnectedStaticToolDefinitions,
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
-import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import {
-  isRecoverableDaemonReleaseReason,
   isRecoverableDaemonHandoffReason,
+  isRecoverableDaemonReleaseReason,
   sessionReleaseReasonFamily,
   SESSION_NOT_FOUND_REASON,
   IDLE_WINDOW_RELEASE_REASON,
   REPLAY_LEASE_EXPIRED_REASON,
 } from "./releaseReasons";
-import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
   LivenessRecovery,
@@ -167,7 +215,6 @@ import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
   livenessHandoverMessage,
-  livenessHandoverPayload,
   livenessRecoveryCallWaitMs,
   livenessResumedNotice,
   type DaemonRestartEvidence,
@@ -180,31 +227,6 @@ import {
 } from "./proxyLivenessRecovery";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-
-function isPermanentResourceSubscriptionRejection(error: unknown): boolean {
-  if (error instanceof McpTimeoutError || error instanceof DaemonUnavailableError) {
-    return false;
-  }
-  if (error !== null && typeof error === "object" && "code" in error && error.code !== undefined) {
-    return error.code === -32601 || error.code === -32602;
-  }
-  // These daemon responses currently carry only text, not a structured rejection code.
-  const message = errorMessage(error);
-  return (
-    message.startsWith("Unsupported daemon method: resources/subscribe") ||
-    message === "Resource subscription requires params.uri"
-  );
-}
-export type VersionMismatchReason =
-  | "autoStartDisabled"
-  | "cooldown"
-  | "daemonNewer"
-  | "nonNumeric"
-  | "restartMismatch";
-
-export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
-
-const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 /** The client name a managed slot proxy registers its re-bound connection under (#11178). */
 const MANAGED_SLOT_PROXY_CLIENT_NAME = "auto-mobile-managed-slot-proxy";
@@ -215,12 +237,6 @@ interface ManagedExecutionHold {
   acknowledgedClient?: DaemonClientLike;
 }
 
-/** Preserve the registration boundary so claim refusals keep their narrower retry policy. */
-class ManagedExecutionRegistrationError extends ActionableError {
-  constructor(cause: unknown) {
-    super(`Managed execution registration failed: ${errorMessage(cause)}`, { cause });
-  }
-}
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -242,47 +258,6 @@ export function isDeviceInventoryTool(name: unknown): boolean {
     typeof name === "string" &&
     (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name)
   );
-}
-
-/** A transport failed before dispatch, rather than a reconciliation policy gate. */
-class DaemonPreflightConnectionError extends DaemonUnavailableError {
-  constructor(readonly cause: DaemonUnavailableError) {
-    super(cause.message);
-    this.name = "DaemonPreflightConnectionError";
-  }
-}
-
-/**
- * A non-idempotent `tools/call` failed without structured proof that the daemon
- * never dispatched it (e.g. the connection closed after the request frame was
- * written), so it may already have run on the device. Replaying it could repeat
- * the action (issues #6382, #6383), so the outcome is surfaced instead.
- */
-export class DaemonToolOutcomeUnknownError extends ActionableError {
-  constructor(
-    readonly toolName: string,
-    cause: unknown,
-  ) {
-    super(
-      `The daemon request for ${toolName} failed after it may have been delivered, so it may ` +
-        `or may not have run on the device (${errorMessage(cause)}). It was not retried ` +
-        "automatically to avoid repeating a device action; observe the device state before retrying.",
-      { cause },
-    );
-    this.name = "DaemonToolOutcomeUnknownError";
-  }
-}
-
-/**
- * An observation-only connection (a heartbeat or liveness recovery) found a lifecycle-capable
- * connection attempt in flight and did not join it. Nothing was sent to the daemon, so this is not
- * evidence that the daemon stopped acknowledging heartbeats (#10508).
- */
-export class LifecycleConnectionInFlightError extends DaemonUnavailableError {
-  constructor() {
-    super("Lifecycle-capable daemon connection is in flight; retry observation-only recovery");
-    this.name = "LifecycleConnectionInFlightError";
-  }
 }
 
 /**
@@ -310,44 +285,12 @@ function isSuspectRefusalRetryable(
   );
 }
 
-/** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
 /** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
 interface DaemonIdleReport {
   /** Epoch-ms idle deadline, or null when the daemon explicitly exempts idle release. */
   releaseAt: number | null;
   /** Proxy-clock time the ack carrying it arrived. */
   reportedAt: number;
-}
-
-interface StallHandoverRecord {
-  handover: LivenessHandover;
-  delivered: boolean;
-  /**
-   * The daemon process the stall probe resumes the session on; undefined once that daemon was
-   * found replaced, or when its identity was never reported (#10989).
-   */
-  probeDaemonInstance?: string;
-  /** First instance-change answer; marks a handed-over session reclaiming without a daemon pin. */
-  managedReclaimSince?: number;
-  /**
-   * First awaitable not-found from an answering daemon process; silence never resets it.
-   * Only an answer naming a different defined daemon instance opens a fresh window.
-   */
-  managedNotFoundWindow?: { since: number; daemonInstance: string | undefined };
-  /**
-   * The daemon process that last acknowledged a heartbeat before the handover, kept even after
-   * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
-   */
-  stalledDaemonInstance?: string;
-  /** How the session was held when it was handed over, so a resume restores it as it was. */
-  restore: {
-    /** It was the latest binding. */
-    bound: boolean;
-    /** Replay-lease start (latest binding) or last use (held session). */
-    lastUsedAt: number;
-    /** The latest binding came from `--initial-session-uuid`. */
-    initialBinding: boolean;
-  };
 }
 
 /** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
@@ -368,34 +311,6 @@ function isUnprovenSessionAdmissionError(error: unknown): boolean {
     error instanceof DaemonBoundSessionExpiredError ||
     error instanceof DaemonBoundSessionLostError ||
     error instanceof DaemonToolOutcomeUnknownError
-  );
-}
-
-async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (error instanceof DaemonUnavailableError) {
-      throw new DaemonPreflightConnectionError(error);
-    }
-    throw error;
-  }
-}
-
-function daemonRestartCommand(clientVersion: string, clientBuild?: BuildIdentity): string {
-  if (clientBuild?.entryScript) {
-    return `${shellQuote(process.execPath)} ${shellQuote(clientBuild.entryScript)} --daemon restart`;
-  }
-  const installableVersion = releaseVersion(clientVersion);
-  return installableVersion.length > 0 && installableVersion !== "unknown"
-    ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
-    : "the same installed auto-mobile package";
-}
-
-function startupOptionRecoveryGuidance(): string {
-  return (
-    "Close and relaunch this configured MCP client once so it owns the next bounded " +
-    "reconciliation attempt; do not delete daemon control files manually."
   );
 }
 
@@ -435,68 +350,14 @@ export function resourceUriNamesSession(uri: string): boolean {
   return /^automobile:(?:device-session|observation\/session)\/[^/?#]+/.test(uri);
 }
 
-function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
-  const configuredTimeout = config.heartbeatTimeoutMs;
-  const configuredInterval = config.heartbeatIntervalMs;
-  if (
-    configuredTimeout !== undefined &&
-    (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0)
-  ) {
-    throw new Error("heartbeat timeout must be a positive finite number");
-  }
-  const interval =
-    configuredInterval ??
-    (configuredTimeout === undefined
-      ? DAEMON_MCP_HEARTBEAT_INTERVAL_MS
-      : Math.max(1, Math.floor(configuredTimeout / 2)));
-  if (!Number.isFinite(interval) || interval <= 0) {
-    throw new Error("heartbeat interval must be a positive finite number");
-  }
-  return Math.max(1, interval);
-}
+const NO_HANDOFFS: ReadonlySet<string> = new Set();
 
-/** The owner's hold a conflict refusal reports (#10701); absent from an older daemon. */
-function reportedOwnerHold(error: unknown): ReportedOwnerHold | undefined {
-  if (error === null || typeof error !== "object" || !("livenessOwnerHold" in error)) {
-    return undefined;
-  }
-  const hold = error.livenessOwnerHold;
-  return hold !== null &&
-    typeof hold === "object" &&
-    "holdRemainingMs" in hold &&
-    typeof hold.holdRemainingMs === "number"
-    ? { holdRemainingMs: hold.holdRemainingMs }
-    : undefined;
-}
-
-function isLivenessOwnerConflictError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-  );
-}
-
-/** A probe heartbeat reached a daemon process other than the one that stalled (#10989). */
-function isDaemonInstanceChangedError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === DAEMON_INSTANCE_CHANGED_CODE
-  );
-}
-
-/** The daemon process a heartbeat acknowledgement reports, when it reports one (#10989). */
-function ackDaemonInstance(ack: unknown): string | undefined {
-  return ack !== null &&
-    typeof ack === "object" &&
-    "daemonInstance" in ack &&
-    typeof ack.daemonInstance === "string" &&
-    ack.daemonInstance.length > 0
-    ? ack.daemonInstance
-    : undefined;
+/** The latest binding's keeper heartbeat while it is in flight. */
+interface LatestHeartbeatAsk {
+  /** It was answered not-found, so any further answer is to the second ask. */
+  notFound: boolean;
+  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
+  handoff: boolean;
 }
 
 /**
@@ -535,187 +396,6 @@ function withResumedNotice(
   };
 }
 
-/** The daemon answered that this token no longer owns liveness (#10050, #10260). */
-function isLivenessOwnershipLostError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
-      error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
-  );
-}
-
-/**
- * What a not-found heartbeat answer means for the session it names (#11570). Decided by
- * {@link decideNotFoundAnswer} alone, for the latest binding and every held session alike.
- *
- * - `ended`: the daemon named a release that is not a recoverable handoff of a session this proxy
- *   owns. Terminal for that session only, under that reason.
- * - `awaited`: the session is inside its window (`windowSince`): it keeps being heartbeated, each
- *   heartbeat claiming again, and the connection is never reset for it. `handoff`: the answer is
- *   the first of that handoff, which opens the window now.
- * - `ask-again`: the latest binding, on a connection that had answered before and outside any
- *   window: asked once more on a fresh connection. `handoff`: the daemon named a recoverable
- *   handoff, so the daemon that answers there may be its successor.
- * - `stopped`: no longer heartbeated until a tool call reaches it again; never fenced.
- */
-export type NotFoundAnswerOutcome =
-  | { kind: "ended"; reason: string }
-  | { kind: "awaited"; windowSince: number; handoff?: string }
-  | { kind: "ask-again"; handoff: boolean }
-  | { kind: "stopped" };
-
-/**
- * The handoff a session's answer with no reason belongs to: a daemon the proxy just connected to
- * that has not rehydrated the session yet. A not-found answer names no daemon instance, so every
- * such answer is the same handoff until the daemon acknowledges the session again.
- */
-export const UNREHYDRATED_HANDOFF = "unrehydrated";
-
-/** Everything the outcome of a not-found heartbeat answer depends on. */
-export interface NotFoundAnswerFacts {
-  /** The release reason the daemon gave with the answer, when it gave one. */
-  releaseReason: string | undefined;
-  /** The proxy owns the session: only an owned session is handed back after a recoverable release. */
-  owned: boolean;
-  /**
-   * The answer is the session's first on a connection that was established while the proxy held
-   * it: the daemon behind it may have restarted and not rehydrated the session yet.
-   */
-  establishes: boolean;
-  /** Positive evidence: this session last heard a different reported daemon process instance. */
-  answeredByOtherDaemon: boolean;
-  /** When the session's latest window opened, while it has had one (open or expired). */
-  windowSince: number | undefined;
-  /**
-   * The handoffs the session already got its window for, since the daemon last acknowledged it
-   * or admitted a call under it.
-   */
-  handoffs: ReadonlySet<string>;
-  now: number;
-  /** The heartbeat may be asked once more on a fresh connection (the latest binding's first ask). */
-  mayAskAgain: boolean;
-}
-
-/**
- * Whether a release the daemon reports leaves the session with its owner: only a recoverable
- * handoff (`device-restart:<id>`, a daemon shutdown or restart) of a session this proxy owns,
- * because the daemon hands that session back to the next call.
- */
-function isRecoverableHandoffOfOwnedSession(
-  releaseReason: string | undefined,
-  owned: boolean,
-): boolean {
-  return releaseReason !== undefined && owned && isRecoverableDaemonReleaseReason(releaseReason);
-}
-
-/**
- * The one decision for a not-found heartbeat answer, from the session's own state (#11570).
- *
- * A window belongs to a HANDOFF, never to a connection. A handoff is identified by the
- * recoverable release reason the daemon names (#11461), or, for an answer with no reason that is
- * the session's first on a just-established connection or reports another daemon instance, by
- * {@link UNREHYDRATED_HANDOFF} (#11529, #11557). The first answer of a handoff opens one window of
- * {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}; no later answer of the same handoff opens or
- * extends one, whatever connection it arrives on (a reconnect by liveness recovery or to ask
- * again reaches the same daemon as far as the answer can tell). So a session that is not
- * acknowledged is heartbeated for at most one window per distinct handoff it was actually told
- * of. Inside a window every answer that does not end the session is awaited. Outside one the
- * session is stopped; the latest binding is first asked once more on a fresh connection when it
- * has had no window at all, or when the answer names a handoff it has had no window for yet.
- */
-export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswerOutcome {
-  const { releaseReason, owned, windowSince, now } = facts;
-  const establishes = notFoundAnswerEstablishes(facts);
-  const recoverable = isRecoverableHandoffOfOwnedSession(releaseReason, owned);
-  if (releaseReason !== undefined && !recoverable) {
-    return { kind: "ended", reason: releaseReason };
-  }
-  const open =
-    windowSince !== undefined && now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
-  const handoff = newHandoffOf(facts, recoverable);
-  if (handoff !== undefined) {
-    // A connection that had answered before named the handoff: the daemon is going away or
-    // handing the session back, so the latest binding asks on a fresh one first.
-    return recoverable && !open && !establishes && facts.mayAskAgain
-      ? { kind: "ask-again", handoff: true }
-      : { kind: "awaited", windowSince: now, handoff };
-  }
-  if (open) {
-    return { kind: "awaited", windowSince };
-  }
-  return windowSince === undefined && facts.mayAskAgain
-    ? { kind: "ask-again", handoff: false }
-    : { kind: "stopped" };
-}
-
-/** Both the connection and a changed process instance provide positive establishment evidence. */
-function notFoundAnswerEstablishes(facts: NotFoundAnswerFacts): boolean {
-  return facts.establishes || facts.answeredByOtherDaemon;
-}
-
-/**
- * The handoff a not-found answer that does not end its session tells of, when the session has
- * had no window for it yet: the recoverable release the daemon names, or, with no reason, the
- * one {@link UNREHYDRATED_HANDOFF} when the answer is the session's first on a connection just
- * established or it reports another daemon instance. Undefined for a handoff it already had its
- * window for, and for an answer with no reason on a connection that had answered before and no
- * evidence of another daemon, which tells of none.
- */
-function newHandoffOf(facts: NotFoundAnswerFacts, recoverable: boolean): string | undefined {
-  const handoff = recoverable
-    ? `release:${facts.releaseReason}`
-    : facts.owned && notFoundAnswerEstablishes(facts)
-      ? UNREHYDRATED_HANDOFF
-      : undefined;
-  return handoff === undefined || facts.handoffs.has(handoff) ? undefined : handoff;
-}
-
-const NO_HANDOFFS: ReadonlySet<string> = new Set();
-
-/** The latest binding's keeper heartbeat while it is in flight. */
-interface LatestHeartbeatAsk {
-  /** It was answered not-found, so any further answer is to the second ask. */
-  notFound: boolean;
-  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
-  handoff: boolean;
-}
-
-/**
- * The daemon answered a session's heartbeat with "session not found", and what that means for the
- * session ({@link decideNotFoundAnswer}). Thrown instead of the raw error so the shared reconnect
- * machinery (which resets the one daemon socket and retries "stale session" errors) is not
- * triggered by a per-session answer.
- */
-class HeldSessionNotFoundError extends Error {
-  constructor(
-    readonly sessionUuid: string,
-    readonly outcome: NotFoundAnswerOutcome,
-  ) {
-    // Deliberately not the daemon's "Session not found" wording, which the reconnect machinery matches on.
-    super(`The daemon does not know held session ${sessionUuid}`);
-    this.name = "HeldSessionNotFoundError";
-  }
-}
-
-/** The heartbeat request timeout: how long a heartbeat is given before it counts as unanswered. */
-function heartbeatRequestTimeoutMs(leaseMs: number, intervalMs: number): number {
-  return Math.max(1, Math.min(Math.floor(leaseMs / 2), intervalMs * 2));
-}
-
-/** The harness-supplied stable owner token when given, otherwise a per-process one (#10050). */
-function resolveLivenessOwnerToken(config: DaemonMcpProxyConfig): string {
-  const suppliedToken = config.livenessOwnerToken?.trim();
-  return suppliedToken ? suppliedToken : (config.idGenerator ?? defaultIdGenerator).next();
-}
-
-/** The harness-supplied stable owner token, or undefined when this proxy minted its own. */
-function stableLivenessOwnerToken(config: DaemonMcpProxyConfig): string | undefined {
-  const suppliedToken = config.livenessOwnerToken?.trim();
-  return suppliedToken ? suppliedToken : undefined;
-}
-
 /** A live session the daemon reports this proxy's stable token owns (#10990). */
 const tokenOwnedSessionSchema = z.object({
   sessionId: z.string().min(1),
@@ -739,248 +419,6 @@ function parseTokenOwnedSessions(result: unknown): TokenOwnedSession[] {
     const session = tokenOwnedSessionSchema.safeParse(entry);
     return session.success ? [session.data] : [];
   });
-}
-
-/** The heartbeat lease the proxy believes the daemon enforces on the sessions it holds. */
-function heartbeatLeashMs(config: DaemonMcpProxyConfig): number {
-  return config.heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs();
-}
-
-/**
- * Raised before connecting when the running daemon and MCP client package
- * versions differ but the proxy cannot safely reconcile them immediately.
- */
-export class DaemonVersionMismatchError extends DaemonUnavailableError {
-  readonly clientVersion: string;
-  readonly daemonVersion: string;
-  readonly reason: VersionMismatchReason;
-  readonly retryAfterMs?: number;
-
-  constructor(params: {
-    clientVersion: string;
-    daemonVersion: string;
-    reason: VersionMismatchReason;
-    detail: string;
-    retryAfterMs?: number;
-    clientBuild?: BuildIdentity;
-    daemonBuild?: BuildIdentity;
-  }) {
-    // Use the client's own entrypoint when available. Direct callers that do not
-    // provide build identity retain the published-version fallback.
-    const installableVersion = releaseVersion(params.clientVersion);
-    const restartCommand = daemonRestartCommand(params.clientVersion, params.clientBuild);
-    const unresolvedClientVersion =
-      installableVersion.trim() === "" || installableVersion === "unknown";
-    const retryGuidance = unresolvedClientVersion
-      ? " The client package version could not be resolved. Reinstall or repair the AutoMobile client package, then relaunch this MCP client. Restarting the daemon cannot repair missing client version metadata."
-      : params.retryAfterMs !== undefined
-        ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
-        : ` Restart the daemon from this client's build: ${restartCommand}`;
-    const sameRelease =
-      releaseVersion(params.daemonVersion) === releaseVersion(params.clientVersion) &&
-      params.daemonVersion !== params.clientVersion;
-    const mismatchMessage =
-      sameRelease && params.clientBuild && params.daemonBuild
-        ? `AutoMobile daemon build mismatch: daemon build ${describeBuildIdentity(params.daemonBuild)} != ` +
-          `client build ${describeBuildIdentity(params.clientBuild)} (${params.detail}).${retryGuidance}`
-        : `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
-          `(${params.detail}).${retryGuidance}`;
-    super(mismatchMessage);
-    this.name = "DaemonVersionMismatchError";
-    this.clientVersion = params.clientVersion;
-    this.daemonVersion = params.daemonVersion;
-    this.reason = params.reason;
-    this.retryAfterMs = params.retryAfterMs;
-  }
-}
-
-/**
- * Raised when the running daemon is a *different build* than this client even
- * though the version strings may be identical (e.g. two checkouts that both
- * report a pre-release version sharing one per-uid socket). Detected via the
- * build-identity content hash rather than the version string.
- */
-export class DaemonBuildMismatchError extends DaemonUnavailableError {
-  readonly clientBuildId: string;
-  readonly daemonBuildId: string;
-  readonly clientEntryScript: string;
-  readonly daemonEntryScript: string;
-  readonly reason: BuildMismatchReason;
-  readonly retryAfterMs?: number;
-
-  constructor(params: {
-    client: BuildIdentity;
-    daemon: BuildIdentity;
-    reason: BuildMismatchReason;
-    detail: string;
-    retryAfterMs?: number;
-  }) {
-    const retryGuidance =
-      params.retryAfterMs !== undefined ? ` Retry after ${params.retryAfterMs}ms.` : "";
-    super(
-      `AutoMobile daemon build mismatch: the running daemon is a different build than this client ` +
-        `(${params.detail}). daemon build=${describeBuildIdentity(params.daemon)}, ` +
-        `client build=${describeBuildIdentity(params.client)}.${retryGuidance}`,
-    );
-    this.name = "DaemonBuildMismatchError";
-    this.clientBuildId = params.client.buildId;
-    this.daemonBuildId = params.daemon.buildId;
-    this.clientEntryScript = params.client.entryScript;
-    this.daemonEntryScript = params.daemon.entryScript;
-    this.reason = params.reason;
-    this.retryAfterMs = params.retryAfterMs;
-  }
-}
-
-export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
-  readonly clientAssetVersion: string;
-  readonly daemonAssetVersion: string;
-
-  constructor(clientAssetVersion: string, daemonAssetVersion: string) {
-    super(
-      `AutoMobile AUTOMOBILE_VERSION mismatch: caller requested ${clientAssetVersion}, ` +
-        `but the shared daemon was started with ${daemonAssetVersion}. Restart the daemon ` +
-        `from the caller's environment (for example, run auto-mobile --daemon restart) before reusing it.`,
-    );
-    this.name = "DaemonAssetVersionMismatchError";
-    this.clientAssetVersion = clientAssetVersion;
-    this.daemonAssetVersion = daemonAssetVersion;
-  }
-}
-
-/**
- * Raised after a daemon release proves that this transport's device-session
- * identity is terminal. The transport must never silently resurrect its UUID
- * against another device; an explicit getAndroid/getApple on the same transport
- * acquires a new session (#5689), which is what the message tells the agent (#10702).
- */
-export class DaemonBoundSessionExpiredError extends ActionableError {
-  readonly sessionUuid: string;
-  readonly reason: string;
-  readonly release?: SessionReleaseSnapshot;
-
-  constructor(sessionUuid: string, reason: string, release?: SessionReleaseSnapshot) {
-    super(
-      `Device session ${sessionUuid} expired or was released (${reason}) and cannot be used ` +
-        `again. ${DEVICE_SESSION_RECOVERY_PROMPT}`,
-    );
-    this.name = "DaemonBoundSessionExpiredError";
-    this.sessionUuid = sessionUuid;
-    this.reason = reason;
-    this.release = release;
-  }
-}
-
-/**
- * Raised after automatic liveness recovery was exhausted for a session this proxy holds (#10053).
- * It is a {@link DaemonBoundSessionExpiredError} so every path that already reports a fenced
- * binding reports it, but it carries the structured `daemon_stalled` / `proxy_stalled` handover
- * the harness acts on instead of the generic ownership-lost recovery.
- */
-export class DaemonSessionStalledError extends DaemonBoundSessionExpiredError {
-  readonly handover: LivenessHandover;
-
-  constructor(sessionUuid: string, handover: LivenessHandover) {
-    super(sessionUuid, handover.code);
-    this.message = livenessHandoverMessage(handover);
-    this.name = "DaemonSessionStalledError";
-    this.handover = handover;
-  }
-
-  /** The structured error body for a tool result or MCP error. */
-  toPayload(): ReturnType<typeof livenessHandoverPayload> {
-    return livenessHandoverPayload(this.handover);
-  }
-}
-
-/**
- * Raised when a call that does NOT reference a specific device session reaches a
- * connection whose only binding — one MINTED by a device-acquisition RESULT, and
- * therefore never named by the client — has been terminally released. Naming a
- * stale UUID the caller never referenced would misattribute the loss; instead
- * this reports the CURRENT connection state and directs the caller to acquire a
- * fresh session (issue #5689).
- */
-export class DaemonConnectionSessionReleasedError extends Error {
-  readonly reason: string;
-
-  constructor(reason: string) {
-    super(
-      `This MCP connection has no active device session (the previous session was released: ${reason}). ` +
-        DEVICE_SESSION_RECOVERY_PROMPT,
-    );
-    this.name = "DaemonConnectionSessionReleasedError";
-    this.reason = reason;
-  }
-}
-
-/** A platform-only control selector matches several sessions this connection holds. */
-export class DaemonAmbiguousSessionSelectorError extends Error {
-  constructor(
-    readonly platform: "android" | "ios",
-    readonly candidates: ReadonlyArray<{ sessionUuid: string; deviceId?: string }>,
-  ) {
-    const sessions = candidates
-      .map(({ sessionUuid, deviceId }) =>
-        deviceId === undefined ? sessionUuid : `${sessionUuid} (device '${deviceId}')`,
-      )
-      .join(", ");
-    super(
-      `Platform '${platform}' alone matches ${candidates.length} device sessions this MCP connection holds: ` +
-        `${sessions}. Name one with sessionUuid or deviceId.`,
-    );
-    this.name = "DaemonAmbiguousSessionSelectorError";
-  }
-}
-
-/** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */
-export class DaemonToolUnavailableError extends Error {
-  /** Set when the daemon's availability gate rejected the call, so callers can tell it from skew. */
-  readonly code?: typeof DAEMON_TOOL_UNAVAILABLE_CODE;
-  readonly toolName: string;
-  readonly clientBuildId: string;
-  readonly daemonBuildId: string;
-
-  constructor(params: {
-    toolName: string;
-    client: BuildIdentity;
-    daemon: BuildIdentity;
-    buildMismatch?: boolean;
-    daemonRejection?: string;
-    gated?: boolean;
-  }) {
-    const matchingReason =
-      params.client.buildId !== "unknown" &&
-      params.client.buildId.length > 0 &&
-      params.daemon.buildId !== "unknown" &&
-      params.daemon.buildId.length > 0
-        ? "The client and daemon build IDs match."
-        : params.client.entryScript.length > 0 && params.daemon.entryScript.length > 0
-          ? "One or both build IDs are unknown; the entry-script paths match."
-          : "Build identity is unavailable on at least one side, so the builds cannot be compared.";
-    super(
-      params.buildMismatch === false
-        ? `Tool "${params.toolName}" is advertised by this AutoMobile client but is unavailable in ` +
-            `the connected daemon's current configuration for this session. ` +
-            `${params.daemonRejection ? `Daemon rejection: ${params.daemonRejection}. ` : ""}` +
-            `client build=${describeBuildIdentity(params.client)}, ` +
-            `daemon build=${describeBuildIdentity(params.daemon)}. ${matchingReason}`
-        : `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
-            `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
-            `wrong-build daemon is serving this frontend. ` +
-            `client build=${describeBuildIdentity(params.client)}, ` +
-            `daemon build=${describeBuildIdentity(params.daemon)}. ` +
-            `Restart the daemon from this checkout to resolve the skew.` +
-            `${params.daemonRejection ? ` Daemon rejection: ${params.daemonRejection}.` : ""}`,
-    );
-    this.name = "DaemonToolUnavailableError";
-    if (params.gated) {
-      this.code = DAEMON_TOOL_UNAVAILABLE_CODE;
-    }
-    this.toolName = params.toolName;
-    this.clientBuildId = params.client.buildId;
-    this.daemonBuildId = params.daemon.buildId;
-  }
 }
 
 /**
@@ -1128,214 +566,6 @@ export interface ProxiedResourceTemplate {
 }
 
 /**
- * The daemon startup options that change its observable MCP behavior and so must
- * match before a running daemon can be reused: `debug`, `embeddedSdk`, `networkMockable`,
- * every process-global feature-flag CLI override, marker-based eventAll promotion config,
- * plus every process-global output-reduction flag. A
- * same-build MCP client that requests one of these against an already-running
- * daemon started without it (or vice versa) would otherwise silently get the
- * wrong tool-output or text-input behavior until a manual restart. `debug`, `embeddedSdk`,
- * and `networkMockable`
- * additionally gate whole tool families out of the registry, so reusing a daemon
- * that lacks the requested flag makes those tools unreachable (issue #4247). The
- * output-reduction fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose
- * `field` names map 1:1 to `DaemonOptions`) so a new flag is covered
- * automatically.
- */
-export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
-  "debug",
-  "debugPerf",
-  "embeddedSdk",
-  "networkMockable",
-  "noUiPerfMode",
-  "memPerfAudit",
-  "accessibilityAudit",
-  "predictiveUi",
-  "rawElementSearch",
-  "toolCallRecording",
-  "noNavigationScreenshots",
-  ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-    (spec) =>
-      spec.field !== "toolResultsNoStructuredContent" && spec.field !== "actionsCompactMetadata",
-  ).map((spec) => spec.field),
-];
-
-const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
-  "toolOutputsDir",
-  "accessibilityLevel",
-  "accessibilityFailureMode",
-  "accessibilityMinSeverity",
-];
-
-const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
-
-/** Every startup option inspected by startupOptionDeficits(). */
-export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
-  ...REUSE_CRITICAL_OPTION_KEYS,
-  ...REUSE_CRITICAL_STRING_OPTION_KEYS,
-  ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
-  "accessibilityUseBaseline",
-  "eventAllMarkers",
-];
-
-/** The value of a startup option when it is a string, else undefined. */
-function stringOption(
-  options: DaemonOptions | undefined,
-  key: keyof DaemonOptions,
-): string | undefined {
-  const value = options?.[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-function numberOption(
-  options: DaemonOptions | undefined,
-  key: keyof DaemonOptions,
-): number | undefined {
-  const value = options?.[key];
-  return typeof value === "number" ? value : undefined;
-}
-
-function stringArrayOption(
-  options: DaemonOptions | undefined,
-  key: keyof DaemonOptions,
-): readonly string[] | undefined {
-  const value = options?.[key];
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? value
-    : undefined;
-}
-
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function requestedOptionDeficits<T>(
-  keys: readonly (keyof DaemonOptions)[],
-  requested: DaemonOptions | undefined,
-  running: DaemonOptions | undefined,
-  readRequested: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T | undefined,
-  readRunning: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T,
-  equals: (requestedValue: T, runningValue: T) => boolean = (left, right) => left === right,
-): string[] {
-  return keys.flatMap((key) => {
-    const requestedValue = readRequested(requested, key);
-    if (requestedValue === undefined) {
-      return [];
-    }
-    const runningValue = readRunning(running, key);
-    return equals(requestedValue, runningValue)
-      ? []
-      : [
-          `${key} (requested=${JSON.stringify(requestedValue)}, running=${JSON.stringify(runningValue)})`,
-        ];
-  });
-}
-
-/**
- * Reuse-critical startup options the connecting client *explicitly requests*
- * that the running daemon lacks. Reconciliation is **one-directional** (issue
- * #3846): a client that does not ask for a flag has no opinion on it, so a flag
- * the daemon already has is never reported as a deficit just because a
- * particular caller (e.g. a bare short-lived CLI client) didn't request it.
- * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
- * read as "no opinion"; strings and marker arrays count only when the client
- * supplies one that differs from the daemon's. Connection presentation options
- * (including the compact-metadata opt-out, relayed per connection) are
- * intentionally absent from this comparison, so they never restart the shared
- * daemon.
- * Returns a human-readable list (empty when the daemon already satisfies every
- * requested flag) for logging and error messages.
- */
-export function startupOptionDeficits(
-  requested: DaemonOptions | undefined,
-  running: DaemonOptions | undefined,
-): string[] {
-  return [
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_OPTION_KEYS,
-      requested,
-      running,
-      (options, key) => (options?.[key] === true ? true : undefined),
-      (options, key) => options?.[key] === true,
-    ),
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_STRING_OPTION_KEYS,
-      requested,
-      running,
-      stringOption,
-      (options, key) => stringOption(options, key) ?? "unset",
-    ),
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_NUMBER_OPTION_KEYS,
-      requested,
-      running,
-      numberOption,
-      (options, key) => numberOption(options, key) ?? Number.NaN,
-    ),
-    ...requestedOptionDeficits(
-      ["accessibilityUseBaseline"],
-      requested,
-      running,
-      (options) =>
-        options?.accessibilityAudit === true
-          ? options.accessibilityUseBaseline === true
-          : undefined,
-      (options) => options?.accessibilityUseBaseline === true,
-    ),
-    ...requestedOptionDeficits(
-      ["eventAllMarkers"],
-      requested,
-      running,
-      (options, key) => stringArrayOption(options, key),
-      (options, key) => stringArrayOption(options, key) ?? [],
-      arraysEqual,
-    ),
-  ];
-}
-
-/**
- * Options to launch a replacement daemon with when a restart is unavoidable
- * (version/build skew, or a genuine startup-option deficit). Preserves the
- * *running* daemon's existing options as the base and overlays the connecting
- * client's requested options, so a restart triggered for any reason can never
- * silently strip a flag the daemon was already launched with (issue #3846) —
- * it only ever adds flags the client explicitly asks for. Boolean CLI options
- * are one-directional: `false` means the caller has no opinion, so every
- * active boolean on the running daemon is force-preserved. Connection
- * presentation options are dropped: they are relayed per connection instead.
- */
-export function mergeDaemonOptions(
-  running: DaemonOptions | undefined,
-  requested: DaemonOptions | undefined,
-): DaemonOptions {
-  const runningOptions = daemonReuseOptions(running);
-  const requestedOptions = daemonReuseOptions(requested);
-  const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
-  const mergedRecord = merged as Record<string, unknown>;
-  for (const [key, value] of Object.entries(runningOptions)) {
-    if (value === true) {
-      mergedRecord[key] = true;
-    }
-  }
-  if (requested?.accessibilityAudit === true) {
-    merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
-  }
-  for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
-    const runningString = stringOption(running, key);
-    if (stringOption(requested, key) === undefined && runningString !== undefined) {
-      mergedRecord[key] = runningString;
-    }
-  }
-  for (const key of REUSE_CRITICAL_NUMBER_OPTION_KEYS) {
-    const runningNumber = numberOption(running, key);
-    if (numberOption(requested, key) === undefined && runningNumber !== undefined) {
-      mergedRecord[key] = runningNumber;
-    }
-  }
-  return merged;
-}
-
-/**
  * DaemonMcpProxy - Proxy layer for MCP server to communicate with daemon
  *
  * This class handles:
@@ -1382,6 +612,9 @@ function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): 
 }
 
 export class DaemonMcpProxy {
+  private readonly sessionState = new ProxySessionState();
+  private readonly lifecycleReconciler: DaemonLifecycleReconciler;
+  private readonly resourceSubscriptionManager: ResourceSubscriptions;
   private client: DaemonClientLike | null = null;
   private closePromise: Promise<void> | undefined;
   private config: DaemonMcpProxyConfig;
@@ -1412,20 +645,12 @@ export class DaemonMcpProxy {
     string,
     { outcome: NotFoundAnswerOutcome; releaseReason: string | undefined }
   >();
-  /**
-   * Each session's latest not-found window (when it opened, by the injected timer) and the
-   * handoffs it has had a window for ({@link decideNotFoundAnswer}). An entry outlives its window,
-   * so no later answer of the same handoff opens another.
-   * Cleared by a heartbeat acknowledgement, by a call the daemon admitted under the session, or by
-   * the session ending here; a call that proves nothing about the session leaves it (#11570).
-   */
-  private readonly notFoundWindows = new Map<string, { since: number; handoffs: Set<string> }>();
-  /**
-   * Sessions the proxy stopped heartbeating on a not-found answer that did not end them (#10702):
-   * the latest binding stays bound, a held session is dropped. A tool call that reaches the
-   * session re-arms its heartbeat, and the daemon may still hand it back (#11400).
-   */
-  private readonly notFoundStopped = new Set<string>();
+  private get notFoundWindows(): Map<string, { since: number; handoffs: Set<string> }> {
+    return this.sessionState.notFoundWindows;
+  }
+  private get notFoundStopped(): Set<string> {
+    return this.sessionState.notFoundStopped;
+  }
   /** Last reported heartbeat answer per tracked session, including a stopped held session. */
   private readonly sessionDaemonInstances = new Map<string, string>();
   /**
@@ -1462,28 +687,9 @@ export class DaemonMcpProxy {
    * response is lost; reconnects must then verify the same token, not reclaim.
    */
   private livenessOwnershipClaimSent = false;
-  /**
-   * Device sessions this proxy still holds besides its latest binding, each with
-   * whether its ownership claim has been delivered (#9335). `boundSessionUuid`
-   * only tracks the LATEST binding, so acquiring or naming a second session moves
-   * it off the first, which still depends on this proxy for liveness. Every entry
-   * is heartbeated on the keeper's cadence under the same owner token; an entry
-   * leaves on release, fencing, confirmed loss and close.
-   */
-  private readonly otherHeldSessions = new Map<
-    string,
-    {
-      claimSent: boolean;
-      /**
-       * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
-       * has named for the session idle window (`boundSessionReplayTtlMs`) is abandoned and
-       * evicted, so a conversation that moved to another device stops pinning the old one.
-       */
-      lastUsedAt: number;
-      /** The daemon's refusals of this session's claim as a live-owner conflict (#10050, #10701). */
-      conflict?: OwnerConflictLeash;
-    }
-  >();
+  private get otherHeldSessions(): Map<string, OtherHeldSession> {
+    return this.sessionState.otherHeldSessions;
+  }
   /** Supersession is informational; report it at most once per proxy instance. */
   private livenessSupersessionLogged = false;
   /** Sessions whose live-owner conflict was already reported, so each tick does not repeat it. */
@@ -1543,13 +749,9 @@ export class DaemonMcpProxy {
   private readonly sessionDeviceIds = new Map<string, string>();
   /** Platform each acquired session runs on; absent when its result did not describe one. */
   private readonly sessionPlatforms = new Map<string, "android" | "ios">();
-  /**
-   * Handovers per affected session. A tool call that names the session first attempts an
-   * observation-only resume and returns the structured error only when the daemon still does not
-   * answer; one that reaches it implicitly returns the error. The stall probe, an acknowledged
-   * resume or a definitive daemon answer ends the handover (#10989).
-   */
-  private readonly stallHandovers = new Map<string, StallHandoverRecord>();
+  private get stallHandovers(): Map<string, StallHandoverRecord> {
+    return this.sessionState.stallHandovers;
+  }
   /**
    * Sessions resumed after a `daemon_stalled` handover whose next tool call has not run yet: that
    * call carries the warning instead of the handover's failure (#10989).
@@ -1604,16 +806,18 @@ export class DaemonMcpProxy {
   private resolveDaemonShutdownDisconnect: (() => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
-  // The daemon clears socket-local state when its RPC connection drops. Keep this
-  // proxy's successful explicit binding so subsequent sessionless calls can seed
-  // a replacement socket without sharing the binding with other proxies.
-  private boundSessionUuid: string | undefined;
-  // When the binding above was last set/refreshed, on the injected clock. Once
-  // the daemon's session idle window elapses with no forwarded call (explicit or
-  // injected sessionUuid) refreshing it, the remembered UUID is treated as
-  // retired so a sessionless call is not rewritten to a released session (issue
-  // #4610). Heartbeat acks never refresh it: they prove liveness, not use (#10656).
-  private boundSessionUuidAt: number | undefined;
+  private get boundSessionUuid(): string | undefined {
+    return this.sessionState.boundSessionUuid;
+  }
+  private set boundSessionUuid(value: string | undefined) {
+    this.sessionState.boundSessionUuid = value;
+  }
+  private get boundSessionUuidAt(): number | undefined {
+    return this.sessionState.boundSessionUuidAt;
+  }
+  private set boundSessionUuidAt(value: number | undefined) {
+    this.sessionState.boundSessionUuidAt = value;
+  }
   // Whether the current binding was minted by a device-acquisition RESULT
   // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
   // client-declared (an explicit `sessionUuid` arg, or a startup
@@ -1638,14 +842,9 @@ export class DaemonMcpProxy {
    */
   private readonly finalizedRecordingOwners = new Map<string, string>();
   private readonly ownedDeviceSessions = new Set<string>();
-  /**
-   * Sessions this proxy may claim liveness ownership of and heartbeat (#10664): ones it minted
-   * from an acquisition RESULT, plus the startup `initialSessionUuid`. A session only NAMED in a
-   * tool call's `sessionUuid` arg is forwarded and bound for routing, but never claimed or
-   * heartbeated, so a proxy cannot inherit a session another proxy (or a CLI keeper) owns once
-   * that owner's lease lapses. The other owner keeps it alive or the daemon reaps it.
-   */
-  private readonly claimableSessions = new Set<string>();
+  private get claimableSessions(): Set<string> {
+    return this.sessionState.claimableSessions;
+  }
   /** Sessions held for a managed slot execution; released promptly on close (#11176). */
   private readonly managedExecutionSessions = new Set<string>();
   /** Slot sessions whose acquisition abandoned its hold; never resumed or re-held (#12055). */
@@ -1670,20 +869,12 @@ export class DaemonMcpProxy {
    * of this proxy's is left ahead of the managed execution release in the socket's queue.
    */
   private readonly closeAbort = new AbortController();
-  // Once the daemon confirms this transport's bound session is gone, preserve
-  // that terminal identity instead of clearing it and allowing the same UUID to
-  // acquire another device. `fromResultMint` records the binding's provenance at
-  // fence time (see boundSessionFromResultMint).
-  private terminalBoundSession:
-    | {
-        sessionUuid: string;
-        reason: string;
-        fromResultMint: boolean;
-        release?: SessionReleaseSnapshot;
-        /** First reported managed stall loss; lives and clears with this terminal binding. */
-        reportedStallLossReason?: string;
-      }
-    | undefined;
+  private get terminalBoundSession(): TerminalBoundSession | undefined {
+    return this.sessionState.terminalBoundSession;
+  }
+  private set terminalBoundSession(value: TerminalBoundSession | undefined) {
+    this.sessionState.terminalBoundSession = value;
+  }
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
   private recoverableBoundSessionHandoff: string | undefined;
   /** Only a device-restart handoff presents the binding on a fresh acquisition. */
@@ -1743,10 +934,21 @@ export class DaemonMcpProxy {
   private cachedTools: ProxiedToolDefinition[] | null = null;
   private cachedResources: ProxiedResourceDefinition[] | null = null;
   private cachedResourceTemplates: ProxiedResourceTemplate[] | null = null;
+  private get resourceSubscriptions(): Set<string> {
+    return this.resourceSubscriptionManager.resourceSubscriptions;
+  }
 
-  private readonly resourceSubscriptions = new Set<string>();
-  private readonly resourceUpdatedListeners = new Set<(uri: string) => void>();
-  private resourceSubscriptionSync: Promise<void> = Promise.resolve();
+  private get resourceUpdatedListeners(): Set<(uri: string) => void> {
+    return this.resourceSubscriptionManager.resourceUpdatedListeners;
+  }
+
+  private get resourceSubscriptionSync(): Promise<void> {
+    return this.resourceSubscriptionManager.resourceSubscriptionSync;
+  }
+  private set resourceSubscriptionSync(value: Promise<void>) {
+    this.resourceSubscriptionManager.resourceSubscriptionSync = value;
+  }
+
   // Listeners for daemon-forwarded list-changed notifications (issue #3223),
   // fired after the matching cache is invalidated so a re-fetch is never stale.
   private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
@@ -1776,6 +978,81 @@ export class DaemonMcpProxy {
     this.clientFactory =
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
+    const proxy = this;
+    this.resourceSubscriptionManager = new ResourceSubscriptions({
+      get client() {
+        return proxy.client;
+      },
+      get connected() {
+        return proxy.connected;
+      },
+      get closing() {
+        return proxy.closing;
+      },
+      throwIfClosing: () => this.throwIfClosing(),
+      connectResourceSubscriptionsInBackground: () =>
+        this.connectResourceSubscriptionsInBackground(),
+      assertConnectedClient: (client) => this.assertConnectedClient(client),
+    });
+    this.lifecycleReconciler = new DaemonLifecycleReconciler({
+      get config() {
+        return proxy.config;
+      },
+      get daemonManager() {
+        return proxy.daemonManager;
+      },
+      get daemonStatusProbe() {
+        return proxy.daemonStatusProbe;
+      },
+      get timer() {
+        return proxy.timer;
+      },
+      get clientVersion() {
+        return proxy.clientVersion;
+      },
+      get clientAssetVersion() {
+        return proxy.clientAssetVersion;
+      },
+      get buildIdentity() {
+        return proxy.buildIdentity;
+      },
+      get reconciliationSnapshot() {
+        return proxy.reconciliationSnapshot;
+      },
+      set reconciliationSnapshot(value) {
+        proxy.reconciliationSnapshot = value;
+      },
+      invalidateCache: () => this.invalidateCache(),
+      assertDaemonLifecycleUnfenced: () => this.assertDaemonLifecycleUnfenced(),
+
+      reconciliationStatus: () => this.reconciliationStatus(),
+      isSameDaemonGeneration: (current, expected) => this.isSameDaemonGeneration(current, expected),
+      waitForJoinedRestartSuccessor: (expected, deadline) =>
+        this.waitForJoinedRestartSuccessor(expected, deadline),
+      waitForRunningReconciliationStatus: (deadline) =>
+        this.waitForRunningReconciliationStatus(deadline),
+      readSocketReconciliationStatus: () => this.readSocketReconciliationStatus(),
+      assertAutomaticRestartAllowed: (status, reason) =>
+        this.assertAutomaticRestartAllowed(status, reason),
+      ensureVersionMatches: (reconciliationDeadline, observedStatus) =>
+        this.ensureVersionMatches(reconciliationDeadline, observedStatus),
+      verifyRestartedVersion: () => this.verifyRestartedVersion(),
+      requiresVersionRestart: (status, runningVersion) =>
+        this.requiresVersionRestart(status, runningVersion),
+      assertNewerClientVersion: (status, runningVersion, runningBase, clientBase, sameRelease) =>
+        this.assertNewerClientVersion(status, runningVersion, runningBase, clientBase, sameRelease),
+      assertVersionRestartCooldownExpired: (status, runningVersion) =>
+        this.assertVersionRestartCooldownExpired(status, runningVersion),
+      versionMismatchError: (runningVersion, reason, detail, retryAfterMs, daemonBuild) =>
+        this.versionMismatchError(runningVersion, reason, detail, retryAfterMs, daemonBuild),
+
+      ensureBuildMatches: (reconciliationDeadline, observedStatus) =>
+        this.ensureBuildMatches(reconciliationDeadline, observedStatus),
+      finishBuildRestart: (restartResult, status, reconciliationDeadline) =>
+        this.finishBuildRestart(restartResult, status, reconciliationDeadline),
+      buildMismatchError: (daemon, reason, detail, retryAfterMs) =>
+        this.buildMismatchError(daemon, reason, detail, retryAfterMs),
+    });
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
@@ -2835,33 +2112,15 @@ export class DaemonMcpProxy {
   }
 
   onResourceUpdated(listener: (uri: string) => void): () => void {
-    this.resourceUpdatedListeners.add(listener);
-    return () => {
-      this.resourceUpdatedListeners.delete(listener);
-    };
+    return this.resourceSubscriptionManager.onResourceUpdated(listener);
   }
 
-  async subscribeResource(uri: string): Promise<void> {
-    this.throwIfClosing();
-    this.resourceSubscriptions.add(uri);
-    if (this.connected) {
-      try {
-        await this.syncResourceSubscription(uri);
-      } catch (error) {
-        this.resourceSubscriptions.delete(uri);
-        throw toActionableError(error, "Failed to subscribe to resource");
-      }
-    } else {
-      this.connectResourceSubscriptionsInBackground();
-    }
+  subscribeResource(uri: string): Promise<void> {
+    return this.resourceSubscriptionManager.subscribeResource(uri);
   }
 
-  async unsubscribeResource(uri: string): Promise<void> {
-    this.throwIfClosing();
-    this.resourceSubscriptions.delete(uri);
-    if (this.connected) {
-      await this.syncResourceSubscription(uri);
-    }
+  unsubscribeResource(uri: string): Promise<void> {
+    return this.resourceSubscriptionManager.unsubscribeResource(uri);
   }
 
   private assertConnectedClient(client: DaemonClientLike): void {
@@ -2872,55 +2131,19 @@ export class DaemonMcpProxy {
     }
   }
 
-  private async replayResourceSubscriptions(client: DaemonClientLike): Promise<void> {
-    for (const uri of this.resourceSubscriptions) {
-      try {
-        await this.syncResourceSubscription(uri);
-      } catch (error) {
-        // Resource subscriptions are optional; rejection must not disable unrelated requests.
-        logger.warn(`[DaemonMcpProxy] Failed to replay resource subscription ${uri}`, error);
-        if (isPermanentResourceSubscriptionRejection(error)) {
-          this.resourceSubscriptions.delete(uri);
-        }
-      }
-    }
-    this.throwIfClosing();
-    this.assertConnectedClient(client);
+  private replayResourceSubscriptions(client: DaemonClientLike): Promise<void> {
+    return this.resourceSubscriptionManager.replayResourceSubscriptions(client);
   }
 
   private syncResourceSubscription(uri: string): Promise<void> {
-    const client = this.client;
-    const operation = this.resourceSubscriptionSync.then(async () => {
-      if (!client || this.client !== client || this.closing) {
-        return;
-      }
-      const method = this.resourceSubscriptions.has(uri)
-        ? RESOURCE_SUBSCRIBE_METHOD
-        : RESOURCE_UNSUBSCRIBE_METHOD;
-      await client.callDaemonMethod(method, { uri });
-    });
-    // Keep subsequent mutations/replay ordered even after a failed RPC; its caller still rejects.
-    this.resourceSubscriptionSync = operation.catch((error) => {
-      logger.warn("[DaemonMcpProxy] Failed to synchronize resource subscription", error);
-    });
-    return operation;
+    return this.resourceSubscriptionManager.syncResourceSubscription(uri);
   }
 
   private handleResourceUpdated(
     notification: DaemonNotification,
     sourceClient: DaemonClientLike,
   ): void {
-    const uri = notification.uri;
-    if (sourceClient !== this.client || !uri || !this.resourceSubscriptions.has(uri)) {
-      return;
-    }
-    for (const listener of this.resourceUpdatedListeners) {
-      try {
-        listener(uri);
-      } catch (error) {
-        logger.warn("[DaemonMcpProxy] resource update listener failed", error);
-      }
-    }
+    return this.resourceSubscriptionManager.handleResourceUpdated(notification, sourceClient);
   }
 
   private handleDaemonNotification(
@@ -3210,34 +2433,15 @@ export class DaemonMcpProxy {
   private createStatusProbe(
     config: DaemonMcpProxyConfig,
   ): (() => Promise<DaemonStatus>) | undefined {
-    // Custom transports supply their matching probe separately; constructing a
-    // default socket client here would escape an injected transport/test seam.
-    if (config.daemonStatusProbe) {
-      return config.daemonStatusProbe;
-    }
-    if (config.clientFactory) {
-      return undefined;
-    }
-    return () =>
-      new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs).getDaemonStatus();
+    return this.lifecycleReconciler.createStatusProbe(config);
   }
 
   private reconciliationStatus(): Promise<DaemonStatus> {
-    if (!this.daemonStatusProbe) {
-      return this.daemonManager.status();
-    }
-    this.reconciliationSnapshot ??= this.readSocketReconciliationStatus();
-    return this.reconciliationSnapshot;
+    return this.lifecycleReconciler.reconciliationStatus();
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
-    if (!current.running || !expected.running || current.pid !== expected.pid) {
-      return false;
-    }
-    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
-    return identityFields.every(
-      (field) => expected[field] === undefined || current[field] === expected[field],
-    );
+    return this.lifecycleReconciler.isSameDaemonGeneration(current, expected);
   }
 
   /**
@@ -3245,211 +2449,39 @@ export class DaemonMcpProxy {
    * intentional handoff gap. Wait for a different, running generation instead
    * of treating that gap as a completed reconciliation.
    */
-  private async waitForJoinedRestartSuccessor(
+  private waitForJoinedRestartSuccessor(
     expected: DaemonStatus,
     deadline: number,
   ): Promise<DaemonStatus> {
-    let initialProbe = true;
-    while (initialProbe || this.timer.now() < deadline) {
-      initialProbe = false;
-      try {
-        const status = await this.reconciliationStatus();
-        if (status.running && !this.isSameDaemonGeneration(status, expected)) {
-          return status;
-        }
-      } catch (error) {
-        if (!(error instanceof DaemonPreflightConnectionError)) {
-          throw error;
-        }
-        // A missing socket is expected while the restart owner changes generations.
-        logger.debug(`[DaemonMcpProxy] Waiting for joined restart successor: ${error.message}`);
-      }
-      this.reconciliationSnapshot = undefined;
-      const remaining = deadline - this.timer.now();
-      if (remaining <= 0) {
-        break;
-      }
-      await this.timer.sleep(Math.min(DAEMON_RESTART_HANDOFF_DELAY_MS, remaining));
-      this.reconciliationSnapshot = undefined;
-    }
-    throw new DaemonUnavailableError(
-      `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-    );
+    return this.lifecycleReconciler.waitForJoinedRestartSuccessor(expected, deadline);
   }
 
-  private async waitForRunningReconciliationStatus(deadline: number): Promise<DaemonStatus> {
-    let initialProbe = true;
-    while (initialProbe || this.timer.now() < deadline) {
-      initialProbe = false;
-      try {
-        const status = await this.reconciliationStatus();
-        if (status.running) {
-          return status;
-        }
-      } catch (error) {
-        if (!(error instanceof DaemonPreflightConnectionError)) {
-          throw error;
-        }
-        // A follow-up reconciler may temporarily remove the incumbent socket.
-        logger.debug(`[DaemonMcpProxy] Waiting through restart handoff: ${error.message}`);
-      }
-      this.reconciliationSnapshot = undefined;
-      const remaining = deadline - this.timer.now();
-      if (remaining <= 0) {
-        break;
-      }
-      await this.timer.sleep(Math.min(DAEMON_RESTART_HANDOFF_DELAY_MS, remaining));
-      this.reconciliationSnapshot = undefined;
-    }
-    throw new DaemonUnavailableError(
-      `Timed out waiting for daemon reconciliation after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-    );
+  private waitForRunningReconciliationStatus(deadline: number): Promise<DaemonStatus> {
+    return this.lifecycleReconciler.waitForRunningReconciliationStatus(deadline);
   }
 
-  private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
-    const recorded = await this.daemonManager.status();
-    const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
-    // Compatibility allows legacy missing build fields, but missing identity is not
-    // evidence that a PID record belongs to this socket. Only enrich a known matching
-    // process, build and entry script; never manufacture live build/options from a legacy probe.
-    const actualBuild = buildIdentityFromStatus(actual);
-    const matchesRecord =
-      recorded.running &&
-      actual.pid !== undefined &&
-      actual.pid === recorded.pid &&
-      recorded.version === actual.version &&
-      actualBuild.buildId !== "unknown" &&
-      actualBuild.buildId.length > 0 &&
-      actualBuild.entryScript.length > 0 &&
-      recorded.buildId === actualBuild.buildId &&
-      recorded.entryScript === actualBuild.entryScript;
-    // Only the socket owner can advertise support, even when PID metadata matches.
-    return matchesRecord
-      ? { ...recorded, ...actual, structuredSessionNotFound: actual.structuredSessionNotFound }
-      : actual;
+  private readSocketReconciliationStatus(): Promise<DaemonStatus> {
+    return this.lifecycleReconciler.readSocketReconciliationStatus();
   }
 
   private assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
-    this.assertDaemonLifecycleUnfenced();
-    if (this.config.lifecycleNamespaceEnv) {
-      // A private state env with the shared namespace would restart the resident daemon (#11252).
-      assertDaemonNamespaceMatchesState(
-        `restart the daemon (${reason})`,
-        this.config.lifecycleNamespaceEnv,
-      );
-    }
-    if (status.activeProvisioning) {
-      throw new DaemonRestartDeferredError(reason);
-    }
+    return this.lifecycleReconciler.assertAutomaticRestartAllowed(status, reason);
   }
 
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
-  private async ensureVersionMatches(
+  private ensureVersionMatches(
     reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.reconciliationStatus());
-    if (!status.running) {
-      return;
-    }
-
-    const runningVersion = status.version?.trim() ?? "";
-    if (runningVersion === this.clientVersion) {
-      return;
-    }
-
-    if (!this.requiresVersionRestart(status, runningVersion)) {
-      return;
-    }
-
-    // Reach here when the client is strictly newer OR the daemon is a same-release
-    // dev-skew (different git stamp). Both reconcile by restarting the daemon from
-    // this client's build. Same-release dev-skew must be handled HERE rather than
-    // deferred to ensureBuildMatches: the build-identity hash covers only the entry
-    // script (process.argv[1]), so in unbundled source-mode runs (`bun src/index.ts`)
-    // it is blind to commits that change non-entry files — the git stamp is the only
-    // signal. The restart is cooldown-bounded below so two checkouts cannot thrash.
-
-    this.assertVersionRestartCooldownExpired(status, runningVersion);
-
-    if (this.timer.now() >= reconciliationDeadline) {
-      throw new DaemonUnavailableError(
-        `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    logger.info(
-      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`,
-    );
-    this.assertAutomaticRestartAllowed(status, "version mismatch");
-    // Preserve the running daemon's existing options across the restart rather
-    // than resetting to this client's config, which would strip flags the
-    // daemon was launched with when the connecting client is bare (issue #3846).
-    const restartResult = await this.daemonManager.restart(
-      mergeDaemonOptions(status.options, this.config.daemonOptions),
-      status,
-    );
-    this.reconciliationSnapshot = undefined;
-    if (restartResult === "joined") {
-      const successorStatus = await this.waitForJoinedRestartSuccessor(
-        status,
-        reconciliationDeadline,
-      );
-      return await this.ensureVersionMatches(reconciliationDeadline, successorStatus);
-    }
-    // The replacement daemon may expose a different tool set; drop the cache so we
-    // never advertise the old daemon's tools against the new build.
-    this.invalidateCache();
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    await this.verifyRestartedVersion();
+    return this.lifecycleReconciler.ensureVersionMatches(reconciliationDeadline, observedStatus);
   }
 
-  private async verifyRestartedVersion(): Promise<void> {
-    const restartedStatus = await this.reconciliationStatus();
-    const restartedVersion = restartedStatus.version?.trim() ?? "";
-    if (!restartedStatus.running || restartedVersion !== this.clientVersion) {
-      throw this.versionMismatchError(
-        restartedVersion,
-        "restartMismatch",
-        "daemon restart completed but version still differs",
-        undefined,
-        buildIdentityFromStatus(restartedStatus),
-      );
-    }
+  private verifyRestartedVersion(): Promise<void> {
+    return this.lifecycleReconciler.verifyRestartedVersion();
   }
 
   private requiresVersionRestart(status: DaemonStatus, runningVersion: string): boolean {
-    // The release portions (before the `+g<sha>` dev stamp) drive the
-    // newer/older decision. A plain release client intentionally matches a
-    // source-stamped daemon at that release; two stamped versions still detect
-    // source-checkout dev-skew.
-    const runningBase = releaseVersion(runningVersion);
-    const clientBase = releaseVersion(this.clientVersion);
-    const sameRelease = runningBase === clientBase;
-    const clientDeclaresFullVersion = clientBase !== this.clientVersion;
-
-    if (sameRelease && !clientDeclaresFullVersion) {
-      return false;
-    }
-
-    if (!this.config.autoStartDaemon) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "autoStartDisabled",
-        "auto-start is disabled",
-        undefined,
-        buildIdentityFromStatus(status),
-      );
-    }
-
-    this.assertNewerClientVersion(status, runningVersion, runningBase, clientBase, sameRelease);
-    return true;
+    return this.lifecycleReconciler.requiresVersionRestart(status, runningVersion);
   }
 
   private assertNewerClientVersion(
@@ -3459,50 +2491,17 @@ export class DaemonMcpProxy {
     clientBase: string,
     sameRelease: boolean,
   ): void {
-    if (!sameRelease) {
-      const cmp =
-        runningBase.length > 0
-          ? compareStrictNumericVersions(clientBase, runningBase)
-          : Number.POSITIVE_INFINITY;
-
-      if (runningBase.length > 0 && !Number.isFinite(cmp)) {
-        throw this.versionMismatchError(
-          runningVersion,
-          "nonNumeric",
-          "version comparison is not numeric",
-          undefined,
-          buildIdentityFromStatus(status),
-        );
-      }
-
-      if (cmp <= 0) {
-        throw this.versionMismatchError(
-          runningVersion,
-          "daemonNewer",
-          "the running daemon is newer than this client",
-          undefined,
-          buildIdentityFromStatus(status),
-        );
-      }
-    }
+    return this.lifecycleReconciler.assertNewerClientVersion(
+      status,
+      runningVersion,
+      runningBase,
+      clientBase,
+      sameRelease,
+    );
   }
 
   private assertVersionRestartCooldownExpired(status: DaemonStatus, runningVersion: string): void {
-    if (status.startedAt) {
-      const daemonAgeMs = this.timer.now() - status.startedAt;
-      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
-        logger.warn(
-          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`,
-        );
-        throw this.versionMismatchError(
-          runningVersion,
-          "cooldown",
-          "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
-          buildIdentityFromStatus(status),
-        );
-      }
-    }
+    return this.lifecycleReconciler.assertVersionRestartCooldownExpired(status, runningVersion);
   }
 
   private versionMismatchError(
@@ -3512,35 +2511,17 @@ export class DaemonMcpProxy {
     retryAfterMs?: number,
     daemonBuild?: BuildIdentity,
   ): DaemonVersionMismatchError {
-    const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
-    const clientVersion = this.clientVersion.trim();
-    return new DaemonVersionMismatchError({
-      clientVersion,
-      daemonVersion,
+    return this.lifecycleReconciler.versionMismatchError(
+      runningVersion,
       reason,
       detail,
       retryAfterMs,
-      clientBuild: this.buildIdentity,
       daemonBuild,
-    });
+    );
   }
 
-  private async ensureAssetVersionPinMatches(): Promise<void> {
-    if (!this.clientAssetVersion) {
-      return;
-    }
-    const status = await this.reconciliationStatus();
-    if (!status.running) {
-      return;
-    }
-    const daemonAssetVersion = status.assetVersion?.trim() ?? "";
-    if (daemonAssetVersion === this.clientAssetVersion) {
-      return;
-    }
-    throw new DaemonAssetVersionMismatchError(
-      this.clientAssetVersion,
-      daemonAssetVersion.length > 0 ? daemonAssetVersion : "unknown",
-    );
+  private ensureAssetVersionPinMatches(): Promise<void> {
+    return this.lifecycleReconciler.ensureAssetVersionPinMatches();
   }
 
   /**
@@ -3551,91 +2532,23 @@ export class DaemonMcpProxy {
    * frontend and backend run the same code. Independent of, and complementary to,
    * {@link ensureVersionMatches}.
    */
-  private async ensureBuildMatches(
+  private ensureBuildMatches(
     reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
     observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = observedStatus ?? (await this.reconciliationStatus());
-    if (!status.running) {
-      return;
-    }
-
-    const daemonIdentity = buildIdentityFromStatus(status);
-    if (buildIdentitiesMatch(this.buildIdentity, daemonIdentity)) {
-      return;
-    }
-
-    if (!this.config.autoStartDaemon) {
-      throw this.buildMismatchError(daemonIdentity, "autoStartDisabled", "auto-start is disabled");
-    }
-
-    if (status.startedAt) {
-      const daemonAgeMs = this.timer.now() - status.startedAt;
-      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
-        logger.warn(
-          `[DaemonMcpProxy] Skipping build-mismatch restart due to cooldown: daemon build ${daemonIdentity.buildId} is ${daemonAgeMs}ms old, client build is ${this.buildIdentity.buildId}`,
-        );
-        throw this.buildMismatchError(
-          daemonIdentity,
-          "cooldown",
-          "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
-        );
-      }
-    }
-
-    if (this.timer.now() >= reconciliationDeadline) {
-      throw new DaemonUnavailableError(
-        `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    logger.info(
-      `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`,
-    );
-    this.assertAutomaticRestartAllowed(status, "build mismatch");
-    // Preserve the running daemon's existing options across the restart rather
-    // than resetting to this client's config, which would strip flags the
-    // daemon was launched with when the connecting client is bare (issue #3846).
-    const restartResult = await this.daemonManager.restart(
-      mergeDaemonOptions(status.options, this.config.daemonOptions),
-      status,
-    );
-    this.reconciliationSnapshot = undefined;
-    return await this.finishBuildRestart(restartResult, status, reconciliationDeadline);
+    return this.lifecycleReconciler.ensureBuildMatches(reconciliationDeadline, observedStatus);
   }
 
-  private async finishBuildRestart(
+  private finishBuildRestart(
     restartResult: DaemonRestartResult,
     status: DaemonStatus,
     reconciliationDeadline: number,
   ): Promise<void> {
-    if (restartResult === "joined") {
-      const successorStatus = await this.waitForJoinedRestartSuccessor(
-        status,
-        reconciliationDeadline,
-      );
-      return await this.ensureBuildMatches(reconciliationDeadline, successorStatus);
-    }
-    // The replacement daemon may expose a different tool set; drop the cache so we
-    // never advertise the old daemon's tools against the new build.
-    this.invalidateCache();
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    const restartedStatus = await this.reconciliationStatus();
-    const restartedIdentity = buildIdentityFromStatus(restartedStatus);
-    if (!restartedStatus.running || !buildIdentitiesMatch(this.buildIdentity, restartedIdentity)) {
-      throw this.buildMismatchError(
-        restartedIdentity,
-        "restartMismatch",
-        "daemon restart completed but build still differs",
-      );
-    }
+    return this.lifecycleReconciler.finishBuildRestart(
+      restartResult,
+      status,
+      reconciliationDeadline,
+    );
   }
 
   private buildMismatchError(
@@ -3644,146 +2557,18 @@ export class DaemonMcpProxy {
     detail: string,
     retryAfterMs?: number,
   ): DaemonBuildMismatchError {
-    return new DaemonBuildMismatchError({
-      client: this.buildIdentity,
-      daemon,
-      reason,
-      detail,
-      retryAfterMs,
-    });
+    return this.lifecycleReconciler.buildMismatchError(daemon, reason, detail, retryAfterMs);
   }
 
-  private async ensureStartupOptionsMatch(): Promise<void> {
-    const requested = this.config.daemonOptions;
-    const reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
-    while (this.timer.now() < reconciliationDeadline) {
-      const status = await this.reconciliationStatus();
-      if (!status.running) {
-        return;
-      }
-
-      const deficits = startupOptionDeficits(requested, status.options);
-      if (deficits.length === 0) {
-        return;
-      }
-
-      if (!this.config.autoStartDaemon) {
-        throw new DaemonUnavailableError(
-          `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
-        );
-      }
-
-      logger.info(
-        `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
-      );
-      this.assertAutomaticRestartAllowed(status, "startup option mismatch");
-      // Preserve the running daemon's existing options and add the requested ones
-      // so the restart gains the missing flag without stripping any the daemon
-      // already had (issue #3846).
-      const restartResult = await this.daemonManager.restart(
-        mergeDaemonOptions(status.options, requested),
-        status,
-      );
-      this.reconciliationSnapshot = undefined;
-      if (restartResult === "joined") {
-        const successorStatus = await this.waitForJoinedRestartSuccessor(
-          status,
-          reconciliationDeadline,
-        );
-        const remaining = startupOptionDeficits(requested, successorStatus.options);
-        if (remaining.length === 0) {
-          return;
-        }
-        if (this.timer.now() >= reconciliationDeadline) {
-          break;
-        }
-        continue;
-      }
-
-      const readinessTimeout = Math.max(0, reconciliationDeadline - this.timer.now());
-      await this.daemonManager.waitForReady(readinessTimeout);
-
-      const restartedStatus = await this.waitForRunningReconciliationStatus(reconciliationDeadline);
-      const remaining = startupOptionDeficits(requested, restartedStatus.options);
-      if (remaining.length > 0) {
-        throw new DaemonUnavailableError(
-          `Daemon process handoff completed (pid ${status.pid ?? "unknown"} -> pid ${restartedStatus.pid ?? "unknown"}), ` +
-            `but the successor for the shared per-user daemon still does not satisfy the requested startup options ` +
-            `(${remaining.join(", ")}). A different owner or launch path may control the replacement configuration. ` +
-            startupOptionRecoveryGuidance(),
-        );
-      }
-      return;
-    }
-    throw new DaemonUnavailableError(
-      `Timed out waiting for concurrent daemon startup-option reconciliation after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-    );
+  private ensureStartupOptionsMatch(): Promise<void> {
+    return this.lifecycleReconciler.ensureStartupOptionsMatch();
   }
 
   /**
    * Start the daemon process
    */
-  private async startDaemon(): Promise<void> {
-    const status = await this.daemonManager.status();
-    this.assertDaemonLifecycleUnfenced();
-
-    if (!status.running) {
-      logger.info("[DaemonMcpProxy] Starting daemon...");
-      // Pass through daemon options (debug flags, video defaults, etc.)
-      await this.daemonManager.start(daemonProcessOptions(this.config.daemonOptions));
-
-      // Wait for daemon to be ready
-      const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-      if (!ready) {
-        throw new DaemonUnavailableError(
-          `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-        );
-      }
-      logger.info("[DaemonMcpProxy] Daemon started successfully");
-      return;
-    }
-
-    // The daemon reports running but startDaemon is only reached when the
-    // observation-only socket probe (DaemonClient.isAvailable) failed — i.e. the
-    // socket is not connectable yet. A daemon in-progress startup writes its
-    // early-owner PID record (daemon.ts writeEarlyOwnerRecord) BEFORE publishing
-    // the Unix socket, which appears seconds later once DB init, device-pool
-    // discovery, and iOS services complete. Treat that missing socket as pending
-    // readiness, not a terminal error: wait behind the same bounded readiness
-    // path so publication can complete instead of letting the subsequent
-    // client.connect() fail immediately with "Daemon socket not found" (issue
-    // #5664). waitForReady polls the socket + verifyDaemonConnection and never
-    // unlinks a live daemon's socket, so stale-socket / dead-daemon handling and
-    // the "do not replace a live daemon's socket" contract are preserved. A
-    // genuinely wedged daemon that never publishes still fails promptly at the
-    // deadline with an actionable error.
-    //
-    // This wait is nested inside a `tools/list` request that clients cut off at
-    // ~30s (DAEMON_STARTUP_TIMEOUT_MS); if the error it can throw is produced only
-    // as that deadline expires, the client sees an AutoMobile server with zero
-    // tools and no error text (issue #5878, residual of #5871/#5874). So keep the
-    // full startup budget while a live process is actively bringing the daemon up
-    // — a legitimate concurrent cold start writes its early-owner PID (making
-    // status.running true) seconds before it publishes the socket, and abandoning
-    // it early would reject a start that was about to succeed — but exit the moment
-    // no live startup-lock holder remains. A genuinely wedged or orphaned daemon
-    // (early-owner record present, socket unreachable, no live holder finishing the
-    // start) is then reported now instead of at the client's deadline, while the
-    // concurrent-cold-start case keeps the budget it needs.
-    // Re-arbitrate across replacement holders under one deadline, exactly like the
-    // double-lock-contention loop in DaemonManager.start (issue #5904): if the live
-    // holder A crashes and a replacement B reclaims the lock to finish the start, a
-    // single liveness-gated waitForReady would give up on A and throw even though B
-    // is now bringing the daemon up. waitForLockHolderReadiness keeps the full budget
-    // per live holder and only reports failure once no live holder remains.
-    const ready = await this.daemonManager.waitForLockHolderReadiness(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new DaemonUnavailableError(
-        `Daemon reported running but its socket did not become reachable, and no live ` +
-          `process is completing its startup`,
-      );
-    }
-    logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");
+  private startDaemon(): Promise<void> {
+    return this.lifecycleReconciler.startDaemon();
   }
 
   private async withRecoverableReconnect<T>(

@@ -82,6 +82,25 @@ function acceptsScalarString(schema: any): boolean {
     return false;
   }
   const types = options.map((option: any) => resolveDeclaredType(option).type);
+  const hasNumericMember = types.some((type: string) => type === "number" || type === "bigint");
+  const stringMembers = options.filter((_: any, index: number) => types[index] === "string");
+  const stringMembersAreAllLiterals = stringMembers.every((option: any) => {
+    let current = option;
+    for (let depth = 0; depth < 10 && current; depth++) {
+      const name = schemaTypeName(current);
+      if (name === "literal") {
+        return typeof (current._def?.value ?? current._def?.values?.[0]) === "string";
+      }
+      if (!SCHEMA_WRAPPER_TYPES.has(name)) {
+        return false;
+      }
+      current = unwrapSchema(current);
+    }
+    return false;
+  });
+  if (hasNumericMember && stringMembersAreAllLiterals) {
+    return false;
+  }
   return (
     types.includes("string") &&
     types.every((type: string) => ["string", "number", "boolean", "bigint"].includes(type))

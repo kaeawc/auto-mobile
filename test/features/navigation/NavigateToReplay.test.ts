@@ -7,11 +7,7 @@ import type { ForegroundObserver } from "../../../src/features/navigation/foregr
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { BootedDevice } from "../../../src/models";
-import {
-  navigateToHandler,
-  resetNavigateToFactory,
-  setNavigateToFactory,
-} from "../../../src/server/navigationTools";
+import { createNavigateToHandler } from "../../../src/server/navigationTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -76,7 +72,6 @@ describe("NavigateTo replay safety", () => {
 
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetNavigateToFactory();
   });
 
   function makeNav(
@@ -312,7 +307,7 @@ describe("NavigateTo replay safety", () => {
       signals.push(signal);
       controller.abort();
     };
-    setNavigateToFactory(() => makeNav());
+    const navigateToHandler = createNavigateToHandler({ navigateToFactory: () => makeNav() });
     await expect(navigateToHandler(device, options, undefined, controller.signal)).rejects.toThrow(
       OPERATION_CANCELLED_MESSAGE,
     );

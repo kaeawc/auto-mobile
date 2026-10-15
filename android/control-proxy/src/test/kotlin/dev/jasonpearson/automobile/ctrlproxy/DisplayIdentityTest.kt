@@ -40,6 +40,47 @@ class DisplayIdentityTest {
   private class FakeDisplay(var id: String)
 
   @Test
+  fun `sdk 35 resolves hidden unique id`() {
+    var lookups = 0
+    val resolver =
+      PanelUniqueIdResolver<FakeDisplay>(
+        lookup = {
+          lookups++
+          { display -> display.id }
+        },
+        sdkInt = 35,
+      )
+
+    assertEquals("local:35", resolver.resolve(FakeDisplay("local:35")))
+    assertEquals(1, lookups)
+  }
+
+  @Test
+  fun `sdk 36 and 37 skip hidden unique id without reporting failures`() {
+    for (sdk in listOf(36, 37)) {
+      var lookups = 0
+      var unavailable = 0
+      var transientFailures = 0
+      val resolver =
+        PanelUniqueIdResolver<FakeDisplay>(
+          lookup = {
+            lookups++
+            { display -> display.id }
+          },
+          onUnavailable = { unavailable++ },
+          onTransientFailure = { transientFailures++ },
+          sdkInt = sdk,
+        )
+
+      repeat(100) { assertNull(resolver.resolve(FakeDisplay("local:$sdk"))) }
+
+      assertEquals(0, lookups)
+      assertEquals(0, unavailable)
+      assertEquals(0, transientFailures)
+    }
+  }
+
+  @Test
   fun `repeated transient failures are logged once without disabling reads`() {
     var calls = 0
     val errors = mutableListOf<Throwable>()

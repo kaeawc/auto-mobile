@@ -1,0 +1,137 @@
+import CtrlProxy
+import Foundation
+import XCTest
+
+final class HierarchyModelParityTests: XCTestCase {
+    func testCompleteHierarchyOmitsTruncationReasons() throws {
+        let variants: [[String]?] = [nil, []]
+        for reasons in variants {
+            let hierarchy = ViewHierarchy(updatedAt: 0, truncationReasons: reasons)
+            let object = try XCTUnwrap(JSONGolden.object(JSONEncoder().encode(hierarchy)))
+            XCTAssertNil(object["truncationReasons"])
+        }
+    }
+
+    func testTruncatedHierarchyEncodesExactAndroidKeyAndRoundTrips() throws {
+        let hierarchy = ViewHierarchy(updatedAt: 0, truncationReasons: ["max_depth"])
+        let encoded = try JSONEncoder().encode(hierarchy)
+        let object = try XCTUnwrap(JSONGolden.object(encoded))
+        XCTAssertEqual(object["truncationReasons"] as? [String], ["max_depth"])
+        XCTAssertEqual(try JSONDecoder().decode(ViewHierarchy.self, from: encoded).truncationReasons, ["max_depth"])
+    }
+
+    func testTruncationChangesBroadcastHashEvenWhenNodesAreUnchanged() {
+        let complete = ViewHierarchy(updatedAt: 0, hierarchy: UIElementInfo(text: "same"))
+        let truncated = ViewHierarchy(
+            updatedAt: 0,
+            hierarchy: UIElementInfo(text: "same"),
+            truncationReasons: ["max_depth"]
+        )
+        XCTAssertNotEqual(StructuralHasher.computeHash(complete), StructuralHasher.computeHash(truncated))
+        XCTAssertEqual(StructuralHasher.computeHash(complete), StructuralHasher.computeHash(complete))
+    }
+
+    /// Rich enough to cover every kebab-case key and one level of nesting.
+    private let goldenJSON = """
+    {
+      "updatedAt": 1730000000000,
+      "packageName": "com.example.app",
+      "hierarchy": {
+        "className": "Window",
+        "content-desc": "root container",
+        "resource-id": "root_id",
+        "view-id": "abc123def456",
+        "clickable": "true",
+        "enabled": "true",
+        "long-clickable": "false",
+        "accessibility-focused": "true",
+        "state-description": "expanded",
+        "hint-text": "enter your name",
+        "role": "group",
+        "testTag": "root-tag",
+        "semantic-links": [
+          { "text": "Terms", "occurrence": 0, "start": 4, "end": 9 }
+        ],
+        "bounds": { "left": 0, "top": 0, "right": 393, "bottom": 852 },
+        "extras": { "sdk.alpha": "1.0", "sdk.isLayerNode": "false" },
+        "actions": ["tap", "scroll"],
+        "node": [
+          {
+            "className": "Button",
+            "text": "OK",
+            "resource-id": "ok_button",
+            "clickable": "true",
+            "bounds": { "left": 10, "top": 20, "right": 120, "bottom": 64 }
+          }
+        ]
+      },
+      "windowInfo": { "id": 1, "type": 0, "isActive": true, "isFocused": false,
+                      "bounds": { "left": 0, "top": 0, "right": 393, "bottom": 852 } },
+      "windows": [
+        { "id": 1, "type": 0, "isActive": true, "isFocused": true,
+          "bounds": { "left": 0, "top": 0, "right": 393, "bottom": 852 } }
+      ],
+      "screenScale": 3.0,
+      "screenWidth": 393,
+      "screenHeight": 852,
+      "nativeScale": 3.0,
+      "pixelWidth": 1179,
+      "pixelHeight": 2556,
+      "rotation": 0,
+      "systemInsets": { "top": 59, "right": 0, "bottom": 34, "left": 0 },
+      "insets": {
+        "available": true,
+        "source": "safeAreaInsets",
+        "units": "points",
+        "safeArea": { "top": 59, "right": 0, "bottom": 34, "left": 0 },
+        "displayCutoutInfo": {
+          "classification": "dynamic_island",
+          "bounds": [ { "left": 128, "top": 11, "right": 247, "bottom": 48 } ]
+        },
+        "systemChrome": {
+          "visibility": "visible",
+          "statusBar": "shown",
+          "homeIndicatorAutoHideRequested": false,
+          "source": "scene"
+        }
+      },
+      "fallbackToSpringboard": false
+    }
+    """
+
+    func testViewHierarchyReencodesFaithfully() throws {
+        let data = Data(goldenJSON.utf8)
+        let first = try HierarchyDecoder.decodeReencodeAndHash(data)
+        // Idempotent: decoding + re-encoding the sorted-key output yields identical bytes.
+        let second = try HierarchyDecoder.decodeReencodeAndHash(first.encoded)
+        XCTAssertEqual(first.encoded, second.encoded, "ViewHierarchy re-encode is not idempotent")
+
+        // Every wire field the golden carried survives the round trip (no drop/rename/change).
+        if let inputObject = JSONGolden.object(data), let outputObject = JSONGolden.object(first.encoded) {
+            JSONGolden.assertContains(outputObject, contains: inputObject, context: "ViewHierarchy")
+        }
+
+        // Sanity: the kebab-case wire keys actually survived the round trip.
+        let encodedString = String(decoding: first.encoded, as: UTF8.self)
+        for key in [
+            "content-desc",
+            "resource-id",
+            "semantic-links",
+            "accessibility-focused",
+            "long-clickable",
+            "view-id",
+            "state-description",
+            "hint-text",
+        ] {
+            XCTAssertTrue(encodedString.contains("\"\(key)\""), "decoded model omitted wire key `\(key)`")
+        }
+    }
+
+    func testStructuralHashIsDeterministic() throws {
+        let data = Data(goldenJSON.utf8)
+        let a = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        let b = try HierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        XCTAssertEqual(a, b, "StructuralHasher must be deterministic (stable combine sequence)")
+        XCTAssertNotEqual(a, 0, "hash should be non-trivial for a populated hierarchy")
+    }
+}

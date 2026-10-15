@@ -57,7 +57,16 @@ const DENSITY_BUCKET_FACTORS: Record<Exclude<DensityBucket, "default">, number> 
 };
 
 /** `wm density` rejects values below this AOSP-supported floor. */
-const MIN_ANDROID_DENSITY_DPI = 72;
+export const MIN_ANDROID_DENSITY_DPI = 72;
+
+/**
+ * Safety ceiling for explicit and relative density requests. AOSP's
+ * `DisplayMetrics.DENSITY_XXXHIGH` is 640 dpi; 1280 dpi gives high-density
+ * panels orchestrator-chosen headroom while bounding requests after issue
+ * #11660 triggered a system_server ANR with an unbounded density.
+ * Source: frameworks/base/core/java/android/util/DisplayMetrics.java.
+ */
+export const MAX_ANDROID_DENSITY_DPI = 1280;
 
 /** The AOSP default text scale — restored on `reset`. */
 export const DEFAULT_FONT_SCALE = 1.0;
@@ -849,6 +858,16 @@ export class DisplayConfig {
   ): { command: string; target: number | "default" } | { error: string } {
     if (typeof density === "number") {
       const target = Math.round(density);
+      if (target < MIN_ANDROID_DENSITY_DPI) {
+        return {
+          error: `Cannot set display density: ${target} dpi is below Android's ${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
+        };
+      }
+      if (target > MAX_ANDROID_DENSITY_DPI) {
+        return {
+          error: `Cannot set display density: ${target} dpi exceeds Android's ${MAX_ANDROID_DENSITY_DPI} dpi maximum.`,
+        };
+      }
       return { command: `shell wm density ${target}`, target };
     }
     if (density === "default") {
@@ -867,6 +886,13 @@ export class DisplayConfig {
         error:
           `Cannot resolve relative density bucket '${density}': ${scaled} dpi is below Android's ` +
           `${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
+      };
+    }
+    if (scaled > MAX_ANDROID_DENSITY_DPI) {
+      return {
+        error:
+          `Cannot resolve relative density bucket '${density}': ${scaled} dpi exceeds Android's ` +
+          `${MAX_ANDROID_DENSITY_DPI} dpi maximum.`,
       };
     }
     return { command: `shell wm density ${scaled}`, target: scaled };

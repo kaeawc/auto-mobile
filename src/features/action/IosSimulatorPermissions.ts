@@ -50,6 +50,8 @@ export interface IosSimulatorPermissionState {
   state: "granted" | "denied" | "unknown" | "limited";
   verified?: boolean;
   reason?: string;
+  accessLevel?: "readWrite" | "addOnly";
+  evidence?: "storedTccGrant";
   authValue?: number;
   raw?: Record<string, string | number | null>;
 }
@@ -107,18 +109,26 @@ function stateFromAllowed(value: number | null | undefined): IosSimulatorPermiss
 export function classifyIosSimulatorPermission(
   service: string,
   row?: TccPermissionRow,
-): Pick<IosSimulatorPermissionState, "state" | "verified" | "reason"> {
+): Pick<IosSimulatorPermissionState, "state" | "verified" | "reason" | "accessLevel" | "evidence"> {
   const authValue = row?.auth_value ?? null;
   const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(row?.allowed);
+  const accessLevel =
+    service === "kTCCServicePhotos"
+      ? "readWrite"
+      : service === "kTCCServicePhotosAdd"
+        ? "addOnly"
+        : undefined;
   if (service === "kTCCServicePhotos" && state === "granted") {
     return {
       state: "unknown",
       verified: false,
+      accessLevel,
+      evidence: "storedTccGrant",
       reason:
         "stored TCC grant for Photos does not establish effective full read/write authorization; native PHPhotoLibrary status is not observable from the host without app instrumentation",
     };
   }
-  return { state };
+  return { state, ...(accessLevel === undefined ? {} : { accessLevel }) };
 }
 
 const PHOTOS_GRANT_UNVERIFIED_WARNING =

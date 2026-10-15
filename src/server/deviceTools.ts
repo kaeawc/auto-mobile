@@ -108,6 +108,7 @@ import {
   type TransitionalHold,
 } from "./inventoryDeviceDescription";
 import {
+  type AppResourceDependencies,
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
   syncInstalledAppResources,
@@ -1297,6 +1298,7 @@ export interface DeviceToolsDependencies {
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
   displayInventory: DisplayInventoryProvider;
+  appResourceDependencies?: AppResourceDependencies;
   notifyResourcesChanged: () => Promise<void>;
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
@@ -1434,7 +1436,7 @@ async function defaultNotifyDeviceInventoryResourcesChanged(
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
   await defaultNotifyDeviceInventoryResourcesChanged(false);
-  await syncInstalledAppResources();
+  await syncInstalledAppResources(getDeviceToolsDependencies().appResourceDependencies);
 }
 
 async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<void> {
@@ -3523,7 +3525,8 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       displayInventory: defaultDisplayInventoryProvider,
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       notifyDeviceInventoryResourcesChanged: defaultNotifyDeviceInventoryResourcesChanged,
-      syncInstalledAppResourceRegistry,
+      syncInstalledAppResourceRegistry: () =>
+        syncInstalledAppResourceRegistry(getDeviceToolsDependencies().appResourceDependencies),
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
@@ -3564,11 +3567,13 @@ function resourceNotificationDependencyOverrides(
   currentDeps: DeviceToolsDependencies,
 ): Pick<
   DeviceToolsDependencies,
+  | "appResourceDependencies"
   | "notifyResourcesChanged"
   | "notifyDeviceInventoryResourcesChanged"
   | "syncInstalledAppResourceRegistry"
 > {
   return {
+    appResourceDependencies: deps.appResourceDependencies ?? currentDeps.appResourceDependencies,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
     notifyDeviceInventoryResourcesChanged:
       deps.notifyDeviceInventoryResourcesChanged ??

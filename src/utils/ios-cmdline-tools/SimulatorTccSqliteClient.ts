@@ -33,6 +33,7 @@ const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
 export type TccPermissionRow = {
   service: string;
   client: string;
+  auth_version?: number | null;
   auth_value?: number | null;
   allowed?: number | null;
   prompt_count?: number | null;
@@ -196,7 +197,7 @@ function classifySqliteExecutionError(
 
 function optionalNumberField(
   row: Record<string, unknown>,
-  field: "auth_value" | "allowed" | "prompt_count",
+  field: "auth_version" | "auth_value" | "allowed" | "prompt_count",
 ): Pick<TccPermissionRow, typeof field> {
   const value = row[field];
   return typeof value === "number" || value === null ? { [field]: value } : {};
@@ -212,6 +213,7 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
     return {
       service: row.service,
       client: row.client,
+      ...optionalNumberField(row, "auth_version"),
       ...optionalNumberField(row, "auth_value"),
       ...optionalNumberField(row, "allowed"),
       ...optionalNumberField(row, "prompt_count"),
@@ -264,8 +266,8 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       );
     }
 
-    const optionalColumns = ["auth_value", "allowed", "prompt_count"].filter((column) =>
-      columns.has(column),
+    const optionalColumns = ["auth_version", "auth_value", "allowed", "prompt_count"].filter(
+      (column) => columns.has(column),
     );
     const services = (permissions ?? []).map(tccServiceForPermission);
     const parameterArgs = [

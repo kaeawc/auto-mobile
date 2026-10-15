@@ -41,7 +41,7 @@ import {
 } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
-import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "../daemon/sessionBroker/provisioning/executionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";

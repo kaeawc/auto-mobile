@@ -95,7 +95,7 @@ const scenarios: Scenario[] = [
     serial: generic,
     managedSlotStableId: "Absent-Phone",
     target: WIRELESS,
-    expected: "device_assigned_to_managed_slot",
+    expected: "device_assigned_to_binding",
   },
   {
     name: "wireless-shaped iOS id vs Android holder",

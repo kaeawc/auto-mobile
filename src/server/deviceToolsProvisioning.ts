@@ -11,9 +11,9 @@ import {
 } from "../daemon/deviceAcquisitionRefusals";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
-  DeviceAssignedToManagedSlotError,
-  ManagedSlotDiscoveryIncompleteError,
-} from "../daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+} from "../daemon/sessionBroker/provisioning/refusal";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
@@ -550,13 +550,13 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     if (knownError) {
       return knownError;
     }
-    if (error instanceof DeviceAssignedToManagedSlotError) {
+    if (error instanceof DeviceAssignedToBindingError) {
       return managedSlotProvisionError(
         error,
         `Failed to provision ${args.device.platform} device '${args.device.name}'`,
       );
     }
-    if (error instanceof ManagedSlotDiscoveryIncompleteError) {
+    if (error instanceof BindingDiscoveryIncompleteError) {
       return new ProvisionDeviceError(
         "discovery_incomplete",
         `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,

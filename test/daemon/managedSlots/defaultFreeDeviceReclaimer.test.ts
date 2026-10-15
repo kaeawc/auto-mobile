@@ -1,8 +1,13 @@
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { ManagedSlotJournal } from "../../../src/daemon/managedSlots/slotJournal";
-import { FakeInventory, FakeClaims, FakeMatcher, FakeDeleter } from "./fixtures/reconcilerFakes";
-import { assignManagedSlotDevice } from "./managedSlotFixtures";
+import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
+import {
+  FakeInventory,
+  FakeClaims,
+  FakeMatcher,
+  FakeDeleter,
+} from "../sessionBroker/registry/fixtures/reconcilerFakes";
+import { assignBindingDevice } from "../sessionBroker/provisioning/bindingFixtures";
 import { describe, expect, test } from "bun:test";
 import type { PooledDevice } from "../../../src/daemon/devicePool";
 import {
@@ -116,11 +121,11 @@ describe("createDefaultFreeDeviceReclaimer", () => {
   });
   test("absent-row wiring requires the acquisition journal and uses that registry", async () => {
     const timer = new FakeTimer();
-    const registry = new FakeSlotRegistry(timer, () => false);
+    const registry = new FakeBindingRegistry(timer, () => false);
     expect(createAbsentRowEvictor(registry, undefined)).toBeUndefined();
     expect(createAbsentRowEvictor(registry, () => undefined)).toBeUndefined();
     const inventory = new FakeInventory();
-    const journal = new ManagedSlotJournal({
+    const journal = new BindingJournal({
       registry,
       timer,
       inventory,
@@ -135,7 +140,7 @@ describe("createDefaultFreeDeviceReclaimer", () => {
       expect(source).toBe(registry);
       return journal;
     });
-    const key = await assignManagedSlotDevice(registry, "android", "amslot-gone");
+    const key = await assignBindingDevice(registry, "android", "amslot-gone");
     await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
     await registry.completeScopeInvalidation(key.scopeKey);
     const [row] = await registry.listFreeDevices();

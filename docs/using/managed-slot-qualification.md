@@ -55,17 +55,17 @@ verified by the identity tool.
 is also shipped in the package. These rows describe its compatibility boundary;
 `native-qualification` identifies evidence still owed, not a passing test.
 
-| ID                                  | Supported | Outcome                        | Verified by          |
-| ----------------------------------- | --------- | ------------------------------ | -------------------- |
-| v1-on-current-daemon                | yes       | acquire                        | unit-test            |
-| frontend-daemon-build-mismatch      | no        | contract_unsupported           | unit-test            |
-| v1-on-v1-only-daemon                | yes       | acquire                        | unit-test            |
-| device-family-on-v1-only-daemon     | no        | contract_unsupported           | unit-test            |
-| device-family-on-current-daemon     | yes       | acquire                        | unit-test            |
-| any-on-daemon-without-managed-slots | no        | contract_unsupported           | unit-test            |
-| contract-version-2                  | no        | contract_unsupported           | unit-test            |
-| multi-device-group                  | no        | managed_slot_group_unsupported | unit-test            |
-| unmanaged-frontend-shares-daemon    | yes       | unmanaged                      | native-qualification |
+| ID                                  | Supported | Outcome                   | Verified by          |
+| ----------------------------------- | --------- | ------------------------- | -------------------- |
+| v1-on-current-daemon                | yes       | acquire                   | unit-test            |
+| frontend-daemon-build-mismatch      | no        | contract_unsupported      | unit-test            |
+| v1-on-v1-only-daemon                | yes       | acquire                   | unit-test            |
+| device-family-on-v1-only-daemon     | no        | contract_unsupported      | unit-test            |
+| device-family-on-current-daemon     | yes       | acquire                   | unit-test            |
+| any-on-daemon-without-managed-slots | no        | contract_unsupported      | unit-test            |
+| contract-version-2                  | no        | contract_unsupported      | unit-test            |
+| multi-device-group                  | no        | binding_group_unsupported | unit-test            |
+| unmanaged-frontend-shares-daemon    | yes       | unmanaged                 | native-qualification |
 
 Unsupported compatibility rows are refused before mutation. A daemon handshake
 version or build mismatch is non-retryable `contract_unsupported`; restart the
@@ -137,48 +137,48 @@ exit 2. Generate/check the format with
 ## Retry and recovery by failure code
 
 Retryability below is the nested acquisition failure's value. Client class comes
-from the refusal-wire expectations: the outer `managed_slot_acquisition_failed`
+from the refusal-wire expectations: the outer `binding_acquisition_failed`
 envelope is classified `fail` even when its nested cause is retryable. Read
 `automobile:managed-slots` before relaunching; do not blindly retry a tool call on
 the same failed execution. Source paths identify production guidance replacing
 synthetic fixture text.
 
-| Code                                 | Retryable | Client class        | Recovery                                                                                                                                                                                |
-| ------------------------------------ | --------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cancelled`                          | yes       | fail                | The preparation was cancelled; retry when needed. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                                                   |
-| `capacity_exhausted`                 | yes       | fail                | Shut down a device or raise the boot limit, then retry. (src/daemon/managedSlots/reconciler.ts)                                                                                         |
-| `cleanup_pending`                    | yes       | fail                | The previous device could not be removed; retry after cleanup succeeds. (src/daemon/managedSlots/reconciler.ts)                                                                         |
-| `concurrent_modification`            | yes       | fail                | The slot changed concurrently; retry to converge on its new state. (src/daemon/managedSlots/reconciler.ts)                                                                              |
-| `contract_unsupported`               | no        | fail                | Restart the daemon from a build that supports managed slots. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                |
-| `daemon_unavailable`                 | yes       | fail                | Retry once the AutoMobile daemon is reachable. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                              |
-| `device_busy`                        | yes       | fail                | Wait for the device's live session or foreign claim to end, then retry. (src/daemon/managedSlots/reconciler.ts)                                                                         |
-| `discovery_incomplete`               | yes       | fail                | Retry once device discovery completes; nothing destructive was done. (src/daemon/managedSlots/reconciler.ts)                                                                            |
-| `execution_hold_failed`              | yes       | fail                | Relaunch the execution; the slot keeps its device. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                          |
-| `execution_policy_failed`            | yes       | fail                | Retry; the session could not be held for the execution. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                                             |
-| `liveness_owner_conflict`            | yes       | fail                | Retry; another owner claimed the slot's session. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                                                    |
-| `managed_slot_config_invalid`        | no        | fail                | Fix the managed slot config; nothing changed. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                               |
-| `managed_slot_group_unsupported`     | no        | fail                | "managed slot groups larger than 1 slot/device are not supported"; not retryable. (src/models/managedSlotConfig.ts)                                                                     |
-| `managed_slots_unsupported`          | no        | fail                | managed slots not yet supported by this build; remove --managed-slot-config / AUTOMOBILE_MANAGED_SLOT_CONFIG to run an unmanaged proxy (src/models/managedSlotConfig.ts)                |
-| `managed_slot_budget_exhausted`      | yes       | fail                | Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry. (src/daemon/managedSlots/reconciler.ts)                       |
-| `provision_failed`                   | no        | fail                | Inspect the provision failure code; retry if it is retryable. (src/daemon/managedSlots/reconciler.ts)                                                                                   |
-| `readiness_incomplete`               | yes       | fail                | Retry; the device did not reach automation readiness. (src/daemon/managedSlots/reconciler.ts)                                                                                           |
-| `reconcile_in_progress`              | yes       | fail                | Another reconciliation of this slot is in progress; retry later. (src/daemon/managedSlots/reconciler.ts)                                                                                |
-| `registry_schema_unsupported`        | no        | fail                | Upgrade this daemon and every daemon sharing the registry to the build that migrated it, restarting older daemons; nothing was changed. (src/daemon/managedSlots/managedSlotRefusal.ts) |
-| `runtime_incompatible`               | no        | fail                | Request a model/runtime pair the host supports; nothing was changed. (src/daemon/managedSlots/reconciler.ts)                                                                            |
-| `scope_invalidated`                  | no        | fail                | This runner incarnation was reset; launch with the current runnerIncarnation. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                       |
-| `scope_not_valid`                    | no        | fail                | Use the current runner incarnation; this scope no longer accepts work. (src/daemon/managedSlots/reconciler.ts)                                                                          |
-| `scope_transition_pending`           | yes       | fail                | Wait for the previous runner incarnation's executions and cleanup to settle, then retry. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                            |
-| `slot_in_use`                        | yes       | fail                | Wait for the slot's live execution to end, then retry. (src/daemon/managedSlots/reconciler.ts)                                                                                          |
-| `slot_settling`                      | yes       | fail                | Wait for the previous execution's released work to settle, then retry. (src/daemon/managedSlots/reconciler.ts)                                                                          |
-| `spec_unsupported`                   | no        | fail                | Fix the requested spec; nothing was changed. (src/daemon/managedSlots/reconciler.ts)                                                                                                    |
-| `stale_session`                      | yes       | fail                | Retry; an earlier execution's session on the slot device could not be released. (src/daemon/managedSlots/reconciler.ts)                                                                 |
-| `timeout`                            | yes       | fail                | Retry with a longer preparationTimeoutMs. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                                                           |
-| `managed_slot_acquisition_failed`    | no        | fail                | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                          |
-| `device_assigned_to_managed_slot`    | no        | fail                | It stays reserved while idle; use another device, or reset the slot's scope to release it.                                                                                              |
-| `device_outside_managed_slots`       | no        | fail                | Slot devices are acquired, started, stopped and deleted only by managed slot acquisition and release. Reads stay open; use a separate MCP connection for anything else.                 |
-| `managed_slot_ownership_unconfirmed` | yes       | retry               | Slot ownership is not recorded for this daemon yet (the managed slot registry is busy or the slot is not ready); retry shortly.                                                         |
-| `managed_execution_ended`            | no        | fail                | "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work." (`relaunch_execution`) (src/server/deviceSessionResult.ts)                 |
-| `session_ownership_lost`             | no        | acquire-new-session | "Acquire a new device with getAndroid or getApple." (`acquire_new_session`) (src/daemon/managedSlots/managedSlotRefusal.ts)                                                             |
+| Code                            | Retryable | Client class        | Recovery                                                                                                                                                                                |
+| ------------------------------- | --------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cancelled`                     | yes       | fail                | The preparation was cancelled; retry when needed. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                                                          |
+| `capacity_exhausted`            | yes       | fail                | Shut down a device or raise the boot limit, then retry. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                           |
+| `cleanup_pending`               | yes       | fail                | The previous device could not be removed; retry after cleanup succeeds. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                           |
+| `concurrent_modification`       | yes       | fail                | The slot changed concurrently; retry to converge on its new state. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                |
+| `contract_unsupported`          | no        | fail                | Restart the daemon from a build that supports managed slots. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                |
+| `daemon_unavailable`            | yes       | fail                | Retry once the AutoMobile daemon is reachable. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                              |
+| `device_busy`                   | yes       | fail                | Wait for the device's live session or foreign claim to end, then retry. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                           |
+| `discovery_incomplete`          | yes       | fail                | Retry once device discovery completes; nothing destructive was done. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                              |
+| `execution_hold_failed`         | yes       | fail                | Relaunch the execution; the slot keeps its device. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                          |
+| `execution_policy_failed`       | yes       | fail                | Retry; the session could not be held for the execution. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                                                    |
+| `liveness_owner_conflict`       | yes       | fail                | Retry; another owner claimed the slot's session. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                                                           |
+| `binding_config_invalid`        | no        | fail                | Fix the managed slot config; nothing changed. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                               |
+| `binding_group_unsupported`     | no        | fail                | "managed slot groups larger than 1 slot/device are not supported"; not retryable. (src/models/managedSlotConfig.ts)                                                                     |
+| `bindings_unsupported`          | no        | fail                | managed slots not yet supported by this build; remove --managed-slot-config / AUTOMOBILE_MANAGED_SLOT_CONFIG to run an unmanaged proxy (src/models/managedSlotConfig.ts)                |
+| `binding_budget_exhausted`      | yes       | fail                | Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry. (src/daemon/sessionBroker/provisioning/reconciler.ts)         |
+| `provision_failed`              | no        | fail                | Inspect the provision failure code; retry if it is retryable. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                     |
+| `readiness_incomplete`          | yes       | fail                | Retry; the device did not reach automation readiness. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                             |
+| `reconcile_in_progress`         | yes       | fail                | Another reconciliation of this slot is in progress; retry later. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                  |
+| `registry_schema_unsupported`   | no        | fail                | Upgrade this daemon and every daemon sharing the registry to the build that migrated it, restarting older daemons; nothing was changed. (src/daemon/managedSlots/managedSlotRefusal.ts) |
+| `runtime_incompatible`          | no        | fail                | Request a model/runtime pair the host supports; nothing was changed. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                              |
+| `scope_invalidated`             | no        | fail                | This runner incarnation was reset; launch with the current runnerIncarnation. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                              |
+| `scope_not_valid`               | no        | fail                | Use the current runner incarnation; this scope no longer accepts work. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                            |
+| `scope_transition_pending`      | yes       | fail                | Wait for the previous runner incarnation's executions and cleanup to settle, then retry. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                   |
+| `binding_in_use`                | yes       | fail                | Wait for the slot's live execution to end, then retry. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                            |
+| `binding_settling`              | yes       | fail                | Wait for the previous execution's released work to settle, then retry. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                            |
+| `spec_unsupported`              | no        | fail                | Fix the requested spec; nothing was changed. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                                                      |
+| `stale_session`                 | yes       | fail                | Retry; an earlier execution's session on the slot device could not be released. (src/daemon/sessionBroker/provisioning/reconciler.ts)                                                   |
+| `timeout`                       | yes       | fail                | Retry with a longer preparationTimeoutMs. (src/daemon/sessionBroker/provisioning/deviceAcquisition.ts)                                                                                  |
+| `binding_acquisition_failed`    | no        | fail                | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                          |
+| `device_assigned_to_binding`    | no        | fail                | It stays reserved while idle; use another device, or reset the slot's scope to release it.                                                                                              |
+| `device_outside_managed_slots`  | no        | fail                | Slot devices are acquired, started, stopped and deleted only by managed slot acquisition and release. Reads stay open; use a separate MCP connection for anything else.                 |
+| `binding_ownership_unconfirmed` | yes       | retry               | Slot ownership is not recorded for this daemon yet (the managed slot registry is busy or the slot is not ready); retry shortly.                                                         |
+| `managed_execution_ended`       | no        | fail                | "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work." (`relaunch_execution`) (src/server/deviceSessionResult.ts)                 |
+| `session_ownership_lost`        | no        | acquire-new-session | "Acquire a new device with getAndroid or getApple." (`acquire_new_session`) (src/daemon/managedSlots/managedSlotRefusal.ts)                                                             |
 
 ## What qualification still requires
 

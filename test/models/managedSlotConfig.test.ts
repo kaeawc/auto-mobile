@@ -4,17 +4,19 @@ import {
   assertManagedSlotOwnerRunning,
   MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
-  ManagedSlotConfigError,
   assertManagedSlotContractSupported,
   assertManagedSlotsSupported,
   daemonSupportsManagedSlots,
   unmetManagedSlotConfigCapabilities,
   MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
-  parseManagedSlotConfig,
+  parseBindingConfig,
   parseManagedSlotConfigSource,
   resolveManagedSlotConfig,
-  type ManagedSlotConfigErrorCode,
 } from "../../src/models/managedSlotConfig";
+import {
+  BindingConfigError,
+  type BindingConfigErrorCode,
+} from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
@@ -22,7 +24,7 @@ import {
 import { logger } from "../../src/utils/logger";
 
 const androidRequest = {
-  slotIndex: 0,
+  bindingIndex: 0,
   role: "primary",
   platform: "android",
   requestedSpec: {
@@ -36,15 +38,15 @@ const validConfig = {
   managedHostScope: "host-a",
   runnerNamespace: "ci-lane-1",
   runnerIncarnation: "inc-7",
-  localSlotCapacity: 1,
+  localBindingCapacity: 1,
   requests: [androidRequest],
 };
 
-function codeOf(run: () => unknown): ManagedSlotConfigErrorCode | undefined {
+function codeOf(run: () => unknown): BindingConfigErrorCode | undefined {
   try {
     run();
   } catch (error) {
-    return error instanceof ManagedSlotConfigError ? error.code : undefined;
+    return error instanceof BindingConfigError ? error.code : undefined;
   }
   return undefined;
 }
@@ -53,7 +55,7 @@ const neverRead = (): string => {
   throw new Error("file must not be read");
 };
 
-describe("parseManagedSlotConfig", () => {
+describe("parseBindingConfig", () => {
   test.each(["phone", "tablet", "foldable"])(
     "accepts family %s with and without a model on both platforms",
     (deviceFamily) => {
@@ -66,9 +68,9 @@ describe("parseManagedSlotConfig", () => {
           platform === "android" ? "pixel_8" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
         for (const deviceType of [undefined, model]) {
           const requestedSpec = { runtime, deviceFamily, ...(deviceType ? { deviceType } : {}) };
-          const config = parseManagedSlotConfig({
+          const config = parseBindingConfig({
             ...validConfig,
-            requests: [{ slotIndex: 0, role: "primary", platform, requestedSpec }],
+            requests: [{ bindingIndex: 0, role: "primary", platform, requestedSpec }],
           });
           expect(config.requests[0]?.requestedSpec).toEqual(requestedSpec);
         }
@@ -83,11 +85,11 @@ describe("parseManagedSlotConfig", () => {
         : "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
     expect(
       codeOf(() =>
-        parseManagedSlotConfig({
+        parseBindingConfig({
           ...validConfig,
           requests: [
             {
-              slotIndex: 0,
+              bindingIndex: 0,
               role: "primary",
               platform,
               requestedSpec: { runtime, deviceFamily: "watch" },
@@ -95,7 +97,7 @@ describe("parseManagedSlotConfig", () => {
           ],
         }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
   });
 
   test.each(["phone", "tablet", "foldable"])(
@@ -118,20 +120,20 @@ describe("parseManagedSlotConfig", () => {
   );
 
   test("accepts a minimal android config", () => {
-    const config = parseManagedSlotConfig(validConfig);
+    const config = parseBindingConfig(validConfig);
     expect(config.requests[0].platform).toBe("android");
     expect(config.idleTimeoutMs).toBeUndefined();
   });
 
   test("accepts an ios config with every optional field", () => {
-    const config = parseManagedSlotConfig({
+    const config = parseBindingConfig({
       ...validConfig,
       executionAttempt: "attempt-3",
       preparationTimeoutMs: 120_000,
       idleTimeoutMs: 600_000,
       requests: [
         {
-          slotIndex: 0,
+          bindingIndex: 0,
           role: "primary",
           platform: "ios",
           requestedSpec: {
@@ -152,8 +154,8 @@ describe("parseManagedSlotConfig", () => {
     ["unknown top-level field", { surprise: true }],
     ["operationId is not accepted", { operationId: "op-1" }],
     ["empty requests", { requests: [] }],
-    ["zero capacity", { localSlotCapacity: 0 }],
-    ["negative slotIndex", { requests: [{ ...androidRequest, slotIndex: -1 }] }],
+    ["zero capacity", { localBindingCapacity: 0 }],
+    ["negative slotIndex", { requests: [{ ...androidRequest, bindingIndex: -1 }] }],
     [
       "ios spec on an android request",
       {
@@ -174,13 +176,13 @@ describe("parseManagedSlotConfig", () => {
     ["idleTimeoutMs above the cap", { idleTimeoutMs: 24 * 60 * 60 * 1000 }],
     ["non-integer idleTimeoutMs", { idleTimeoutMs: 150_000.5 }],
   ])("rejects %s", (_name, override) => {
-    expect(codeOf(() => parseManagedSlotConfig({ ...validConfig, ...override }))).toBe(
-      "managed_slot_config_invalid",
+    expect(codeOf(() => parseBindingConfig({ ...validConfig, ...override }))).toBe(
+      "binding_config_invalid",
     );
   });
 
   test("an omitted deviceType is unconstrained on both platforms (owner decision Q4)", () => {
-    const anyModel = parseManagedSlotConfig({
+    const anyModel = parseBindingConfig({
       ...validConfig,
       requests: [
         { ...androidRequest, requestedSpec: { runtime: androidRequest.requestedSpec.runtime } },
@@ -189,11 +191,11 @@ describe("parseManagedSlotConfig", () => {
     expect(anyModel.requests[0]!.requestedSpec).toEqual({
       runtime: androidRequest.requestedSpec.runtime,
     });
-    const iosAnyModel = parseManagedSlotConfig({
+    const iosAnyModel = parseBindingConfig({
       ...validConfig,
       requests: [
         {
-          slotIndex: 0,
+          bindingIndex: 0,
           role: "primary",
           platform: "ios",
           requestedSpec: { runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0" },
@@ -220,7 +222,7 @@ describe("parseManagedSlotConfig", () => {
   test("a supplied deviceType is still checked against its platform", () => {
     expect(
       codeOf(() =>
-        parseManagedSlotConfig({
+        parseBindingConfig({
           ...validConfig,
           requests: [
             {
@@ -233,74 +235,72 @@ describe("parseManagedSlotConfig", () => {
           ],
         }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
   });
 
   test("rejects non-object input", () => {
-    expect(codeOf(() => parseManagedSlotConfig("nope"))).toBe("managed_slot_config_invalid");
-    expect(codeOf(() => parseManagedSlotConfig(null))).toBe("managed_slot_config_invalid");
+    expect(codeOf(() => parseBindingConfig("nope"))).toBe("binding_config_invalid");
+    expect(codeOf(() => parseBindingConfig(null))).toBe("binding_config_invalid");
   });
 
   test("rejects an unsupported version before validating any other field", () => {
-    expect(codeOf(() => parseManagedSlotConfig({ contractVersion: 2, garbage: true }))).toBe(
+    expect(codeOf(() => parseBindingConfig({ contractVersion: 2, garbage: true }))).toBe(
       "contract_unsupported",
     );
-    expect(codeOf(() => parseManagedSlotConfig({ requests: [] }))).toBe("contract_unsupported");
-    expect(codeOf(() => parseManagedSlotConfig({ contractVersion: "1" }))).toBe(
-      "contract_unsupported",
-    );
+    expect(codeOf(() => parseBindingConfig({ requests: [] }))).toBe("contract_unsupported");
+    expect(codeOf(() => parseBindingConfig({ contractVersion: "1" }))).toBe("contract_unsupported");
   });
 
-  test("rejects groups larger than one slot with a typed error", () => {
-    expect(codeOf(() => parseManagedSlotConfig({ ...validConfig, localSlotCapacity: 2 }))).toBe(
-      "managed_slot_group_unsupported",
+  test("rejects groups larger than one binding with a typed error", () => {
+    expect(codeOf(() => parseBindingConfig({ ...validConfig, localBindingCapacity: 2 }))).toBe(
+      "binding_group_unsupported",
     );
-    const second = { ...androidRequest, slotIndex: 1, role: "secondary" };
+    const second = { ...androidRequest, bindingIndex: 1, role: "secondary" };
     expect(
-      codeOf(() => parseManagedSlotConfig({ ...validConfig, requests: [androidRequest, second] })),
-    ).toBe("managed_slot_group_unsupported");
+      codeOf(() => parseBindingConfig({ ...validConfig, requests: [androidRequest, second] })),
+    ).toBe("binding_group_unsupported");
   });
 
-  test("rejects duplicate slot indexes as invalid", () => {
+  test("rejects duplicate binding indexes as invalid", () => {
     expect(
       codeOf(() =>
-        parseManagedSlotConfig({ ...validConfig, requests: [androidRequest, androidRequest] }),
+        parseBindingConfig({ ...validConfig, requests: [androidRequest, androidRequest] }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
   });
 });
 
 describe("executionOwnerPid", () => {
   test("accepts a positive integer and stays optional", () => {
-    expect(
-      parseManagedSlotConfig({ ...validConfig, executionOwnerPid: 4242 }).executionOwnerPid,
-    ).toBe(4242);
-    expect(parseManagedSlotConfig(validConfig).executionOwnerPid).toBeUndefined();
+    expect(parseBindingConfig({ ...validConfig, executionOwnerPid: 4242 }).executionOwnerPid).toBe(
+      4242,
+    );
+    expect(parseBindingConfig(validConfig).executionOwnerPid).toBeUndefined();
   });
 
   test.each([0, -5, 1.5, "42", null])("rejects %p", (value) => {
-    expect(codeOf(() => parseManagedSlotConfig({ ...validConfig, executionOwnerPid: value }))).toBe(
-      "managed_slot_config_invalid",
+    expect(codeOf(() => parseBindingConfig({ ...validConfig, executionOwnerPid: value }))).toBe(
+      "binding_config_invalid",
     );
   });
 
   test("startup validation requires the owner process to exist", () => {
-    const config = parseManagedSlotConfig({ ...validConfig, executionOwnerPid: 4242 });
+    const config = parseBindingConfig({ ...validConfig, executionOwnerPid: 4242 });
     expect(codeOf(() => assertManagedSlotOwnerRunning(config, () => false))).toBe(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
     expect(
       codeOf(() => assertManagedSlotOwnerRunning(config, (pid) => pid === 4242)),
     ).toBeUndefined();
     expect(codeOf(() => assertManagedSlotOwnerRunning(undefined, () => false))).toBeUndefined();
     expect(
-      codeOf(() => assertManagedSlotOwnerRunning(parseManagedSlotConfig(validConfig), () => false)),
+      codeOf(() => assertManagedSlotOwnerRunning(parseBindingConfig(validConfig), () => false)),
     ).toBeUndefined();
   });
 });
 
 describe("executionOwnerStartIdentity", () => {
-  const base = parseManagedSlotConfig(validConfig);
+  const base = parseBindingConfig(validConfig);
   const owner = {
     ...base,
     executionOwnerPid: 4242,
@@ -308,7 +308,7 @@ describe("executionOwnerStartIdentity", () => {
   };
 
   test("parses an opaque identity with its owner PID", () => {
-    expect(parseManagedSlotConfig(owner).executionOwnerStartIdentity).toBe(
+    expect(parseBindingConfig(owner).executionOwnerStartIdentity).toBe(
       owner.executionOwnerStartIdentity,
     );
   });
@@ -318,21 +318,21 @@ describe("executionOwnerStartIdentity", () => {
       ...validConfig,
       executionOwnerStartIdentity: owner.executionOwnerStartIdentity,
     };
-    expect(codeOf(() => parseManagedSlotConfig(config))).toBe("managed_slot_config_invalid");
-    expect(() => parseManagedSlotConfig(config)).toThrow(
+    expect(codeOf(() => parseBindingConfig(config))).toBe("binding_config_invalid");
+    expect(() => parseBindingConfig(config)).toThrow(
       "executionOwnerStartIdentity requires executionOwnerPid",
     );
   });
 
   test.each(["", "x".repeat(257)])("rejects invalid identity length %p", (identity) => {
     expect(
-      codeOf(() => parseManagedSlotConfig({ ...owner, executionOwnerStartIdentity: identity })),
-    ).toBe("managed_slot_config_invalid");
+      codeOf(() => parseBindingConfig({ ...owner, executionOwnerStartIdentity: identity })),
+    ).toBe("binding_config_invalid");
   });
 
   test("refuses a different process and names the PID", () => {
     expect(codeOf(() => assertManagedSlotOwnerIdentity(owner, () => "different"))).toBe(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
     expect(() => assertManagedSlotOwnerIdentity(owner, () => "different")).toThrow(
       "executionOwnerPid 4242 no longer names the process described by executionOwnerStartIdentity (the PID was reused)",
@@ -405,14 +405,14 @@ describe("contract negotiation", () => {
 describe("assertManagedSlotsSupported", () => {
   test("is wired (#11173): a supplied config is accepted", () => {
     expect(MANAGED_SLOTS_PROXY_WIRED).toBe(true);
-    expect(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig))).not.toThrow();
+    expect(() => assertManagedSlotsSupported(parseBindingConfig(validConfig))).not.toThrow();
     expect(() => assertManagedSlotsSupported(undefined)).not.toThrow();
   });
 
   test("a build without the wiring refuses a supplied config with a typed error", () => {
-    expect(
-      codeOf(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig), false)),
-    ).toBe("managed_slots_unsupported");
+    expect(codeOf(() => assertManagedSlotsSupported(parseBindingConfig(validConfig), false))).toBe(
+      "bindings_unsupported",
+    );
     expect(() => assertManagedSlotsSupported(undefined, false)).not.toThrow();
   });
 });
@@ -433,13 +433,13 @@ describe("parseManagedSlotConfigSource", () => {
 
   test("reports unreadable files, bad JSON and empty values as invalid", () => {
     expect(codeOf(() => parseManagedSlotConfigSource("/missing.json", neverRead))).toBe(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
     expect(codeOf(() => parseManagedSlotConfigSource("{not json", neverRead))).toBe(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
     expect(codeOf(() => parseManagedSlotConfigSource("  ", neverRead))).toBe(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
   });
 });
@@ -470,7 +470,7 @@ describe("resolveManagedSlotConfig precedence", () => {
       codeOf(() =>
         resolveManagedSlotConfig({ flagValue: "{bad", envValue: envJson, readFile: neverRead }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
   });
 
   test("is incompatible with --initial-session-uuid and --no-proxy", () => {
@@ -478,7 +478,7 @@ describe("resolveManagedSlotConfig precedence", () => {
       codeOf(() =>
         resolveManagedSlotConfig({ flagValue: flagJson, readFile: neverRead, noProxy: true }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
     expect(
       codeOf(() =>
         resolveManagedSlotConfig({
@@ -487,17 +487,17 @@ describe("resolveManagedSlotConfig precedence", () => {
           hasInitialSessionUuid: true,
         }),
       ),
-    ).toBe("managed_slot_config_invalid");
+    ).toBe("binding_config_invalid");
   });
 });
 
-describe("managed slot config field capabilities", () => {
+describe("binding config field capabilities", () => {
   test("base fields need no additive capability", () => {
-    expect(unmetManagedSlotConfigCapabilities(parseManagedSlotConfig(validConfig), [])).toEqual([]);
+    expect(unmetManagedSlotConfigCapabilities(parseBindingConfig(validConfig), [])).toEqual([]);
   });
 
   test.each(["android", "ios"] as const)("deviceFamily needs its capability on %s", (platform) => {
-    const config = parseManagedSlotConfig({
+    const config = parseBindingConfig({
       ...validConfig,
       requests: [
         {
@@ -519,7 +519,7 @@ describe("managed slot config field capabilities", () => {
   });
 
   test("reports only the first request using deviceFamily", () => {
-    const base = parseManagedSlotConfig(validConfig);
+    const base = parseBindingConfig(validConfig);
     const family = {
       ...base.requests[0]!,
       requestedSpec: { runtime: "runtime", deviceFamily: "tablet" as const },
@@ -539,14 +539,14 @@ describe("managed slot config field capabilities", () => {
 
   test.each(["android", "ios"] as const)("strictly rejects unknown spec keys on %s", (platform) => {
     const parse = () =>
-      parseManagedSlotConfig({
+      parseBindingConfig({
         ...validConfig,
         requests: [
           { ...androidRequest, platform, requestedSpec: { runtime: "runtime", futureKey: true } },
         ],
       });
-    expect(parse).toThrow(ManagedSlotConfigError);
-    expect(codeOf(parse)).toBe("managed_slot_config_invalid");
+    expect(parse).toThrow(BindingConfigError);
+    expect(codeOf(parse)).toBe("binding_config_invalid");
     expect(parse).toThrow('requests.0.requestedSpec: Unrecognized key: "futureKey"');
   });
 });

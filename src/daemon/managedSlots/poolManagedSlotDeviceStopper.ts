@@ -5,8 +5,11 @@ import type {
   ManagedSlotStopResult,
   ManagedSlotStopTarget,
 } from "./freeDeviceReclaimer";
-import { runAsManagedSlotReconciler } from "./managedSlotExclusion";
-import { readToolPayload, type ManagedSlotToolInvoker } from "./managedSlotReconcilerPorts";
+import { runAsBindingReconciler } from "../sessionBroker/provisioning/exclusion";
+import {
+  readToolPayload,
+  type BindingToolInvoker,
+} from "../sessionBroker/provisioning/reconcilerPorts";
 
 /** `killDevice` reports a device that is not running with this code; the goal is already met. */
 const DEVICE_ALREADY_STOPPED_CODE = "device_already_stopped";
@@ -25,7 +28,7 @@ export interface ManagedSlotStopPool {
 export class PoolManagedSlotDeviceStopper implements ManagedSlotDeviceStopper {
   constructor(
     private readonly pool: ManagedSlotStopPool,
-    private readonly invokeTool: ManagedSlotToolInvoker,
+    private readonly invokeTool: BindingToolInvoker,
   ) {}
 
   async stopAndVerifyOffline(target: ManagedSlotStopTarget): Promise<ManagedSlotStopResult> {
@@ -58,8 +61,8 @@ export class PoolManagedSlotDeviceStopper implements ManagedSlotDeviceStopper {
       if (!(await target.stillClaimed())) {
         return { kind: "failed", message: "The free-pool row is no longer claimed for shutdown" };
       }
-      const response = await runAsManagedSlotReconciler(
-        { scopeKey: target.fromScopeKey, slotIndex: 0 },
+      const response = await runAsBindingReconciler(
+        { scopeKey: target.fromScopeKey, bindingIndex: 0 },
         () =>
           this.invokeTool(
             "killDevice",

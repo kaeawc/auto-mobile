@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SessionManager,
@@ -63,7 +63,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
   let managedSlotExecSession: string | null;
   let pool: DevicePool;
 
-  const managedSlotExclusion: ManagedSlotExclusion = {
+  const bindingExclusion: BindingExclusion = {
     refresh: async () => {},
     holderOf: ({ stableIds }) => {
       const stableDeviceId = stableIds.find((id) => id !== undefined && managedSlotDevices.has(id));
@@ -72,9 +72,9 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
         : {
             platform: "ios",
             stableDeviceId,
-            holder: "slot",
+            holder: "binding",
             scopeKey: "scope",
-            slotIndex: 0,
+            bindingIndex: 0,
             scopeState: null,
             execSessionUuid: managedSlotExecSession,
           };
@@ -90,7 +90,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        ...(withManagedSlots ? { managedSlotExclusion } : {}),
+        ...(withManagedSlots ? { bindingExclusion } : {}),
       }),
     );
     await pool.initializeWithDevices(devices);
@@ -185,7 +185,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     ).resolves.toBe("row-a");
   });
 
-  test("a device a managed slot already holds is not reserved", async () => {
+  test("a device a binding already holds is not reserved", async () => {
     managedSlotDevices.add(SIM_A);
     await setUp([ios(SIM_A), ios(SIM_B)], true);
 
@@ -193,7 +193,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
       reservation("row-a", SIM_A),
       reservation("row-b", SIM_B),
     ]);
-    expect(pool.genericAvailability(SIM_A)).toBe("managed_slot");
+    expect(pool.genericAvailability(SIM_A)).toBe("binding");
     expect(pool.genericAvailability(SIM_B)).toBe("reserved");
 
     // Once the slot lets go, nothing else holds the device: it was never reserved for the row.
@@ -203,7 +203,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
 
   // Managed slots win even when the slot takes the device after the row reserved it: the
   // reservation never blocks the slot, and the row then ends through the normal target-busy path.
-  test("a managed slot that acquires a reserved device afterwards takes it from the row", async () => {
+  test("a binding that acquires a reserved device afterwards takes it from the row", async () => {
     await seedRestartReleasedRow(persistence, "row-a", SIM_A, 10);
     await setUp([ios(SIM_A)], true);
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
@@ -225,7 +225,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     });
   });
 
-  test("a reservation still refuses a session that is not the managed slot's execution", async () => {
+  test("a reservation still refuses a session that is not the binding's execution", async () => {
     await setUp([ios(SIM_A)], true);
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
 
@@ -378,7 +378,7 @@ describe("restart recovery device reservation: the rehydration batch (#11294)", 
   test("a reservation that fails does not stop rehydration", async () => {
     const pool = reservingPool();
     pool.reserveDevicesForRehydration = async () => {
-      throw new Error("slot registry unreadable");
+      throw new Error("binding registry unreadable");
     };
 
     await expect(

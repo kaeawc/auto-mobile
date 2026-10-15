@@ -28,7 +28,7 @@ import {
   startVideoRecording,
 } from "../../src/server/videoRecordingManager";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BootedDevice } from "../../src/models";
 
 isolateToolRegistry();
@@ -229,19 +229,19 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
     expect(stopped.skipped).toBeUndefined();
   });
 
-  test("a managed-slot target is skipped on start and stop with its typed code", async () => {
+  test("a binding target is skipped on start and stop with its typed code", async () => {
     setRecordingRequesterResolverForTesting({
       baseSessionUuid: (id) => id,
       isDeviceHeld: () => false,
       connectionOwnsDeviceSession: () => false,
       assertFanoutTargetAllowed: async (target) => {
         if (target.deviceId === heldDevice.deviceId) {
-          throw new DeviceAssignedToManagedSlotError("videoRecording", target.deviceId, {
+          throw new DeviceAssignedToBindingError("videoRecording", target.deviceId, {
             platform: "android",
             stableDeviceId: "managed-avd",
-            holder: "slot",
+            holder: "binding",
             scopeKey: "scope",
-            slotIndex: 0,
+            bindingIndex: 0,
             scopeState: "active",
             execSessionUuid: HOLDER,
           });
@@ -249,11 +249,11 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
       },
     });
     const started = await response({ action: "start" });
-    expect(started.skipped[0].code).toBe("device_assigned_to_managed_slot");
+    expect(started.skipped[0].code).toBe("device_assigned_to_binding");
     expect(started.count).toBe(1);
     await fsPromises.writeFile(started.recordings[0].outputPath, "video");
     const stopped = await response({ action: "stop" });
-    expect(stopped.skipped[0].code).toBe("device_assigned_to_managed_slot");
+    expect(stopped.skipped[0].code).toBe("device_assigned_to_binding");
     expect(stopped.count).toBe(1);
     expect(JSON.stringify(stopped)).not.toContain(HOLDER);
   });

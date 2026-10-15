@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
-  RegistryManagedSlotExclusion,
-  runAsManagedSlotReconciler,
-} from "../../src/daemon/managedSlots/managedSlotExclusion";
+  RegistryBindingExclusion,
+  runAsBindingReconciler,
+} from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-  MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
-  DeviceAssignedToManagedSlotError,
-  ManagedSlotDiscoveryIncompleteError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DEVICE_ASSIGNED_TO_BINDING_CODE,
+  BINDING_DISCOVERY_INCOMPLETE_CODE,
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -17,12 +17,12 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
-import { assignManagedSlotDevice } from "./managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 
 // #11174 part b / #11178 part a: a device a managed slot holds is never generic capacity, even
 // while idle with no session. Every case below has no live session on the assigned device.
@@ -34,11 +34,11 @@ const android = (deviceId: string): BootedDevice => ({
   platform: "android",
 });
 
-describe("DevicePool managed-slot exclusion", () => {
+describe("DevicePool binding exclusion", () => {
   let timer: FakeTimer;
   let sessions: SessionManager;
   let manager: FakeDeviceManager;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   let pool: DevicePool;
 
   const setUp = async (devices: BootedDevice[]) => {
@@ -49,7 +49,7 @@ describe("DevicePool managed-slot exclusion", () => {
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     await pool.initializeWithDevices(devices);
@@ -76,7 +76,7 @@ describe("DevicePool managed-slot exclusion", () => {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager = new FakeDeviceManager();
-    registry = new FakeSlotRegistry(timer);
+    registry = new FakeBindingRegistry(timer);
   });
 
   afterEach(() => {
@@ -84,8 +84,8 @@ describe("DevicePool managed-slot exclusion", () => {
     timer.reset();
   });
 
-  test("generic single-device allocation skips an idle device a managed slot holds", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+  test("generic single-device allocation skips an idle device a binding holds", async () => {
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
 
     expect(await assignOne("generic-1", "ios")).toBe("SIM-FREE");
@@ -96,20 +96,20 @@ describe("DevicePool managed-slot exclusion", () => {
     expect(sessions.getSession("generic-2")).toBeNull();
   });
 
-  test("stats and the available count treat a managed-slot device as assigned, not idle", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+  test("stats and the available count treat a binding device as assigned, not idle", async () => {
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
-    await pool.managedSlotStableIds("ios");
+    await pool.bindingStableIds("ios");
 
     expect(pool.getStats()).toMatchObject({ total: 2, idle: 1, assigned: 1 });
     expect(pool.getAvailableDeviceCount()).toBe(1);
     expect(pool.getIdleDevices().map((device) => device.id)).toEqual(["SIM-FREE"]);
   });
 
-  test("allocation timeout message does not count the managed-slot device as idle (#11320)", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+  test("allocation timeout message does not count the binding device as idle (#11320)", async () => {
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
-    await pool.managedSlotStableIds("ios");
+    await pool.bindingStableIds("ios");
 
     expect(await assignOne("generic-1", "ios")).toBe("SIM-FREE");
     const refused = await assignOne("generic-2", "ios");
@@ -122,7 +122,7 @@ describe("DevicePool managed-slot exclusion", () => {
   });
 
   test("multi-device criteria allocation never lends the assigned device", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
 
     const allocate = (sessionIds: string[]) =>
@@ -144,18 +144,18 @@ describe("DevicePool managed-slot exclusion", () => {
   });
 
   test("an explicit bind of the assigned idle device is refused, typed and non-retryable", async () => {
-    const slot = await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+    const binding = await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT")]);
 
     const error = await pool
       .bindOrReuseDeviceSession("generic", "SIM-SLOT", "ios")
       .catch((caught: unknown) => caught);
 
-    expect(error).toBeInstanceOf(DeviceAssignedToManagedSlotError);
-    expect((error as DeviceAssignedToManagedSlotError).toPayload()).toMatchObject({
-      code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-      scopeKey: slot.scopeKey,
-      declaredSlot: 0,
+    expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
+    expect((error as DeviceAssignedToBindingError).toPayload()).toMatchObject({
+      code: DEVICE_ASSIGNED_TO_BINDING_CODE,
+      scopeKey: binding.scopeKey,
+      declaredBinding: 0,
       stableId: "SIM-SLOT",
       retryable: false,
     });
@@ -163,9 +163,9 @@ describe("DevicePool managed-slot exclusion", () => {
   });
 
   test.each(["SIM-SLOT", "amslot-12345678-0-g1-attempt"])(
-    "the slot's own execution session may bind its device held as %s",
+    "the binding's own execution session may bind its device held as %s",
     async (stableId) => {
-      await assignManagedSlotDevice(registry, "ios", stableId, "runner-a", "slot-exec");
+      await assignBindingDevice(registry, "ios", stableId, "runner-a", "slot-exec");
       await setUp([{ ...ios("SIM-SLOT"), name: stableId }]);
 
       await pool.bindOrReuseDeviceSession("slot-exec", "SIM-SLOT", "ios");
@@ -174,7 +174,7 @@ describe("DevicePool managed-slot exclusion", () => {
     },
   );
 
-  test("pooled iOS lifecycle gates refuse a creating slot's name but allow its reconciler", async () => {
+  test("pooled iOS lifecycle gates refuse a creating binding's name but allow its reconciler", async () => {
     const name = "amslot-12345678-0-g1-attempt";
     const scope = await registry.ensureScope({
       managedHostScope: "host",
@@ -184,10 +184,10 @@ describe("DevicePool managed-slot exclusion", () => {
     if (scope.kind !== "ready") {
       throw new Error(`scope not ready: ${scope.kind}`);
     }
-    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
-    await registry.initSlot(key, { role: "app", platform: "ios", requestedSpec: {} });
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+    await registry.initBinding(key, { role: "app", platform: "ios", requestedSpec: {} });
     expect(
-      await registry.openSlotJournal(key, {
+      await registry.openBindingJournal(key, {
         kind: "create",
         phase: "creating",
         owner: { daemonId: "creator", pid: 1, processGenerationToken: "fake" },
@@ -209,15 +209,15 @@ describe("DevicePool managed-slot exclusion", () => {
     ).toMatchObject({ kind: "opened" });
     await setUp([]);
     await expect(
-      pool.assertNotAssignedToManagedSlot({
+      pool.assertNotAssignedToBinding({
         action: "startDevice",
         deviceId: "SIM-SLOT",
         platform: "ios",
         stableIds: [name],
       }),
-    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, stableId: name });
-    await runAsManagedSlotReconciler(key, () =>
-      pool.assertNotAssignedToManagedSlot({
+    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE, stableId: name });
+    await runAsBindingReconciler(key, () =>
+      pool.assertNotAssignedToBinding({
         action: "startDevice",
         deviceId: "SIM-SLOT",
         platform: "ios",
@@ -227,14 +227,14 @@ describe("DevicePool managed-slot exclusion", () => {
     await setUp([{ ...ios("SIM-SLOT"), name }]);
     for (const action of ["killDevice", "deleteDevice", "setActiveDevice"]) {
       await expect(
-        pool.assertNotAssignedToManagedSlot({ action, deviceId: "SIM-SLOT", platform: "ios" }),
-      ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, stableId: name });
+        pool.assertNotAssignedToBinding({ action, deviceId: "SIM-SLOT", platform: "ios" }),
+      ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE, stableId: name });
     }
     expect(pool.getDevice("SIM-SLOT")?.sessionId).toBeNull();
   });
 
   test("an explicit bind names the AVD the caller resolved for a pooled serial", async () => {
-    await assignManagedSlotDevice(registry, "android", "slot-avd");
+    await assignBindingDevice(registry, "android", "slot-avd");
     await setUp([android("emulator-5554")]);
 
     const error = await pool
@@ -245,23 +245,21 @@ describe("DevicePool managed-slot exclusion", () => {
       })
       .catch((caught: unknown) => caught);
 
-    expect((error as DeviceAssignedToManagedSlotError).code).toBe(
-      DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-    );
+    expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
   });
 
   test("a device a reset scope parked in the managed free pool is still excluded", async () => {
-    const slot = await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
-    await registry.beginScopeInvalidation(slot.scopeKey, "operator_reset");
-    await registry.completeScopeInvalidation(slot.scopeKey);
+    const binding = await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    await registry.beginScopeInvalidation(binding.scopeKey, "operator_reset");
+    await registry.completeScopeInvalidation(binding.scopeKey);
     await setUp([ios("SIM-SLOT")]);
 
     expect(await assignOne("generic", "ios")).toBeInstanceOf(Error);
     expect(pool.getDevice("SIM-SLOT")?.sessionId).toBeNull();
   });
 
-  test("auto-start never boots a stopped AVD a managed slot holds", async () => {
-    await assignManagedSlotDevice(registry, "android", "slot-avd");
+  test("auto-start never boots a stopped AVD a binding holds", async () => {
+    await assignBindingDevice(registry, "android", "slot-avd");
     await setUp([android("d1")]);
     await pool.bindOrReuseDeviceSession("base", "d1", "android");
     manager.deviceImages = [
@@ -295,11 +293,11 @@ describe("DevicePool managed-slot exclusion", () => {
 
     const error = await assignOne("generic", "ios");
 
-    expect(error).toBeInstanceOf(ManagedSlotDiscoveryIncompleteError);
+    expect(error).toBeInstanceOf(BindingDiscoveryIncompleteError);
     expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
   });
   const failAfterSnapshot = async () => {
-    await pool.managedSlotStableIds("ios");
+    await pool.bindingStableIds("ios");
     registry.snapshotManagedDevices = async () => {
       throw new Error("locked");
     };
@@ -316,7 +314,7 @@ describe("DevicePool managed-slot exclusion", () => {
       throw new Error("registry never readable");
     };
     await expect(
-      pool.assertNotAssignedToManagedSlot({
+      pool.assertNotAssignedToBinding({
         action: "tapOn",
         deviceId: "SIM-HELD",
         platform: "ios",
@@ -324,12 +322,12 @@ describe("DevicePool managed-slot exclusion", () => {
       }),
     ).resolves.toBeUndefined();
     await expect(
-      pool.assertNotAssignedToManagedSlot({
+      pool.assertNotAssignedToBinding({
         action: "tapOn",
         deviceId: "SIM-FREE",
         platform: "ios",
       }),
-    ).rejects.toMatchObject({ code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE, retryable: true });
+    ).rejects.toMatchObject({ code: BINDING_DISCOVERY_INCOMPLETE_CODE, retryable: true });
     expect(pool.getDevice("SIM-HELD")?.sessionId).toBe("existing");
     expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
   });
@@ -338,7 +336,7 @@ describe("DevicePool managed-slot exclusion", () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();
     await expect(pool.bindOrReuseDeviceSession("plain", "SIM-FREE", "ios")).rejects.toMatchObject({
-      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
     expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
@@ -348,31 +346,31 @@ describe("DevicePool managed-slot exclusion", () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();
     expect(await assignOne("generic", "ios")).toMatchObject({
-      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
     expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
   });
 
   test("retained known devices still refuse plain callers and admit their execution and reconciler", async () => {
-    const slot = await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
+    const binding = await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
     await setUp([ios("SIM-SLOT")]);
     await failAfterSnapshot();
     const input = { action: "tapOn", deviceId: "SIM-SLOT", platform: "ios" as const };
-    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
-      code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
+    await expect(pool.assertNotAssignedToBinding(input)).rejects.toMatchObject({
+      code: DEVICE_ASSIGNED_TO_BINDING_CODE,
     });
-    await pool.assertNotAssignedToManagedSlot({ ...input, requesterSessionUuid: "exec" });
-    await runAsManagedSlotReconciler(slot, () => pool.assertNotAssignedToManagedSlot(input));
+    await pool.assertNotAssignedToBinding({ ...input, requesterSessionUuid: "exec" });
+    await runAsBindingReconciler(binding, () => pool.assertNotAssignedToBinding(input));
     await expect(
-      runAsManagedSlotReconciler({ scopeKey: "peer", slotIndex: 0 }, () =>
-        pool.assertNotAssignedToManagedSlot(input),
+      runAsBindingReconciler({ scopeKey: "peer", bindingIndex: 0 }, () =>
+        pool.assertNotAssignedToBinding(input),
       ),
-    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE });
+    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE });
   });
 
   test("a retained refusal for a nonholding session retries until a current read proves assignment", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
+    await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
     await setUp([ios("SIM-SLOT")]);
     const readable = registry.snapshotManagedDevices.bind(registry);
     await failAfterSnapshot();
@@ -382,39 +380,39 @@ describe("DevicePool managed-slot exclusion", () => {
       platform: "ios" as const,
       requesterSessionUuid: "other",
     };
-    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
+    await expect(pool.assertNotAssignedToBinding(input)).rejects.toMatchObject({
       code: "discovery_incomplete",
       retryable: true,
       retryAfterMs: 2_000,
     });
     registry.snapshotManagedDevices = readable;
-    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
-      code: "device_assigned_to_managed_slot",
+    await expect(pool.assertNotAssignedToBinding(input)).rejects.toMatchObject({
+      code: "device_assigned_to_binding",
       retryable: false,
     });
   });
 
   test("a current registry naming another execution refuses even the session held by this pool", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
+    await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
     await setUp([ios("SIM-SLOT")]);
     const held = pool.getDevice("SIM-SLOT")!;
     held.sessionId = "local";
     held.status = "assigned";
     await expect(
-      pool.assertNotAssignedToManagedSlot({
+      pool.assertNotAssignedToBinding({
         action: "tapOn",
         deviceId: "SIM-SLOT",
         platform: "ios",
         requesterSessionUuid: "local",
       }),
-    ).rejects.toMatchObject({ code: "device_assigned_to_managed_slot", retryable: false });
+    ).rejects.toMatchObject({ code: "device_assigned_to_binding", retryable: false });
   });
 
   test("an existing unmanaged holder keeps control and inventory remains available", async () => {
     await setUp([ios("SIM-FREE")]);
     await pool.bindOrReuseDeviceSession("existing", "SIM-FREE", "ios");
     await failAfterSnapshot();
-    await pool.assertNotAssignedToManagedSlot({
+    await pool.assertNotAssignedToBinding({
       action: "tapOn",
       deviceId: "SIM-FREE",
       platform: "ios",
@@ -428,13 +426,13 @@ describe("DevicePool managed-slot exclusion", () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();
     await expect(
-      runAsManagedSlotReconciler({ scopeKey: "peer", slotIndex: 0 }, () =>
-        pool.assertNotAssignedToManagedSlot({
+      runAsBindingReconciler({ scopeKey: "peer", bindingIndex: 0 }, () =>
+        pool.assertNotAssignedToBinding({
           action: "startDevice",
           deviceId: "SIM-FREE",
           platform: "ios",
         }),
       ),
-    ).rejects.toMatchObject({ code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE, retryable: true });
+    ).rejects.toMatchObject({ code: BINDING_DISCOVERY_INCOMPLETE_CODE, retryable: true });
   });
 });

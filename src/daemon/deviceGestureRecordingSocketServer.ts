@@ -25,7 +25,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
-import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
+import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";
 import { DaemonState } from "./daemonState";
 import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
@@ -132,7 +132,7 @@ const defaultManagedSlotGate: DeviceGestureRecordingManagedSlotGate = async (inp
   if (!daemonState.isInitialized()) {
     return;
   }
-  await assertInputNotOnForeignManagedSlotDevice({
+  await assertInputNotOnForeignBindingDevice({
     action: input.action,
     deviceId: input.device.deviceId,
     platform: input.device.platform,

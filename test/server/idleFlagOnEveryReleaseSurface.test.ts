@@ -39,7 +39,7 @@ import {
 import { RELEASE_REASON_WIRE_BUILDERS } from "../lint/releaseReasonWireBuilders";
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
-const slots = readyManagedSlotsResult(SESSION);
+const bindings = readyManagedSlotsResult(SESSION);
 type Holder = { reason?: unknown; releaseReason?: unknown; idle?: unknown };
 const snapshot = (reason: string): SessionReleaseSnapshot => ({
   sessionId: SESSION,
@@ -138,7 +138,7 @@ const surfaces: Surface[] = [
     name: "managed tool result",
     builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
     reasonKey: "reason",
-    holder: (reason) => managedEndedPayload(slots, SESSION, reason)!.error,
+    holder: (reason) => managedEndedPayload(bindings, SESSION, reason)!.error,
   },
   {
     name: "managed liveness logging notification",
@@ -156,15 +156,16 @@ const surfaces: Surface[] = [
           action: "reacquire_lost_sessions",
           releaseReasons: { [SESSION]: reason },
         },
-        slots,
+        bindings,
       )[0].error as Holder,
   },
   {
-    name: "managed slots resource",
+    name: "bindings resource",
     builders: ["src/server/proxyServer.ts#managedSlotsResourceView"],
     reasonKey: "reason",
     holder: (reason) =>
-      managedSlotsResourceView(slots, { sessionUuid: SESSION, reason }).slots[0].executionEnded!,
+      managedSlotsResourceView(bindings, { sessionUuid: SESSION, reason }).bindings[0]
+        .executionEnded!,
   },
   {
     name: "ownership lost",
@@ -341,7 +342,7 @@ const ends: string[] = [
   "explicit-release",
   "daemon-shutdown",
   "owner-disconnected",
-  "managed-slot-ownership-lost",
+  "binding-ownership-lost",
   "session-not-found",
   "unknown",
 ];

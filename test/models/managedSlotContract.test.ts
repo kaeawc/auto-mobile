@@ -15,11 +15,11 @@ import {
   type ManagedSlotProxyAcquisitionPorts,
 } from "../../src/daemon/managedSlotProxyAcquisition";
 import {
-  migrateSlotRegistry,
-  SLOT_REGISTRY_MIGRATIONS,
-} from "../../src/daemon/managedSlots/slotRegistryMigrations";
-import type { SlotRegistryDatabase } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
-import { ManagedSlotRegistrySchemaUnsupportedError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+  migrateBindingRegistry,
+  BINDING_REGISTRY_MIGRATIONS,
+} from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import type { BindingRegistryDatabase } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   MANAGED_SLOT_CONFIG_ENV,
   MANAGED_SLOT_CONFIG_FLAG,
@@ -28,13 +28,15 @@ import {
   MANAGED_SLOTS_V1_CAPABILITY,
   MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
   MAX_MANAGED_SLOT_GROUP_SIZE,
-  ManagedSlotConfigError,
   daemonSupportsManagedSlots,
-  parseManagedSlotConfig,
+  parseBindingConfig,
   unmetManagedSlotConfigCapabilities,
-  type ManagedSlotConfig,
-  type ManagedSlotConfigErrorCode,
 } from "../../src/models/managedSlotConfig";
+import {
+  BindingConfigError,
+  type BrokerProvisionRequest,
+  type BindingConfigErrorCode,
+} from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 
@@ -43,11 +45,11 @@ const contract: typeof import("../../schemas/managed-slot-contract.json") = JSON
   readFileSync(new URL("../../schemas/managed-slot-contract.json", import.meta.url), "utf8"),
 );
 const configErrorCodes = {
-  managed_slot_config_invalid: true,
+  binding_config_invalid: true,
   contract_unsupported: true,
-  managed_slot_group_unsupported: true,
-  managed_slots_unsupported: true,
-} satisfies Record<ManagedSlotConfigErrorCode, true>;
+  binding_group_unsupported: true,
+  bindings_unsupported: true,
+} satisfies Record<BindingConfigErrorCode, true>;
 
 function configFor(frontend: NonNullable<(typeof contract.compatibility)[number]["frontend"]>) {
   return {
@@ -55,11 +57,11 @@ function configFor(frontend: NonNullable<(typeof contract.compatibility)[number]
     managedHostScope: "host",
     runnerNamespace: "runner",
     runnerIncarnation: "incarnation",
-    localSlotCapacity: frontend.groupSize,
+    localBindingCapacity: frontend.groupSize,
     preparationTimeoutMs: 100,
-    requests: Array.from({ length: frontend.groupSize }, (_, slotIndex) => ({
-      slotIndex,
-      role: `app-${slotIndex}`,
+    requests: Array.from({ length: frontend.groupSize }, (_, bindingIndex) => ({
+      bindingIndex,
+      role: `app-${bindingIndex}`,
       platform: "ios",
       requestedSpec: {
         runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
@@ -83,18 +85,18 @@ const uninitializedState: DaemonStateAccess = {
   },
 };
 
-describe("published managed-slot contract", () => {
+describe("published binding contract", () => {
   let migratedRegistryTemplate: Uint8Array;
 
   // Build immutable schema bytes once, as in test/db/videoRecordingRecorderDaemonScope.test.ts.
   // The gap test clones them so its budget measures the newer-registry probe, not schema setup.
   beforeAll(async () => {
     const database = new Sqlite(":memory:");
-    const db = new Kysely<SlotRegistryDatabase>({
+    const db = new Kysely<BindingRegistryDatabase>({
       dialect: new BunSqliteDialect({ database }),
     });
     try {
-      await migrateSlotRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:");
       migratedRegistryTemplate = database.serialize();
     } finally {
       await db.destroy();
@@ -117,7 +119,7 @@ describe("published managed-slot contract", () => {
     ]);
     expect(contract.maxGroupSize).toBe(MAX_MANAGED_SLOT_GROUP_SIZE);
     expect([...contract.configErrorCodes].sort()).toEqual(Object.keys(configErrorCodes).sort());
-    expect(contract.registry.migrations).toEqual(Object.keys(SLOT_REGISTRY_MIGRATIONS));
+    expect(contract.registry.migrations).toEqual(Object.keys(BINDING_REGISTRY_MIGRATIONS));
   });
 
   test("daemon advertisement and additive config fields match the published contract", async () => {
@@ -136,7 +138,7 @@ describe("published managed-slot contract", () => {
       contract.daemonCapabilities.base,
       ...contract.daemonCapabilities.additive.map((entry) => entry.capability),
     ]);
-    const config = parseManagedSlotConfig(
+    const config = parseBindingConfig(
       configFor({ contractVersion: 1, groupSize: 1, usesDeviceFamily: true }),
     );
     expect(
@@ -225,13 +227,13 @@ describe("published managed-slot contract", () => {
           releases++;
         },
       };
-      let config: ManagedSlotConfig;
+      let config: BrokerProvisionRequest;
       try {
-        config = parseManagedSlotConfig(configFor(row.frontend));
+        config = parseBindingConfig(configFor(row.frontend));
       } catch (error) {
         // Parsing refusals are expected for unsupported versions/groups; assert their typed code.
-        expect(error).toBeInstanceOf(ManagedSlotConfigError);
-        if (!(error instanceof ManagedSlotConfigError)) {
+        expect(error).toBeInstanceOf(BindingConfigError);
+        if (!(error instanceof BindingConfigError)) {
           throw error;
         }
         expect(error.code).toBe(row.outcome);
@@ -267,28 +269,28 @@ describe("published managed-slot contract", () => {
   );
 
   test("older builds on newer registries are refused before mutation as published", async () => {
-    const db = new Kysely<SlotRegistryDatabase>({
+    const db = new Kysely<BindingRegistryDatabase>({
       dialect: new BunSqliteDialect({
         database: new Sqlite(new Uint8Array(migratedRegistryTemplate)),
       }),
     });
     try {
-      await migrateSlotRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:");
       await sql`INSERT INTO kysely_migration (name, timestamp) VALUES ('2099_01_01_999_future', '2099-01-01T00:00:00.000Z')`.execute(
         db,
       );
-      const migration = migrateSlotRegistry(db, ":memory:");
+      const migration = migrateBindingRegistry(db, ":memory:");
       const message =
         "Update registry.olderBuildOnNewerRegistry in schemas/managed-slot-contract.json when the refusal behavior changes";
       if (contract.registry.olderBuildOnNewerRegistry.refusedBeforeMutation) {
         await expect(migration, message).rejects.toBeInstanceOf(
-          ManagedSlotRegistrySchemaUnsupportedError,
+          BindingRegistrySchemaUnsupportedError,
         );
         try {
           await migration;
         } catch (error) {
-          expect(error).toBeInstanceOf(ManagedSlotRegistrySchemaUnsupportedError);
-          if (!(error instanceof ManagedSlotRegistrySchemaUnsupportedError)) {
+          expect(error).toBeInstanceOf(BindingRegistrySchemaUnsupportedError);
+          if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
             throw error;
           }
           expect(error.code).toBe(contract.registry.olderBuildOnNewerRegistry.failureCode);

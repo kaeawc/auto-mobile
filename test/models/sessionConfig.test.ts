@@ -82,7 +82,7 @@ function ownerRig() {
 }
 
 describe("session execution owner start identity", () => {
-  test("accepts an identity with its PID and enforces the managed-slot length limits", () => {
+  test("accepts an identity with its PID and enforces the binding length limits", () => {
     expect(
       parseSessionConfig({ ...config, executionOwnerStartIdentity: "T1" })
         .executionOwnerStartIdentity,

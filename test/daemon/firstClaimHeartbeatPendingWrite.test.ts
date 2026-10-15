@@ -342,7 +342,7 @@ describe("a second heartbeat for the session while the first claim's write is pe
   });
 });
 
-describe("a claim the daemon makes for its owner (managed slot hand-off)", () => {
+describe("a claim the daemon makes for its owner (binding hand-off)", () => {
   // `ManagedSlotAcquisition.handOff` claims for the proxy's token and adopts the managed policy
   // before the acquisition reply reaches the proxy; the proxy's first heartbeat follows the reply.
   async function handOff(r: Rig): Promise<void> {

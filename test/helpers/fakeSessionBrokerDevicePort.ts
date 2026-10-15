@@ -5,11 +5,11 @@ import type {
 } from "../../src/daemon/sessionBroker/devicePort";
 import { nativeProfile } from "../../src/daemon/sessionBroker/profile";
 import type { BrokerResourceRecord } from "../../src/daemon/sessionBroker/store";
-import type { SqliteSlotRegistry } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { SlotProcessIdentity } from "../../src/daemon/managedSlots/slotRegistry";
+import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingProcessIdentity } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { CountingIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 
-export const FAKE_BROKER_OWNER: SlotProcessIdentity = {
+export const FAKE_BROKER_OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "start-a",
@@ -33,17 +33,17 @@ export class FakeNativePort implements SessionBrokerDevicePort {
   releaseHook: (() => Promise<void>) | undefined;
 
   constructor(
-    private readonly registry: SqliteSlotRegistry,
+    private readonly registry: SqliteBindingRegistry,
     readonly sessionIds: IdGenerator = new CountingIdGenerator("session"),
-    private readonly owner: SlotProcessIdentity = FAKE_BROKER_OWNER,
+    private readonly owner: BindingProcessIdentity = FAKE_BROKER_OWNER,
   ) {}
 
   async prepare(resource: BrokerResourceRecord, options: SessionDevicePreparationOptions) {
     this.prepared.push(resource.resourceId);
     await this.prepareHook?.(options);
-    const key = { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
+    const key = { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex };
     const profile = nativeProfile(resource);
-    await this.registry.initSlot(key, {
+    await this.registry.initBinding(key, {
       platform: profile.platform,
       role: "primary",
       requestedSpec: profile,
@@ -89,7 +89,7 @@ export class FakeNativePort implements SessionBrokerDevicePort {
     const resource = this.sessions.get(sessionId);
     if (resource) {
       await this.registry.releaseExecution(
-        { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex },
+        { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex },
         sessionId,
       );
       this.sessions.delete(sessionId);
@@ -101,7 +101,7 @@ export class FakeNativePort implements SessionBrokerDevicePort {
     if (!this.canDestroy) {
       return "pending";
     }
-    const key = { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
+    const key = { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex };
     let assignment = await this.registry.getAssignment(key);
     if (assignment?.execOwner) {
       if (!(await this.release(assignment.execOwner.sessionUuid)).settled) {

@@ -104,7 +104,7 @@ rejected) and happens before any daemon or device work.
 | `executionOwnerStartIdentity` | string, 1-256 chars    | Optional. Runner's own start identity; requires `executionOwnerPid`. Proxy-only, never forwarded to the daemon.                                               |
 
 If `executionOwnerPid` is set, the proxy checks at startup that it names a
-running process and otherwise fails with `managed_slot_config_invalid`.
+running process and otherwise fails with `binding_config_invalid`.
 If `executionOwnerStartIdentity` is also set, a different start identity causes
 the same refusal. An unknown or unreadable identity falls back to trusting the
 PID alone. Use AutoMobile's opaque token format: `linux:<boot_id>:<starttime ticks>`
@@ -175,7 +175,7 @@ Contract v1 is advertised as the daemon capability `managed-slots/v1` in
 `daemon/capabilities` (`MANAGED_SLOTS_V1_CAPABILITY`). A launcher that needs
 slot mode should fail before any mutation when that capability is absent. A
 build that does not wire slots (`MANAGED_SLOTS_PROXY_WIRED` false) refuses a
-supplied config with `managed_slots_unsupported` instead of running unmanaged;
+supplied config with `bindings_unsupported` instead of running unmanaged;
 on `main` it is `true`. A config with an unsupported `contractVersion` fails with
 `contract_unsupported`, and the version is checked before any other field so a
 newer contract's shape reports that code, not a schema error.
@@ -190,9 +190,9 @@ stale running daemon when the proxy starts it automatically from the same
 installation; alternatively, remove `deviceFamily` from the config. A config
 without `deviceFamily` works unchanged against an older daemon. An older proxy
 connected to a newer daemon has nothing to negotiate: the older proxy's own
-schema rejects `deviceFamily` at launch as `managed_slot_config_invalid`. A raw
+schema rejects `deviceFamily` at launch as `binding_config_invalid`. A raw
 socket client that skips the probe and sends an unknown spec key to a daemon
-still gets strict `managed_slot_config_invalid` naming the key.
+still gets strict `binding_config_invalid` naming the key.
 
 ### Mixed versions and upgrades
 
@@ -273,7 +273,7 @@ connection used for tools and resources:
    per answering daemon instance; silence never resets that window.
    If the execution ends, every managed answer, notification and resource reports
    the daemon's release reason, or `session-not-found` when none was named. While the session is live, a duplicate proxy still gets
-   `slot_in_use` and the scope is never treated as abandoned.
+   `binding_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
    (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). A closing proxy first
@@ -283,9 +283,9 @@ connection used for tools and resources:
    "MCP proxy is closing" error. The daemon cancels the
    session's in-flight work, waits about 500 ms for it, then releases the session
    (about 700 ms budget). If everything settled, the slot is
-   `reusable_for_this_slot`. If work outlived the budget the slot is marked
+   `reusable_for_this_binding`. If work outlived the budget the slot is marked
    `settling` before its owner is cleared, so the next acquisition waits
-   (retryable `slot_settling`) until the work ends or the settler is found dead.
+   (retryable `binding_settling`) until the work ends or the settler is found dead.
    The slot registry is shared by every daemon on the host and can be busy, so no
    registry step of the drain is assumed to have happened (#11616). A failed
    slot lookup, `settling` mark or return to `ready` is retried with backoff
@@ -293,7 +293,7 @@ connection used for tools and resources:
    until it lands or the daemon stops. A failed owner clear is retried the
    same way: the record it leaves belongs to an ended session and pins nothing
    in the draining daemon, but it names that daemon's running process, so other
-   daemons on the host answer `slot_in_use` for it until the retry lands. The
+   daemons on the host answer `binding_in_use` for it until the retry lands. The
    retry clears only that ended session's record; one a live execution holds
    again is left to that execution's own release. Failed acquisition back-out also
    retries owed session release and owner clearing in the background, at 25 ms
@@ -320,7 +320,7 @@ connection used for tools and resources:
    or, until that mark lands, the owner record. Before it marks a slot the
    daemon re-stamps an owner record that still names another process (the
    previous daemon after a restart, or a second daemon) with itself, so a slot
-   whose mark is owed reads `slot_in_use` from any daemon. Both hold for as long
+   whose mark is owed reads `binding_in_use` from any daemon. Both hold for as long
    as that process runs, including after it has begun to shut down, and neither
    outlives it: once the process is gone its work is gone too, the next daemon
    returns a `settling` slot to `ready` at startup, and the owner record reads
@@ -330,7 +330,7 @@ connection used for tools and resources:
    a session released by heartbeat loss has not), only the draining daemon
    itself refuses the slot. And an owner record whose clear failed, which the
    draining daemon itself reads as dead, still names that daemon's process:
-   other daemons on the host answer `slot_in_use` for it until the clear's
+   other daemons on the host answer `binding_in_use` for it until the clear's
    retry lands, the draining daemon next claims the slot, or it exits.
    A release clears the execution owner and keeps the device assignment and spec,
    whatever the release reason (explicit or owner/heartbeat loss). The generation
@@ -339,7 +339,7 @@ connection used for tools and resources:
    it by one.
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses
    the assigned device with a fresh session. A duplicate proxy for a slot whose
-   execution is still live is refused with a retryable `slot_in_use`.
+   execution is still live is refused with a retryable `binding_in_use`.
 
 ## Idle and liveness
 
@@ -353,7 +353,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
   living owner with a healthy proxy heartbeat holds the slot indefinitely. Heartbeats and
   reads still never move tool-activity clocks. The trusted config's `idleTimeoutMs`
   (2 to 60 minutes, default 2 minutes) stays validated, stored and reported; it does not
-  end a live-owned execution. Out-of-range values remain `managed_slot_config_invalid`.
+  end a live-owned execution. Out-of-range values remain `binding_config_invalid`.
   `session-info` and requested heartbeat reports give `idleReleaseAt: null`; the proxy
   treats null as authoritative and never substitutes its local idle window.
   Once the owner lease lapses, `session-info` reports a numeric `idleReleaseAt` again;
@@ -375,7 +375,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
   failed rehydration frees that reservation immediately, while successful rehydration
   holds the device until the proxy returns or the awaiting-owner timeout ends the session.
   A rehydrated execution with unconfirmed slot ownership (registry busy) stays held
-  while its proxy heartbeats; control calls return `managed_slot_ownership_unconfirmed`
+  while its proxy heartbeats; control calls return `binding_ownership_unconfirmed`
   until ownership is confirmed or lost.
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
@@ -405,7 +405,7 @@ held by the current daemon can still do so while re-owning catches up. The `pid`
 in `reset-slot-scope` pending `liveOwners` evidence is this recorded daemon PID.
 
 While re-owning is unconfirmed, control calls refuse with
-`managed_slot_ownership_unconfirmed` and `retryAfterMs: 1000`; retries start at
+`binding_ownership_unconfirmed` and `retryAfterMs: 1000`; retries start at
 25 ms, double to a 1 s cap, and continue while the session remains unconfirmed.
 Back-out cleanup, re-own and settled-slot recovery take turns in arrival order and
 share quiet time after a blocked registry call (capped at 5 s). An expedited re-own
@@ -585,7 +585,7 @@ count (the acceptance run saw `g1` then `g4` after one replacement).
 ## Scope reset and abandonment
 
 The registry tracks each scope as `valid`, `invalidating` or `invalidated`
-(`src/daemon/managedSlots/slotRegistry.ts`).
+(`src/daemon/sessionBroker/registry/bindingRegistry.ts`).
 
 - **New incarnation (implicit reset).** A trusted config with a new
   `runnerIncarnation` for the same `(managedHostScope, runnerNamespace)` starts a
@@ -686,7 +686,7 @@ The initialize capability is a snapshot at connect. Resource reads add
 
 If acquisition fails, the proxy still serves MCP: `initialize` reports outcome
 `failed` with the typed failure, the tool list is empty, and every tool call is
-refused with `managed_slot_acquisition_failed` (the error carries
+refused with `binding_acquisition_failed` (the error carries
 `acquisitionFailure`; read the resource for the evidence). The launcher must set
 its MCP initialize timeout at or above `preparationTimeoutMs`. Launch-config
 errors (invalid JSON or schema, `contract_unsupported`, unsupported group size,
@@ -707,7 +707,7 @@ slot. Only control and lifecycle calls on another slot's device are refused.
 
 - A generic caller (no managed slot) that tries to lend, adopt, start, stop,
   delete or drive a device a slot holds, or one parked in the managed free pool,
-  gets the non-retryable `device_assigned_to_managed_slot`. `force: true` does not
+  gets the non-retryable `device_assigned_to_binding`. `force: true` does not
   override it. The device frees only when its scope is reset.
 - A managed connection (a proxy launched with a slot config) that tries to
   control, start, provision or delete anything outside its own slot devices or
@@ -853,7 +853,7 @@ A delete journaled but not confirmed before that deadline stays charged until
 3 failed native deletes, when it may receive the single exemption, and is finished by periodic redrive. A
 deadline passing during admission returns `timeout`.
 
-A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
+A full budget returns `binding_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
 `limit`, category `usage` (including `total` and `orphaned`), protected `retained`
 entries with reasons, `evictionFailures`, and `charged` rows identifying every device
@@ -873,25 +873,25 @@ exceed the limit by at most one uncounted stuck marker at a time. The exempt
 
 | Code                                | Retryable | Meaning                                                                                                                                                                                                                                                                                                        |
 | ----------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or an `executionOwnerStartIdentity` that names a different process than `executionOwnerPid` now holds, or is combined with `--initial-session-uuid` / `--no-proxy`. |
+| `binding_config_invalid`            | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or an `executionOwnerStartIdentity` that names a different process than `executionOwnerPid` now holds, or is combined with `--initial-session-uuid` / `--no-proxy`. |
 | `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon, or the daemon lacks a capability a config field requires (`managed-slots/v1.deviceFamily`).                                                                                                                                                        |
 | `registry_schema_unsupported`       | no        | The shared registry was migrated by a newer build. Nothing was changed. Upgrade every daemon sharing it.                                                                                                                                                                                                       |
-| `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                                                                                                                 |
-| `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                                                                                                             |
+| `binding_group_unsupported`         | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                                                                                                                 |
+| `bindings_unsupported`              | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                                                                                                             |
 | `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                                                                                                                   |
 | `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                                                                                                                                  |
-| `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                                                                                                                       |
-| `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                                                                                                                                      |
+| `binding_in_use`                    | yes       | A live execution already holds the slot.                                                                                                                                                                                                                                                                       |
+| `binding_settling`                  | yes       | The previous execution's released work is still settling.                                                                                                                                                                                                                                                      |
 | `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                                                                                                                       |
 | `scope_invalidated`                 | no        | The request's incarnation was reset and never accepts work again.                                                                                                                                                                                                                                              |
 | `scope_transition_pending`          | yes       | A scope reset is waiting for owners or cleanup to settle.                                                                                                                                                                                                                                                      |
 | `cleanup_pending`                   | yes       | A prior deletion or release has not been confirmed.                                                                                                                                                                                                                                                            |
 | `discovery_incomplete`              | yes       | Device inventory or the slot registry was partial, so absence cannot be proven.                                                                                                                                                                                                                                |
 | `capacity_exhausted`                | yes       | Boot refused at the platform's booted-device limit.                                                                                                                                                                                                                                                            |
-| `managed_slot_budget_exhausted`     | yes       | Total-resource budget is full. `budget` carries limit, usage, retained reasons and eviction failures; reset/release unused scopes or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry. No retry delay is promised.                                                                                      |
-| `device_assigned_to_managed_slot`   | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                                                                                                                             |
+| `binding_budget_exhausted`          | yes       | Total-resource budget is full. `budget` carries limit, usage, retained reasons and eviction failures; reset/release unused scopes or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry. No retry delay is promised.                                                                                      |
+| `device_assigned_to_binding`        | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                                                                                                                             |
 | `device_outside_managed_slots`      | no        | A managed connection touched a device, session or tool outside its own slots.                                                                                                                                                                                                                                  |
-| `managed_slot_acquisition_failed`   | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                                                                                                                                 |
+| `binding_acquisition_failed`        | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                                                                                                                                 |
 | `managed_slot_registration_refused` | no        | `daemon/registerSession` refused to bind a connection to managed sessions it cannot prove it holds.                                                                                                                                                                                                            |
 
 Other reconciler codes that can appear in a slot's `failure`: `scope_not_valid`,
@@ -913,7 +913,7 @@ This is the epic's required scenario, as run live on Android (scope
    gets its own device, and `killDevice`, `getAndroid` and `deleteDevice` (with or
    without `force`) on D from B's connection are refused
    (`device_outside_managed_slots`; from a plain client,
-   `device_assigned_to_managed_slot`). B's slot `0` is also a different scoped
+   `device_assigned_to_binding`). B's slot `0` is also a different scoped
    identity with its own device.
 4. A starts P2 with the same scoped slot `0` and a matching spec. AutoMobile
    reuses D with a fresh session S2, not S1 (`disposition: reused`).
@@ -927,7 +927,7 @@ This is the epic's required scenario, as run live on Android (scope
 
 The failure path was also exercised: a malformed runtime (`"android-36"`) served
 MCP in under a second with outcome `failed`, `spec_unsupported`, zero tools,
-`managed_slot_acquisition_failed` on every call and no AVD created.
+`binding_acquisition_failed` on every call and no AVD created.
 
 ## Native descendants after cancellation and daemon death
 

@@ -376,7 +376,7 @@ export async function assertLifecycleCallerNotOnForeignManagedSlot(input: {
     return;
   }
   const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
-  await managedSlotPoolGate(daemonState.getDevicePool()).assertNotAssignedToManagedSlot?.({
+  await managedSlotPoolGate(daemonState.getDevicePool()).assertNotAssignedToBinding?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
     platform: input.device.platform,

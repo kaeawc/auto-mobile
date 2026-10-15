@@ -117,7 +117,7 @@ export function resolveSessionConfig(launch: SessionConfigLaunch): SessionConfig
   }
   if (launch.hasInitialSessionUuid || launch.hasManagedSlotConfig || launch.noProxy) {
     throw new SessionConfigError(
-      "session config is incompatible with managed-slot config, --initial-session-uuid, and --no-proxy",
+      "session config is incompatible with binding config, --initial-session-uuid, and --no-proxy",
     );
   }
   return parseSessionConfigSource(source, launch.readFile);

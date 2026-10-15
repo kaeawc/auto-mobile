@@ -14,13 +14,13 @@ import {
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/managedExecutionLiveness";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
 } from "../../src/daemon/types";
-import type { ManagedSlotConfig } from "../../src/models/managedSlotConfig";
-import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import type { BrokerProvisionRequest } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -32,14 +32,14 @@ const SESSION = "11111111-2222-4333-8444-555555555555";
 const OTHER = "66666666-2222-4333-8444-555555555555";
 const TOKEN = "managed-acquisition-owner";
 const INTERVAL = 2_000;
-const CONFIG: ManagedSlotConfig = {
+const CONFIG: BrokerProvisionRequest = {
   contractVersion: 1,
   managedHostScope: "host",
   runnerNamespace: "runner",
   runnerIncarnation: "boot",
-  localSlotCapacity: 1,
+  localBindingCapacity: 1,
   preparationTimeoutMs: 100,
-  requests: [{ slotIndex: 0, role: "app", platform: "android", requestedSpec: {} }],
+  requests: [{ bindingIndex: 0, role: "app", platform: "android", requestedSpec: {} }],
 };
 const READY = readyManagedSlotsResult(SESSION);
 
@@ -62,7 +62,7 @@ class HoldScenario {
   parkRegistration = false;
   readonly claimRefusals: Error[] = [];
   readonly registrationRefusals: unknown[] = [];
-  result: ManagedSlotsResult | undefined;
+  result: BindingsResult | undefined;
   readonly proxy: DaemonMcpProxy;
 
   constructor() {
@@ -131,8 +131,8 @@ class HoldScenario {
     });
   }
 
-  acquire(preparationTimeoutMs = CONFIG.preparationTimeoutMs): Promise<ManagedSlotsResult> {
-    const pending = this.proxy.acquireManagedSlots({ ...CONFIG, preparationTimeoutMs });
+  acquire(preparationTimeoutMs = CONFIG.preparationTimeoutMs): Promise<BindingsResult> {
+    const pending = this.proxy.acquireBindings({ ...CONFIG, preparationTimeoutMs });
     void pending.then((result) => {
       this.result = result;
     });
@@ -228,7 +228,7 @@ describe("managed acquisition hold deadline on the proxy", () => {
       livenessOwnerToken: TOKEN,
     });
     await s.expire();
-    expect((await pending).slots.every((slot) => slot.sessionUuid === null)).toBe(true);
+    expect((await pending).bindings.every((binding) => binding.sessionUuid === null)).toBe(true);
     expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)).toHaveLength(1);
     expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)[0]?.params).toEqual({
       sessionId: SESSION,
@@ -275,7 +275,7 @@ describe("managed acquisition hold deadline on the proxy", () => {
     expect(s.result).toBeUndefined();
     expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)).toHaveLength(1);
     s.assertAbandoned();
-    s.timer.advanceTime(MANAGED_EXECUTION_RELEASE_TIMEOUT_MS - 1);
+    s.timer.advanceTime(BROKER_EXECUTION_RELEASE_TIMEOUT_MS - 1);
     await drainMicrotasks(150);
     expect(s.result).toBeUndefined();
     s.timer.advanceTime(1);
@@ -413,7 +413,7 @@ describe("managed acquisition hold deadline on the proxy", () => {
     expect(calls.find((call) => call.method === DAEMON_REGISTER_SESSION_METHOD)?.params).toEqual({
       sessionId: SESSION,
       clientName: "auto-mobile-managed-slot-proxy",
-      managedSlots: {
+      bindings: {
         scopeKey: READY.scope.scopeKey,
         sessionUuids: [SESSION],
         livenessOwnerToken: TOKEN,

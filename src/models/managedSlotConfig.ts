@@ -1,14 +1,18 @@
-import { z } from "zod/v4";
-import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../daemon/sessionLivenessWindows";
 import {
-  androidManagedSlotSpecSchema,
-  iosManagedSlotSpecSchema,
+  type BrokerProvisionRequest,
+  MIN_BINDING_IDLE_TIMEOUT_MS,
+  MAX_BINDING_IDLE_TIMEOUT_MS,
+  BindingConfigError,
+} from "../daemon/sessionBroker/provisioning/provisionRequest";
+import { z } from "zod/v4";
+import {
+  androidBindingSpecSchema,
+  iosBindingSpecSchema,
 } from "../server/provisionDeviceSpecSchemas";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import { logger } from "../utils/logger";
-import { ActionableError } from "./ActionableError";
 
 /**
  * Launch-time, launcher-trusted configuration for managed device slots (epic #11172, #11173).
@@ -53,31 +57,13 @@ export const MANAGED_SLOT_CONFIG_ENV = "AUTOMOBILE_MANAGED_SLOT_CONFIG";
 export const MAX_MANAGED_SLOT_GROUP_SIZE = 1;
 
 /** Stored 2-minute default; validated overrides remain accepted but never end a live-owned execution. */
-export const MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS = MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS;
-export const MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
-
-export type ManagedSlotConfigErrorCode =
-  | "managed_slot_config_invalid"
-  | "contract_unsupported"
-  | "managed_slot_group_unsupported"
-  | "managed_slots_unsupported";
 
 /** Typed launch-config failure; always raised before any device or registry mutation. */
-export class ManagedSlotConfigError extends ActionableError {
-  constructor(
-    public readonly code: ManagedSlotConfigErrorCode,
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(`${code}: ${message}`, options);
-    this.name = "ManagedSlotConfigError";
-  }
-}
 
 const identitySchema = z.string().trim().min(1).max(256);
 
 const slotRequestBase = {
-  slotIndex: z.number().int().min(0),
+  bindingIndex: z.number().int().min(0),
   role: identitySchema,
   /** Non-authoritative: a prior assignment's stable id may be tried first, never trusted. */
   priorDeviceHint: z.object({ stableId: identitySchema }).strict().optional(),
@@ -88,14 +74,14 @@ export const managedSlotRequestSchema = z.discriminatedUnion("platform", [
     .object({
       ...slotRequestBase,
       platform: z.literal("android"),
-      requestedSpec: androidManagedSlotSpecSchema,
+      requestedSpec: androidBindingSpecSchema,
     })
     .strict(),
   z
     .object({
       ...slotRequestBase,
       platform: z.literal("ios"),
-      requestedSpec: iosManagedSlotSpecSchema,
+      requestedSpec: iosBindingSpecSchema,
     })
     .strict(),
 ]);
@@ -109,7 +95,7 @@ export const managedSlotConfigSchema = z
     /** Correlation only, never authorization. */
     executionAttempt: identitySchema.optional(),
     /** How many slots this host-local runner may hold; V1 supports exactly one. */
-    localSlotCapacity: z.number().int().min(1),
+    localBindingCapacity: z.number().int().min(1),
     requests: z.array(managedSlotRequestSchema).min(1),
     preparationTimeoutMs: z
       .number()
@@ -121,8 +107,8 @@ export const managedSlotConfigSchema = z
     idleTimeoutMs: z
       .number()
       .int()
-      .min(MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS)
-      .max(MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS)
+      .min(MIN_BINDING_IDLE_TIMEOUT_MS)
+      .max(MAX_BINDING_IDLE_TIMEOUT_MS)
       .optional(),
     /**
      * Supervising process whose death ends the execution even while the proxy's own parent is
@@ -150,26 +136,23 @@ export const managedSlotConfigSchema = z
     }
     const seen = new Set<number>();
     config.requests.forEach((request, index) => {
-      if (seen.has(request.slotIndex)) {
+      if (seen.has(request.bindingIndex)) {
         context.addIssue({
           code: "custom",
-          message: `duplicate slotIndex ${request.slotIndex}`,
-          path: ["requests", index, "slotIndex"],
+          message: `duplicate slotIndex ${request.bindingIndex}`,
+          path: ["requests", index, "bindingIndex"],
         });
       }
-      seen.add(request.slotIndex);
+      seen.add(request.bindingIndex);
     });
   });
-
-export type ManagedSlotRequest = z.infer<typeof managedSlotRequestSchema>;
-export type ManagedSlotConfig = z.infer<typeof managedSlotConfigSchema>;
 
 /**
  * Requirements of `config` that the daemon's advertised `daemon/capabilities` list does not meet.
  * Empty for a config that uses only base `managed-slots/v1` fields, whatever the daemon advertises.
  */
 export function unmetManagedSlotConfigCapabilities(
-  config: ManagedSlotConfig,
+  config: BrokerProvisionRequest,
   capabilities: readonly string[],
 ): ManagedSlotConfigCapabilityRequirement[] {
   if (capabilities.includes(MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY)) {
@@ -205,9 +188,9 @@ export function assertManagedSlotContractSupported(
   supportedVersions: readonly number[] = MANAGED_SLOT_SUPPORTED_CONTRACT_VERSIONS,
 ): void {
   if (typeof contractVersion !== "number" || !supportedVersions.includes(contractVersion)) {
-    throw new ManagedSlotConfigError(
+    throw new BindingConfigError(
       "contract_unsupported",
-      `managed slot contractVersion ${JSON.stringify(contractVersion)} is not supported; ` +
+      `binding contractVersion ${JSON.stringify(contractVersion)} is not supported; ` +
         `supported versions: ${supportedVersions.join(", ")}`,
     );
   }
@@ -215,13 +198,13 @@ export function assertManagedSlotContractSupported(
 
 /** Refuses to start with a managed slot config this build cannot honour. */
 export function assertManagedSlotsSupported(
-  config: ManagedSlotConfig | undefined,
+  config: BrokerProvisionRequest | undefined,
   proxyWired: boolean = MANAGED_SLOTS_PROXY_WIRED,
 ): void {
   if (config !== undefined && !proxyWired) {
-    throw new ManagedSlotConfigError(
-      "managed_slots_unsupported",
-      "managed slots not yet supported by this build; remove --managed-slot-config / " +
+    throw new BindingConfigError(
+      "bindings_unsupported",
+      "bindings not yet supported by this build; remove --managed-slot-config / " +
         `${MANAGED_SLOT_CONFIG_ENV} to run an unmanaged proxy`,
     );
   }
@@ -232,13 +215,13 @@ export function assertManagedSlotsSupported(
  * already-dead owner fails typed instead of shutting the proxy down a second later.
  */
 export function assertManagedSlotOwnerRunning(
-  config: ManagedSlotConfig | undefined,
+  config: BrokerProvisionRequest | undefined,
   isProcessRunning: (pid: number) => boolean,
 ): void {
   const ownerPid = config?.executionOwnerPid;
   if (ownerPid !== undefined && !isProcessRunning(ownerPid)) {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
+    throw new BindingConfigError(
+      "binding_config_invalid",
       `executionOwnerPid ${ownerPid} is not a running process`,
     );
   }
@@ -248,7 +231,7 @@ export type ManagedSlotOwnerIdentityVerdict = ReturnType<LockOwnerGenerationProb
 
 /** Startup check that the declared owner PID still names the process the runner described. */
 export function assertManagedSlotOwnerIdentity(
-  config: ManagedSlotConfig | undefined,
+  config: BrokerProvisionRequest | undefined,
   compare: LockOwnerGenerationProbe["compare"],
 ): ManagedSlotOwnerIdentityVerdict | undefined {
   const pid = config?.executionOwnerPid;
@@ -257,8 +240,8 @@ export function assertManagedSlotOwnerIdentity(
   }
   const verdict = compareExecutionOwnerIdentity(pid, config?.executionOwnerStartIdentity, compare);
   if (verdict === "different") {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
+    throw new BindingConfigError(
+      "binding_config_invalid",
       `executionOwnerPid ${pid} no longer names the process described by executionOwnerStartIdentity (the PID was reused)`,
     );
   }
@@ -298,28 +281,25 @@ export function daemonSupportsManagedSlots(capabilities: readonly string[]): boo
 }
 
 /** Validates an already-decoded JSON value into a trusted {@link ManagedSlotConfig}. */
-export function parseManagedSlotConfig(value: unknown): ManagedSlotConfig {
+export function parseBindingConfig(value: unknown): BrokerProvisionRequest {
   const probe = contractVersionProbeSchema.safeParse(value);
   if (!probe.success) {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
-      "managed slot config must be a JSON object",
-    );
+    throw new BindingConfigError("binding_config_invalid", "binding config must be a JSON object");
   }
   assertManagedSlotContractSupported(probe.data.contractVersion);
   const parsed = managedSlotConfigSchema.safeParse(value);
   if (!parsed.success) {
-    throw new ManagedSlotConfigError("managed_slot_config_invalid", describeIssues(parsed.error));
+    throw new BindingConfigError("binding_config_invalid", describeIssues(parsed.error));
   }
   const config = parsed.data;
   if (
-    config.localSlotCapacity > MAX_MANAGED_SLOT_GROUP_SIZE ||
+    config.localBindingCapacity > MAX_MANAGED_SLOT_GROUP_SIZE ||
     config.requests.length > MAX_MANAGED_SLOT_GROUP_SIZE
   ) {
-    throw new ManagedSlotConfigError(
-      "managed_slot_group_unsupported",
-      `managed slot groups larger than ${MAX_MANAGED_SLOT_GROUP_SIZE} slot/device are not supported ` +
-        `(localSlotCapacity=${config.localSlotCapacity}, requests=${config.requests.length})`,
+    throw new BindingConfigError(
+      "binding_group_unsupported",
+      `binding groups larger than ${MAX_MANAGED_SLOT_GROUP_SIZE} slot/device are not supported ` +
+        `(localSlotCapacity=${config.localBindingCapacity}, requests=${config.requests.length})`,
     );
   }
   return config;
@@ -329,12 +309,12 @@ export function parseManagedSlotConfig(value: unknown): ManagedSlotConfig {
 export function parseManagedSlotConfigSource(
   source: string,
   readFile: (path: string) => string,
-): ManagedSlotConfig {
+): BrokerProvisionRequest {
   const trimmed = source.trim();
   if (trimmed.length === 0) {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
-      "managed slot config value is empty; pass inline JSON or a file path",
+    throw new BindingConfigError(
+      "binding_config_invalid",
+      "binding config value is empty; pass inline JSON or a file path",
     );
   }
   let text = trimmed;
@@ -342,9 +322,9 @@ export function parseManagedSlotConfigSource(
     try {
       text = readFile(trimmed);
     } catch (error) {
-      throw new ManagedSlotConfigError(
-        "managed_slot_config_invalid",
-        `cannot read managed slot config file ${trimmed}: ${errorMessage(error)}`,
+      throw new BindingConfigError(
+        "binding_config_invalid",
+        `cannot read binding config file ${trimmed}: ${errorMessage(error)}`,
         { cause: error },
       );
     }
@@ -355,12 +335,12 @@ export function parseManagedSlotConfigSource(
   } catch {
     // The engine's SyntaxError text quotes a snippet of the (possibly secret-bearing) input, and
     // the same snippet rides on `cause`; report only the source kind (#11208).
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
-      `managed slot config ${trimmed.startsWith("{") ? "inline value" : `file ${trimmed}`} is not valid JSON`,
+    throw new BindingConfigError(
+      "binding_config_invalid",
+      `binding config ${trimmed.startsWith("{") ? "inline value" : `file ${trimmed}`} is not valid JSON`,
     );
   }
-  return parseManagedSlotConfig(json);
+  return parseBindingConfig(json);
 }
 
 export interface ManagedSlotConfigLaunch {
@@ -378,15 +358,15 @@ export interface ManagedSlotConfigLaunch {
 /** Resolves the launch config. The flag wins over the env; absent both returns undefined. */
 export function resolveManagedSlotConfig(
   launch: ManagedSlotConfigLaunch,
-): ManagedSlotConfig | undefined {
+): BrokerProvisionRequest | undefined {
   const source = launch.flagValue ?? launch.envValue;
   if (source === undefined) {
     return undefined;
   }
   if (launch.hasInitialSessionUuid || launch.noProxy) {
-    throw new ManagedSlotConfigError(
-      "managed_slot_config_invalid",
-      "managed slot config is incompatible with --initial-session-uuid and --no-proxy",
+    throw new BindingConfigError(
+      "binding_config_invalid",
+      "binding config is incompatible with --initial-session-uuid and --no-proxy",
     );
   }
   return parseManagedSlotConfigSource(source, launch.readFile);

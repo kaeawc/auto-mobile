@@ -12,11 +12,11 @@ import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
-  DeviceAssignedToManagedSlotError,
-  ManagedSlotDiscoveryIncompleteError,
-  ManagedSlotOwnershipUnconfirmedError,
-  ManagedSlotOwnershipLostError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+  BindingOwnershipUnconfirmedError,
+  BindingOwnershipLostError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
@@ -77,19 +77,19 @@ describe("shapeToolCallError", () => {
     }
   });
 
-  test("the managed-slot payload allowlist preserves each refusal on both tool boundaries", () => {
+  test("the binding payload allowlist preserves each refusal on both tool boundaries", () => {
     const refusals = [
-      new DeviceAssignedToManagedSlotError("tapOn", "device", {
+      new DeviceAssignedToBindingError("tapOn", "device", {
         platform: "android",
         stableDeviceId: "device",
-        holder: "slot",
+        holder: "binding",
         scopeKey: "scope",
-        slotIndex: 0,
+        bindingIndex: 0,
         scopeState: "valid",
         execSessionUuid: null,
       }),
-      new ManagedSlotDiscoveryIncompleteError("registry busy"),
-      new ManagedSlotOwnershipUnconfirmedError("session"),
+      new BindingDiscoveryIncompleteError("registry busy"),
+      new BindingOwnershipUnconfirmedError("session"),
     ];
     for (const error of refusals) {
       expect(isTypedToolRefusal(error)).toBe(true);
@@ -106,8 +106,8 @@ describe("shapeToolCallError", () => {
   });
 
   test("known ownership loss at the gate equals the terminal release on every wire", () => {
-    const gate = new ManagedSlotOwnershipLostError("session");
-    const released = new SessionReleasedDuringCallError("session", "managed-slot-ownership-lost");
+    const gate = new BindingOwnershipLostError("session");
+    const released = new SessionReleasedDuringCallError("session", "binding-ownership-lost");
     for (const source of ["MCP", "ProxyServer"] as const) {
       const payload = (error: Error) => {
         const { message, ...fields } = JSON.parse(
@@ -122,7 +122,7 @@ describe("shapeToolCallError", () => {
         retryable: false,
         nextAction: "acquire_new_session",
         sessionUuid: "session",
-        reason: "managed-slot-ownership-lost",
+        reason: "binding-ownership-lost",
       });
       expect(payload(gate)).not.toHaveProperty("idle");
     }
@@ -130,9 +130,9 @@ describe("shapeToolCallError", () => {
       mcpRequestFailureDetails(released, undefined),
     );
     expect(gate.message).toBe(
-      "Session session is terminal after managed-slot-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.",
+      "Session session is terminal after binding-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.",
     );
-    expect(gate.name).toBe("ManagedSlotOwnershipLostError");
+    expect(gate.name).toBe("BindingOwnershipLostError");
   });
 
   test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {

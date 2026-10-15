@@ -46,7 +46,7 @@ import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { ManagedExecutionReowner } from "../../src/daemon/managedSlots/managedExecutionReowner";
-import { ManagedSlotOwnershipUnconfirmedError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   isSessionlessDeviceRead,
@@ -403,7 +403,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       success: true,
     }));
     expect(await outcome("controlProbe", { sessionUuid: agent })).toBeInstanceOf(
-      ManagedSlotOwnershipUnconfirmedError,
+      BindingOwnershipUnconfirmedError,
     );
     await call("readProbe", { sessionUuid: agent, deviceId: free.deviceId });
     expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);

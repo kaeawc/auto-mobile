@@ -3,12 +3,12 @@ import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import {
-  computeSlotScopeKey,
+  computeBindingScopeKey,
   type ManagedDeviceEntry,
-} from "../../src/daemon/managedSlots/slotRegistry";
-import type { SlotScopeResetRequest } from "../../src/daemon/managedSlots/slotScopeReset";
+} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type { BindingScopeResetRequest } from "../../src/daemon/sessionBroker/provisioning/scopeReset";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
@@ -79,7 +79,7 @@ const SCOPE_IDENTITY = {
   runnerNamespace: "runner-a",
   runnerIncarnation: "incarnation-a",
 };
-const SCOPE_KEY = computeSlotScopeKey(SCOPE_IDENTITY);
+const SCOPE_KEY = computeBindingScopeKey(SCOPE_IDENTITY);
 const slotDevice: BootedDevice = { deviceId: "emulator-5554", name: "Slot", platform: "android" };
 const freeDevice: BootedDevice = { deviceId: "emulator-5556", name: "Free", platform: "android" };
 const heldDevice: BootedDevice = { deviceId: "emulator-5558", name: "Held", platform: "android" };
@@ -100,16 +100,16 @@ describe("direct frames from a managed connection outside its slots", () => {
   let discovered: BootedDevice[];
   let managedSlotHeld: boolean;
   let releasedExecutions: string[];
-  let scopeResets: SlotScopeResetRequest[];
+  let scopeResets: BindingScopeResetRequest[];
   let poolRefreshes: string[];
   let flagWrites: Array<{ key: string; enabled: boolean }>;
   const flags = [{ key: "debug", label: "Debug", description: "Debug", enabled: false }];
   const slotEntry: ManagedDeviceEntry = {
     platform: "android",
     stableDeviceId: slotDevice.deviceId,
-    holder: "slot",
+    holder: "binding",
     scopeKey: SCOPE_KEY,
-    slotIndex: 0,
+    bindingIndex: 0,
     scopeState: "valid",
     execSessionUuid: SLOT_SESSION,
   };
@@ -227,7 +227,7 @@ describe("direct frames from a managed connection outside its slots", () => {
         managedSlotHeld && !heldDeviceIds.includes(slotDevice.deviceId)
           ? { entry: slotEntry }
           : undefined,
-      assertNotAssignedToManagedSlot: async (input: {
+      assertNotAssignedToBinding: async (input: {
         action: string;
         deviceId: string;
         requesterSessionUuid?: string;
@@ -237,7 +237,7 @@ describe("direct frames from a managed connection outside its slots", () => {
           input.deviceId === slotDevice.deviceId &&
           input.requesterSessionUuid !== SLOT_SESSION
         ) {
-          throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, slotEntry);
+          throw new DeviceAssignedToBindingError(input.action, input.deviceId, slotEntry);
         }
       },
     };
@@ -255,19 +255,19 @@ describe("direct frames from a managed connection outside its slots", () => {
             releasedExecutions.push(sessionId);
             return {
               sessionId,
-              outcome: "reusable_for_this_slot",
+              outcome: "reusable_for_this_binding",
               settlement: "confirmed",
               alreadyReleased: false,
               cancellationRequested: 0,
               releaseForced: false,
               device: null,
-              slots: [],
-              slotFailures: [],
+              bindings: [],
+              bindingFailures: [],
             };
           },
         }),
-        getSlotScopeReset: () => ({
-          reset: async (request: SlotScopeResetRequest) => {
+        getBindingScopeReset: () => ({
+          reset: async (request: BindingScopeResetRequest) => {
             scopeResets.push(request);
             return { outcome: "invalidated", retryable: false, scopes: [], waitedMs: 0 };
           },
@@ -314,7 +314,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("control: input/tap on a device outside the slots is refused", async () => {
+  test("control: input/tap on a device outside the bindings is refused", async () => {
     const response = await send("tap", "input/tap", {
       platform: "android",
       deviceId: freeDevice.deviceId,
@@ -382,7 +382,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(flagWrites).toEqual([]);
   });
 
-  test("releaseExecution of its own slot reaches the drain once", async () => {
+  test("releaseExecution of its own binding reaches the drain once", async () => {
     const response = await send("execution-own", "daemon/releaseExecution", {
       sessionId: SLOT_SESSION,
       livenessOwnerToken: "owner",
@@ -391,7 +391,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(releasedExecutions).toEqual([SLOT_SESSION]);
   });
 
-  test("releaseExecution of its own slot retains the liveness owner token gate", async () => {
+  test("releaseExecution of its own binding retains the liveness owner token gate", async () => {
     expect(sessionManager.claimUnownedLivenessOwnership(SLOT_SESSION, "owner")).toBe(true);
     const response = await send("execution-wrong-token", "daemon/releaseExecution", {
       sessionId: SLOT_SESSION,
@@ -505,7 +505,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(flagWrites).toEqual([{ key: "debug", enabled: true }]);
   });
 
-  test("control: ide/setKeyValue on the connection's own slot device is written", async () => {
+  test("control: ide/setKeyValue on the connection's own binding device is written", async () => {
     const response = await send("own", "ide/setKeyValue", {
       platform: "android",
       deviceId: slotDevice.deviceId,
@@ -521,7 +521,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(writes).toEqual(["setPreference"]);
   });
 
-  test("ide/setKeyValue on a device outside the slots is refused before anything is written", async () => {
+  test("ide/setKeyValue on a device outside the bindings is refused before anything is written", async () => {
     const response = await send("kv", "ide/setKeyValue", {
       platform: "android",
       deviceId: freeDevice.deviceId,
@@ -536,7 +536,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("ide/clearKeyValueFile on a device outside the slots is refused", async () => {
+  test("ide/clearKeyValueFile on a device outside the bindings is refused", async () => {
     const response = await send("clear", "ide/clearKeyValueFile", {
       platform: "android",
       deviceId: freeDevice.deviceId,
@@ -548,7 +548,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("ide/updateService on a device outside the slots never reaches the service manager", async () => {
+  test("ide/updateService on a device outside the bindings never reaches the service manager", async () => {
     const response = await send("svc", "ide/updateService", {
       platform: "android",
       deviceId: freeDevice.deviceId,
@@ -569,14 +569,14 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("ide/removeKeyValue on a device outside the slots is refused", async () => {
+  test("ide/removeKeyValue on a device outside the bindings is refused", async () => {
     const response = await send("remove", "ide/removeKeyValue", keyValue(freeDevice.deviceId));
 
     expect(writes).toEqual([]);
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("ide/setKeyValue on the slot device for a session outside the slots is refused", async () => {
+  test("ide/setKeyValue on the binding device for a session outside the bindings is refused", async () => {
     const response = await send(
       "kv-session",
       "ide/setKeyValue",
@@ -587,7 +587,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("ide/setSessionToolEnabled changes only the connection's own slot sessions", async () => {
+  test("ide/setSessionToolEnabled changes only the connection's own binding sessions", async () => {
     // The process registry is empty here; the route only needs the tool to be configurable.
     configurable = spyOn(ToolRegistry, "isUserConfigurableTool").mockReturnValue(true);
     const foreign = await send("tool-foreign", "ide/setSessionToolEnabled", {
@@ -633,7 +633,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("daemon/releaseSession of the connection's own slot session releases it", async () => {
+  test("daemon/releaseSession of the connection's own binding session releases it", async () => {
     const response = await send("release-own", "daemon/releaseSession", {
       sessionId: SLOT_SESSION,
     });
@@ -643,7 +643,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(sessionManager.getSession(GENERIC_SESSION)).not.toBeNull();
   });
 
-  test("daemon/relinquishDeviceLease on a device outside the slots is refused", async () => {
+  test("daemon/relinquishDeviceLease on a device outside the bindings is refused", async () => {
     const response = await send("lease", "daemon/relinquishDeviceLease", {
       deviceId: heldDevice.deviceId,
     });
@@ -651,7 +651,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
-  test("daemon/relinquishDeviceLease compares the slot device by its pooled canonical id", async () => {
+  test("daemon/relinquishDeviceLease compares the binding device by its pooled canonical id", async () => {
     canonicalIds.set("192.168.1.20:5555", heldDevice.deviceId);
     canonicalIds.set("192.168.1.30:5555", slotDevice.deviceId);
 
@@ -666,7 +666,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(own?.code).not.toBe("device_outside_managed_slots");
   });
 
-  test("reads from the managed connection outside its slots still answer", async () => {
+  test("reads from the managed connection outside its bindings still answer", async () => {
     const info = await send("info", "daemon/sessionInfo", { sessionId: GENERIC_SESSION });
     const sessions = await send("sessions", "daemon/activeSessions", {});
     const ping = await send("ping", "ide/ping", {});
@@ -692,7 +692,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(released).toMatchObject({ success: true });
     expect(sessionManager.getSession(GENERIC_SESSION)).toBeNull();
   });
-  test("outside callers cannot drive an unidentified transport while an idle Android slot is held", async () => {
+  test("outside callers cannot drive an unidentified transport while an idle Android binding is held", async () => {
     await sessionManager.releaseSession(SLOT_SESSION);
     await sessionManager.releaseSession(GENERIC_SESSION);
     const target = "192.168.1.20:5555";
@@ -712,15 +712,15 @@ describe("direct frames from a managed connection outside its slots", () => {
     );
     expect(tapped).toMatchObject({
       success: false,
-      code: "device_assigned_to_managed_slot",
+      code: "device_assigned_to_binding",
       retryable: false,
     });
-    expect(written).toMatchObject({ success: false, code: "device_assigned_to_managed_slot" });
+    expect(written).toMatchObject({ success: false, code: "device_assigned_to_binding" });
     expect(taps).toBe(0);
     expect(writes).toEqual([]);
   });
 
-  test("a slot's managed connection drives its canonical device", async () => {
+  test("a binding's managed connection drives its canonical device", async () => {
     const tapped = await send("slot-canonical-tap", "input/tap", {
       platform: "android",
       deviceId: slotDevice.deviceId,

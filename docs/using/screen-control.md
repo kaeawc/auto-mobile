@@ -80,7 +80,7 @@ possible alias belongs to the requester's own session (including derived label
 sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
 transport the caller targeted; an unknown managed-slot hold uses
-`device_assigned_to_managed_slot` when its registry entry is available. Address
+`device_assigned_to_binding` when its registry entry is available. Address
 the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
 not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets

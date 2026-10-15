@@ -57,9 +57,9 @@ import {
   assertManagedSlotOwnerIdentity,
   assertManagedSlotOwnerRunning,
   assertManagedSlotsSupported,
-  type ManagedSlotConfig,
 } from "./models/managedSlotConfig";
-import type { ManagedSlotsResult } from "./models/managedSlotsResult";
+import { type BrokerProvisionRequest } from "./daemon/sessionBroker/provisioning/provisionRequest";
+import type { BindingsResult } from "./daemon/sessionBroker/provisioning/acquisitionResult";
 import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./models/sessionConfig";
 import type { SessionBrokerResult } from "./models/sessionBrokerResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
@@ -258,7 +258,7 @@ async function main() {
       daemonHost,
       initialSessionUuid,
       livenessOwnerToken,
-      managedSlotConfig,
+      bindingConfig,
       sessionConfig,
       debugPerf,
       debug,
@@ -307,27 +307,26 @@ async function main() {
     }
     let ownerGenerationToken: string | undefined;
     // Refuse before any daemon or device work rather than run unmanaged (#11208).
-    assertManagedSlotsSupported(managedSlotConfig);
+    assertManagedSlotsSupported(bindingConfig);
     // Only the STDIO proxy has an execution owner; daemon and CLI calls may run after it exited (#11286).
     if (
       !cliMode &&
       !daemonMode &&
       !daemonRequested &&
-      managedSlotConfig?.executionOwnerPid !== undefined
+      bindingConfig?.executionOwnerPid !== undefined
     ) {
       const [{ isProcessRunning }, { defaultLockOwnerGenerationProbe }] = await Promise.all([
         import("./utils/processLiveness"),
         import("./daemon/lockOwnerGeneration"),
       ]);
-      assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
-      const ownerIdentityVerdict = assertManagedSlotOwnerIdentity(
-        managedSlotConfig,
-        (pid, recorded) => defaultLockOwnerGenerationProbe.compare(pid, recorded),
+      assertManagedSlotOwnerRunning(bindingConfig, (pid) => isProcessRunning(pid));
+      const ownerIdentityVerdict = assertManagedSlotOwnerIdentity(bindingConfig, (pid, recorded) =>
+        defaultLockOwnerGenerationProbe.compare(pid, recorded),
       );
       ownerGenerationToken =
         ownerIdentityVerdict === "same"
-          ? managedSlotConfig.executionOwnerStartIdentity
-          : defaultLockOwnerGenerationProbe.current(managedSlotConfig.executionOwnerPid);
+          ? bindingConfig.executionOwnerStartIdentity
+          : defaultLockOwnerGenerationProbe.current(bindingConfig.executionOwnerPid);
     }
     if (
       !cliMode &&
@@ -802,7 +801,7 @@ async function main() {
       // A managed slot proxy reads stdin from the start, so EOF during its acquisition shuts it
       // down (aborting the acquisition), while initialize waits for the acquisition's result.
       const earlyTransport =
-        useProxyMode && (managedSlotConfig || sessionConfig)
+        useProxyMode && (bindingConfig || sessionConfig)
           ? new (await import("./server/earlyStartTransport")).EarlyStartTransport(stdioTransport)
           : undefined;
       await earlyTransport?.startEarly();
@@ -821,10 +820,10 @@ async function main() {
           });
           // Published first, so shutdown (stdin EOF, SIGTERM) closes it and aborts an acquisition.
           stdioProxy = proxy;
-          const managedSlots = managedSlotConfig
+          const bindings = bindingConfig
             ? await acquireManagedSlotsBeforeServing(
                 proxy,
-                managedSlotConfig,
+                bindingConfig,
                 launchParentPid,
                 ownerGenerationToken,
               )
@@ -839,7 +838,7 @@ async function main() {
             : undefined;
           const result = createProxyMcpServer({
             proxy,
-            ...(managedSlots ? { managedSlots } : {}),
+            ...(bindings ? { bindings } : {}),
             ...(session ? { session } : {}),
           });
           server = result.server;
@@ -885,16 +884,16 @@ async function main() {
  * (#11176): owner exit or re-parenting shuts the proxy down, which aborts the acquisition.
  */
 async function acquireManagedSlotsBeforeServing(
-  proxy: { acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> },
-  config: ManagedSlotConfig,
+  proxy: { acquireBindings(config: BrokerProvisionRequest): Promise<BindingsResult> },
+  config: BrokerProvisionRequest,
   launchParentPid: number,
   ownerGenerationToken?: string,
-): Promise<ManagedSlotsResult> {
+): Promise<BindingsResult> {
   await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid, ownerGenerationToken);
-  const result = await proxy.acquireManagedSlots(config);
+  const result = await proxy.acquireBindings(config);
   const { logger } = await import("./utils/logger");
   logger.info(
-    `[ManagedSlots] Acquisition ${result.outcome}` +
+    `[Bindings] Acquisition ${result.outcome}` +
       (result.failure ? ` (${result.failure.code})` : ""),
   );
   return result;

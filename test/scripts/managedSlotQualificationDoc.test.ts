@@ -52,7 +52,7 @@ describe("managed-slot qualification documentation", () => {
     expected = [];
     const extras = new Set([
       "managed_slot_acquisition_failed",
-      "device_assigned_to_managed_slot",
+      "device_assigned_to_binding",
       "device_outside_managed_slots",
       "managed_slot_ownership_unconfirmed",
       "managed_execution_ended",

@@ -6,9 +6,9 @@ import type { VideoRecordingConfigInput } from "../models";
 import {
   MANAGED_SLOT_CONFIG_ENV,
   MANAGED_SLOT_CONFIG_FLAG,
-  ManagedSlotConfigError,
   resolveManagedSlotConfig,
 } from "../models/managedSlotConfig";
+import { BindingConfigError } from "../daemon/sessionBroker/provisioning/provisionRequest";
 import {
   SESSION_CONFIG_ENV,
   SESSION_CONFIG_FLAG,
@@ -189,7 +189,7 @@ export function parseArgs(
   const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
   const scalarOptions = parseValueOptions(args, log, video, runnerReadinessTimeoutMs);
   // Throws a typed ManagedSlotConfigError before any daemon or device work (#11173).
-  const managedSlotConfig = resolveManagedSlotConfig({
+  const bindingConfig = resolveManagedSlotConfig({
     flagValue: scalarOptions.managedSlotConfigValue,
     // The env var is per-proxy launch state: daemon and CLI invocations that merely inherit it
     // must not parse it (#11286). The explicit flag stays honored.
@@ -205,7 +205,7 @@ export function parseArgs(
       cliMode || daemonMode || daemonRequested ? undefined : environment[SESSION_CONFIG_ENV],
     readFile,
     hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
-    hasManagedSlotConfig: managedSlotConfig !== undefined,
+    hasManagedSlotConfig: bindingConfig !== undefined,
     noProxy,
   });
 
@@ -217,7 +217,7 @@ export function parseArgs(
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
     livenessOwnerToken: scalarOptions.livenessOwnerToken,
-    managedSlotConfig,
+    bindingConfig,
     sessionConfig,
     debugPerf,
     debug,
@@ -641,8 +641,8 @@ function parseManagedSlotConfigOption(
   if (arg === MANAGED_SLOT_CONFIG_FLAG) {
     const value = args[i + 1]?.trim();
     if (!value || (value.startsWith("--") && !value.startsWith("{"))) {
-      throw new ManagedSlotConfigError(
-        "managed_slot_config_invalid",
+      throw new BindingConfigError(
+        "binding_config_invalid",
         `${MANAGED_SLOT_CONFIG_FLAG} requires inline JSON or a file path`,
       );
     }

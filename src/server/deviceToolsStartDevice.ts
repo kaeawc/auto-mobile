@@ -522,7 +522,7 @@ async function startMatchExclusions(args: StartDeviceArgs): Promise<{
 }> {
   const platform = args.platform;
   const managed =
-    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
+    (await managedSlotPoolGate(initializedDevicePool()).bindingStableIds?.(platform)) ??
     new Set<string>();
   if (platform === "ios") {
     const exclusions = unionSets(undefined, managed);

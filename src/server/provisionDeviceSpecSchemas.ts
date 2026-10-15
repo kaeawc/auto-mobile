@@ -9,7 +9,7 @@ const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
 const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
 export const MANAGED_SLOT_DEVICE_FAMILIES = ["phone", "tablet", "foldable"] as const;
-export type ManagedSlotDeviceFamily = (typeof MANAGED_SLOT_DEVICE_FAMILIES)[number];
+export type BindingDeviceFamily = (typeof MANAGED_SLOT_DEVICE_FAMILIES)[number];
 
 const managedSlotDeviceFamilySchema = z
   .enum(MANAGED_SLOT_DEVICE_FAMILIES)
@@ -123,7 +123,7 @@ export const iosProvisionDeviceSpecSchema = z
  * optional. An omitted field is unconstrained (owner decision Q4): any existing model matches, and
  * a creation uses the reconciler's resolved default.
  */
-export const androidManagedSlotSpecSchema = z
+export const androidBindingSpecSchema = z
   .object({
     runtime: androidRuntimeSchema,
     deviceType: androidDeviceTypeSchema.optional(),
@@ -135,7 +135,7 @@ export const androidManagedSlotSpecSchema = z
   .superRefine(refineAndroidSpec);
 
 /** A managed slot's requested iOS spec: `deviceType` optional, as for Android (Q4). */
-export const iosManagedSlotSpecSchema = z
+export const iosBindingSpecSchema = z
   .object({
     runtime: iosRuntimeSchema,
     deviceType: iosDeviceTypeSchema.optional(),

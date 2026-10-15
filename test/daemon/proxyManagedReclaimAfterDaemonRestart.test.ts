@@ -97,15 +97,15 @@ class RestartScenario {
 
   async start(): Promise<void> {
     await this.newDaemon(true);
-    const result = await this.proxy.acquireManagedSlots({
+    const result = await this.proxy.acquireBindings({
       contractVersion: 1,
       managedHostScope: "host",
       runnerNamespace: "runner",
       runnerIncarnation: "boot",
-      localSlotCapacity: 1,
+      localBindingCapacity: 1,
       requests: [
         {
-          slotIndex: 1,
+          bindingIndex: 1,
           role: "primary",
           platform: "android",
           requestedSpec: { runtime: "system-images;android-35;google_apis;arm64-v8a" },
@@ -274,7 +274,7 @@ beforeAll(async () => {
   });
   const { server } = createProxyMcpServer({
     proxy,
-    managedSlots: readyManagedSlotsResult(SESSION),
+    bindings: readyManagedSlotsResult(SESSION),
   });
   await server.close();
   await proxy.close();
@@ -313,7 +313,7 @@ async function withManagedServer(
   const registration = spyOn(Server.prototype, "setRequestHandler");
   const { server } = createProxyMcpServer({
     proxy: s.proxy,
-    managedSlots: readyManagedSlotsResult(SESSION),
+    bindings: readyManagedSlotsResult(SESSION),
   });
   const call = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)![1];
   const read = registration.mock.calls.find(([schema]) => schema === ReadResourceRequestSchema)![1];
@@ -333,7 +333,7 @@ async function withManagedServer(
         { method: "resources/read", params: { uri: "automobile:managed-slots" } },
         extra,
       );
-      expect(JSON.parse(resource.contents[0].text).slots[0].executionEnded.reason).toBe(reason);
+      expect(JSON.parse(resource.contents[0].text).bindings[0].executionEnded.reason).toBe(reason);
       const losses = logged.mock.calls
         .map(([params]) => params.data)
         .filter(
@@ -433,7 +433,7 @@ test.each(["notification", "heartbeat"] as const)(
     const registration = spyOn(Server.prototype, "setRequestHandler");
     const { server } = createProxyMcpServer({
       proxy: s.proxy,
-      managedSlots: readyManagedSlotsResult(SESSION),
+      bindings: readyManagedSlotsResult(SESSION),
     });
     const call = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)![1];
     const read = registration.mock.calls.find(
@@ -463,7 +463,7 @@ test.each(["notification", "heartbeat"] as const)(
         { method: "resources/read", params: { uri: "automobile:managed-slots" } },
         extra,
       );
-      expect(JSON.parse(resource.contents[0].text).slots[0].executionEnded.reason).toBe(
+      expect(JSON.parse(resource.contents[0].text).bindings[0].executionEnded.reason).toBe(
         RELEASE_REASON,
       );
       const losses = logged.mock.calls
@@ -502,7 +502,7 @@ test.each([
   spies.push(logged);
   const { server } = createProxyMcpServer({
     proxy: s.proxy,
-    managedSlots: readyManagedSlotsResult(SESSION),
+    bindings: readyManagedSlotsResult(SESSION),
   });
   try {
     await handedOver(false);
@@ -849,7 +849,7 @@ test("PIN: a transient managed re-bind refusal retries and binds the same replac
   expect(s.rebinds).toHaveLength(2);
   expect(s.clients.at(-1)).toBe(socket);
   expect(s.rebinds[1].socketSessionId).toBe(socketSessionId);
-  expect(s.rebinds[1].params.managedSlots).toMatchObject({
+  expect(s.rebinds[1].params.bindings).toMatchObject({
     sessionUuids: [SESSION],
     livenessOwnerToken: TOKEN,
   });
@@ -871,7 +871,7 @@ test("an ended managed execution still confines a reconnected socket without ret
   expect(s.rebinds).toHaveLength(1);
   const registration = s.rebinds[0];
   expect(registration.socketSessionId).toBe("socket-1");
-  expect(registration.params.managedSlots).toMatchObject({ sessionUuids: [SESSION] });
+  expect(registration.params.bindings).toMatchObject({ sessionUuids: [SESSION] });
   expect(s.scopes.get(registration.socketSessionId)?.sessionUuids.size).toBe(0);
   expect(s.timer.getPendingTimeoutCount()).toBe(0);
   await s.advance(5_001);

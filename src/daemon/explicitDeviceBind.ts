@@ -35,7 +35,7 @@ import {
   heldDeviceBindRefusal,
   InputDeviceOwnedError,
 } from "./inputDeviceOwnership";
-import type { ManagedSlotExclusion } from "./managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
@@ -51,7 +51,7 @@ export interface ExplicitDeviceBindPort extends Pick<
   DevicePool,
   | "beginMcpBind"
   | "assertNotClaimedByForeignDaemon"
-  | "assertNotAssignedToManagedSlot"
+  | "assertNotAssignedToBinding"
   | "assertDeviceCleanupComplete"
   | "matchesRestartRecoveryTarget"
   | "assertNotPreparedForOtherRequest"
@@ -70,7 +70,7 @@ export interface ExplicitDeviceBindPort extends Pick<
     | "getOrCreateSession"
   >;
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "assertRuntimeIdentity">;
-  readonly managedSlotExclusion: ManagedSlotExclusion | undefined;
+  readonly bindingExclusion: BindingExclusion | undefined;
   readonly cancelDeviceSessionExecutions: Pick<
     DeviceSessionExecutionCanceller,
     "cancelDeviceExecutions"
@@ -250,8 +250,8 @@ export class ExplicitDeviceBind {
     } = options;
     const caller: AutolockClient = { mcpSessionId, oneShotCli };
     await this.port.assertNotClaimedByForeignDaemon(deviceId, platform);
-    if (this.port.managedSlotExclusion) {
-      await this.port.assertNotAssignedToManagedSlot({
+    if (this.port.bindingExclusion) {
+      await this.port.assertNotAssignedToBinding({
         action: "acquire",
         deviceId,
         platform,

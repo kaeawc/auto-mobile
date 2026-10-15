@@ -31,40 +31,40 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
-import type { ManagedSlotJournal } from "./slotJournal";
+import type { BindingJournal } from "../sessionBroker/registry/bindingJournal";
 import {
-  FENCING_SLOT_STATES,
+  FENCING_BINDING_STATES,
   type AbandonmentQuery,
-  type SlotAssignmentRecord,
-  type SlotKey,
-  type SlotPlatform,
-  type SlotRegistry,
-} from "./slotRegistry";
+  type BindingAssignmentRecord,
+  type BindingKey,
+  type BindingPlatform,
+  type BindingRegistry,
+} from "../sessionBroker/registry/bindingRegistry";
 
 /** How often the daemon looks for abandoned scopes. Abandonment itself takes an hour. */
 export const ABANDONED_SCOPE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export type AbandonedScopeReclaimRegistry = Pick<
-  SlotRegistry,
+  BindingRegistry,
   | "findAbandonedScopes"
   | "markScopeAbandoned"
   | "listAbandonedScopes"
   | "listAssignments"
   | "getAssignment"
-  | "listOpenSlotJournal"
-  | "openSlotJournal"
+  | "listOpenBindingJournal"
+  | "openBindingJournal"
 >;
 
 /** The journal operations the sweep drives its deletions through. */
 export type AbandonedScopeReclaimJournal = Pick<
-  ManagedSlotJournal,
-  "owner" | "redriveSlot" | "advance"
+  BindingJournal,
+  "owner" | "redriveBinding" | "advance"
 >;
 
 export interface ReclaimedSlotDevice {
   scopeKey: string;
-  slotIndex: number;
-  platform: SlotPlatform;
+  bindingIndex: number;
+  platform: BindingPlatform;
   stableDeviceId: string;
 }
 
@@ -74,9 +74,9 @@ export interface AbandonedScopeSweepReport {
   /** Devices deleted (absence verified) and cleared from their slots. */
   deleted: ReclaimedSlotDevice[];
   /** Slots whose journaled work is blocked; the entry stays open and is redriven later. */
-  blocked: Array<{ scopeKey: string; slotIndex: number; reason: string; message: string }>;
+  blocked: Array<{ scopeKey: string; bindingIndex: number; reason: string; message: string }>;
   /** Slots left alone, with why (revived, live owner, journal already open elsewhere). */
-  skipped: Array<{ scopeKey: string; slotIndex: number; reason: string }>;
+  skipped: Array<{ scopeKey: string; bindingIndex: number; reason: string }>;
 }
 
 export interface AbandonedScopeReclaimerOptions {
@@ -98,8 +98,8 @@ function emptyReport(): AbandonedScopeSweepReport {
   return { marked: [], deleted: [], blocked: [], skipped: [] };
 }
 
-function keyOf(slot: SlotKey): SlotKey {
-  return { scopeKey: slot.scopeKey, slotIndex: slot.slotIndex };
+function keyOf(binding: BindingKey): BindingKey {
+  return { scopeKey: binding.scopeKey, bindingIndex: binding.bindingIndex };
 }
 
 export class AbandonedScopeReclaimer {
@@ -114,7 +114,7 @@ export class AbandonedScopeReclaimer {
     }
     this.interval = this.options.timer.setInterval(() => {
       this.sweep().catch((error: unknown) => {
-        logger.warn(`[ManagedSlots] Abandoned scope sweep failed: ${errorMessage(error)}`, error);
+        logger.warn(`[Bindings] Abandoned scope sweep failed: ${errorMessage(error)}`, error);
       });
     }, this.options.intervalMs ?? ABANDONED_SCOPE_SWEEP_INTERVAL_MS);
     // A periodic sweep must never keep the daemon process alive on its own.
@@ -149,13 +149,13 @@ export class AbandonedScopeReclaimer {
     for (const scope of await registry.findAbandonedScopes(this.options.abandonment)) {
       const marked = await registry.markScopeAbandoned(scope.scopeKey, this.options.abandonment);
       if (marked.kind === "marked") {
-        logger.info(`[ManagedSlots] Scope ${scope.scopeKey} abandoned; reclaiming its devices`);
+        logger.info(`[Bindings] Scope ${scope.scopeKey} abandoned; reclaiming its devices`);
         report.marked.push(scope.scopeKey);
       }
     }
     for (const scope of await registry.listAbandonedScopes()) {
-      for (const slot of await registry.listAssignments(scope.scopeKey)) {
-        await this.reclaimSlot(registry, journal, slot, report);
+      for (const binding of await registry.listAssignments(scope.scopeKey)) {
+        await this.reclaimSlot(registry, journal, binding, report);
       }
     }
     return report;
@@ -164,37 +164,38 @@ export class AbandonedScopeReclaimer {
   private async reclaimSlot(
     registry: AbandonedScopeReclaimRegistry,
     journal: AbandonedScopeReclaimJournal,
-    slot: SlotAssignmentRecord,
+    binding: BindingAssignmentRecord,
     report: AbandonedScopeSweepReport,
   ): Promise<void> {
-    const key = keyOf(slot);
+    const key = keyOf(binding);
     const unfinished =
-      FENCING_SLOT_STATES.has(slot.state) || (await registry.listOpenSlotJournal(key)).length > 0;
+      FENCING_BINDING_STATES.has(binding.state) ||
+      (await registry.listOpenBindingJournal(key)).length > 0;
     if (unfinished) {
       // Earlier work on this slot (ours after a crash, or a reconcile's): redrive it, never stack.
-      await this.drive(registry, journal, slot, slot.stableDeviceId, report);
+      await this.drive(registry, journal, binding, binding.stableDeviceId, report);
       return;
     }
-    if (slot.stableDeviceId === null) {
+    if (binding.stableDeviceId === null) {
       return;
     }
-    const opened = await registry.openSlotJournal(key, {
+    const opened = await registry.openBindingJournal(key, {
       kind: "replace",
       requireAbandonedScope: true,
       phase: "deleting",
       target: {
-        oldStableId: slot.stableDeviceId,
-        oldName: slot.deviceName,
+        oldStableId: binding.stableDeviceId,
+        oldName: binding.deviceName,
         newName: null,
         newStableId: null,
-        requestedSpec: slot.requestedSpec,
-        resolvedSpec: slot.resolvedSpec,
-        specFingerprint: slot.specFingerprint,
+        requestedSpec: binding.requestedSpec,
+        resolvedSpec: binding.resolvedSpec,
+        specFingerprint: binding.specFingerprint,
       },
       owner: journal.owner,
       assignment: {
         kind: "state",
-        expected: { generation: slot.generation, stableDeviceId: slot.stableDeviceId },
+        expected: { generation: binding.generation, stableDeviceId: binding.stableDeviceId },
         state: "replacing",
       },
     });
@@ -208,25 +209,25 @@ export class AbandonedScopeReclaimer {
       });
       return;
     }
-    await this.drive(registry, journal, slot, slot.stableDeviceId, report);
+    await this.drive(registry, journal, binding, binding.stableDeviceId, report);
   }
 
   private async drive(
     registry: AbandonedScopeReclaimRegistry,
     journal: AbandonedScopeReclaimJournal,
-    slot: SlotAssignmentRecord,
+    binding: BindingAssignmentRecord,
     stableDeviceId: string | null,
     report: AbandonedScopeSweepReport,
   ): Promise<void> {
-    const key = keyOf(slot);
-    const result = await journal.redriveSlot(key);
+    const key = keyOf(binding);
+    const result = await journal.redriveBinding(key);
     if (result.kind === "blocked") {
       report.blocked.push({ ...key, reason: result.reason, message: result.message });
       return;
     }
     const after = await registry.getAssignment(key);
     if (stableDeviceId !== null && after !== null && after.stableDeviceId === null) {
-      report.deleted.push({ ...key, platform: slot.platform, stableDeviceId });
+      report.deleted.push({ ...key, platform: binding.platform, stableDeviceId });
     }
   }
 }

@@ -499,7 +499,7 @@ describe("DeviceGestureRecordingSocketServer managed-slot exclusion (#11352)", (
     }) => {
       order.push(`slot:${input.action}:${input.device.deviceId}:${input.requesterSessionUuid}`);
       if (refuse) {
-        throw new ActionableError("device_assigned_to_managed_slot");
+        throw new ActionableError("device_assigned_to_binding");
       }
     };
     const server = new TestableServer(
@@ -518,7 +518,7 @@ describe("DeviceGestureRecordingSocketServer managed-slot exclusion (#11352)", (
 
     await expect(
       server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
-    ).rejects.toThrow("device_assigned_to_managed_slot");
+    ).rejects.toThrow("device_assigned_to_binding");
     expect(order).toEqual(["slot:deviceGestureRecording start:slot-1:live"]);
   });
 
@@ -551,7 +551,7 @@ describe("DeviceGestureRecordingSocketServer managed-slot exclusion (#11352)", (
     const { order, server } = harness(true);
     try {
       await expect(server.invoke({ command: "stop", sessionUuid: "live" })).rejects.toThrow(
-        "device_assigned_to_managed_slot",
+        "device_assigned_to_binding",
       );
       expect(order).toEqual(["slot:deviceGestureRecording stop:slot-1:live"]);
       expect(stops).toBe(0);

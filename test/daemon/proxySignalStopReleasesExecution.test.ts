@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonUnavailableError } from "../../src/daemon/client";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import {
   ManagedExecutionScenario,
   SCOPE,
@@ -19,7 +19,7 @@ import {
 
 interface Launched {
   device: string;
-  key: SlotKey;
+  key: BindingKey;
   execution: ManagedExecution;
   session: string;
 }
@@ -32,9 +32,9 @@ const deviceCommands: Array<() => void> = [];
 
 async function launch(device: string, runnerNamespace: string): Promise<Launched> {
   const scope = { ...SCOPE, runnerNamespace };
-  const key = await s.assignSlot(device, scope);
+  const key = await s.assignBinding(device, scope);
   const execution = await s.launchExecution(scope);
-  expect(execution.result.slots[0]).toMatchObject({ disposition: "reused" });
+  expect(execution.result.bindings[0]).toMatchObject({ disposition: "reused" });
   return { device, key, execution, session: execution.sessionUuid! };
 }
 
@@ -118,7 +118,7 @@ describe("a proxy stopped by a signal while one of its tool calls is in flight",
     expect({
       held: snapshot.held,
       row: snapshot.row,
-      owner: (await s.slot(key))?.owner ?? null,
+      owner: (await s.binding(key))?.owner ?? null,
       releaseReasons: releaseReasons(session),
     }).toEqual({
       held: false,
@@ -132,7 +132,7 @@ describe("a proxy stopped by a signal while one of its tool calls is in flight",
     expect(String(threw)).toContain("MCP proxy is closing");
   });
 
-  test("a call wedged on the device does not hold the release: the slot settles behind it", async () => {
+  test("a call wedged on the device does not hold the release: the binding settles behind it", async () => {
     const { execution, session, device, key } = wedged;
     const inFlight = callInFlight(wedged, true);
     await s.idle(300);
@@ -146,12 +146,12 @@ describe("a proxy stopped by a signal while one of its tool calls is in flight",
     expect({
       held: snapshot.held,
       row: snapshot.row,
-      slot: await s.slot(key),
+      binding: await s.binding(key),
       releaseReasons: releaseReasons(session),
     }).toMatchObject({
       held: false,
       row: { released: true, reason: "explicit-release" },
-      slot: { state: "settling", owner: null },
+      binding: { state: "settling", owner: null },
       releaseReasons: ["explicit-release"],
     });
     expect(inFlight.outcome()?.threw).toBeInstanceOf(DaemonUnavailableError);

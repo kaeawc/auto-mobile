@@ -14,15 +14,17 @@
 import {
   daemonSupportsManagedSlots,
   unmetManagedSlotConfigCapabilities,
-  type ManagedSlotConfig,
-  type ManagedSlotConfigErrorCode,
 } from "../models/managedSlotConfig";
 import {
-  managedSlotSessions,
-  type ManagedSlotAcquisitionOwnFailureCode,
-  type ManagedSlotsFailure,
-  type ManagedSlotsResult,
-} from "../models/managedSlotsResult";
+  type BrokerProvisionRequest,
+  type BindingConfigErrorCode,
+} from "./sessionBroker/provisioning/provisionRequest";
+import {
+  bindingSessions,
+  type BrokerDeviceAcquisitionOwnFailureCode,
+  type BindingsFailure,
+  type BindingsResult,
+} from "./sessionBroker/provisioning/acquisitionResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -31,7 +33,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "./constants";
 import { DaemonHandshakeMismatchError, DaemonUnavailableError } from "./client";
 import { McpTimeoutError } from "./McpTimeoutError";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "./sessionBroker/provisioning/executionLiveness";
 
 /** Same method name the daemon serves (`daemonRequestHandlers.DAEMON_CAPABILITIES_METHOD`). */
 const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -45,11 +47,11 @@ export const MANAGED_SLOT_ACQUISITION_REPLY_GRACE_MS = 15_000;
 /** Bound on the capability probe; it is daemon self-description and answers at once. */
 const CAPABILITY_PROBE_TIMEOUT_MS = 5_000;
 
-const CONFIG_ERROR_CODES: ReadonlySet<string> = new Set<ManagedSlotConfigErrorCode>([
-  "managed_slot_config_invalid",
+const CONFIG_ERROR_CODES: ReadonlySet<string> = new Set<BindingConfigErrorCode>([
+  "binding_config_invalid",
   "contract_unsupported",
-  "managed_slot_group_unsupported",
-  "managed_slots_unsupported",
+  "binding_group_unsupported",
+  "bindings_unsupported",
 ]);
 
 export interface ManagedSlotProxyAcquisitionPorts {
@@ -70,18 +72,18 @@ export interface ManagedSlotProxyAcquisitionPorts {
 }
 
 function failure(
-  code: ManagedSlotAcquisitionOwnFailureCode,
+  code: BrokerDeviceAcquisitionOwnFailureCode,
   message: string,
   retryable: boolean,
   nextAction: string,
 ) {
-  return { code, message, retryable, nextAction } satisfies ManagedSlotsFailure;
+  return { code, message, retryable, nextAction } satisfies BindingsFailure;
 }
 
 export function failedManagedSlotsResult(
-  config: ManagedSlotConfig,
-  slotFailure: ManagedSlotsFailure,
-): ManagedSlotsResult {
+  config: BrokerProvisionRequest,
+  slotFailure: BindingsFailure,
+): BindingsResult {
   return {
     contractVersion: 1,
     scope: {
@@ -91,30 +93,30 @@ export function failedManagedSlotsResult(
       scopeKey: null,
     },
     outcome: "failed",
-    slots: [],
+    bindings: [],
     failure: slotFailure,
   };
 }
 
-function isManagedSlotsResult(value: unknown): value is ManagedSlotsResult {
+function isManagedSlotsResult(value: unknown): value is BindingsResult {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<ManagedSlotsResult>;
+  const candidate = value as Partial<BindingsResult>;
   return (
     candidate.contractVersion === 1 &&
     (candidate.outcome === "ready" || candidate.outcome === "failed") &&
-    Array.isArray(candidate.slots) &&
+    Array.isArray(candidate.bindings) &&
     typeof candidate.scope === "object" &&
     candidate.scope !== null
   );
 }
 
-function incompatibleDaemonFailure(error: unknown): ManagedSlotsFailure | undefined {
+function incompatibleDaemonFailure(error: unknown): BindingsFailure | undefined {
   if (error instanceof DaemonHandshakeMismatchError) {
     return failure(
       "contract_unsupported",
-      `Managed slot acquisition refused a daemon ${error.failure.reason} mismatch: ${errorMessage(error)}`,
+      `Binding acquisition refused a daemon ${error.failure.reason} mismatch: ${errorMessage(error)}`,
       false,
       "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
     );
@@ -129,7 +131,7 @@ function incompatibleDaemonFailure(error: unknown): ManagedSlotsFailure | undefi
   ) {
     return failure(
       "contract_unsupported",
-      `Managed slot acquisition refused a daemon mismatch (${error.reason}): ${errorMessage(error)}`,
+      `Binding acquisition refused a daemon mismatch (${error.reason}): ${errorMessage(error)}`,
       false,
       "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
     );
@@ -137,7 +139,7 @@ function incompatibleDaemonFailure(error: unknown): ManagedSlotsFailure | undefi
   return undefined;
 }
 
-function classifyError(error: unknown, signal: AbortSignal | undefined): ManagedSlotsFailure {
+function classifyError(error: unknown, signal: AbortSignal | undefined): BindingsFailure {
   if (signal?.aborted) {
     return failure(
       "cancelled",
@@ -149,7 +151,7 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
   if (error instanceof McpTimeoutError) {
     return failure(
       "timeout",
-      `Managed slot acquisition did not finish within the preparation deadline: ${errorMessage(error)}`,
+      `Binding acquisition did not finish within the preparation deadline: ${errorMessage(error)}`,
       true,
       "Retry with a longer preparationTimeoutMs, and set the MCP init timeout at or above it.",
     );
@@ -161,15 +163,15 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && CONFIG_ERROR_CODES.has(code)) {
     return failure(
-      code as ManagedSlotConfigErrorCode,
+      code as BindingConfigErrorCode,
       errorMessage(error),
       false,
-      "Fix the managed slot config; nothing changed.",
+      "Fix the binding config; nothing changed.",
     );
   }
   return failure(
     "daemon_unavailable",
-    `Managed slot acquisition could not reach the daemon: ${errorMessage(error)}`,
+    `Binding acquisition could not reach the daemon: ${errorMessage(error)}`,
     true,
     "Retry once the AutoMobile daemon is reachable.",
   );
@@ -180,10 +182,10 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
  * failure is a `failed` result with a typed code.
  */
 export async function acquireManagedSlotsThroughDaemon(
-  config: ManagedSlotConfig,
+  config: BrokerProvisionRequest,
   ports: ManagedSlotProxyAcquisitionPorts,
   signal?: AbortSignal,
-): Promise<ManagedSlotsResult> {
+): Promise<BindingsResult> {
   const budgetMs = config.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
   const deadlineMs = ports.timer.now() + budgetMs;
   const remaining = () => deadlineMs - ports.timer.now();
@@ -193,13 +195,13 @@ export async function acquireManagedSlotsThroughDaemon(
       timeoutMs: budgetMs,
       origin: "acquireManagedSlotsThroughDaemon",
     });
-  let result: ManagedSlotsResult;
+  let result: BindingsResult;
   try {
     await raceWithDeadline(() => ports.ensureConnected(), {
       timer: ports.timer,
       timeoutMs: Math.max(1, remaining()),
       signal,
-      label: "managed slot daemon connection",
+      label: "binding daemon connection",
       timeoutError,
     });
     const capabilities = (await ports.callDaemonMethod(
@@ -255,7 +257,7 @@ export async function acquireManagedSlotsThroughDaemon(
         config,
         failure(
           "daemon_unavailable",
-          "The daemon returned a malformed managed slot result.",
+          "The daemon returned a malformed binding result.",
           true,
           "Restart the daemon from this client installation.",
         ),
@@ -265,7 +267,7 @@ export async function acquireManagedSlotsThroughDaemon(
   } catch (error) {
     const classified = classifyError(error, signal);
     logger.warn(
-      `[ManagedSlots] Acquisition failed (${classified.code}): ${errorMessage(error)}`,
+      `[Bindings] Acquisition failed (${classified.code}): ${errorMessage(error)}`,
       error,
     );
     return failedManagedSlotsResult(config, classified);
@@ -273,7 +275,7 @@ export async function acquireManagedSlotsThroughDaemon(
   if (result.outcome !== "ready") {
     return result;
   }
-  const sessionUuids = managedSlotSessions(result);
+  const sessionUuids = bindingSessions(result);
   // No await between learning the grants and registering close's cleanup responsibility.
   ports.trackAcquiredSessions(sessionUuids, result.scope.scopeKey);
   return await holdReadySessions(result, ports, sessionUuids, remaining, timeoutError, signal);
@@ -281,13 +283,13 @@ export async function acquireManagedSlotsThroughDaemon(
 
 /** Hold every ready slot's session; a failed hold turns the result into a typed failure. */
 async function holdReadySessions(
-  result: ManagedSlotsResult,
+  result: BindingsResult,
   ports: ManagedSlotProxyAcquisitionPorts,
   sessionUuids: readonly string[],
   remaining: () => number,
   timeoutError: () => McpTimeoutError,
   signal?: AbortSignal,
-): Promise<ManagedSlotsResult> {
+): Promise<BindingsResult> {
   const holdAbort = new AbortController();
   const cancelHold = () => holdAbort.abort(signal?.reason);
   signal?.addEventListener("abort", cancelHold, { once: true });
@@ -308,7 +310,7 @@ async function holdReadySessions(
         timer: ports.timer,
         timeoutMs,
         signal,
-        label: "managed slot session hold",
+        label: "binding session hold",
         timeoutError,
         onTimeout: () => holdAbort.abort(timeoutError()),
       },
@@ -320,19 +322,16 @@ async function holdReadySessions(
     return result;
   } catch (error) {
     holdAbort.abort(error);
-    logger.warn(
-      `[ManagedSlots] Holding the acquired sessions failed: ${errorMessage(error)}`,
-      error,
-    );
+    logger.warn(`[Bindings] Holding the acquired sessions failed: ${errorMessage(error)}`, error);
     try {
       await raceWithDeadline(() => ports.releaseHeldSessions(), {
         timer: ports.timer,
-        timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
-        label: "managed slot abandoned hold release",
+        timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
+        label: "binding abandoned hold release",
       });
     } catch (releaseError) {
       logger.warn(
-        `[ManagedSlots] Releasing the acquired sessions failed; the daemon's owner-disconnect / ` +
+        `[Bindings] Releasing the acquired sessions failed; the daemon's owner-disconnect / ` +
           `no-heartbeat release remains responsible: ${errorMessage(releaseError)}`,
         releaseError,
       );
@@ -340,7 +339,7 @@ async function holdReadySessions(
     return {
       ...result,
       outcome: "failed",
-      slots: result.slots.map((slot) => ({ ...slot, sessionUuid: null })),
+      bindings: result.bindings.map((binding) => ({ ...binding, sessionUuid: null })),
       failure:
         signal?.aborted || error instanceof McpTimeoutError
           ? classifyError(error, signal)
@@ -348,7 +347,7 @@ async function holdReadySessions(
               "execution_hold_failed",
               `The acquired session could not be held: ${errorMessage(error)}`,
               true,
-              "Relaunch the execution; the slot keeps its device.",
+              "Relaunch the execution; the binding keeps its device.",
             ),
     };
   } finally {

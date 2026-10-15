@@ -83,11 +83,11 @@ describe("daemon/registerSession on managed connections", () => {
     return {
       sessionId: sessionUuids[0],
       clientName: "managed-proxy",
-      managedSlots: { scopeKey: SCOPE, sessionUuids, livenessOwnerToken: token },
+      bindings: { scopeKey: SCOPE, sessionUuids, livenessOwnerToken: token },
     };
   }
 
-  test("a bound connection registers its own slot session but no other session", async () => {
+  test("a bound connection registers its own binding session but no other session", async () => {
     scopes.bind("socket-1", { scopeKey: SCOPE, sessionUuids: [SLOT_SESSION] });
 
     const own = await register({ sessionId: SLOT_SESSION, clientName: "c" }, "socket-1");
@@ -108,7 +108,7 @@ describe("daemon/registerSession on managed connections", () => {
     expect(scopes.get("socket-1")).toBeUndefined();
   });
 
-  test("a reconnected managed proxy re-binds its socket to the slot sessions its token holds", async () => {
+  test("a reconnected managed proxy re-binds its socket to the binding sessions its token holds", async () => {
     const response = await register(rebind([SLOT_SESSION]), "socket-2");
 
     expect(response).toMatchObject({ success: true });
@@ -138,7 +138,7 @@ describe("daemon/registerSession on managed connections", () => {
     expect(reowned).toEqual([]);
   });
 
-  test("a re-bind must register one of its slot sessions, from a known socket, in its own scope", async () => {
+  test("a re-bind must register one of its binding sessions, from a known socket, in its own scope", async () => {
     const outside = await register(
       { ...rebind([SLOT_SESSION]), sessionId: OTHER_SESSION },
       "socket-2",
@@ -208,7 +208,7 @@ describe("daemon/registerSession on managed connections", () => {
       await register(
         {
           ...rebind([SLOT_SESSION]),
-          managedSlots: {
+          bindings: {
             scopeKey: "other-scope",
             sessionUuids: [SLOT_SESSION],
             livenessOwnerToken: TOKEN,

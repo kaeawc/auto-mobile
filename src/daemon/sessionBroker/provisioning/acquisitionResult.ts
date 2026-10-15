@@ -1,0 +1,152 @@
+export type BindingsOutcome = "ready" | "failed";
+
+export type BindingDispositionName = "created" | "reused" | "adopted" | "replaced";
+
+/**
+ * Typed failure. `code` is either a reconciler code (`discovery_incomplete`, `binding_in_use`,
+ * `capacity_exhausted`, ...) or an acquisition-level one:
+ *
+ * - `contract_unsupported`: a legacy caller requested an unsupported contract.
+ * - `registry_schema_unsupported`: a newer daemon migrated the shared registry beyond this build's schema.
+ * - `scope_invalidated`: this runner incarnation was reset; it never accepts work again.
+ * - `scope_transition_pending`: a newer incarnation is waiting for the old one's owners/cleanup.
+ * - `execution_policy_failed`: the session could not be put on the managed-execution policy.
+ * - `execution_hold_failed`: the proxy could not hold a binding session for the execution.
+ * - `daemon_unavailable`: the proxy could not reach the daemon within the preparation deadline.
+ * - `timeout` / `cancelled`: the preparation deadline passed, or the proxy is shutting down.
+ */
+export const BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES = [
+  "binding_config_invalid",
+  "contract_unsupported",
+  "registry_schema_unsupported",
+  "binding_group_unsupported",
+  "bindings_unsupported",
+  "scope_invalidated",
+  "scope_transition_pending",
+  "execution_policy_failed",
+  "execution_hold_failed",
+  "liveness_owner_conflict",
+  "daemon_unavailable",
+  "timeout",
+  "cancelled",
+] as const;
+
+/** Failure codes the acquisition and the proxy mint themselves, beside the reconciler's. */
+export type BrokerDeviceAcquisitionOwnFailureCode =
+  (typeof BROKER_DEVICE_ACQUISITION_OWN_FAILURE_CODES)[number];
+
+/** Plain total-resource admission evidence, shared by daemon and proxy. */
+export interface BindingBudgetEvidence {
+  limit: number;
+  usage: {
+    total: number;
+    active: number;
+    assignedIdle: number;
+    cached: number;
+    preparing: number;
+    deleting: number;
+    orphaned: number;
+  };
+  charged: Array<{
+    platform: "android" | "ios";
+    stableDeviceId: string;
+    kind:
+      | "assigned_active"
+      | "assigned_idle"
+      | "free"
+      | "deleting"
+      | "deletion_stuck"
+      | "preparing"
+      | "orphaned";
+    uncounted?: true;
+  }>;
+  retained: Array<{
+    platform: "android" | "ios";
+    stableDeviceId: string;
+    reason: string;
+    attempts?: number;
+    failedDeletes?: number;
+    uncounted?: true;
+    lastError?: string | null;
+  }>;
+  evictionFailures: Array<{ platform: "android" | "ios"; stableDeviceId: string; message: string }>;
+}
+
+export interface BindingsFailure {
+  code: string;
+  retryable: boolean;
+  message: string;
+  nextAction: string;
+  /** Boot-capacity details of a `capacity_exhausted` binding failure (#11390). */
+  capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
+  /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
+  budget?: BindingBudgetEvidence;
+}
+
+export interface BindingDeviceEvidence {
+  /** AVD name or simulator UDID. */
+  stableId: string;
+  /** adb serial or UDID once booted. */
+  transportId: string | null;
+  name: string;
+}
+
+export interface BindingResultEntry {
+  bindingIndex: number;
+  role: string;
+  platform: "android" | "ios";
+  /** The binding's assignment generation after this acquisition (null when the binding was never read). */
+  assignmentGeneration: number | null;
+  device: BindingDeviceEvidence | null;
+  /** The fresh session this execution holds on the binding's device (null when the binding failed). */
+  sessionUuid: string | null;
+  /**
+   * Set by the proxy's resource once this binding's session was terminally released (#11712).
+   * The idle field is true only for an idle release and absent otherwise.
+   */
+  executionEnded?: { reason: string; idle?: true; nextAction: "relaunch_execution" };
+  requestedSpec: unknown;
+  resolvedSpec: unknown;
+  specFingerprint: { version: number; hash: string } | null;
+  disposition: BindingDispositionName | null;
+  readiness: { mode: string; status: string } | null;
+  /** The provision path's lifecycle/cleanup evidence and the reconciler's decision trail. */
+  lifecycle: unknown;
+  failure?: BindingsFailure;
+}
+
+export interface BindingsResult {
+  contractVersion: 1;
+  scope: {
+    managedHostScope: string;
+    runnerNamespace: string;
+    runnerIncarnation: string;
+    /** Null when the acquisition failed before the scope was resolved. */
+    scopeKey: string | null;
+    /** This acquisition reactivated a scope that had been abandoned (owner decision 2026-10-09). */
+    revived?: boolean;
+  };
+  outcome: BindingsOutcome;
+  /** The stored idle window (2-minute default or override); live-owned executions are idle-exempt. */
+  idleTimeoutMs?: number;
+  bindings: BindingResultEntry[];
+  /** Scope- or transport-level failure; per-binding failures sit on the binding entry. */
+  failure?: BindingsFailure;
+}
+
+/** The binding of a ready result that holds `sessionUuid` (null when the result has no such binding). */
+export function bindingForSession(
+  result: BindingsResult | undefined,
+  sessionUuid: string,
+): BindingResultEntry | null {
+  return result?.outcome === "ready"
+    ? (result.bindings.find((binding) => binding.sessionUuid === sessionUuid) ?? null)
+    : null;
+}
+
+/** The sessions a ready result asks the proxy to hold. */
+export function bindingSessions(result: BindingsResult): string[] {
+  return result.outcome === "ready"
+    ? result.bindings.flatMap((binding) => (binding.sessionUuid ? [binding.sessionUuid] : []))
+    : [];
+}

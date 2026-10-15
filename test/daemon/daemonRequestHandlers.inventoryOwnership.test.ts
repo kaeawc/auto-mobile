@@ -5,7 +5,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonRequest } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
@@ -14,10 +14,10 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { assignManagedSlotDevice } from "./managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 
 // #11305: availableDevices means "allocation can lend it", so the handlers must refresh the
 // managed-slot snapshot and foreign ownership before counting, not answer from a stale cache.
@@ -33,7 +33,7 @@ const request = (method: string): DaemonRequest => ({
 describe("daemon availableDevices and refreshDevices refresh ownership before counting", () => {
   let timer: FakeTimer;
   let sessions: SessionManager;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   const devices = [ios("SIM-SLOT"), ios("SIM-FREE")];
 
   const makePool = async (extra: Partial<Parameters<typeof createDevicePoolDependencies>[2]>) => {
@@ -64,22 +64,22 @@ describe("daemon availableDevices and refreshDevices refresh ownership before co
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   });
 
-  const slotExclusion = () => new RegistryManagedSlotExclusion(async () => registry, timer);
+  const slotExclusion = () => new RegistryBindingExclusion(async () => registry, timer);
 
   beforeEach(() => {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    registry = new FakeSlotRegistry(timer);
+    registry = new FakeBindingRegistry(timer);
   });
   afterEach(() => {
     sessions.stopCleanupTimer();
     timer.reset();
   });
 
-  test("a stale snapshot: a slot took the device since the last refresh", async () => {
-    const pool = await makePool({ managedSlotExclusion: slotExclusion() });
-    await pool.managedSlotStableIds("ios");
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+  test("a stale snapshot: a binding took the device since the last refresh", async () => {
+    const pool = await makePool({ bindingExclusion: slotExclusion() });
+    await pool.bindingStableIds("ios");
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
 
     const response = await handleDaemonRequest(request("daemon/availableDevices"), stateFor(pool));
 
@@ -87,9 +87,9 @@ describe("daemon availableDevices and refreshDevices refresh ownership before co
     expect(response.result).toMatchObject({ availableDevices: 1, assignedDevices: 1 });
   });
 
-  test("a never-loaded snapshot does not read a slot's device as free", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
-    const pool = await makePool({ managedSlotExclusion: slotExclusion() });
+  test("a never-loaded snapshot does not read a binding's device as free", async () => {
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    const pool = await makePool({ bindingExclusion: slotExclusion() });
 
     const response = await handleDaemonRequest(request("daemon/refreshDevices"), stateFor(pool));
 
@@ -114,11 +114,11 @@ describe("daemon availableDevices and refreshDevices refresh ownership before co
     expect(response.result).toMatchObject({ availableDevices: 1, assignedDevices: 1 });
   });
 
-  test("an unreadable slot registry fails the call instead of reporting devices idle", async () => {
+  test("an unreadable binding registry fails the call instead of reporting devices idle", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const pool = await makePool({
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => {
+        bindingExclusion: new RegistryBindingExclusion(async () => {
           throw new Error("registry locked");
         }, timer),
       });

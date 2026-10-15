@@ -38,13 +38,13 @@ test/daemon/foreignDeviceOwnership.test.ts	recursive-rm
 test/daemon/idleProxyHeartbeatIdleRelease.test.ts	heavy-harness
 test/daemon/implicitRoutingForeignOwnedSession.test.ts	heavy-harness
 test/daemon/loggerPrune.test.ts	recursive-rm
-test/daemon/managedSlots/slotsOwnExecutionStaleSnapshot.test.ts	heavy-harness
-test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts	heavy-harness
 test/daemon/manager.test.ts	recursive-rm
 test/daemon/manager.test.ts	temp-dir
 test/daemon/ownerDisconnectReleaseRearm.test.ts	heavy-harness
 test/daemon/perSourceIosLiveness.test.ts	heavy-harness
 test/daemon/rehydrationReservationAutolock.test.ts	heavy-harness
+test/daemon/sessionBroker/provisioning/bindingsOwnExecutionStaleSnapshot.test.ts	heavy-harness
+test/daemon/sessionBroker/provisioning/bindingsUnresolvedEmulatorIdentityGate.test.ts	heavy-harness
 test/daemon/socketServerDirectFrameTransportAlias.test.ts	heavy-harness
 test/daemon/socketServerFramerInteractions.test.ts	recursive-rm
 test/daemon/socketServerFramerInteractions.test.ts	temp-dir

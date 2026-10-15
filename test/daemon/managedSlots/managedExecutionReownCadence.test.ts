@@ -9,32 +9,32 @@ import {
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
 } from "../../../src/daemon/managedSlots/managedExecutionReowner";
-import { MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import {
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
-  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
-  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
-  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/managedSlots/managedExecutionRelease";
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import {
-  ManagedSlotDiscoveryIncompleteError,
-  ManagedSlotOwnershipUnconfirmedError,
-} from "../../../src/daemon/managedSlots/managedSlotRefusal";
+  BindingDiscoveryIncompleteError,
+  BindingOwnershipUnconfirmedError,
+} from "../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
-  MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS,
-  MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
-  MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/managedSlots/managedSlotAcquisition";
+  BINDING_BACK_OUT_RETRY_INITIAL_DELAY_MS,
+  BINDING_BACK_OUT_RETRY_MAX_DELAY_MS,
+  BINDING_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import {
   RegistryRetryPacing,
   REGISTRY_BUSY_WRITE_MS,
   REGISTRY_RETRY_INITIAL_DELAY_MS,
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../../../src/daemon/managedSlots/registryRetryPacing";
+} from "../../../src/daemon/sessionBroker/registry/registryRetryPacing";
 import { logger } from "../../../src/utils/logger";
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 
@@ -48,7 +48,7 @@ afterEach(async () => {
 
 async function harness(policy?: ManagedExecutionReownerDependencies["retryBackoff"]) {
   const timer = new FakeTimer();
-  const registry = new FakeSlotRegistry(timer, () => false);
+  const registry = new FakeBindingRegistry(timer, () => false);
   const scope = await registry.ensureScope({
     managedHostScope: "host",
     runnerNamespace: "runner",
@@ -57,9 +57,9 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
   if (scope.kind !== "ready") {
     throw new Error(scope.kind);
   }
-  for (const [slotIndex, sessionUuid] of ["a", "b"].entries()) {
-    const key = { scopeKey: scope.scope.scopeKey, slotIndex };
-    await registry.initSlot(key, { role: "app", platform: "android", requestedSpec: {} });
+  for (const [bindingIndex, sessionUuid] of ["a", "b"].entries()) {
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex };
+    await registry.initBinding(key, { role: "app", platform: "android", requestedSpec: {} });
     await registry.commitBinding(
       key,
       { generation: 0, stableDeviceId: null },
@@ -174,7 +174,7 @@ test("one transient failure retries at 25 ms and opens admission with elapsed in
   const h = await harness();
   h.behavior.failures = 1;
   await h.reowner.reown(["a"], { rehydrated: true });
-  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
   await h.step(24);
   expect(h.calls).toHaveLength(1);
   await h.step(1);
@@ -353,10 +353,10 @@ test("a timed-out foreign-owner claim gates an unmarked session until a later cu
   const inline = h.reowner.reown(["a"]);
   await h.step(700);
   await inline;
-  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
   expect(h.calls).toHaveLength(1);
   expect(h.info).not.toHaveBeenCalled();
-  h.claim.resolve({ kind: "slot_in_use" });
+  h.claim.resolve({ kind: "binding_in_use" });
   h.behavior.hangClaim = false;
   await h.step(700);
   expect(h.calls).toHaveLength(2);
@@ -364,7 +364,7 @@ test("a timed-out foreign-owner claim gates an unmarked session until a later cu
   expect(h.warn).not.toHaveBeenCalled();
   expect(
     h.debug.mock.calls.some((call) =>
-      String(call[0]).includes("retained claim completed (slot_in_use)"),
+      String(call[0]).includes("retained claim completed (binding_in_use)"),
     ),
   ).toBe(true);
 });
@@ -418,8 +418,8 @@ test("release schedule stays unchanged while ownership and discovery hints are i
   expect(
     [1, 2, 3, 4, 5, 6].map((n) => MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF.delayForAttempt(n)),
   ).toEqual([250, 500, 1_000, 2_000, 4_000, 5_000]);
-  expect(new ManagedSlotOwnershipUnconfirmedError("a").toPayload().retryAfterMs).toBe(1_000);
-  expect(new ManagedSlotDiscoveryIncompleteError("a").toPayload().retryAfterMs).toBe(2_000);
+  expect(new BindingOwnershipUnconfirmedError("a").toPayload().retryAfterMs).toBe(1_000);
+  expect(new BindingDiscoveryIncompleteError("a").toPayload().retryAfterMs).toBe(2_000);
 });
 
 test("busy ownership hold drops state exactly at the derived cap", async () => {
@@ -429,7 +429,7 @@ test("busy ownership hold drops state exactly at the derived cap", async () => {
   const hold = h.reowner.releaseDeviceHold("a");
   expect(hold?.capMs).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
   expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(
-    2 * (MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS),
+    2 * (MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + BINDING_REGISTRY_BUSY_TIMEOUT_MS),
   );
   expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(1_900);
   let outcome: string | undefined;
@@ -578,16 +578,16 @@ test("A's release expedites its attempt behind B's blocking in-flight attempt", 
   expect(h.confirmed).toEqual([REGISTRY_BUSY_WRITE_MS]);
 });
 
-test("back-out, re-own and settled-slot recovery export the shared retry schedule", () => {
+test("back-out, re-own and settled-binding recovery export the shared retry schedule", () => {
   const schedule = [
     REGISTRY_RETRY_INITIAL_DELAY_MS,
     REGISTRY_RETRY_MAX_DELAY_MS,
     REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
   ];
   expect([
-    MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS,
-    MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
-    MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
+    BINDING_BACK_OUT_RETRY_INITIAL_DELAY_MS,
+    BINDING_BACK_OUT_RETRY_MAX_DELAY_MS,
+    BINDING_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
   ]).toEqual(schedule);
   expect([
     MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
@@ -595,9 +595,9 @@ test("back-out, re-own and settled-slot recovery export the shared retry schedul
     MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
   ]).toEqual(schedule);
   expect([
-    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
-    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
-    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+    MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
+    MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
+    MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
   ]).toEqual(schedule);
 });
 

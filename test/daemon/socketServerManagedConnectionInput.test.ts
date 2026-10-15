@@ -129,7 +129,7 @@ afterEach(() => {
 });
 
 describe("input/* from a managed connection (#11178)", () => {
-  test("a managed socket drives its own slot device", async () => {
+  test("a managed socket drives its own binding device", async () => {
     binding = { scopeKey: "scope-a", sessionUuids: new Set([SLOT_SESSION]) };
     useServer();
     const socket = connect();
@@ -184,7 +184,7 @@ describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () =
             scopeKey: "scope-a",
           },
           outcome: "ready" as const,
-          slots: [{ sessionUuid: SLOT_SESSION }],
+          bindings: [{ sessionUuid: SLOT_SESSION }],
         }),
       }),
       getManagedConnectionScopes: () => ({
@@ -218,10 +218,10 @@ describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () =
           managedHostScope: "host-a",
           runnerNamespace: "ns",
           runnerIncarnation: "inc-1",
-          localSlotCapacity: 1,
+          localBindingCapacity: 1,
           requests: [
             {
-              slotIndex: 0,
+              bindingIndex: 0,
               role: "app",
               platform: "android",
               requestedSpec: {

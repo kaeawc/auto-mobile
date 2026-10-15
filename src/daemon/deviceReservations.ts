@@ -18,7 +18,7 @@ import {
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
   isSameHolderSession,
 } from "./inputDeviceOwnership";
-import type { ManagedSlotExclusion } from "./managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { isDeviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
@@ -73,7 +73,7 @@ export interface DeviceReservationsPort {
   readonly recoveryCoordinator: Pick<DeviceRecoveryCoordinator, "isAndroidRecoveryHandoffReserved">;
   readonly autolockManager: Pick<DeviceAutolockManager, "getOwnedAutolockSession">;
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "hasUnresolvedEmulatorName">;
-  readonly managedSlotExclusion: Pick<ManagedSlotExclusion, "refresh" | "holderOf"> | undefined;
+  readonly bindingExclusion: Pick<BindingExclusion, "refresh" | "holderOf"> | undefined;
   readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   reserveDeviceForReadiness: DeviceReservations["reserveDeviceForReadiness"];
   assertCallerOwnsDeviceSession(
@@ -347,9 +347,9 @@ export class DeviceReservations {
     if (rows.length === 0) {
       return;
     }
-    if (this.port.managedSlotExclusion) {
+    if (this.port.bindingExclusion) {
       try {
-        await this.port.managedSlotExclusion.refresh({ requireCurrent: true });
+        await this.port.bindingExclusion.refresh({ requireCurrent: true });
       } catch (error) {
         // Which devices managed slots hold is unknown, and they win: reserve nothing.
         logger.warn(
@@ -363,7 +363,7 @@ export class DeviceReservations {
       return;
     }
     for (const { sessionId, target } of rows) {
-      const managed = this.port.managedSlotExclusion?.holderOf({
+      const managed = this.port.bindingExclusion?.holderOf({
         platform: target.platform,
         stableIds: [target.stableDeviceId, target.deviceId],
       });
@@ -570,7 +570,7 @@ export class DeviceReservations {
       if (
         target.platform !== platform ||
         !this.startMatchesRestartReservation(platform, identities, sessionUuid, target) ||
-        this.port.managedSlotExclusion?.holderOf({
+        this.port.bindingExclusion?.holderOf({
           platform,
           stableIds: [target.stableDeviceId, target.deviceId],
         })

@@ -48,11 +48,11 @@ import {
   splitFlagToken,
 } from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
-import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../constants";
+import { DAEMON_RESET_BINDING_SCOPE_METHOD } from "../constants";
 import {
-  SLOT_SCOPE_RESET_DEFAULT_WAIT_MS,
-  SLOT_SCOPE_RESET_MAX_WAIT_MS,
-} from "../managedSlots/slotScopeReset";
+  BINDING_SCOPE_RESET_DEFAULT_WAIT_MS,
+  BINDING_SCOPE_RESET_MAX_WAIT_MS,
+} from "../sessionBroker/provisioning/scopeReset";
 import {
   ALLOW_SHARED_NAMESPACE_FLAG,
   assertDaemonNamespaceMatchesState,
@@ -200,9 +200,9 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
   let waitMs: number | undefined;
   if (waitText !== undefined) {
     waitMs = Number(waitText);
-    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > SLOT_SCOPE_RESET_MAX_WAIT_MS) {
+    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > BINDING_SCOPE_RESET_MAX_WAIT_MS) {
       throw new ActionableError(
-        `--wait-ms must be an integer between 0 and ${SLOT_SCOPE_RESET_MAX_WAIT_MS}`,
+        `--wait-ms must be an integer between 0 and ${BINDING_SCOPE_RESET_MAX_WAIT_MS}`,
       );
     }
   }
@@ -239,7 +239,7 @@ export function resetSlotScopeForceRefusalLines(result: unknown): string[] {
     return scope.forceRefusals.flatMap((refusal: unknown): string[] => {
       if (
         !isObject(refusal) ||
-        typeof refusal.slotIndex !== "number" ||
+        typeof refusal.bindingIndex !== "number" ||
         typeof refusal.reason !== "string" ||
         typeof refusal.message !== "string"
       ) {
@@ -248,7 +248,7 @@ export function resetSlotScopeForceRefusalLines(result: unknown): string[] {
       const remaining =
         typeof refusal.remainingMs === "number" ? `, remainingMs=${refusal.remainingMs}` : "";
       return [
-        `  ${scopeKey} slot ${refusal.slotIndex} [${refusal.reason}${remaining}]: ${refusal.message}`,
+        `  ${scopeKey} binding ${refusal.bindingIndex} [${refusal.reason}${remaining}]: ${refusal.message}`,
       ];
     });
   });
@@ -270,13 +270,13 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
     let result: unknown;
     try {
       await client.connect();
-      result = await client.callDaemonMethod(DAEMON_RESET_SLOT_SCOPE_METHOD, request, {
+      result = await client.callDaemonMethod(DAEMON_RESET_BINDING_SCOPE_METHOD, request, {
         timeoutMs:
-          (request.waitMs ?? SLOT_SCOPE_RESET_DEFAULT_WAIT_MS) + RESET_SLOT_SCOPE_CALL_MARGIN_MS,
+          (request.waitMs ?? BINDING_SCOPE_RESET_DEFAULT_WAIT_MS) + RESET_SLOT_SCOPE_CALL_MARGIN_MS,
       });
       await client.close();
     } catch (error) {
-      throw new ActionableError(`Failed to reset slot scope: ${errorMessage(error)}`);
+      throw new ActionableError(`Failed to reset binding scope: ${errorMessage(error)}`);
     }
     console.log(JSON.stringify(result));
     outcome =
@@ -302,7 +302,7 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
     process.exit(2);
   }
   if (outcome === "not_found") {
-    console.error("No managed slot scope matches that runner namespace and incarnation.");
+    console.error("No binding scope matches that runner namespace and incarnation.");
     process.exit(1);
   }
 }
@@ -1308,7 +1308,7 @@ function printDaemonUsageError(message: string): void {
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
     console.log(
-      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
+      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a binding scope; free its devices",
     );
     console.log("\nOptions:");
     console.log(

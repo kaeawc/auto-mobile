@@ -30,7 +30,7 @@ import {
   resolveRestartStopIdentity,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import {
   DEVICE_SHUTDOWN_TIMEOUT_MS,
   PooledAvdIdentityError,
@@ -155,7 +155,7 @@ async function teardownOwnershipRefusal(
 
 function isTeardownOwnershipRefusal(error: unknown): boolean {
   return (
-    error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof DeviceAssignedToBindingError ||
     error instanceof InputDeviceOwnedError ||
     error instanceof DeviceOwnedByOtherDaemonError ||
     error instanceof BootedDeviceDiscoveryIncompleteError
@@ -213,7 +213,7 @@ async function managedSlotDeleteRefusal(
     });
     return undefined;
   } catch (error) {
-    if (error instanceof DeviceAssignedToManagedSlotError) {
+    if (error instanceof DeviceAssignedToBindingError) {
       const response = typedTeardownRefusal(args, error);
       if (response) {
         return { response };

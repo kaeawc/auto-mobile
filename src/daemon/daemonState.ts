@@ -1,9 +1,9 @@
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
-import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
+import type { BrokerExecutionRelease } from "./sessionBroker/provisioning/executionRelease";
 import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
-import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
-import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
+import type { BindingScopeReset } from "./sessionBroker/provisioning/scopeReset";
+import type { BrokerDeviceAcquisition } from "./sessionBroker/provisioning/deviceAcquisition";
 import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import type { SessionBrokerService } from "./sessionBroker/service";
 import { SessionManager } from "./sessionManager";
@@ -35,10 +35,10 @@ export class DaemonState implements DaemonStateLike {
   private devicePool: DevicePool | null = null;
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
   private unregisterSessionReadinessListener: (() => void) | null = null;
-  private managedExecutionRelease: ManagedExecutionRelease | null = null;
-  private slotScopeReset: SlotScopeReset | null = null;
+  private brokerExecutionRelease: BrokerExecutionRelease | null = null;
+  private slotScopeReset: BindingScopeReset | null = null;
   private readonly managedConnectionScopes = new ManagedConnectionScopes();
-  private managedSlotAcquisition: ManagedSlotAcquisition | null = null;
+  private brokerDeviceAcquisition: BrokerDeviceAcquisition | null = null;
   private managedExecutionReowner: ManagedExecutionReowner | null = null;
   private sessionBrokerService: SessionBrokerService | undefined;
   private sessionBrokerMode = false;
@@ -109,20 +109,20 @@ export class DaemonState implements DaemonStateLike {
   }
 
   /** Publish the managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
-  setManagedExecutionRelease(release: ManagedExecutionRelease | null): void {
-    this.managedExecutionRelease = release;
+  setManagedExecutionRelease(release: BrokerExecutionRelease | null): void {
+    this.brokerExecutionRelease = release;
   }
 
-  getManagedExecutionRelease(): ManagedExecutionRelease | undefined {
-    return this.managedExecutionRelease ?? undefined;
+  getManagedExecutionRelease(): BrokerExecutionRelease | undefined {
+    return this.brokerExecutionRelease ?? undefined;
   }
 
   /** Publish the managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
-  setSlotScopeReset(reset: SlotScopeReset | null): void {
+  setSlotScopeReset(reset: BindingScopeReset | null): void {
     this.slotScopeReset = reset;
   }
 
-  getSlotScopeReset(): SlotScopeReset | undefined {
+  getBindingScopeReset(): BindingScopeReset | undefined {
     return this.slotScopeReset ?? undefined;
   }
 
@@ -132,12 +132,12 @@ export class DaemonState implements DaemonStateLike {
   }
 
   /** Publish the managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
-  setManagedSlotAcquisition(acquisition: ManagedSlotAcquisition | null): void {
-    this.managedSlotAcquisition = acquisition;
+  setManagedSlotAcquisition(acquisition: BrokerDeviceAcquisition | null): void {
+    this.brokerDeviceAcquisition = acquisition;
   }
 
-  getManagedSlotAcquisition(): ManagedSlotAcquisition | undefined {
-    return this.managedSlotAcquisition ?? undefined;
+  getManagedSlotAcquisition(): BrokerDeviceAcquisition | undefined {
+    return this.brokerDeviceAcquisition ?? undefined;
   }
 
   setSessionBrokerMode(enabled: boolean): void {
@@ -216,10 +216,10 @@ export class DaemonState implements DaemonStateLike {
   reset(): void {
     this.observerSessionRegistry?.dispose();
     this.observerSessionRegistry = null;
-    this.managedExecutionRelease = null;
+    this.brokerExecutionRelease = null;
     this.slotScopeReset = null;
     this.managedConnectionScopes.clear();
-    this.managedSlotAcquisition = null;
+    this.brokerDeviceAcquisition = null;
     this.managedExecutionReowner = null;
     this.sessionBrokerService = undefined;
     this.sessionBrokerMode = false;

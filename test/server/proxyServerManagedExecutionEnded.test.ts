@@ -7,7 +7,7 @@ import {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer, managedSlotsResourceView } from "../../src/server/proxyServer";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { MANAGED_SLOTS_RESOURCE_URI } from "../../src/models/managedSlotsResult";
 import {
   DaemonBoundSessionExpiredError,
@@ -20,10 +20,10 @@ import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 
-function createHarness(managedSlots?: ManagedSlotsResult) {
+function createHarness(bindings?: BindingsResult) {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   const harness = createProxyMcpServer({
-    managedSlots,
+    bindings,
     proxyConfig: {
       timer: new FakeTimer(),
       clientFactory: () => new FakeDaemonClient(),
@@ -58,10 +58,10 @@ beforeAll(async () => {
 
 /** Run one `tools/call` against a proxy whose daemon call is replaced by `outcome`. */
 async function callThrough(
-  managedSlots: ManagedSlotsResult | undefined,
+  bindings: BindingsResult | undefined,
   outcome: { throws: unknown } | { returns: CallToolResult },
 ): Promise<{ isError?: boolean; error?: Record<string, unknown>; text: string }> {
-  const { server, proxy, registrations } = createHarness(managedSlots);
+  const { server, proxy, registrations } = createHarness(bindings);
   const call = spyOn(proxy, "callTool");
   if ("throws" in outcome) {
     call.mockRejectedValue(outcome.throws);
@@ -83,7 +83,7 @@ async function callThrough(
   }
 }
 
-test("a managed connection answers a released slot session with managed_execution_ended", async () => {
+test("a managed connection answers a released binding session with managed_execution_ended", async () => {
   const { error } = await callThrough(readyManagedSlotsResult(SESSION), {
     throws: new DaemonBoundSessionExpiredError(SESSION, "heartbeat-timeout"),
   });
@@ -93,7 +93,7 @@ test("a managed connection answers a released slot session with managed_executio
     nextAction: "relaunch_execution",
     sessionUuid: SESSION,
     reason: "heartbeat-timeout",
-    slotIndex: 1,
+    bindingIndex: 1,
     assignmentGeneration: 3,
   });
   expect(error).not.toHaveProperty("recovery");
@@ -119,7 +119,7 @@ test("a managed connection's session-less release is managed_execution_ended too
     nextAction: "relaunch_execution",
     reason: "heartbeat_timeout",
   });
-  expect(error).not.toHaveProperty("slotIndex");
+  expect(error).not.toHaveProperty("bindingIndex");
 });
 
 test("a daemon session_ownership_lost relayed to a managed connection is rewritten", async () => {
@@ -136,7 +136,7 @@ test("a daemon session_ownership_lost relayed to a managed connection is rewritt
     code: "managed_execution_ended",
     nextAction: "relaunch_execution",
     reason: "owner-exit",
-    slotIndex: 1,
+    bindingIndex: 1,
   });
 });
 
@@ -194,8 +194,8 @@ test("a read naming a device still succeeds after the release, and the refusal c
 });
 
 test("the managed-slots resource reflects a terminal release at read time", async () => {
-  const managedSlots = readyManagedSlotsResult(SESSION);
-  const { server, proxy, registrations } = createHarness(managedSlots);
+  const bindings = readyManagedSlotsResult(SESSION);
+  const { server, proxy, registrations } = createHarness(bindings);
   let ended: { sessionUuid: string; reason: string } | undefined;
   const terminal = spyOn(proxy, "getTerminalSessionRelease").mockImplementation(() => ended);
   try {
@@ -205,14 +205,14 @@ test("the managed-slots resource reflects a terminal release at read time", asyn
     }
     const request = { method: "resources/read", params: { uri: MANAGED_SLOTS_RESOURCE_URI } };
     const before = await handler(request, extra);
-    expect(JSON.parse(before.contents[0].text)).toEqual(managedSlots);
+    expect(JSON.parse(before.contents[0].text)).toEqual(bindings);
     ended = { sessionUuid: SESSION, reason: "cleanup-expired" };
     const after = await handler(request, extra);
-    expect(JSON.parse(after.contents[0].text).slots[0]).toMatchObject({
+    expect(JSON.parse(after.contents[0].text).bindings[0]).toMatchObject({
       sessionUuid: SESSION,
       executionEnded: { reason: "cleanup-expired", idle: true, nextAction: "relaunch_execution" },
     });
-    expect(managedSlots.slots[0]).not.toHaveProperty("executionEnded");
+    expect(bindings.bindings[0]).not.toHaveProperty("executionEnded");
   } finally {
     terminal.mockRestore();
     await server.close();
@@ -222,7 +222,7 @@ test("the managed-slots resource reflects a terminal release at read time", asyn
 
 test("the managed-slots resource view adds ended evidence without changing acquisition fields", () => {
   const result = readyManagedSlotsResult(SESSION);
-  result.slots.push({ ...result.slots[0]!, slotIndex: 2, sessionUuid: "another-session" });
+  result.bindings.push({ ...result.bindings[0]!, bindingIndex: 2, sessionUuid: "another-session" });
   const before = structuredClone(result);
   const view = managedSlotsResourceView(result, {
     sessionUuid: SESSION,
@@ -230,22 +230,22 @@ test("the managed-slots resource view adds ended evidence without changing acqui
   });
   expect(view).toEqual({
     ...before,
-    slots: [
+    bindings: [
       {
-        ...before.slots[0],
+        ...before.bindings[0],
         executionEnded: { reason: "cleanup-expired", idle: true, nextAction: "relaunch_execution" },
       },
-      before.slots[1],
+      before.bindings[1],
     ],
   });
   expect(view).not.toBe(result);
-  expect(view.slots[1]).toBe(result.slots[1]);
+  expect(view.bindings[1]).toBe(result.bindings[1]);
   expect(result).toEqual(before);
 });
 
 test("the managed-slots resource view keeps undefined, unknown and failed releases unchanged", () => {
   const ready = readyManagedSlotsResult(SESSION);
-  const failed: ManagedSlotsResult = { ...ready, outcome: "failed" };
+  const failed: BindingsResult = { ...ready, outcome: "failed" };
   expect(managedSlotsResourceView(ready, undefined)).toBe(ready);
   expect(
     managedSlotsResourceView(ready, { sessionUuid: "unknown", reason: "cleanup-expired" }),

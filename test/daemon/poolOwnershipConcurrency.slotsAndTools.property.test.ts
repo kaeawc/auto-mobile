@@ -23,7 +23,7 @@ const TESTS_PER_PROFILE = 3;
 
 const PROFILES: Record<string, HarnessProfile> = {
   /** Generic acquisitions racing slot assignment and the slot's execution lifecycle. */
-  slots: {
+  bindings: {
     steps: STEPS,
     weights: {
       acquireMcp: 7,
@@ -93,11 +93,11 @@ function seedChunks(firstSeed: number): number[][] {
   );
 }
 
-describe("managed slots and the tool path under seeded concurrent interleavings", () => {
+describe("bindings and the tool path under seeded concurrent interleavings", () => {
   for (const [name, profile] of Object.entries(PROFILES)) {
     for (const seeds of seedChunks(1)) {
-      test(`${name}: seeds ${seeds[0]}-${seeds.at(-1)} keep every slot and tool-path invariant`, async () => {
-        await assertOwnershipInvariants(seeds, profile, { managedSlots: true });
+      test(`${name}: seeds ${seeds[0]}-${seeds.at(-1)} keep every binding and tool-path invariant`, async () => {
+        await assertOwnershipInvariants(seeds, profile, { bindings: true });
       });
     }
   }

@@ -5,20 +5,25 @@ import {
   type AbandonedScopeReclaimRegistry,
 } from "../../../src/daemon/managedSlots/abandonedScopeReclaimer";
 import {
-  ManagedSlotJournal,
-  SlotJournalInFlight,
-} from "../../../src/daemon/managedSlots/slotJournal";
+  BindingJournal,
+  BindingJournalInFlight,
+} from "../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {
-  MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
-  type SlotJournalOwner,
-  type SlotKey,
-  type SlotRegistry,
-} from "../../../src/daemon/managedSlots/slotRegistry";
-import { withLiveExecutionSessions } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+  BINDING_ABANDONED_SCOPE_THRESHOLD_MS,
+  type BindingJournalOwner,
+  type BindingKey,
+  type BindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { withLiveExecutionSessions } from "../../../src/daemon/sessionBroker/registry/ownerLiveness";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeClaims, FakeDeleter, FakeInventory, FakeMatcher } from "./fixtures/reconcilerFakes";
-import { assignManagedSlotDevice } from "./managedSlotFixtures";
+import {
+  FakeClaims,
+  FakeDeleter,
+  FakeInventory,
+  FakeMatcher,
+} from "../sessionBroker/registry/fixtures/reconcilerFakes";
+import { assignBindingDevice } from "../sessionBroker/provisioning/bindingFixtures";
 
 // #11174 part c: a scope idle for an hour with no live owner or settler is abandoned and its devices
 // are deleted through the slot journal (#11179), so a crash mid-delete is redriven. A revive of the
@@ -30,7 +35,7 @@ const SCOPE_A = {
   runnerIncarnation: "boot-1",
 };
 
-function owner(daemonId: string): SlotJournalOwner {
+function owner(daemonId: string): BindingJournalOwner {
   return { daemonId, pid: daemonId === "daemon-1" ? 1001 : 2002, processGenerationToken: daemonId };
 }
 
@@ -51,7 +56,7 @@ function crashPoint(): { reached: Promise<void>; hang: () => Promise<never> } {
 
 describe("AbandonedScopeReclaimer", () => {
   let timer: FakeTimer;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   let inventory: FakeInventory;
   let deleter: FakeDeleter;
   let claims: FakeClaims;
@@ -63,18 +68,18 @@ describe("AbandonedScopeReclaimer", () => {
     timer.setCurrentTime(1_000_000);
     livePids = new Set();
     liveDaemons = new Set(["daemon-1", "daemon-2"]);
-    registry = new FakeSlotRegistry(timer, (process) => livePids.has(process.pid));
+    registry = new FakeBindingRegistry(timer, (process) => livePids.has(process.pid));
     inventory = new FakeInventory();
     deleter = new FakeDeleter(inventory);
     claims = new FakeClaims();
   });
 
-  function reclaimer(daemonId = "daemon-1", over: SlotRegistry = registry) {
+  function reclaimer(daemonId = "daemon-1", over: BindingRegistry = registry) {
     return new AbandonedScopeReclaimer({
       registry: async () => over,
       journal: (journalRegistry: AbandonedScopeReclaimRegistry) =>
-        new ManagedSlotJournal({
-          registry: journalRegistry as SlotRegistry,
+        new BindingJournal({
+          registry: journalRegistry as BindingRegistry,
           inventory,
           matcher: new FakeMatcher(),
           deleter,
@@ -83,19 +88,19 @@ describe("AbandonedScopeReclaimer", () => {
           owner: owner(daemonId),
           isOwnerLive: (candidate) => liveDaemons.has(candidate.daemonId),
           isExecOwnerLive: (candidate) => livePids.has(candidate.pid),
-          inFlight: new SlotJournalInFlight(),
+          inFlight: new BindingJournalInFlight(),
         }),
       timer,
     });
   }
 
-  async function idleSlot(udid: string, namespace = "runner-a"): Promise<SlotKey> {
+  async function idleSlot(udid: string, namespace = "runner-a"): Promise<BindingKey> {
     inventory.devices.push({ name: udid, deviceId: udid, platform: "ios", isRunning: false });
-    return assignManagedSlotDevice(registry, "ios", udid, namespace);
+    return assignBindingDevice(registry, "ios", udid, namespace);
   }
 
   function abandonAll(): void {
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
   }
 
   test("deletes an abandoned scope's device through the journal and leaves an empty slot", async () => {
@@ -112,7 +117,7 @@ describe("AbandonedScopeReclaimer", () => {
       stableDeviceId: null,
       state: "provisioning",
     });
-    expect(await registry.listOpenSlotJournal()).toEqual([]);
+    expect(await registry.listOpenBindingJournal()).toEqual([]);
 
     // Idempotent: nothing is left to delete.
     expect((await reclaimer().sweep()).deleted).toEqual([]);
@@ -123,17 +128,11 @@ describe("AbandonedScopeReclaimer", () => {
 
   test("never touches a valid scope, a recent acquisition, or a scope with a live owner", async () => {
     const recent = await idleSlot("UDID-RECENT", "runner-recent");
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
     inventory.devices.push({ name: "o", deviceId: "UDID-OWNED", platform: "ios", isRunning: true });
-    const owned = await assignManagedSlotDevice(
-      registry,
-      "ios",
-      "UDID-OWNED",
-      "runner-owned",
-      "s1",
-    );
+    const owned = await assignBindingDevice(registry, "ios", "UDID-OWNED", "runner-owned", "s1");
     livePids.add(1);
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
     await registry.ensureScope({ ...SCOPE_A, runnerNamespace: "runner-recent" });
 
     const report = await reclaimer().sweep();
@@ -148,14 +147,14 @@ describe("AbandonedScopeReclaimer", () => {
     // Daemon pid 1 claimed the slot for the session, then restarted: pid 1 is dead, but this
     // daemon holds the rehydrated session live.
     inventory.devices.push({ name: "s", deviceId: "UDID-LIVE", platform: "ios", isRunning: true });
-    const key = await assignManagedSlotDevice(registry, "ios", "UDID-LIVE", "runner-a", "live");
+    const key = await assignBindingDevice(registry, "ios", "UDID-LIVE", "runner-a", "live");
     const liveSessions = new Set(["live"]);
     registry.setExecOwnerLiveness(
       withLiveExecutionSessions((process) => livePids.has(process.pid), {
         isLiveManagedExecutionSession: (sessionUuid) => liveSessions.has(sessionUuid),
       }),
     );
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
 
     expect(await reclaimer().sweep()).toEqual({
       marked: [],
@@ -197,12 +196,12 @@ describe("AbandonedScopeReclaimer", () => {
     const racing = new Proxy(registry, {
       get(target, property, receiver) {
         const value: unknown = Reflect.get(target, property, receiver);
-        if (property !== "openSlotJournal" || typeof value !== "function") {
+        if (property !== "openBindingJournal" || typeof value !== "function") {
           return typeof value === "function" ? value.bind(target) : value;
         }
-        return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
+        return async (...args: Parameters<BindingRegistry["openBindingJournal"]>) => {
           await target.ensureScope(SCOPE_A);
-          return target.openSlotJournal(...args);
+          return target.openBindingJournal(...args);
         };
       },
     });
@@ -211,8 +210,8 @@ describe("AbandonedScopeReclaimer", () => {
 
     expect(report.skipped).toEqual([{ ...key, reason: "scope_revived" }]);
     expect(deleter.calls).toEqual([]);
-    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
-    expect(await registry.getSlotJournal(1)).toBeNull();
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(await registry.getBindingJournal(1)).toBeNull();
     expect(await registry.getAssignment(key)).toEqual(before);
   });
 
@@ -223,12 +222,12 @@ describe("AbandonedScopeReclaimer", () => {
     const racing = new Proxy(registry, {
       get(target, property, receiver) {
         const value: unknown = Reflect.get(target, property, receiver);
-        if (property !== "openSlotJournal" || typeof value !== "function") {
+        if (property !== "openBindingJournal" || typeof value !== "function") {
           return typeof value === "function" ? value.bind(target) : value;
         }
-        return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
+        return async (...args: Parameters<BindingRegistry["openBindingJournal"]>) => {
           await target.beginScopeInvalidation(key.scopeKey, "operator_reset");
-          return target.openSlotJournal(...args);
+          return target.openBindingJournal(...args);
         };
       },
     });
@@ -241,8 +240,8 @@ describe("AbandonedScopeReclaimer", () => {
       state: "invalidating",
       invalidationReason: "operator_reset",
     });
-    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
-    expect(await registry.getSlotJournal(1)).toBeNull();
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(await registry.getBindingJournal(1)).toBeNull();
     expect(await registry.getAssignment(key)).toEqual(before);
   });
 
@@ -253,11 +252,11 @@ describe("AbandonedScopeReclaimer", () => {
     const racing = new Proxy(registry, {
       get(target, property, receiver) {
         const value: unknown = Reflect.get(target, property, receiver);
-        if (property !== "openSlotJournal" || typeof value !== "function") {
+        if (property !== "openBindingJournal" || typeof value !== "function") {
           return typeof value === "function" ? value.bind(target) : value;
         }
-        return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
-          const opened = await target.openSlotJournal(...args);
+        return async (...args: Parameters<BindingRegistry["openBindingJournal"]>) => {
+          const opened = await target.openBindingJournal(...args);
           if (opened.kind === "opened") {
             entryId = opened.entry.id;
             await target.ensureScope(SCOPE_A);
@@ -278,9 +277,9 @@ describe("AbandonedScopeReclaimer", () => {
       stableDeviceId: null,
       state: "provisioning",
     });
-    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
     expect(entryId).toBeDefined();
-    expect(await registry.getSlotJournal(entryId!)).toMatchObject({ phase: "committed" });
+    expect(await registry.getBindingJournal(entryId!)).toMatchObject({ phase: "committed" });
   });
 
   test("a revive during the deletion cannot claim the device and then finds an empty slot", async () => {
@@ -300,7 +299,7 @@ describe("AbandonedScopeReclaimer", () => {
 
     const report = await reclaimer().sweep();
 
-    expect(claims_).toEqual(["slot_not_ready"]);
+    expect(claims_).toEqual(["binding_not_ready"]);
     expect(report.deleted).toHaveLength(1);
     expect((await registry.getScope(key.scopeKey))?.state).toBe("valid");
     expect(await registry.getAssignment(key)).toMatchObject({
@@ -322,7 +321,7 @@ describe("AbandonedScopeReclaimer", () => {
       stableDeviceId: "UDID-A",
       state: "cleanup_pending",
     });
-    expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+    expect(await registry.listOpenBindingJournal(key)).toHaveLength(1);
 
     deleter.failWith = undefined;
     timer.advanceTime(60_000);
@@ -330,7 +329,7 @@ describe("AbandonedScopeReclaimer", () => {
 
     expect(second.deleted).toEqual([{ ...key, platform: "ios", stableDeviceId: "UDID-A" }]);
     expect(deleter.calls).toHaveLength(2);
-    expect(await registry.listOpenSlotJournal()).toEqual([]);
+    expect(await registry.listOpenBindingJournal()).toEqual([]);
   });
 
   test("a sweep that dies mid-delete is redriven by the next daemon's sweep", async () => {
@@ -349,7 +348,7 @@ describe("AbandonedScopeReclaimer", () => {
 
     expect(report.deleted).toEqual([{ ...key, platform: "ios", stableDeviceId: "UDID-A" }]);
     expect(await registry.getAssignment(key)).toMatchObject({ stableDeviceId: null });
-    expect(await registry.listOpenSlotJournal()).toEqual([]);
+    expect(await registry.listOpenBindingJournal()).toEqual([]);
   });
 
   test("an entry a live daemon is still driving is left to it", async () => {
@@ -372,9 +371,7 @@ describe("AbandonedScopeReclaimer", () => {
     sweeper.start();
     sweeper.start();
     expect(timer.getPendingIntervalCount()).toBe(1);
-    timer.advanceTime(
-      MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - ABANDONED_SCOPE_SWEEP_INTERVAL_MS,
-    );
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - ABANDONED_SCOPE_SWEEP_INTERVAL_MS);
     await timer.advanceTimersByTimeAsync(ABANDONED_SCOPE_SWEEP_INTERVAL_MS);
     await sweeper.sweep();
     expect(deleter.calls).toHaveLength(1);

@@ -44,20 +44,20 @@ import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DeviceInfo } from "../../models";
 import {
-  MANAGED_SLOT_DEVICE_NAME_PREFIX,
-  type ManagedSlotDeviceClaims,
-  type ManagedSlotInventory,
-} from "./reconciler";
-import { deviceStableId } from "./slotDeviceIdentity";
-import type { ManagedSlotCacheEvictor } from "./managedSlotCacheEviction";
-import { resolveAbandonmentThresholdMs } from "./slotRegistry";
+  BINDING_DEVICE_NAME_PREFIX,
+  type BindingDeviceClaims,
+  type BindingInventory,
+} from "../sessionBroker/provisioning/reconciler";
+import { deviceStableId } from "../sessionBroker/registry/deviceIdentity";
+import type { BindingCacheEvictor } from "../sessionBroker/provisioning/cacheEviction";
+import { resolveAbandonmentThresholdMs } from "../sessionBroker/registry/bindingRegistry";
 import type {
   AbandonmentQuery,
   FreeDeviceStopClaim,
-  FreeSlotDeviceRecord,
-  SlotPlatform,
-  SlotRegistry,
-} from "./slotRegistry";
+  FreeBindingDeviceRecord,
+  BindingPlatform,
+  BindingRegistry,
+} from "../sessionBroker/registry/bindingRegistry";
 
 /** How often the daemon looks for unadopted free-pool devices. The threshold itself is one hour. */
 export const FREE_DEVICE_RECLAIM_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -69,7 +69,7 @@ export const DEFAULT_FREE_DEVICE_STOP_BACKOFF = exponentialBackoff({
 });
 
 export type FreeDeviceReclaimRegistry = Pick<
-  SlotRegistry,
+  BindingRegistry,
   | "listFreeDevices"
   | "findReclaimableFreeDevices"
   | "beginFreeDeviceStop"
@@ -79,7 +79,7 @@ export type FreeDeviceReclaimRegistry = Pick<
 >;
 
 export interface ManagedSlotStopTarget {
-  platform: SlotPlatform;
+  platform: BindingPlatform;
   stableId: string;
   name: string;
   /** The free-pool row's source scope, for the lifecycle guard's slot context. */
@@ -103,17 +103,17 @@ export interface ManagedSlotDeviceStopper {
 }
 
 export interface FreeDeviceReclaimSkip {
-  platform: SlotPlatform;
+  platform: BindingPlatform;
   stableDeviceId: string;
   reason: string;
 }
 
 export interface FreeDeviceSweepReport {
   /** Devices shut down and recorded `stopped`. */
-  stopped: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
+  stopped: Array<{ platform: BindingPlatform; stableDeviceId: string }>;
   /** Journaled deletion completed and the free row is gone; native deletion may have occurred. */
-  released: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
-  failed: Array<{ platform: SlotPlatform; stableDeviceId: string; message: string }>;
+  released: Array<{ platform: BindingPlatform; stableDeviceId: string }>;
+  failed: Array<{ platform: BindingPlatform; stableDeviceId: string; message: string }>;
   skipped: FreeDeviceReclaimSkip[];
 }
 
@@ -124,8 +124,8 @@ export interface FreeDeviceReclaimerOptions {
    * not open (and so create) it. Defaults to always existing.
    */
   registryExists?: () => boolean;
-  inventory: ManagedSlotInventory;
-  claims: Pick<ManagedSlotDeviceClaims, "describe" | "sessionsOn">;
+  inventory: BindingInventory;
+  claims: Pick<BindingDeviceClaims, "describe" | "sessionsOn">;
   stopper: ManagedSlotDeviceStopper;
   /**
    * A reason the device must be left alone right now (an in-flight boot, a lifecycle lease, a
@@ -143,14 +143,14 @@ export interface FreeDeviceReclaimerOptions {
   /** Resolved per sweep; no journal means absent rows retain their charge. */
   absentRowEvictor?: (
     registry: FreeDeviceReclaimRegistry,
-  ) => Pick<ManagedSlotCacheEvictor, "evict"> | undefined;
+  ) => Pick<BindingCacheEvictor, "evict"> | undefined;
 }
 
 function emptyReport(): FreeDeviceSweepReport {
   return { stopped: [], released: [], failed: [], skipped: [] };
 }
 
-function deviceKey(device: { platform: SlotPlatform; stableDeviceId: string }): string {
+function deviceKey(device: { platform: BindingPlatform; stableDeviceId: string }): string {
   return JSON.stringify([device.platform, device.stableDeviceId]);
 }
 
@@ -176,7 +176,7 @@ export class FreeDeviceReclaimer {
     }
     this.interval = this.options.timer.setInterval(() => {
       this.sweep().catch((error: unknown) => {
-        logger.warn(`[ManagedSlots] Free-pool reclaim sweep failed: ${errorMessage(error)}`, error);
+        logger.warn(`[Bindings] Free-pool reclaim sweep failed: ${errorMessage(error)}`, error);
       });
     }, this.options.intervalMs ?? FREE_DEVICE_RECLAIM_SWEEP_INTERVAL_MS);
     // A periodic sweep must never keep the daemon process alive on its own.
@@ -208,8 +208,8 @@ export class FreeDeviceReclaimer {
     }
     const registry = await this.options.registry();
     const due = await registry.findReclaimableFreeDevices(this.options.reclaim);
-    const inventories = new Map<SlotPlatform, Promise<DeviceInfo[] | undefined>>();
-    const devicesOf = (platform: SlotPlatform): Promise<DeviceInfo[] | undefined> => {
+    const inventories = new Map<BindingPlatform, Promise<DeviceInfo[] | undefined>>();
+    const devicesOf = (platform: BindingPlatform): Promise<DeviceInfo[] | undefined> => {
       let listing = inventories.get(platform);
       if (!listing) {
         listing = this.listConfigured(platform);
@@ -232,8 +232,8 @@ export class FreeDeviceReclaimer {
 
   private async releaseAbsentRows(
     registry: FreeDeviceReclaimRegistry,
-    evictor: Pick<ManagedSlotCacheEvictor, "evict">,
-    devicesOf: (platform: SlotPlatform) => Promise<DeviceInfo[] | undefined>,
+    evictor: Pick<BindingCacheEvictor, "evict">,
+    devicesOf: (platform: BindingPlatform) => Promise<DeviceInfo[] | undefined>,
     report: FreeDeviceSweepReport,
   ): Promise<Set<string>> {
     const rows = await registry.listFreeDevices();
@@ -271,20 +271,20 @@ export class FreeDeviceReclaimer {
     return handled;
   }
 
-  private absenceIdentity(row: FreeSlotDeviceRecord): string {
+  private absenceIdentity(row: FreeBindingDeviceRecord): string {
     return JSON.stringify([row.platform, row.stableDeviceId, row.fromScopeKey, row.freedAtMs]);
   }
 
-  private rowIdentity(row: FreeSlotDeviceRecord): {
-    platform: SlotPlatform;
+  private rowIdentity(row: FreeBindingDeviceRecord): {
+    platform: BindingPlatform;
     stableDeviceId: string;
   } {
     return { platform: row.platform, stableDeviceId: row.stableDeviceId };
   }
 
   private async releaseAbsentRow(
-    evictor: Pick<ManagedSlotCacheEvictor, "evict">,
-    row: FreeSlotDeviceRecord,
+    evictor: Pick<BindingCacheEvictor, "evict">,
+    row: FreeBindingDeviceRecord,
     report: FreeDeviceSweepReport,
   ): Promise<void> {
     const devices = await this.listConfigured(row.platform);
@@ -313,7 +313,7 @@ export class FreeDeviceReclaimer {
         this.absentRows.delete(this.absenceIdentity(row));
         report.released.push(this.rowIdentity(row));
         logger.info(
-          `[ManagedSlots] Released free-pool row '${row.stableDeviceId}': journaled deletion completed`,
+          `[Bindings] Released free-pool row '${row.stableDeviceId}': journaled deletion completed`,
         );
       } else if (result.kind === "lost") {
         this.absentRows.delete(this.absenceIdentity(row));
@@ -322,21 +322,18 @@ export class FreeDeviceReclaimer {
         report.failed.push({ ...this.rowIdentity(row), message: result.message });
       }
     } catch (error) {
-      logger.warn(
-        `[ManagedSlots] Absent free-pool row release failed: ${errorMessage(error)}`,
-        error,
-      );
+      logger.warn(`[Bindings] Absent free-pool row release failed: ${errorMessage(error)}`, error);
       report.failed.push({ ...this.rowIdentity(row), message: errorMessage(error) });
     }
   }
 
-  private async listConfigured(platform: SlotPlatform): Promise<DeviceInfo[] | undefined> {
+  private async listConfigured(platform: BindingPlatform): Promise<DeviceInfo[] | undefined> {
     try {
       const snapshot = await this.options.inventory.list(platform, {});
       return snapshot.complete ? snapshot.devices : undefined;
     } catch (error) {
       logger.warn(
-        `[ManagedSlots] Free-pool reclaim could not list ${platform} devices: ${errorMessage(error)}`,
+        `[Bindings] Free-pool reclaim could not list ${platform} devices: ${errorMessage(error)}`,
         error,
       );
       return undefined;
@@ -345,7 +342,7 @@ export class FreeDeviceReclaimer {
 
   private async reclaimOne(
     registry: FreeDeviceReclaimRegistry,
-    free: FreeSlotDeviceRecord,
+    free: FreeBindingDeviceRecord,
     devices: DeviceInfo[] | undefined,
     report: FreeDeviceSweepReport,
   ): Promise<void> {
@@ -387,7 +384,7 @@ export class FreeDeviceReclaimer {
       return;
     }
     logger.info(
-      `[ManagedSlots] Free-pool device '${device.name}' unadopted past the threshold: shut down, image kept`,
+      `[Bindings] Free-pool device '${device.name}' unadopted past the threshold: shut down, image kept`,
     );
     report.stopped.push({ platform: free.platform, stableDeviceId: free.stableDeviceId });
   }
@@ -412,22 +409,22 @@ export class FreeDeviceReclaimer {
     });
     const text = `Shutting down unadopted free-pool device '${device.name}' failed (attempt ${attempts}): ${message}; it stays adoptable`;
     if (attempts === 1) {
-      logger.warn(`[ManagedSlots] ${text}`);
+      logger.warn(`[Bindings] ${text}`);
     } else {
-      logger.debug(`[ManagedSlots] ${text}`);
+      logger.debug(`[Bindings] ${text}`);
     }
     try {
       await registry.revertFreeDeviceStop(claim);
     } catch (error) {
       // The claim goes stale on its own (FREE_DEVICE_STOP_CLAIM_STALE_MS), which frees the device.
-      logger.warn(`[ManagedSlots] Could not revert the stop claim: ${errorMessage(error)}`, error);
+      logger.warn(`[Bindings] Could not revert the stop claim: ${errorMessage(error)}`, error);
     }
     report.failed.push({ platform: claim.platform, stableDeviceId: claim.stableDeviceId, message });
   }
 
   /** Why this device is left alone this sweep, or the configured device when it is reclaimable. */
   private async skipReason(
-    free: FreeSlotDeviceRecord,
+    free: FreeBindingDeviceRecord,
     devices: DeviceInfo[] | undefined,
     failure: FailureRecord | undefined,
   ): Promise<string | DeviceInfo> {
@@ -446,7 +443,7 @@ export class FreeDeviceReclaimer {
     }
     this.absentRows.delete(this.absenceIdentity(free));
     // Only a device this daemon created is ours to shut down; boot capacity counts the others.
-    if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
+    if (!device.name.startsWith(BINDING_DEVICE_NAME_PREFIX)) {
       return "not_daemon_created";
     }
     return (await this.holdReason(device)) ?? device;

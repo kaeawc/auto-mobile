@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  openSqliteSlotRegistry,
-  type SqliteSlotRegistry,
-} from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { SlotProcessIdentity } from "../../../src/daemon/managedSlots/slotRegistry";
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type {
   DaemonMethodResult,
   DaemonStateAccess,
 } from "../../../src/daemon/daemonRequestHandlers";
-import { ManagedConnectionScopes } from "../../../src/daemon/managedSlots/managedConnectionScope";
+import { ManagedConnectionScopes } from "../../helpers/brokerHandlerFixtures";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
   bindBrokerRegistration,
@@ -27,7 +27,7 @@ import type { DaemonRequest } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
-const OWNER: SlotProcessIdentity = {
+const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "process-a",
@@ -166,14 +166,14 @@ class HandlerBroker extends SessionBroker {
 }
 
 describe("session broker daemon handlers", () => {
-  let registry: SqliteSlotRegistry;
+  let registry: SqliteBindingRegistry;
   let broker: HandlerBroker;
   let scopes: ManagedConnectionScopes;
   let tokens: Map<string, string>;
   let state: DaemonStateAccess;
 
   beforeEach(async () => {
-    registry = await openSqliteSlotRegistry({
+    registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => true,
     });

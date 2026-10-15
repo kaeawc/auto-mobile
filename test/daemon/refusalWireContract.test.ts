@@ -20,7 +20,8 @@ import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmi
 import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
-import * as managedSlotConfig from "../../src/models/managedSlotConfig";
+import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
 import * as sessionConfig from "../../src/models/sessionConfig";
 import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
@@ -59,7 +60,7 @@ import * as controlTransport from "../../src/daemon/deviceControlTransportFailur
 import * as toolUnavailable from "../../src/server/toolUnavailableError";
 import * as deviceTools from "../../src/server/deviceTools";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
-import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -102,7 +103,8 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/downloadsFixtureService": downloadsRefusals,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
-  "models/managedSlotConfig": managedSlotConfig,
+  "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
+  "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
   "models/sessionConfig": sessionConfig,
   "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
@@ -471,6 +473,7 @@ function exportedCodeConstants(): Map<string, string> {
     inputOwnership,
     bootCapacity,
     managedSlotRefusals,
+    bindingRefusals,
     boundSessionRefusal,
     daemonTypes,
     daemonConstants,
@@ -577,8 +580,8 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
       details: Object.keys(evidence).length > 0 ? evidence : undefined,
     };
   }
-  const result = payload as unknown as ManagedSlotsResult;
-  const failure = result.slots.find((slot) => slot.failure)?.failure ?? result.failure;
+  const result = payload as unknown as BindingsResult;
+  const failure = result.bindings.find((binding) => binding.failure)?.failure ?? result.failure;
   return { typed: failure as TypedFields, capacity: failure?.capacity, budget: failure?.budget };
 }
 
@@ -750,7 +753,7 @@ beforeAll(async () => {
     };
     ownedSurfaceFixtures.push({
       surface: "managed-slots-response",
-      name: "managed_slot_config_invalid",
+      name: "binding_config_invalid",
       builder: "handleDaemonRequest via handleAcquireManagedSlots",
       payload: await handleDaemonRequest(
         {
@@ -852,20 +855,20 @@ describe("refusal wire contract", () => {
 
   test("total-resource refusal is retryable without a retry delay on every budget surface", () => {
     for (const fixture of fixtures.filter((entry) =>
-      entry.code.includes("managed_slot_budget_exhausted"),
+      entry.code.includes("binding_budget_exhausted"),
     )) {
       const payload = JSON.parse(fixture.result.content[0].text) as {
-        error: { acquisitionFailure: ManagedSlotsResult["failure"] };
+        error: { acquisitionFailure: BindingsResult["failure"] };
       };
       const failure = payload.error.acquisitionFailure;
-      expect(failure).toMatchObject({ code: "managed_slot_budget_exhausted", retryable: true });
+      expect(failure).toMatchObject({ code: "binding_budget_exhausted", retryable: true });
       expect(failure).not.toHaveProperty("retryAfterMs");
     }
     const surface = surfaceFixtures.find(
-      (entry) => entry.name === "managed_slot_budget_exhausted.budget",
+      (entry) => entry.name === "binding_budget_exhausted.budget",
     )!;
     expect(surfaceFields(surface)).toMatchObject({
-      code: "managed_slot_budget_exhausted",
+      code: "binding_budget_exhausted",
       retryable: true,
       budget: {
         limit: 2,
@@ -914,7 +917,7 @@ describe("refusal wire contract", () => {
     }
   });
 
-  test("every managed slot acquisition failure code has a fixture", () => {
+  test("every binding acquisition failure code has a fixture", () => {
     for (const code of managedSlotNestedCodes()) {
       expect(fixtureCodes, code).toContain(`${MANAGED_SLOT_FIXTURE_PREFIX}${code}`);
     }
@@ -1367,7 +1370,7 @@ describe("refusal wire contract", () => {
           "device_owned_by_other_session",
           "device_outside_bound_session",
           "device_outside_managed_slots",
-          "device_assigned_to_managed_slot",
+          "device_assigned_to_binding",
         ]),
       );
       expect(names("delete-device")).toEqual(

@@ -2,18 +2,18 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { SlotRegistry } from "../../src/daemon/managedSlots/slotRegistry";
+import type { BindingRegistry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../../test/fakes/FakeTimer";
 
 // Only this stable subset of the previous registry API is needed. No current implementation
 // is imported: every domain write below goes through the archived code's exported methods.
 type CaptureRegistry = Pick<
-  SlotRegistry,
+  BindingRegistry,
   | "ensureScope"
-  | "initSlot"
-  | "openSlotJournal"
-  | "advanceSlotJournal"
+  | "initBinding"
+  | "openBindingJournal"
+  | "advanceBindingJournal"
   | "claimExecution"
   | "beginScopeInvalidation"
   | "completeScopeInvalidation"
@@ -33,9 +33,9 @@ process.env.AUTOMOBILE_DATA_DIR = join(root, "data");
 process.env.AUTOMOBILE_LOG_DIR = join(root, "log");
 process.env.AUTOMOBILE_APPEARANCE_SYNC = "0";
 const {
-  openSqliteSlotRegistry,
+  openSqliteBindingRegistry,
 }: {
-  openSqliteSlotRegistry(options: {
+  openSqliteBindingRegistry(options: {
     dbPath: string;
     timer: Timer;
     isExecOwnerLive: () => boolean;
@@ -50,7 +50,7 @@ const owner = {
   processGenerationToken: "fixture-process-1",
 };
 const dbPath = join(root, "registry.sqlite");
-const registry = await openSqliteSlotRegistry({ dbPath, timer, isExecOwnerLive: () => true });
+const registry = await openSqliteBindingRegistry({ dbPath, timer, isExecOwnerLive: () => true });
 try {
   for (const [runnerNamespace, ids] of [
     ["fixture-runner", ["fixture-avd-a", "fixture-avd-b"]],
@@ -64,8 +64,8 @@ try {
     if (scope.kind !== "ready") {
       throw new Error(`Scope capture refused: ${scope.kind}`);
     }
-    for (const [slotIndex, stableDeviceId] of ids.entries()) {
-      const key = { scopeKey: scope.scope.scopeKey, slotIndex };
+    for (const [bindingIndex, stableDeviceId] of ids.entries()) {
+      const key = { scopeKey: scope.scope.scopeKey, bindingIndex };
       const requestedSpec = {
         runtime: "system-images;android-35;google_apis;arm64-v8a",
         deviceType: "pixel_8",
@@ -73,17 +73,17 @@ try {
       const resolvedSpec = { ...requestedSpec };
       const specFingerprint = "fixture-spec-fingerprint";
       const deviceName = `amslot-${stableDeviceId}`;
-      const initialized = await registry.initSlot(key, {
-        role: slotIndex === 0 ? "primary" : "secondary",
+      const initialized = await registry.initBinding(key, {
+        role: bindingIndex === 0 ? "primary" : "secondary",
         platform: "android",
         requestedSpec,
       });
       if (initialized.kind !== "ready") {
-        throw new Error(`Slot capture refused: ${initialized.kind}`);
+        throw new Error(`Binding capture refused: ${initialized.kind}`);
       }
       // openSlotJournal's atomic binding commit records a fixed synthetic creation result;
       // advanceSlotJournal makes committed history, without creating any native device.
-      const created = await registry.openSlotJournal(key, {
+      const created = await registry.openBindingJournal(key, {
         kind: "create",
         phase: "created",
         owner,
@@ -106,7 +106,7 @@ try {
         throw new Error(`Journal capture refused: ${created.kind}`);
       }
       timer.advanceTime(10);
-      const committed = await registry.advanceSlotJournal(created.entry.id, {
+      const committed = await registry.advanceBindingJournal(created.entry.id, {
         owner,
         expectedPhase: "created",
         phase: "committed",
@@ -114,7 +114,7 @@ try {
       if (committed.kind !== "advanced") {
         throw new Error(`Commit capture refused: ${committed.kind}`);
       }
-      if (runnerNamespace === "fixture-runner" && slotIndex === 0) {
+      if (runnerNamespace === "fixture-runner" && bindingIndex === 0) {
         const claimed = await registry.claimExecution(
           key,
           { generation: 1, stableDeviceId },
@@ -124,10 +124,10 @@ try {
           throw new Error(`Owner capture refused: ${claimed.kind}`);
         }
       }
-      if (runnerNamespace === "fixture-runner" && slotIndex === 1) {
+      if (runnerNamespace === "fixture-runner" && bindingIndex === 1) {
         // The lowest-level openSlotJournal API can record a release intent while preserving
         // the ready idle binding; no release worker or native restoration is invoked.
-        const release = await registry.openSlotJournal(key, {
+        const release = await registry.openBindingJournal(key, {
           kind: "release",
           phase: "intent",
           owner,
@@ -201,7 +201,7 @@ try {
     )
     .all();
   const lines = [
-    "-- Captured managed-slot registry: generated, do not edit.",
+    "-- Captured binding registry: generated, do not edit.",
     `-- Source ref: ${process.env.CAPTURE_REGISTRY_REF ?? "unspecified (direct driver invocation)"}`,
     `-- Capture command: ${process.env.CAPTURE_REGISTRY_COMMAND ?? "unspecified (use the capture script)"}`,
     "-- Domain rows were produced by the source ref's registry/journal APIs, without devices.",

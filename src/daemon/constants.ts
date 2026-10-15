@@ -560,7 +560,7 @@ export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
 export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
 
 /** Operator reset of one runner incarnation's managed slot scope (#11174; `--daemon reset-slot-scope`). */
-export const DAEMON_RESET_SLOT_SCOPE_METHOD = "daemon/resetSlotScope";
+export const DAEMON_RESET_BINDING_SCOPE_METHOD = "daemon/resetSlotScope";
 
 /**
  * Acquires a stdio proxy's managed device slots before it serves `initialize` (#11173): ensures the

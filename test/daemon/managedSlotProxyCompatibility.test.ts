@@ -9,19 +9,21 @@ import {
   acquireManagedSlotsThroughDaemon,
   type ManagedSlotProxyAcquisitionPorts,
 } from "../../src/daemon/managedSlotProxyAcquisition";
-import { parseManagedSlotConfig } from "../../src/models/managedSlotConfig";
+import { parseBindingConfig } from "../../src/models/managedSlotConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 
-const CONFIG = parseManagedSlotConfig({
+const CONFIG = parseBindingConfig({
   contractVersion: 1,
   managedHostScope: "host",
   runnerNamespace: "runner",
   runnerIncarnation: "inc",
-  localSlotCapacity: 1,
+  localBindingCapacity: 1,
   preparationTimeoutMs: 100,
-  requests: [{ slotIndex: 0, role: "app", platform: "ios", requestedSpec: { runtime: "ios-18" } }],
+  requests: [
+    { bindingIndex: 0, role: "app", platform: "ios", requestedSpec: { runtime: "ios-18" } },
+  ],
 });
 
 function rig(capabilities: readonly string[], probeError?: Error) {
@@ -71,7 +73,7 @@ async function acquire(harness: ReturnType<typeof rig>) {
   return await pending;
 }
 
-describe("managed slot proxy compatibility", () => {
+describe("binding proxy compatibility", () => {
   test.each([
     ...(["daemonNewer", "autoStartDisabled", "nonNumeric", "restartMismatch"] as const).map(
       (reason) =>
@@ -102,7 +104,7 @@ describe("managed slot proxy compatibility", () => {
     const result = await acquire(harness);
     expect(result).toMatchObject({
       outcome: "failed",
-      slots: [],
+      bindings: [],
       failure: { code: "contract_unsupported", retryable: false },
     });
     expect(result.failure?.message).toContain(error.reason);
@@ -141,7 +143,7 @@ describe("managed slot proxy compatibility", () => {
     const result = await acquire(harness);
     expect(result).toMatchObject({
       outcome: "failed",
-      slots: [],
+      bindings: [],
       failure: { code: "daemon_unavailable", retryable: true },
     });
     expect(result.failure?.message).toContain(error.message);
@@ -169,7 +171,7 @@ describe("managed slot proxy compatibility", () => {
       const result = await acquire(harness);
       expect(result).toMatchObject({
         outcome: "failed",
-        slots: [],
+        bindings: [],
         failure: { code: "contract_unsupported", retryable: false },
       });
       expect(result.failure?.message).toContain(reason);
@@ -189,7 +191,7 @@ describe("managed slot proxy compatibility", () => {
     const result = await acquire(harness);
     expect(result).toMatchObject({
       outcome: "failed",
-      slots: [],
+      bindings: [],
       failure: { code: "contract_unsupported", retryable: false },
     });
     expect(result.failure?.message).toContain("managed-slots/v1");

@@ -2,21 +2,21 @@ import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { RealToolCallPath } from "./realToolCallPath";
@@ -118,9 +118,9 @@ export async function transportAliasHarness(
   // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
   PlatformDeviceManagerFactory.setInstance(discovery);
   Reflect.set(ToolRegistry, "timer", timer);
-  const registry = new FakeSlotRegistry(timer);
+  const registry = new FakeBindingRegistry(timer);
   if (options.managedSlotStableId) {
-    await assignManagedSlotDevice(registry, "android", options.managedSlotStableId, "runner-b");
+    await assignBindingDevice(registry, "android", options.managedSlotStableId, "runner-b");
   }
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "transport-alias-ingress", {
@@ -129,7 +129,7 @@ export async function transportAliasHarness(
       installedAppsRepository: new FakeInstalledAppsRepository(),
       androidAdbFactory: adbFactory,
       ...(options.managedSlotStableId
-        ? { managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer) }
+        ? { bindingExclusion: new RegistryBindingExclusion(async () => registry, timer) }
         : {}),
     }),
   );

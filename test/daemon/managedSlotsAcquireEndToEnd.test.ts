@@ -13,37 +13,35 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/managedExecutionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import {
-  ManagedExecutionRelease,
+  BrokerExecutionRelease,
   managedExecutionSessionsFrom,
-} from "../../src/daemon/managedSlots/managedExecutionRelease";
+} from "../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
-import { ManagedSlotAcquisition } from "../../src/daemon/managedSlots/managedSlotAcquisition";
+import { BrokerDeviceAcquisition } from "../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import {
   DefaultManagedSpecResolver,
-  ManagedSlotReconciler,
-  type ManagedSlotProvisionRequest,
-  type ManagedSlotProvisionedDevice,
-} from "../../src/daemon/managedSlots/reconciler";
-import { computeSlotScopeKey } from "../../src/daemon/managedSlots/slotRegistry";
+  BindingReconciler,
+  type BindingProvisionRequest,
+  type BindingProvisionedDevice,
+} from "../../src/daemon/sessionBroker/provisioning/reconciler";
+import { computeBindingScopeKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY,
-  parseManagedSlotConfig,
-  type ManagedSlotConfig,
+  parseBindingConfig,
 } from "../../src/models/managedSlotConfig";
-import {
-  MANAGED_SLOTS_RESOURCE_URI,
-  type ManagedSlotsResult,
-} from "../../src/models/managedSlotsResult";
+import { type BrokerProvisionRequest } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { MANAGED_SLOTS_RESOURCE_URI } from "../../src/models/managedSlotsResult";
+import { type BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   FakeClaims,
@@ -51,7 +49,7 @@ import {
   FakeInventory,
   FakeMatcher,
   FakeProvisioner,
-} from "./managedSlots/fixtures/reconcilerFakes";
+} from "./sessionBroker/registry/fixtures/reconcilerFakes";
 
 // #11173 part b: a managed slot proxy acquires through `daemon/acquireManagedSlots` before it
 // serves initialize, holds the fresh session, and exposes the typed result in initialize and the
@@ -63,18 +61,18 @@ const IOS_17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-5";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const TOKEN = "managed-proxy-token";
 
-function configFor(runtime = IOS_18): ManagedSlotConfig {
-  return parseManagedSlotConfig({
+function configFor(runtime = IOS_18): BrokerProvisionRequest {
+  return parseBindingConfig({
     contractVersion: 1,
     managedHostScope: "host-a",
     runnerNamespace: "ns",
     runnerIncarnation: "inc-1",
-    localSlotCapacity: 1,
+    localBindingCapacity: 1,
     preparationTimeoutMs: 120_000,
     idleTimeoutMs: 10 * 60_000,
     requests: [
       {
-        slotIndex: 0,
+        bindingIndex: 0,
         role: "app",
         platform: "ios",
         requestedSpec: { runtime, deviceType: IPHONE_16 },
@@ -95,9 +93,7 @@ class SessionMintingProvisioner extends FakeProvisioner {
     super(inventory);
   }
 
-  override async provision(
-    request: ManagedSlotProvisionRequest,
-  ): Promise<ManagedSlotProvisionedDevice> {
+  override async provision(request: BindingProvisionRequest): Promise<BindingProvisionedDevice> {
     const minted = await super.provision(request);
     const provisioned = this.uuidSessions
       ? {
@@ -114,10 +110,10 @@ class SessionMintingProvisioner extends FakeProvisioner {
   }
 }
 
-describe("managed slot acquisition through the daemon handler and the stdio proxy", () => {
+describe("binding acquisition through the daemon handler and the stdio proxy", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   let inventory: FakeInventory;
   let provisioner: SessionMintingProvisioner;
   let deleter: FakeDeleter;
@@ -153,12 +149,12 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    registry = new FakeSlotRegistry(timer);
+    registry = new FakeBindingRegistry(timer);
     inventory = new FakeInventory();
     provisioner = new SessionMintingProvisioner(inventory, sessionManager);
     deleter = new FakeDeleter(inventory);
     advertiseManagedSlots = true;
-    const reconciler = new ManagedSlotReconciler({
+    const reconciler = new BindingReconciler({
       registry,
       inventory,
       matcher: new FakeMatcher(),
@@ -173,7 +169,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     const releaseSessions = managedExecutionSessionsFrom(sessionManager, {
       releaseDevice: async () => {},
     });
-    const acquisition = new ManagedSlotAcquisition({
+    const acquisition = new BrokerDeviceAcquisition({
       registry: async () => registry,
       reconcile: (_registry, request) => reconciler.reconcile(request),
       sessions: {
@@ -188,7 +184,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
       owner: () => ({ daemonId: "daemon-1", pid: 4242 }),
       timer,
     });
-    const drain = new ManagedExecutionRelease({
+    const drain = new BrokerExecutionRelease({
       registry: async () => registry,
       work: {
         cancelDeviceSessionExecutions: async () => 0,
@@ -274,8 +270,8 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     return proxy;
   }
 
-  async function serve(proxy: DaemonMcpProxy, managedSlots: ManagedSlotsResult) {
-    const { server } = createProxyMcpServer({ proxy, managedSlots });
+  async function serve(proxy: DaemonMcpProxy, bindings: BindingsResult) {
+    const { server } = createProxyMcpServer({ proxy, bindings });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "managed-slot-client", version: "0.0.1" });
     await server.connect(serverTransport);
@@ -293,12 +289,12 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     const clients: FakeDaemonClient[] = [];
     const proxy = newProxy(clients);
 
-    const result = await proxy.acquireManagedSlots(configFor());
+    const result = await proxy.acquireBindings(configFor());
 
     expect(result).toMatchObject({
       outcome: "ready",
-      scope: { scopeKey: computeSlotScopeKey(configFor()) },
-      slots: [{ disposition: "created", sessionUuid: "session-1", assignmentGeneration: 1 }],
+      scope: { scopeKey: computeBindingScopeKey(configFor()) },
+      bindings: [{ disposition: "created", sessionUuid: "session-1", assignmentGeneration: 1 }],
     });
     const acquire = clients[0]!.callDaemonMethodCalls.find(
       (call) => call.method === DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
@@ -331,33 +327,33 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     }
   });
 
-  test("the acquiring socket session is bound to exactly its slot sessions", async () => {
+  test("the acquiring socket session is bound to exactly its binding sessions", async () => {
     const proxy = newProxy();
 
-    const result = await proxy.acquireManagedSlots(configFor());
+    const result = await proxy.acquireBindings(configFor());
 
     const binding = connectionScopes.get("socket-1");
-    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
-    expect([...(binding?.sessionUuids ?? [])]).toEqual([result.slots[0]!.sessionUuid!]);
+    expect(binding?.scopeKey).toBe(computeBindingScopeKey(configFor()));
+    expect([...(binding?.sessionUuids ?? [])]).toEqual([result.bindings[0]!.sessionUuid!]);
   });
 
-  test("a failed acquisition binds its socket session to no slot session (fail closed)", async () => {
+  test("a failed acquisition binds its socket session to no binding session (fail closed)", async () => {
     provisioner.failWith = () => new Error("simctl create failed");
     const proxy = newProxy();
 
-    await proxy.acquireManagedSlots(configFor());
+    await proxy.acquireBindings(configFor());
 
     const binding = connectionScopes.get("socket-1");
-    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
+    expect(binding?.scopeKey).toBe(computeBindingScopeKey(configFor()));
     expect(binding?.sessionUuids.size).toBe(0);
   });
 
-  test("a reconnected managed proxy re-binds its new socket to its slot sessions", async () => {
+  test("a reconnected managed proxy re-binds its new socket to its binding sessions", async () => {
     provisioner.uuidSessions = true;
     const clients: FakeDaemonClient[] = [];
     const proxy = newProxy(clients);
-    const result = await proxy.acquireManagedSlots(configFor());
-    const sessionUuid = result.slots[0]!.sessionUuid!;
+    const result = await proxy.acquireBindings(configFor());
+    const sessionUuid = result.bindings[0]!.sessionUuid!;
     expect([...connectionScopes.get("socket-1")!.sessionUuids]).toEqual([sessionUuid]);
 
     // The daemon socket drops; the daemon unbinds the closed socket session.
@@ -366,27 +362,27 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     await proxy.ensureConnected();
 
     const binding = connectionScopes.get("socket-2");
-    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
+    expect(binding?.scopeKey).toBe(computeBindingScopeKey(configFor()));
     expect([...(binding?.sessionUuids ?? [])]).toEqual([sessionUuid]);
   });
 
-  test("a later execution reuses the slot after the first one's release, then a spec change replaces it", async () => {
+  test("a later execution reuses the binding after the first one's release, then a spec change replaces it", async () => {
     const first = newProxy();
-    const created = await first.acquireManagedSlots(configFor());
+    const created = await first.acquireBindings(configFor());
     await first.close();
-    expect(sessionManager.hasSession(created.slots[0]!.sessionUuid!)).toBe(false);
+    expect(sessionManager.hasSession(created.bindings[0]!.sessionUuid!)).toBe(false);
 
     const second = newProxy();
-    const reused = await second.acquireManagedSlots(configFor());
-    expect(reused.slots[0]).toMatchObject({ disposition: "reused", sessionUuid: "session-2" });
-    expect(reused.slots[0]!.device).toEqual(created.slots[0]!.device);
+    const reused = await second.acquireBindings(configFor());
+    expect(reused.bindings[0]).toMatchObject({ disposition: "reused", sessionUuid: "session-2" });
+    expect(reused.bindings[0]!.device).toEqual(created.bindings[0]!.device);
     await second.close();
 
     const third = newProxy();
-    const replaced = await third.acquireManagedSlots(configFor(IOS_17));
-    expect(replaced.slots[0]).toMatchObject({ disposition: "replaced" });
+    const replaced = await third.acquireBindings(configFor(IOS_17));
+    expect(replaced.bindings[0]).toMatchObject({ disposition: "replaced" });
     expect(deleter.calls.map((call) => call.stableId)).toEqual([
-      created.slots[0]!.device!.stableId,
+      created.bindings[0]!.device!.stableId,
     ]);
     expect(provisioner.created()).toHaveLength(2);
   });
@@ -394,7 +390,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
   test("closing the proxy ends the execution through releaseExecution with its owner token", async () => {
     const clients: FakeDaemonClient[] = [];
     const proxy = newProxy(clients);
-    await proxy.acquireManagedSlots(configFor());
+    await proxy.acquireBindings(configFor());
 
     await proxy.close();
 
@@ -403,7 +399,10 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     );
     expect(release?.params).toEqual({ sessionId: "session-1", livenessOwnerToken: TOKEN });
     expect(
-      await registry.getAssignment({ scopeKey: computeSlotScopeKey(configFor()), slotIndex: 0 }),
+      await registry.getAssignment({
+        scopeKey: computeBindingScopeKey(configFor()),
+        bindingIndex: 0,
+      }),
     ).toMatchObject({ execOwner: null, state: "ready" });
   });
 
@@ -411,7 +410,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     provisioner.failWith = () => new Error("simctl create failed");
     const proxy = newProxy();
 
-    const result = await proxy.acquireManagedSlots(configFor());
+    const result = await proxy.acquireBindings(configFor());
 
     expect(result.outcome).toBe("failed");
     expect(result.failure).toMatchObject({ code: "provision_failed" });
@@ -426,7 +425,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
       expect(call.isError).toBe(true);
       const payload = JSON.parse(String((call.content as Array<{ text: string }>)[0]!.text));
       expect(payload.error).toMatchObject({
-        code: "managed_slot_acquisition_failed",
+        code: "binding_acquisition_failed",
         acquisitionFailure: { code: "provision_failed" },
       });
       const read = await mcp.client.readResource({ uri: MANAGED_SLOTS_RESOURCE_URI });
@@ -441,7 +440,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     const clients: FakeDaemonClient[] = [];
     const proxy = newProxy(clients);
 
-    const result = await proxy.acquireManagedSlots(configFor());
+    const result = await proxy.acquireBindings(configFor());
 
     expect(result).toMatchObject({
       outcome: "failed",
@@ -470,7 +469,7 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     expect(provisioner.calls).toEqual([]);
   });
 
-  test("a multi-device group crossing the socket fails managed_slot_group_unsupported before any mutation", async () => {
+  test("a multi-device group crossing the socket fails binding_group_unsupported before any mutation", async () => {
     const config = configFor();
     const response = await handleDaemonRequest(
       {
@@ -480,8 +479,8 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
         params: {
           config: {
             ...config,
-            localSlotCapacity: 2,
-            requests: [config.requests[0], { ...config.requests[0], slotIndex: 1 }],
+            localBindingCapacity: 2,
+            requests: [config.requests[0], { ...config.requests[0], bindingIndex: 1 }],
           },
           livenessOwnerToken: TOKEN,
         },
@@ -489,9 +488,9 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
       state,
     );
 
-    expect(response).toMatchObject({ success: false, code: "managed_slot_group_unsupported" });
+    expect(response).toMatchObject({ success: false, code: "binding_group_unsupported" });
     expect(provisioner.calls).toEqual([]);
-    const scopeKey = computeSlotScopeKey(config);
+    const scopeKey = computeBindingScopeKey(config);
     expect(await registry.getScope(scopeKey)).toBeNull();
     expect(await registry.listAssignments(scopeKey)).toEqual([]);
   });

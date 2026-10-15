@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { acquireManagedSlotsThroughDaemon } from "../../src/daemon/managedSlotProxyAcquisition";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/managedExecutionLiveness";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "../../src/daemon/constants";
-import { parseManagedSlotConfig } from "../../src/models/managedSlotConfig";
+import { parseBindingConfig } from "../../src/models/managedSlotConfig";
 import { logger } from "../../src/utils/logger";
 import type { ManagedSlotProxyAcquisitionPorts } from "../../src/daemon/managedSlotProxyAcquisition";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
@@ -15,16 +15,16 @@ const SESSION = "session-1";
 const PREPARATION_TIMEOUT_MS = 100;
 const TOKEN = "proxy-owner";
 
-const CONFIG = parseManagedSlotConfig({
+const CONFIG = parseBindingConfig({
   contractVersion: 1,
   managedHostScope: "host",
   runnerNamespace: "runner",
   runnerIncarnation: "incarnation",
-  localSlotCapacity: 1,
+  localBindingCapacity: 1,
   preparationTimeoutMs: PREPARATION_TIMEOUT_MS,
   requests: [
     {
-      slotIndex: 0,
+      bindingIndex: 0,
       role: "app",
       platform: "ios",
       requestedSpec: {
@@ -141,7 +141,7 @@ function rig(
   };
 }
 
-describe("managed slot proxy acquisition hold deadline", () => {
+describe("binding proxy acquisition hold deadline", () => {
   const warnings: ReturnType<typeof spyOn>[] = [];
 
   afterEach(() => {
@@ -165,7 +165,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     }
   });
 
-  test("a stalled hold times out retryably, nulls slot sessions, releases once, and aborts the hold signal", async () => {
+  test("a stalled hold times out retryably, nulls binding sessions, releases once, and aborts the hold signal", async () => {
     silenceWarnings();
     const parked = Promise.withResolvers<void>();
     const testRig = rig({ hold: () => parked.promise });
@@ -183,7 +183,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("timeout");
     expect(result.failure?.retryable).toBe(true);
-    expect(result.slots.map((slot) => slot.sessionUuid)).toEqual([null]);
+    expect(result.bindings.map((binding) => binding.sessionUuid)).toEqual([null]);
     expect(testRig.releaseCalls).toBe(1);
     expect(testRig.holds[0]?.signal.aborted).toBe(true);
     parked.resolve();
@@ -207,7 +207,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
 
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("cancelled");
-    expect(result.slots.map((slot) => slot.sessionUuid)).toEqual([null]);
+    expect(result.bindings.map((binding) => binding.sessionUuid)).toEqual([null]);
     expect(testRig.releaseCalls).toBe(1);
     parked.resolve();
     await drainMicrotasks(8);
@@ -252,7 +252,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     expect(testRig.holds).toEqual([]);
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("cancelled");
-    expect(result.slots.map((slot) => slot.sessionUuid)).toEqual([null]);
+    expect(result.bindings.map((binding) => binding.sessionUuid)).toEqual([null]);
     expect(testRig.releaseCalls).toBe(1);
   });
 
@@ -304,7 +304,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
 
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("cancelled");
-    expect(result.slots.map((slot) => slot.sessionUuid)).toEqual([null]);
+    expect(result.bindings.map((binding) => binding.sessionUuid)).toEqual([null]);
     expect(testRig.releaseCalls).toBe(1);
   });
 
@@ -319,7 +319,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     await drainUntil(() => testRig.releaseCalls === 1, {
       description: "held sessions release starts",
     });
-    testRig.timer.advanceTime(MANAGED_EXECUTION_RELEASE_TIMEOUT_MS);
+    testRig.timer.advanceTime(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
     const result = await requireSettled(pending);
 
     expect(result.outcome).toBe("failed");
@@ -357,7 +357,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     void pending.then((value) => {
       result = value;
     });
-    testRig.timer.advanceTime(MANAGED_EXECUTION_RELEASE_TIMEOUT_MS - 1);
+    testRig.timer.advanceTime(BROKER_EXECUTION_RELEASE_TIMEOUT_MS - 1);
     await drainMicrotasks(48);
     expect(result).toBeUndefined();
     testRig.timer.advanceTime(1);
@@ -403,7 +403,7 @@ describe("managed slot proxy acquisition hold deadline", () => {
     expect(result.outcome).toBe("failed");
     expect(result.failure?.code).toBe("execution_hold_failed");
     expect(result.failure?.message).toContain("hold rejected");
-    expect(result.slots.map((slot) => slot.sessionUuid)).toEqual([null]);
+    expect(result.bindings.map((binding) => binding.sessionUuid)).toEqual([null]);
     expect(testRig.releaseCalls).toBe(1);
   });
 

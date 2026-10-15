@@ -14,11 +14,11 @@ import {
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import {
-  ManagedExecutionRelease,
+  BrokerExecutionRelease,
   managedExecutionSessionsFrom,
-} from "../../src/daemon/managedSlots/managedExecutionRelease";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/managedExecutionLiveness";
+} from "../../src/daemon/sessionBroker/provisioning/executionRelease";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -69,8 +69,8 @@ describe("proxy managed-execution session hold", () => {
   let releaseFails: boolean;
   /** What the fake daemon saw, in order: a cancelled request, then each daemon method. */
   let wire: string[];
-  let registry: FakeSlotRegistry;
-  let slotKey: { scopeKey: string; slotIndex: number };
+  let registry: FakeBindingRegistry;
+  let slotKey: { scopeKey: string; bindingIndex: number };
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -81,7 +81,7 @@ describe("proxy managed-execution session hold", () => {
     });
     releaseFails = false;
     wire = [];
-    registry = new FakeSlotRegistry(timer);
+    registry = new FakeBindingRegistry(timer);
     const scope = await registry.ensureScope({
       managedHostScope: "host",
       runnerNamespace: "ns",
@@ -90,8 +90,12 @@ describe("proxy managed-execution session hold", () => {
     if (scope.kind !== "ready") {
       throw new Error(`scope not ready: ${scope.kind}`);
     }
-    slotKey = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
-    await registry.initSlot(slotKey, { role: "primary", platform: "android", requestedSpec: {} });
+    slotKey = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+    await registry.initBinding(slotKey, {
+      role: "primary",
+      platform: "android",
+      requestedSpec: {},
+    });
     await registry.commitBinding(
       slotKey,
       { generation: 0, stableDeviceId: null },
@@ -108,7 +112,7 @@ describe("proxy managed-execution session hold", () => {
       { generation: 1, stableDeviceId: "Pixel_8_API_35" },
       { daemonId: "daemon", pid: 1, sessionUuid: SESSION },
     );
-    const drain = new ManagedExecutionRelease({
+    const drain = new BrokerExecutionRelease({
       registry: async () => registry,
       work: {
         cancelDeviceSessionExecutions: async () => 0,
@@ -252,7 +256,7 @@ describe("proxy managed-execution session hold", () => {
     expect(proxy.getManagedExecutionSessions()).toEqual([]);
   });
 
-  test("close drains through daemon/releaseExecution and keeps the slot's device (#11177)", async () => {
+  test("close drains through daemon/releaseExecution and keeps the binding's device (#11177)", async () => {
     const clients: FakeDaemonClient[] = [];
     const proxy = proxyWith(clients);
     await proxy.holdManagedExecutionSession(SESSION);
@@ -271,7 +275,7 @@ describe("proxy managed-execution session hold", () => {
       state: "ready",
       execOwner: null,
     });
-    expect(await registry.isDeviceAssignedToValidSlot("android", "Pixel_8_API_35")).toBe(true);
+    expect(await registry.isDeviceAssignedToValidBinding("android", "Pixel_8_API_35")).toBe(true);
   });
 
   test("close cancels this proxy's call in flight before it asks for the release (#11642)", async () => {

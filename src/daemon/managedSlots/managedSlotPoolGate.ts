@@ -7,9 +7,9 @@ import type { DevicePool } from "../devicePool";
 export type ManagedSlotPoolGate = Partial<
   Pick<
     DevicePool,
-    | "assertNotAssignedToManagedSlot"
+    | "assertNotAssignedToBinding"
     | "managedSlotRefusalFor"
-    | "managedSlotStableIds"
+    | "bindingStableIds"
     | "managedSlotSnapshotRetainedAfterFailedRead"
   >
 >;

@@ -4,7 +4,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
@@ -182,15 +182,15 @@ describe("a sessionless read never readies a device held outside this daemon's s
     expect(deviceWrites()).toEqual([]);
   });
 
-  test("a read on another execution's idle managed-slot device is answered without a device write", async () => {
-    pool.assertNotAssignedToManagedSlot = async (input) => {
+  test("a read on another execution's idle binding device is answered without a device write", async () => {
+    pool.assertNotAssignedToBinding = async (input) => {
       if (input.deviceId === theirs.deviceId && input.requesterSessionUuid !== "slot-exec") {
-        throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+        throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
           platform: "android",
           stableDeviceId: "Pixel_B",
-          holder: "slot",
+          holder: "binding",
           scopeKey: "scope",
-          slotIndex: 0,
+          bindingIndex: 0,
           scopeState: null,
           execSessionUuid: "slot-exec",
         });
@@ -198,7 +198,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
     };
     await expect(
       call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
-    ).rejects.toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    ).rejects.toBeInstanceOf(DeviceAssignedToBindingError);
     expect(deviceWrites()).toEqual([]);
 
     await call("readProbe", { platform: "android", deviceId: theirs.deviceId });

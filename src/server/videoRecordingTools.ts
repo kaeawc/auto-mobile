@@ -46,7 +46,7 @@ import {
   assertLifecycleCallerNotOnForeignManagedSlot,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
@@ -528,7 +528,7 @@ async function resolveTargetDevices(
 interface SkippedVideoRecordingTarget {
   deviceId: string;
   platform: BootedDevice["platform"];
-  code: InputDeviceOwnedError["code"] | DeviceAssignedToManagedSlotError["code"];
+  code: InputDeviceOwnedError["code"] | DeviceAssignedToBindingError["code"];
   reason: string;
 }
 
@@ -559,7 +559,7 @@ async function skippedFanoutTarget(
   } catch (error) {
     if (
       !(error instanceof InputDeviceOwnedError) &&
-      !(error instanceof DeviceAssignedToManagedSlotError)
+      !(error instanceof DeviceAssignedToBindingError)
     ) {
       throw error;
     }

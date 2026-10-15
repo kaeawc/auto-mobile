@@ -2,9 +2,9 @@ import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegi
 import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
-  createDefaultManagedSlotExclusion,
-  type ManagedSlotExclusion,
-} from "./managedSlots/managedSlotExclusion";
+  createDefaultBindingExclusion,
+  type BindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -75,9 +75,9 @@ import {
 import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
-  assertInputNotOnForeignManagedSlotDevice,
+  assertInputNotOnForeignBindingDevice,
 } from "./inputDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OwnerDisconnectExecutionVeto,
@@ -87,25 +87,25 @@ import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./p
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
 import {
-  ManagedExecutionRelease,
+  BrokerExecutionRelease,
   managedExecutionSessionsFrom,
-} from "./managedSlots/managedExecutionRelease";
+} from "./sessionBroker/provisioning/executionRelease";
 import {
-  currentSlotOwnerProcess,
-  defaultSlotExecOwnerLiveness,
+  currentBindingOwnerProcess,
+  defaultBindingExecOwnerLiveness,
   withLiveExecutionSessions,
-} from "./managedSlots/slotOwnerLiveness";
+} from "./sessionBroker/registry/ownerLiveness";
 import {
-  openSqliteSlotRegistry,
-  slotRegistryFileExists,
-  type SqliteSlotRegistry,
-} from "./managedSlots/sqliteSlotRegistry";
+  openSqliteBindingRegistry,
+  bindingRegistryFileExists,
+  type SqliteBindingRegistry,
+} from "./sessionBroker/registry/sqliteBindingRegistry";
 import { openSessionBrokerService, type SessionBrokerService } from "./sessionBroker/service";
 import {
   readSessionBrokerHostConfig,
   SESSION_BROKER_HOST_CONFIG_ENV,
 } from "./sessionBroker/hostConfig";
-import { SlotScopeReset } from "./managedSlots/slotScopeReset";
+import { BindingScopeReset } from "./sessionBroker/provisioning/scopeReset";
 import { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import {
   createDefaultAbandonedScopeReclaimer,
@@ -122,15 +122,18 @@ import type {
   AbandonedScopeReclaimRegistry,
 } from "./managedSlots/abandonedScopeReclaimer";
 import {
-  createDaemonManagedSlotAcquisition,
-  type DaemonManagedSlotAcquisitionHandle,
-} from "./managedSlots/daemonManagedSlotAcquisition";
+  createDaemonBrokerDeviceAcquisition,
+  type DaemonBrokerDeviceAcquisitionHandle,
+} from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import type {
-  SlotExecOwnerLiveness,
-  SlotJournalOwner,
-  SlotRegistry,
-} from "./managedSlots/slotRegistry";
-import { SlotJournalInFlight, type SlotJournalRedriveLoop } from "./managedSlots/slotJournal";
+  BindingExecOwnerLiveness,
+  BindingJournalOwner,
+  BindingRegistry,
+} from "./sessionBroker/registry/bindingRegistry";
+import {
+  BindingJournalInFlight,
+  type BindingJournalRedriveLoop,
+} from "./sessionBroker/registry/bindingJournal";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
@@ -766,20 +769,20 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
-  private managedExecutionRelease: ManagedExecutionRelease | undefined;
-  private managedSlotRegistry: Promise<SqliteSlotRegistry> | undefined;
+  private brokerExecutionRelease: BrokerExecutionRelease | undefined;
+  private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
   private sessionBrokerService: SessionBrokerService | undefined;
   private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
     ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
     : undefined;
-  private managedSlotExecOwnerLiveness: SlotExecOwnerLiveness | undefined;
+  private managedSlotExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
-  private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
+  private readonly managedSlotJournalInFlight = new BindingJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
   private freeDeviceReclaimer: FreeDeviceReclaimerHandle | undefined;
-  private managedSlotAcquisition: DaemonManagedSlotAcquisitionHandle | undefined;
+  private brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
-  private managedSlotRedrive: SlotJournalRedriveLoop | undefined;
+  private managedSlotRedrive: BindingJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -851,7 +854,7 @@ export class Daemon {
     /** Managed-slot exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
     private readonly managedSlotExclusionFactory: (
       timer: Timer,
-    ) => ManagedSlotExclusion = createDefaultManagedSlotExclusion,
+    ) => BindingExclusion = createDefaultBindingExclusion,
     /** Abandoned managed-slot scope reclamation (#11174); not armed under `bun test`. */
     private readonly managedSlotReclaimerFactory: ManagedSlotReclaimerFactory = createDefaultAbandonedScopeReclaimer,
     /**
@@ -999,7 +1002,7 @@ export class Daemon {
    * serve a managed slot never touch it.
    */
   private installManagedExecutionRelease(): void {
-    const release = new ManagedExecutionRelease({
+    const release = new BrokerExecutionRelease({
       registry: () => this.openManagedSlotRegistry(),
       journal: { inFlight: this.managedSlotJournalInFlight },
       work: executionTracker,
@@ -1007,7 +1010,7 @@ export class Daemon {
         releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
       }),
       timer: this.timer,
-      settler: this.managedSlotJournalOwner(),
+      settler: this.bindingJournalOwner(),
       isExecOwnerLive: this.managedSlotOwnerLiveness(),
       ownership: {
         isReleaseHeld: (id) => this.managedExecutionReowner?.isReleaseHeld(id) ?? false,
@@ -1015,14 +1018,14 @@ export class Daemon {
         loseOwnership: (id) => this.managedExecutionReowner?.loseOwnership(id),
       },
     });
-    this.managedExecutionRelease = release;
+    this.brokerExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
       release.onSessionReleased(snapshot, options),
     );
     DaemonState.getInstance().setManagedExecutionRelease(release);
     // `daemon/resetSlotScope` (#11174): opens the registry only when an operator asks.
     DaemonState.getInstance().setSlotScopeReset(
-      new SlotScopeReset({
+      new BindingScopeReset({
         registry: () => this.openManagedSlotRegistry(),
         registryExists: () => this.managedSlotRegistryExists(),
         timer: this.timer,
@@ -1037,9 +1040,9 @@ export class Daemon {
    * its session, even when the recorded owner is a previous daemon that died with a restart
    * (#11275); a record this daemon wrote is judged by its session alone (#11339).
    */
-  private managedSlotOwnerLiveness(): SlotExecOwnerLiveness {
+  private managedSlotOwnerLiveness(): BindingExecOwnerLiveness {
     this.managedSlotExecOwnerLiveness ??= withLiveExecutionSessions(
-      defaultSlotExecOwnerLiveness,
+      defaultBindingExecOwnerLiveness,
       this.sessionManager,
     );
     return this.managedSlotExecOwnerLiveness;
@@ -1061,7 +1064,7 @@ export class Daemon {
     // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
     this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
       registry: () => this.openManagedSlotRegistry(),
-      journalFor: (registry) => this.managedSlotAcquisition?.journalFor(registry),
+      journalFor: (registry) => this.brokerDeviceAcquisition?.journalFor(registry),
       registryExists: () => this.managedSlotRegistryExists(),
       pool: this.devicePool,
       executions: this.sessionManager,
@@ -1079,10 +1082,12 @@ export class Daemon {
   private defaultManagedSlotJournalFactory():
     | ((registry: AbandonedScopeReclaimRegistry) => AbandonedScopeReclaimJournal)
     | undefined {
-    const acquisition = this.managedSlotAcquisition;
+    const acquisition = this.brokerDeviceAcquisition;
     // The sweep hands back the registry this daemon opened (`openManagedSlotRegistry`), so the
     // narrowed view is the full registry the journal needs.
-    return acquisition ? (registry) => acquisition.journalFor(registry as SlotRegistry) : undefined;
+    return acquisition
+      ? (registry) => acquisition.journalFor(registry as BindingRegistry)
+      : undefined;
   }
 
   /**
@@ -1099,17 +1104,17 @@ export class Daemon {
 
   /** A host that never served a managed slot has no registry; maintenance must not create one. */
   private managedSlotRegistryExists(): boolean {
-    return this.managedSlotRegistry !== undefined || slotRegistryFileExists();
+    return this.bindingRegistry !== undefined || bindingRegistryFileExists();
   }
 
   /**
    * This daemon as a managed-slot settler and journal owner (#11179): PID plus process-generation
    * token, so entries it opens are redriven by a later daemon once this process is gone.
    */
-  private managedSlotJournalOwner(): SlotJournalOwner {
+  private bindingJournalOwner(): BindingJournalOwner {
     return {
       daemonId: this.daemonSessionId,
-      ...currentSlotOwnerProcess(() => this.processGenerationToken),
+      ...currentBindingOwnerProcess(() => this.processGenerationToken),
     };
   }
 
@@ -1122,7 +1127,7 @@ export class Daemon {
     const sessions = managedExecutionSessionsFrom(this.sessionManager, {
       releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
     });
-    const acquisition = createDaemonManagedSlotAcquisition({
+    const acquisition = createDaemonBrokerDeviceAcquisition({
       registry: () => this.openManagedSlotRegistry(),
       sessions: {
         claimLivenessOwnership: (sessionId, ownerToken) =>
@@ -1135,23 +1140,23 @@ export class Daemon {
       },
       pool: this.devicePool,
       executions: this.sessionManager,
-      owner: () => this.managedSlotJournalOwner(),
+      owner: () => this.bindingJournalOwner(),
       timer: this.timer,
       journal: {
-        owner: this.managedSlotJournalOwner(),
+        owner: this.bindingJournalOwner(),
         inFlight: this.managedSlotJournalInFlight,
       },
       // A new incarnation retires the old one through the same settle-waiting reset as the
       // operator command (#11174), published by installManagedExecutionRelease.
       resetSupersededScope: (scope, waitMs) =>
-        DaemonState.getInstance().getSlotScopeReset()?.resetSupersededScope(scope, waitMs),
+        DaemonState.getInstance().getBindingScopeReset()?.resetSupersededScope(scope, waitMs),
     });
-    this.managedSlotAcquisition = acquisition;
+    this.brokerDeviceAcquisition = acquisition;
     DaemonState.getInstance().setManagedSlotAcquisition(acquisition.acquisition);
     this.managedExecutionReowner = new ManagedExecutionReowner({
       registry: () => this.openManagedSlotRegistry(),
       registryExists: () => this.managedSlotRegistryExists(),
-      owner: () => this.managedSlotJournalOwner(),
+      owner: () => this.bindingJournalOwner(),
       timer: this.timer,
       isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
       isSessionPresent: (id) =>
@@ -1162,7 +1167,7 @@ export class Daemon {
       onOwnershipLost: (id) => {
         void this.cancelAndReleaseSession(
           id,
-          "managed-slot-ownership-lost",
+          "binding-ownership-lost",
           false,
           undefined,
           undefined,
@@ -1186,31 +1191,28 @@ export class Daemon {
     // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
     // daemon first opens the registry (#11338), so a fresh host that creates it on its first
     // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
-    if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
+    if (process.env.NODE_ENV !== "test" && bindingRegistryFileExists()) {
       void this.openManagedSlotRegistry().catch((error: unknown) => {
-        logger.warn(
-          `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
-          error,
-        );
+        logger.warn(`[Daemon] Binding journal redrive not started: ${errorMessage(error)}`, error);
       });
     }
   }
 
-  private openManagedSlotRegistry(): Promise<SqliteSlotRegistry> {
-    if (this.managedSlotRegistry) {
-      return this.managedSlotRegistry;
+  private openManagedSlotRegistry(): Promise<SqliteBindingRegistry> {
+    if (this.bindingRegistry) {
+      return this.bindingRegistry;
     }
-    const opening = openSqliteSlotRegistry({
+    const opening = openSqliteBindingRegistry({
       timer: this.timer,
       isExecOwnerLive: this.managedSlotOwnerLiveness(),
     });
-    this.managedSlotRegistry = opening;
+    this.bindingRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
       (registry) => {
-        void this.managedExecutionRelease?.recoverSettledSlots();
-        const acquisition = this.managedSlotAcquisition;
+        void this.brokerExecutionRelease?.recoverSettledBindings();
+        const acquisition = this.brokerDeviceAcquisition;
         if (
           acquisition &&
           !this.sessionBrokerConfigPath &&
@@ -1226,9 +1228,9 @@ export class Daemon {
     opening.catch((error: unknown) => {
       // The release that asked reports this failure; forgetting the failed open lets the next
       // release retry instead of failing forever.
-      logger.debug(`[Daemon] Managed slot registry open failed: ${errorMessage(error)}`);
-      if (this.managedSlotRegistry === opening) {
-        this.managedSlotRegistry = undefined;
+      logger.debug(`[Daemon] Binding registry open failed: ${errorMessage(error)}`);
+      if (this.bindingRegistry === opening) {
+        this.bindingRegistry = undefined;
       }
     });
     return opening;
@@ -1239,7 +1241,7 @@ export class Daemon {
     await this.sessionBrokerService?.close();
     this.sessionBrokerService = undefined;
     DaemonState.getInstance().setSessionBrokerService(undefined);
-    this.managedExecutionRelease?.close();
+    this.brokerExecutionRelease?.close();
     this.managedExecutionReowner?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
@@ -1253,17 +1255,14 @@ export class Daemon {
       logger.warn(`[Daemon] Stopping journal redrive failed: ${errorMessage(error)}`, error);
     }
     this.managedSlotRedrive = undefined;
-    this.managedSlotAcquisition?.acquisition.close();
-    this.managedSlotAcquisition = undefined;
-    const registry = this.managedSlotRegistry;
-    this.managedSlotRegistry = undefined;
+    this.brokerDeviceAcquisition?.acquisition.close();
+    this.brokerDeviceAcquisition = undefined;
+    const registry = this.bindingRegistry;
+    this.bindingRegistry = undefined;
     try {
       await (await registry)?.close();
     } catch (error) {
-      logger.warn(
-        `[Daemon] Closing the managed slot registry failed: ${errorMessage(error)}`,
-        error,
-      );
+      logger.warn(`[Daemon] Closing the binding registry failed: ${errorMessage(error)}`, error);
     }
   }
 
@@ -1271,8 +1270,8 @@ export class Daemon {
     if (!this.sessionBrokerConfigPath || this.sessionBrokerService) {
       return;
     }
-    const acquisition = this.managedSlotAcquisition;
-    const release = this.managedExecutionRelease;
+    const acquisition = this.brokerDeviceAcquisition;
+    const release = this.brokerExecutionRelease;
     if (!acquisition || !release) {
       throw new ActionableError(
         "Session broker requires the provider's native ownership and cleanup machinery",
@@ -1286,7 +1285,7 @@ export class Daemon {
       acquisition: acquisition.acquisition,
       release,
       journal: acquisition.journalFor(registry),
-      owner: this.managedSlotJournalOwner(),
+      owner: this.bindingJournalOwner(),
       timer: this.timer,
       sessionDisposition: (sessionUuid) =>
         sessionDisposition(sessionUuid, {
@@ -1320,7 +1319,7 @@ export class Daemon {
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
-      managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
+      bindingExclusion: this.managedSlotExclusionFactory(this.timer),
       ...(this.foreignCtrlProxyForwardEvidence
         ? {
             foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
@@ -3239,7 +3238,7 @@ export class Daemon {
     const platform = pooledDevice.platform;
     const requester = requesterSessionUuid?.trim() || undefined;
     try {
-      await assertInputNotOnForeignManagedSlotDevice({
+      await assertInputNotOnForeignBindingDevice({
         action: "observe",
         deviceId,
         platform,
@@ -3255,7 +3254,7 @@ export class Daemon {
       return false;
     } catch (error) {
       if (
-        error instanceof DeviceAssignedToManagedSlotError ||
+        error instanceof DeviceAssignedToBindingError ||
         error instanceof DeviceOwnedByOtherDaemonError
       ) {
         // A slot or another daemon holds the device: an expected verdict, so the read is
@@ -5398,7 +5397,7 @@ export class Daemon {
         // A shutdown release keeps the execution owner: the rehydrated session awaits its
         // owner (#11177).
         "managed execution release",
-        "the journal redrive loop stop and the managed slot registry close",
+        "the journal redrive loop stop and the binding registry close",
         () => this.closeManagedExecutionRelease(),
       ),
       shutdownStage(

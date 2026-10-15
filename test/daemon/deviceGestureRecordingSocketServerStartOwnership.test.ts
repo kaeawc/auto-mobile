@@ -160,12 +160,12 @@ describe("device gesture recording start holder admission (#11665)", () => {
       },
       async () => {
         slotCalls++;
-        throw new Error("device_assigned_to_managed_slot");
+        throw new Error("device_assigned_to_binding");
       },
     );
     await expect(
       gatedServer.invoke({ command: "start", deviceId: device.deviceId }),
-    ).rejects.toThrow("device_assigned_to_managed_slot");
+    ).rejects.toThrow("device_assigned_to_binding");
     expect(slotCalls).toBe(1);
     expect(readyCalls).toBe(0);
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();

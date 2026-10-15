@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { PooledDevice } from "../../../src/daemon/devicePool";
-import { currentManagedSlotReconciler } from "../../../src/daemon/managedSlots/managedSlotExclusion";
-import type { ManagedSlotToolInvoker } from "../../../src/daemon/managedSlots/managedSlotReconcilerPorts";
+import { currentBindingReconciler } from "../../../src/daemon/sessionBroker/provisioning/exclusion";
+import type { BindingToolInvoker } from "../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
 import { PoolManagedSlotDeviceStopper } from "../../../src/daemon/managedSlots/poolManagedSlotDeviceStopper";
-import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import type { BindingKey } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 
 function pooled(over: Partial<PooledDevice>): PooledDevice {
   return {
@@ -29,10 +29,13 @@ const TARGET = {
 };
 
 function harness(devices: PooledDevice[], respond: (args: Record<string, unknown>) => unknown) {
-  const calls: Array<{ name: string; args: Record<string, unknown>; slot: SlotKey | undefined }> =
-    [];
-  const invoke: ManagedSlotToolInvoker = async (name, args) => {
-    calls.push({ name, args, slot: currentManagedSlotReconciler() });
+  const calls: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    binding: BindingKey | undefined;
+  }> = [];
+  const invoke: BindingToolInvoker = async (name, args) => {
+    calls.push({ name, args, binding: currentBindingReconciler() });
     return respond(args);
   };
   return {
@@ -53,7 +56,7 @@ describe("PoolManagedSlotDeviceStopper", () => {
       {
         name: "killDevice",
         args: { device: { name: "amslot-a", platform: "android", deviceId: "emulator-5554" } },
-        slot: { scopeKey: "scope-1", slotIndex: 0 },
+        binding: { scopeKey: "scope-1", bindingIndex: 0 },
       },
     ]);
   });

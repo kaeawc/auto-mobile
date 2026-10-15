@@ -11,9 +11,9 @@
       "scopeKey": null
     },
     "outcome": "failed",
-    "slots": [
+    "bindings": [
       {
-        "slotIndex": 0,
+        "bindingIndex": 0,
         "role": "primary",
         "platform": "android",
         "assignmentGeneration": null,

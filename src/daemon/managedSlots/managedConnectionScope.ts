@@ -1,7 +1,11 @@
+import { BROKER_LIFECYCLE_TOOLS } from "../sessionBroker/lifecycleTools";
 import { DeviceCriteriaMatcher, type DeviceAllocationCriteria } from "../DeviceCriteriaMatcher";
 import type { PooledDevice } from "../devicePool";
 import { DeviceOutsideManagedSlotsError } from "./managedSlotRefusal";
-import { computeSlotScopeKey, type SlotScopeQuery } from "./slotRegistry";
+import {
+  computeBindingScopeKey,
+  type BindingScopeQuery,
+} from "../sessionBroker/registry/bindingRegistry";
 
 /**
  * Managed-connection scope (#11178 part b, epic #11172).
@@ -74,14 +78,6 @@ export class ManagedConnectionScopes {
  * boot it again (`getAndroid`/`getApple`/`startDevice` are refused), so a stop would strand the
  * execution; the next acquisition on the slot boots and reuses the device.
  */
-export const MANAGED_CONNECTION_REFUSED_TOOLS: ReadonlySet<string> = new Set([
-  "getAndroid",
-  "getApple",
-  "startDevice",
-  "provisionDevice",
-  "killDevice",
-  "deleteDevice",
-]);
 
 /** Resolves the device a slot session currently holds (its transport id), if any. */
 export type SlotSessionDeviceLookup = (sessionUuid: string) => string | undefined;
@@ -152,7 +148,7 @@ export function managedConnectionHostMutationRefusal(input: {
 export function managedConnectionScopeResetRefusal(input: {
   binding: ManagedConnectionBinding | undefined;
   action: string;
-  identity: SlotScopeQuery;
+  identity: BindingScopeQuery;
 }): DeviceOutsideManagedSlotsError | undefined {
   const { binding, identity } = input;
   if (!binding) {
@@ -160,7 +156,7 @@ export function managedConnectionScopeResetRefusal(input: {
   }
   if (
     identity.managedHostScope !== undefined &&
-    computeSlotScopeKey({ ...identity, managedHostScope: identity.managedHostScope }) ===
+    computeBindingScopeKey({ ...identity, managedHostScope: identity.managedHostScope }) ===
       binding.scopeKey
   ) {
     return undefined;
@@ -239,7 +235,7 @@ export function managedConnectionPlainToolRefusal(input: {
   if (!binding) {
     return undefined;
   }
-  if (MANAGED_CONNECTION_REFUSED_TOOLS.has(toolName)) {
+  if (BROKER_LIFECYCLE_TOOLS.has(toolName)) {
     return new DeviceOutsideManagedSlotsError(toolName, "tool", binding.scopeKey);
   }
   if (toolName === "setActiveDevice") {

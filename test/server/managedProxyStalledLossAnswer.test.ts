@@ -26,7 +26,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
-import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 
 // #11483 item 1 (stdio proxy contract): a MANAGED connection whose execution session the daemon released
 // for a lost heartbeat while the proxy itself was stalled (host sleep, SIGSTOP, a long GC pause).
@@ -182,10 +182,10 @@ const tearDown = async (): Promise<void> => {
 // (over the 100 ms budget on a loaded runner). Pay it once, for both connection kinds, outside the
 // timed tests.
 beforeAll(async () => {
-  for (const managedSlots of [readyManagedSlotsResult(SESSION), undefined]) {
+  for (const bindings of [readyManagedSlotsResult(SESSION), undefined]) {
     await setUp();
     try {
-      await withStallLoss(managedSlots, async (callTool) => {
+      await withStallLoss(bindings, async (callTool) => {
         await callTool("tapOn", { text: "OK" });
         await callTool("observe", { deviceId: "emulator-5554" });
       });
@@ -208,7 +208,7 @@ interface ToolAnswer {
  * hand the test its tools/call handler and every logging notification the server pushed.
  */
 async function withStallLoss(
-  managedSlots: ManagedSlotsResult | undefined,
+  bindings: BindingsResult | undefined,
   body: (
     callTool: (name: string, args: Record<string, unknown>) => Promise<ToolAnswer>,
     pushed: () => unknown[],
@@ -221,7 +221,7 @@ async function withStallLoss(
   } = {},
 ): Promise<void> {
   const registration = spyOn(Server.prototype, "setRequestHandler");
-  const { server } = createProxyMcpServer({ proxy, ...(managedSlots ? { managedSlots } : {}) });
+  const { server } = createProxyMcpServer({ proxy, ...(bindings ? { bindings } : {}) });
   const handler = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)?.[1];
   registration.mockRestore();
   const logged = spyOn(Server.prototype, "sendLoggingMessage").mockResolvedValue(undefined);
@@ -232,7 +232,7 @@ async function withStallLoss(
 
   try {
     // The session is held: claimed and heartbeated from now on.
-    if (managedSlots) {
+    if (bindings) {
       await proxy.holdManagedExecutionSession(SESSION);
     } else {
       await proxy.ensureConnected();

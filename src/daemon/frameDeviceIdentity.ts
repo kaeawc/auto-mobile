@@ -2,8 +2,8 @@ import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import type { ToolSelectionSessionManager } from "../features/toolSelection/selectionSessionResolver";
 import { InputDeviceOwnedError, isSameHolderSession } from "./inputDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
-import type { ManagedDeviceEntry } from "./managedSlots/slotRegistry";
+import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
+import type { ManagedDeviceEntry } from "./sessionBroker/registry/bindingRegistry";
 
 /**
  * The pool's Android transport fold, as a direct socket frame needs it. Every member is optional:
@@ -227,7 +227,7 @@ function frameAliasOwnershipError(
   managed: { entry?: ManagedDeviceEntry } | undefined,
 ): ActionableError {
   if (managed?.entry) {
-    return new DeviceAssignedToManagedSlotError(action, deviceId, managed.entry);
+    return new DeviceAssignedToBindingError(action, deviceId, managed.entry);
   }
   return new InputDeviceOwnedError(
     action,

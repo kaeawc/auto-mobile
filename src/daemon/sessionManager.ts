@@ -3,7 +3,7 @@ import {
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
-import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -83,7 +83,7 @@ import {
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
   resolveManagedExecutionIdleTimeoutMs,
-} from "./managedExecutionLiveness";
+} from "./sessionBroker/provisioning/executionLiveness";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
@@ -11142,7 +11142,7 @@ export class SessionManager {
     if (this.currentNetworkConditionGeneration(session.sessionId) !== expectedGeneration) {
       logger.debug(
         `Network condition TTL expiry for session ${session.sessionId} settled after a newer ` +
-          `condition superseded it; leaving that condition's restore slot in place`,
+          `condition superseded it; leaving that condition's restore binding in place`,
       );
       return;
     }

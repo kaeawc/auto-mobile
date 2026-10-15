@@ -1151,7 +1151,7 @@ async function assertNotManagedSlotDeviceForAdoption(device: {
   platform: "android" | "ios";
   stableId: string;
 }): Promise<void> {
-  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToBinding?.({
     action: "provisionDevice",
     deviceId: device.stableId,
     platform: device.platform,

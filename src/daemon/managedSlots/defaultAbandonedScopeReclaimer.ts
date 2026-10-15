@@ -4,13 +4,13 @@ import {
   type AbandonedScopeReclaimJournal,
   type AbandonedScopeReclaimRegistry,
 } from "./abandonedScopeReclaimer";
-import type { SlotRegistry } from "./slotRegistry";
+import type { BindingRegistry } from "../sessionBroker/registry/bindingRegistry";
 
 /** What the daemon starts and stops; undefined means no sweep runs. */
 export type ManagedSlotReclaimerHandle = Pick<AbandonedScopeReclaimer, "start" | "stop">;
 
 export type ManagedSlotReclaimerFactory = (deps: {
-  registry: () => Promise<SlotRegistry>;
+  registry: () => Promise<BindingRegistry>;
   /** False while the host registry does not exist; the sweep then never creates it. */
   registryExists: () => boolean;
   /**

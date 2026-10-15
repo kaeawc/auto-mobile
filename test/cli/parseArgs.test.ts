@@ -376,10 +376,10 @@ describe("--managed-slot-config (#11173)", () => {
     managedHostScope: "host-a",
     runnerNamespace: "ns",
     runnerIncarnation: "inc",
-    localSlotCapacity: 1,
+    localBindingCapacity: 1,
     requests: [
       {
-        slotIndex: 0,
+        bindingIndex: 0,
         role: "primary",
         platform: "android",
         requestedSpec: {
@@ -394,15 +394,15 @@ describe("--managed-slot-config (#11173)", () => {
   };
 
   test("is absent by default", () => {
-    expect(parseArgs([], logger, {}, noFile).managedSlotConfig).toBeUndefined();
+    expect(parseArgs([], logger, {}, noFile).bindingConfig).toBeUndefined();
   });
 
   test("parses inline JSON from the flag, separate and = forms", () => {
     const json = JSON.stringify(config);
     const separate = parseArgs(["--managed-slot-config", json], logger, {}, noFile);
     const equals = parseArgs([`--managed-slot-config=${json}`], logger, {}, noFile);
-    expect(separate.managedSlotConfig?.runnerNamespace).toBe("ns");
-    expect(equals.managedSlotConfig?.runnerNamespace).toBe("ns");
+    expect(separate.bindingConfig?.runnerNamespace).toBe("ns");
+    expect(equals.bindingConfig?.runnerNamespace).toBe("ns");
     expect(separate.invalidInvocation).toBeUndefined();
   });
 
@@ -413,7 +413,7 @@ describe("--managed-slot-config (#11173)", () => {
       { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify({ ...config, runnerNamespace: "env" }) },
       () => JSON.stringify({ ...config, runnerNamespace: "file" }),
     );
-    expect(parsed.managedSlotConfig?.runnerNamespace).toBe("file");
+    expect(parsed.bindingConfig?.runnerNamespace).toBe("file");
   });
 
   test("uses the env when the flag is absent", () => {
@@ -423,7 +423,7 @@ describe("--managed-slot-config (#11173)", () => {
       { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify(config) },
       noFile,
     );
-    expect(parsed.managedSlotConfig?.managedHostScope).toBe("host-a");
+    expect(parsed.bindingConfig?.managedHostScope).toBe("host-a");
   });
 
   test("rejects an unsupported contract version at parse time", () => {
@@ -440,10 +440,10 @@ describe("--managed-slot-config (#11173)", () => {
   test("throws when the flag has no value instead of falling back to env", () => {
     const env = { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify(config) };
     expect(() => parseArgs(["--managed-slot-config"], logger, env, noFile)).toThrow(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
     expect(() => parseArgs(["--managed-slot-config", "--debug"], logger, env, noFile)).toThrow(
-      "managed_slot_config_invalid",
+      "binding_config_invalid",
     );
   });
 
@@ -457,7 +457,7 @@ describe("--managed-slot-config (#11173)", () => {
       cause = (error as Error).cause;
     }
     expect(cause).toBeUndefined();
-    expect(message).toContain("managed_slot_config_invalid");
+    expect(message).toContain("binding_config_invalid");
     expect(message).not.toContain("s3cr3t-value");
   });
 
@@ -465,7 +465,7 @@ describe("--managed-slot-config (#11173)", () => {
     const json = JSON.stringify(config);
     expect(() =>
       parseArgs(["--no-proxy", "--managed-slot-config", json], logger, {}, noFile),
-    ).toThrow("managed_slot_config_invalid");
+    ).toThrow("binding_config_invalid");
     expect(() =>
       parseArgs(
         ["--initial-session-uuid", "u-1", "--managed-slot-config", json],
@@ -473,7 +473,7 @@ describe("--managed-slot-config (#11173)", () => {
         {},
         noFile,
       ),
-    ).toThrow("managed_slot_config_invalid");
+    ).toThrow("binding_config_invalid");
   });
 });
 
@@ -499,13 +499,11 @@ describe("inherited AUTOMOBILE_MANAGED_SLOT_CONFIG (#11286)", () => {
   });
 
   test("--cli ignores an inherited env config", () => {
-    expect(
-      parseArgs(["--cli", "observe"], logger, env, missingFile).managedSlotConfig,
-    ).toBeUndefined();
+    expect(parseArgs(["--cli", "observe"], logger, env, missingFile).bindingConfig).toBeUndefined();
   });
 
   test("the STDIO proxy still refuses an unreadable env config", () => {
-    expect(() => parseArgs([], logger, env, missingFile)).toThrow("managed_slot_config_invalid");
+    expect(() => parseArgs([], logger, env, missingFile)).toThrow("binding_config_invalid");
   });
 });
 
@@ -561,10 +559,10 @@ describe("--session-config", () => {
             managedHostScope: "host",
             runnerNamespace: "runner",
             runnerIncarnation: "incarnation",
-            localSlotCapacity: 1,
+            localBindingCapacity: 1,
             requests: [
               {
-                slotIndex: 0,
+                bindingIndex: 0,
                 role: "primary",
                 platform: "android",
                 requestedSpec: { runtime: "system-images;android-35;google_apis;x86_64" },

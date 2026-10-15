@@ -242,7 +242,7 @@ Pool-level forward evidence is supplied by the daemon process entry point; direc
 Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
 the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a
 host-wide registry snapshot through the injected `ManagedSlotExclusion`
-(`src/daemon/managedSlots/managedSlotExclusion.ts`) and skips such devices in idle
+(`src/daemon/sessionBroker/provisioning/exclusion.ts`) and skips such devices in idle
 selection, multi-device allocation and auto-start; explicit binds, autolock,
 `provisionDevice` adoption, `getAndroid`/`getApple`/`startDevice` targets,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations

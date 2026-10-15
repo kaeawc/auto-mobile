@@ -15,7 +15,7 @@ export type DeviceLifecycleState =
   | "unavailable";
 export type DeviceReadinessState = "unknown" | "not_ready" | "ready";
 export type DevicePoolStatus = "idle" | "assigned" | "error";
-export type DeviceHeldBy = "managed_slot" | "other_daemon";
+export type DeviceHeldBy = "binding" | "other_daemon";
 export type DeviceSessionOwnership = "owned" | "awaiting-owner";
 
 export interface CapabilityInventoryEntry {

@@ -19,7 +19,7 @@ import type { DevicePoolRefreshResult } from "./devicePoolRefresh";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
-import type { ManagedDeviceRef, ManagedSlotExclusion } from "./managedSlots/managedSlotExclusion";
+import type { ManagedDeviceRef, BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 
 export interface DeviceAutoStartPort {
   readonly criteriaMatcher: Pick<
@@ -42,7 +42,7 @@ export interface DeviceAutoStartPort {
   readonly foreignDeviceOwnership:
     | Pick<ForeignDeviceOwnership, "refresh" | "foreignOwnerPid" | "foreignClaimUnreadable">
     | undefined;
-  readonly managedSlotExclusion: Pick<ManagedSlotExclusion, "refresh" | "holderOf"> | undefined;
+  readonly bindingExclusion: Pick<BindingExclusion, "refresh" | "holderOf"> | undefined;
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "identityEvidenceForBootedDevice">;
   readonly lifecycleCoordinator: Pick<VirtualDeviceLifecycleCoordinator, "reserve">;
   readonly recoveringAndroidImages: Pick<ReadonlyMap<string, DeviceInfo>, "has">;
@@ -564,8 +564,8 @@ export class DeviceAutoStart {
     criteria?: DeviceAllocationCriteria,
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
-    if (this.port.managedSlotExclusion) {
-      await this.port.managedSlotExclusion.refresh({ requireCurrent: true });
+    if (this.port.bindingExclusion) {
+      await this.port.bindingExclusion.refresh({ requireCurrent: true });
     }
     const availableImages = await this.port.deviceManager.listDeviceImages(platform);
     if (availableImages.length === 0) {
@@ -628,7 +628,7 @@ export class DeviceAutoStart {
   isExcludedFromAutoStart(image: DeviceInfo): boolean {
     return (
       this.isAutoStartSuppressed(image) ||
-      this.port.managedSlotExclusion?.holderOf(managedRefForImage(image)) !== undefined
+      this.port.bindingExclusion?.holderOf(managedRefForImage(image)) !== undefined
     );
   }
 

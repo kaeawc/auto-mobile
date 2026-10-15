@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -15,10 +15,10 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
-  RegistryManagedSlotExclusion,
-  runAsManagedSlotReconciler,
-} from "../../src/daemon/managedSlots/managedSlotExclusion";
-import { DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
+  RegistryBindingExclusion,
+  runAsBindingReconciler,
+} from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import { DEVICE_ASSIGNED_TO_BINDING_CODE } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import type { DeviceInfo } from "../../src/models";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -26,7 +26,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
@@ -37,7 +37,7 @@ isolateToolRegistry();
  * provisioner's adoption guard (#11174) is what refuses a slot's stopped device before it is
  * booted or prepared, so these run the real provisioner wiring, not a stand-in for it.
  */
-describe("provisionDevice naming a managed slot's stopped device", () => {
+describe("provisionDevice naming a binding's stopped device", () => {
   const AVD = "phone-api-36-a";
   const SLOT_UDID = "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA";
   const ANDROID_SPEC = {
@@ -52,7 +52,7 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
   let timer: FakeTimer;
   let sessions: SessionManager;
   let devices: FakeDeviceUtils;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   let readinessDeviceIds: string[];
   let existing: DeviceInfo;
 
@@ -62,7 +62,7 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
     clearDirectSessionDevices();
     timer = new FakeTimer();
     devices = new FakeDeviceUtils();
-    registry = new FakeSlotRegistry(timer);
+    registry = new FakeBindingRegistry(timer);
     readinessDeviceIds = [];
     const idGenerator = new CountingIdGenerator("provision-managed");
     setDeviceToolsDependencies({
@@ -90,7 +90,7 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
         idGenerator,
         deviceManager: devices,
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     DaemonState.getInstance().initialize(
@@ -135,8 +135,8 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
     deviceType: IOS_SPEC.deviceType,
   });
 
-  test("Android: refused before the slot's AVD is booted or prepared", async () => {
-    await assignManagedSlotDevice(registry, "android", AVD);
+  test("Android: refused before the binding's AVD is booted or prepared", async () => {
+    await assignBindingDevice(registry, "android", AVD);
     existing = {
       name: AVD,
       platform: "android",
@@ -150,42 +150,42 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
 
     const response = await provision({ platform: "android", name: AVD, spec: ANDROID_SPEC });
 
-    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
   });
 
-  test("iOS: refused before the slot's simulator is booted or prepared", async () => {
-    await assignManagedSlotDevice(registry, "ios", SLOT_UDID);
+  test("iOS: refused before the binding's simulator is booted or prepared", async () => {
+    await assignBindingDevice(registry, "ios", SLOT_UDID);
     existing = iosSlotSimulator();
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("ios", [existing]);
 
     const response = await provision({ platform: "ios", name: "iPhone 17", spec: IOS_SPEC });
 
-    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
   });
 
-  test("iOS: the slot's own reconciler still boots and prepares its simulator", async () => {
-    const slot = await assignManagedSlotDevice(registry, "ios", SLOT_UDID);
+  test("iOS: the binding's own reconciler still boots and prepares its simulator", async () => {
+    const binding = await assignBindingDevice(registry, "ios", SLOT_UDID);
     existing = iosSlotSimulator();
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("ios", [existing]);
 
-    const response = await runAsManagedSlotReconciler(slot, () =>
+    const response = await runAsBindingReconciler(binding, () =>
       provision({ platform: "ios", name: "iPhone 17", spec: IOS_SPEC }),
     );
 
-    expect(JSON.stringify(response)).not.toContain(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+    expect(JSON.stringify(response)).not.toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect({ boots: boots().length, readiness: readinessDeviceIds }).toEqual({
       boots: 1,
       readiness: [SLOT_UDID],
     });
   });
 
-  test("iOS: another slot's reconciler is refused before the simulator is booted", async () => {
-    await assignManagedSlotDevice(registry, "ios", SLOT_UDID);
-    const other = await assignManagedSlotDevice(
+  test("iOS: another binding's reconciler is refused before the simulator is booted", async () => {
+    await assignBindingDevice(registry, "ios", SLOT_UDID);
+    const other = await assignBindingDevice(
       registry,
       "ios",
       "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB",
@@ -195,11 +195,11 @@ describe("provisionDevice naming a managed slot's stopped device", () => {
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("ios", [existing]);
 
-    const response = await runAsManagedSlotReconciler(other, () =>
+    const response = await runAsBindingReconciler(other, () =>
       provision({ platform: "ios", name: "iPhone 17", spec: IOS_SPEC }),
     );
 
-    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
   });
 });

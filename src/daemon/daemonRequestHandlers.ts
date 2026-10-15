@@ -69,7 +69,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
-  DAEMON_RESET_SLOT_SCOPE_METHOD,
+  DAEMON_RESET_BINDING_SCOPE_METHOD,
   DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
@@ -83,19 +83,21 @@ import {
   MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
   MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
-  ManagedSlotConfigError,
-  parseManagedSlotConfig,
-  type ManagedSlotConfigErrorCode,
+  parseBindingConfig,
 } from "../models/managedSlotConfig";
-import type { ManagedSlotsResult } from "../models/managedSlotsResult";
+import {
+  BindingConfigError,
+  type BindingConfigErrorCode,
+} from "./sessionBroker/provisioning/provisionRequest";
+import type { BindingsResult } from "./sessionBroker/provisioning/acquisitionResult";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   holdsOwnerHeartbeatLease,
-} from "./managedExecutionLiveness";
+} from "./sessionBroker/provisioning/executionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
-import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
+import type { BrokerExecutionRelease } from "./sessionBroker/provisioning/executionRelease";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
   SessionReleasedDuringCallError,
@@ -114,8 +116,11 @@ import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
   DeviceOutsideManagedSlotsError,
 } from "./managedSlots/managedSlotRefusal";
-import { SLOT_SCOPE_RESET_MAX_WAIT_MS, type SlotScopeReset } from "./managedSlots/slotScopeReset";
-import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
+import {
+  BINDING_SCOPE_RESET_MAX_WAIT_MS,
+  type BindingScopeReset,
+} from "./sessionBroker/provisioning/scopeReset";
+import type { BrokerDeviceAcquisition } from "./sessionBroker/provisioning/deviceAcquisition";
 import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import {
   daemonDeviceLeaseActivitySources,
@@ -155,13 +160,13 @@ export interface DaemonStateAccess {
   getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   /** The managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
-  getManagedExecutionRelease?(): Pick<ManagedExecutionRelease, "releaseExecution"> | undefined;
+  getManagedExecutionRelease?(): Pick<BrokerExecutionRelease, "releaseExecution"> | undefined;
   /** The managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
-  getSlotScopeReset?(): Pick<SlotScopeReset, "reset"> | undefined;
+  getBindingScopeReset?(): Pick<BindingScopeReset, "reset"> | undefined;
   /** Socket sessions bound to managed slots (#11178). */
   getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "bind" | "get" | "unbind">;
   /** The managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
-  getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
+  getManagedSlotAcquisition?(): Pick<BrokerDeviceAcquisition, "acquire"> | undefined;
   /** Re-stamps a re-bound managed connection's slots with this daemon as their owner (#11275). */
   getManagedExecutionReowner?(): Pick<ManagedExecutionReowner, "reown"> | undefined;
   getSessionManager(): Partial<Pick<SessionManager, "getKeepAwakeRestoreReport">> & {
@@ -262,7 +267,7 @@ export interface DaemonStateAccess {
     /** The pooled canonical id for a known Android alias serial (identity otherwise). */
     resolveAndroidCanonicalId?(deviceId: string): string;
     /** Refuse control of a device a managed slot holds (#11178); see `DevicePool`. */
-    assertNotAssignedToManagedSlot?: ManagedSlotInputGate["assertNotAssignedToManagedSlot"];
+    assertNotAssignedToBinding?: ManagedSlotInputGate["assertNotAssignedToBinding"];
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
     reconcileDiscoveryObservation?(devices: readonly BootedDevice[], source: string): Promise<void>;
     resolveAutolockSessionForMcpSession?(
@@ -313,7 +318,7 @@ export type DaemonMethodResult = {
     | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE
     | typeof DAEMON_INSTANCE_CHANGED_CODE
     /** `daemon/acquireManagedSlots` refusals before any mutation (#11173). */
-    | ManagedSlotConfigErrorCode
+    | BindingConfigErrorCode
     | SessionBrokerProtocolErrorCode
     /** `daemon/registerSession` managed-connection refusals (#11178). */
     | typeof DEVICE_OUTSIDE_MANAGED_SLOTS_CODE
@@ -342,7 +347,7 @@ const registerSessionParams = z.object({
    * A managed slot proxy re-binding its connection after a socket reconnect (#11178): the slot
    * sessions it holds, proven by the liveness owner token they were claimed for.
    */
-  managedSlots: z
+  bindings: z
     .object({
       scopeKey: z.string().trim().min(1),
       sessionUuids: z.array(z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid()).min(1).max(16),
@@ -354,7 +359,7 @@ const registerSessionParams = z.object({
 
 const MANAGED_CONNECTION_REGISTRATION_RETRY_AFTER_MS = 500;
 
-type ManagedSlotsRegistration = NonNullable<z.infer<typeof registerSessionParams>["managedSlots"]>;
+type ManagedSlotsRegistration = NonNullable<z.infer<typeof registerSessionParams>["bindings"]>;
 
 /**
  * Managed-connection enforcement for `daemon/registerSession` (#11178). A connection bound to
@@ -367,15 +372,15 @@ async function managedConnectionRegistrationRefusal(
   state: DaemonStateAccess,
   socketSessionId: string | undefined,
   sessionId: string,
-  managedSlots: ManagedSlotsRegistration | undefined,
+  bindings: ManagedSlotsRegistration | undefined,
 ): Promise<DaemonMethodResult | undefined> {
   const scopes = state.getManagedConnectionScopes?.();
   const binding = scopes?.get(socketSessionId);
-  const outside = managedConnectionSessionRegistrationRefusal(binding, sessionId, managedSlots);
+  const outside = managedConnectionSessionRegistrationRefusal(binding, sessionId, bindings);
   if (outside) {
     return outside;
   }
-  if (!managedSlots) {
+  if (!bindings) {
     return undefined;
   }
   const refuse = (reason: string, retryable = false): DaemonMethodResult => {
@@ -383,31 +388,31 @@ async function managedConnectionRegistrationRefusal(
     // unbound socket fail-closed with zero sessions until it proves its holds; device acquisition
     // and lifecycle stay refused while reads remain open (#11399).
     if (scopes && socketSessionId !== undefined && !binding) {
-      scopes.bind(socketSessionId, { scopeKey: managedSlots.scopeKey, sessionUuids: [] });
+      scopes.bind(socketSessionId, { scopeKey: bindings.scopeKey, sessionUuids: [] });
     }
     return {
       success: false,
       code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
       retryable,
       ...(retryable ? { retryAfterMs: MANAGED_CONNECTION_REGISTRATION_RETRY_AFTER_MS } : {}),
-      error: `Managed slot registration refused: ${reason}`,
+      error: `Binding registration refused: ${reason}`,
     };
   };
   if (!scopes || socketSessionId === undefined) {
     return refuse("this daemon cannot bind managed connections.");
   }
-  if (binding && binding.scopeKey !== managedSlots.scopeKey) {
+  if (binding && binding.scopeKey !== bindings.scopeKey) {
     return refuse(`this connection is already bound to scope ${binding.scopeKey}.`);
   }
-  if (!managedSlots.sessionUuids.includes(sessionId)) {
-    return refuse(`session ${sessionId} is not one of the registered slot sessions.`);
+  if (!bindings.sessionUuids.includes(sessionId)) {
+    return refuse(`session ${sessionId} is not one of the registered binding sessions.`);
   }
   const manager = state.getSessionManager();
-  const foreign = managedSlots.sessionUuids.filter((uuid) => {
+  const foreign = bindings.sessionUuids.filter((uuid) => {
     const session = sessionForIngress(manager, uuid);
     return (
       session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
-      session.livenessOwnerToken !== managedSlots.livenessOwnerToken
+      session.livenessOwnerToken !== bindings.livenessOwnerToken
     );
   });
   if (foreign.length > 0) {
@@ -424,8 +429,8 @@ async function managedConnectionRegistrationRefusal(
       : refusal;
   }
   scopes.bind(socketSessionId, {
-    scopeKey: managedSlots.scopeKey,
-    sessionUuids: managedSlots.sessionUuids,
+    scopeKey: bindings.scopeKey,
+    sessionUuids: bindings.sessionUuids,
   });
   return undefined;
 }
@@ -456,11 +461,11 @@ async function managedRegistrationSessionsAreUnknown(
 function managedConnectionSessionRegistrationRefusal(
   binding: ManagedConnectionBinding | undefined,
   sessionId: string,
-  managedSlots: ManagedSlotsRegistration | undefined,
+  bindings: ManagedSlotsRegistration | undefined,
 ): DaemonMethodResult | undefined {
   const retryingPlaceholder =
-    managedSlots !== undefined &&
-    binding?.scopeKey === managedSlots.scopeKey &&
+    bindings !== undefined &&
+    binding?.scopeKey === bindings.scopeKey &&
     binding.sessionUuids.size === 0;
   if (binding && !retryingPlaceholder && !binding.sessionUuids.has(sessionId)) {
     const refusal = new DeviceOutsideManagedSlotsError(
@@ -481,9 +486,9 @@ function managedConnectionSessionRegistrationRefusal(
  */
 async function reownManagedSlots(
   state: DaemonStateAccess,
-  managedSlots: ManagedSlotsRegistration,
+  bindings: ManagedSlotsRegistration,
 ): Promise<void> {
-  await state.getManagedExecutionReowner?.()?.reown(managedSlots.sessionUuids);
+  await state.getManagedExecutionReowner?.()?.reown(bindings.sessionUuids);
 }
 
 /** Wait (bounded) for an in-flight release of `sessionId`; a retry failure when it outlasts it. */
@@ -696,9 +701,9 @@ async function bindExecutionRegistration(
   registration: z.infer<typeof registerSessionParams>,
   context: DaemonRequestContext,
 ): Promise<DaemonMethodResult | undefined> {
-  const { sessionId, managedSlots, sessionBroker } = registration;
+  const { sessionId, bindings, sessionBroker } = registration;
   if (sessionBroker) {
-    if (managedSlots) {
+    if (bindings) {
       return { success: false, error: "A registration cannot select both acquisition contracts" };
     }
     const brokerRefusal = await bindBrokerRegistration(
@@ -715,13 +720,13 @@ async function bindExecutionRegistration(
     state,
     context.socketSessionId,
     sessionId,
-    managedSlots,
+    bindings,
   );
   if (refusal) {
     return refusal;
   }
-  if (managedSlots) {
-    await reownManagedSlots(state, managedSlots);
+  if (bindings) {
+    await reownManagedSlots(state, bindings);
   }
   return undefined;
 }
@@ -825,7 +830,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
         handleReleaseExecution(request, state, context),
     ],
     [
-      DAEMON_RESET_SLOT_SCOPE_METHOD,
+      DAEMON_RESET_BINDING_SCOPE_METHOD,
       (request, state, _executions, _signal, context) =>
         handleResetSlotScope(request, state, context),
     ],
@@ -850,7 +855,7 @@ async function handleInitializedDaemonRequest(
   if (
     state.isSessionBrokerMode?.() &&
     (request.method === DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD ||
-      request.method === DAEMON_RESET_SLOT_SCOPE_METHOD)
+      request.method === DAEMON_RESET_BINDING_SCOPE_METHOD)
   ) {
     return {
       success: false,
@@ -1766,7 +1771,7 @@ const resetSlotScopeParams = z
     runnerNamespace: z.string().trim().min(1),
     runnerIncarnation: z.string().trim().min(1),
     managedHostScope: z.string().trim().min(1).optional(),
-    waitMs: z.number().int().min(0).max(SLOT_SCOPE_RESET_MAX_WAIT_MS).optional(),
+    waitMs: z.number().int().min(0).max(BINDING_SCOPE_RESET_MAX_WAIT_MS).optional(),
     force: z.boolean().optional(),
   })
   .strict();
@@ -1790,15 +1795,15 @@ async function handleResetSlotScope(
   }
   const refusal = managedConnectionScopeResetRefusal({
     binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
-    action: DAEMON_RESET_SLOT_SCOPE_METHOD,
+    action: DAEMON_RESET_BINDING_SCOPE_METHOD,
     identity: parsed.data,
   });
   if (refusal) {
     return { success: false, code: refusal.code, error: refusal.message };
   }
-  const reset = state.getSlotScopeReset?.();
+  const reset = state.getBindingScopeReset?.();
   if (!reset) {
-    return { success: false, error: "Managed slot scope reset is not available in this daemon" };
+    return { success: false, error: "Binding scope reset is not available in this daemon" };
   }
   const result = await reset.reset(parsed.data);
   return { success: true, result: { ...result } };
@@ -1829,19 +1834,19 @@ async function handleAcquireManagedSlots(
   if (!acquisition) {
     return {
       success: false,
-      code: "managed_slots_unsupported",
-      error: "Managed slot acquisition is not available in this daemon",
+      code: "bindings_unsupported",
+      error: "Binding acquisition is not available in this daemon",
     };
   }
   let config;
   try {
-    config = parseManagedSlotConfig(parsed.data.config);
+    config = parseBindingConfig(parsed.data.config);
   } catch (error) {
-    if (error instanceof ManagedSlotConfigError) {
-      logger.warn(`[ManagedSlots] Refusing an invalid managed slot config: ${error.message}`);
+    if (error instanceof BindingConfigError) {
+      logger.warn(`[Bindings] Refusing an invalid binding config: ${error.message}`);
       return { success: false, code: error.code, error: error.message };
     }
-    throw toActionableError(error, "Managed slot config could not be validated");
+    throw toActionableError(error, "Binding config could not be validated");
   }
   const result = await acquisition.acquire(config, {
     livenessOwnerToken: parsed.data.livenessOwnerToken,
@@ -1863,7 +1868,7 @@ async function handleAcquireManagedSlots(
 function bindManagedConnection(
   state: DaemonStateAccess,
   socketSessionId: string | undefined,
-  result: ManagedSlotsResult,
+  result: BindingsResult,
 ): void {
   const scopeKey = result.scope.scopeKey;
   if (socketSessionId === undefined || scopeKey === null) {
@@ -1871,7 +1876,7 @@ function bindManagedConnection(
   }
   const sessionUuids =
     result.outcome === "ready"
-      ? result.slots.flatMap((slot) => (slot.sessionUuid ? [slot.sessionUuid] : []))
+      ? result.bindings.flatMap((binding) => (binding.sessionUuid ? [binding.sessionUuid] : []))
       : [];
   state.getManagedConnectionScopes?.().bind(socketSessionId, { scopeKey, sessionUuids });
 }

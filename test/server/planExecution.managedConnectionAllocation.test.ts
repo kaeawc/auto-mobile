@@ -7,18 +7,18 @@ import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { DEVICE_OUTSIDE_MANAGED_SLOTS_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 /**
  * #11397: a managed connection may not acquire devices. `getAndroid`, `getApple`, `startDevice` and
@@ -28,7 +28,7 @@ import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtu
  * Plan labels are served only by the connection's own slot sessions, without the allocator.
  */
 describe("managed connection executePlan device labels (#11397)", () => {
-  const slotA: BootedDevice = { name: "Slot A", deviceId: "IOS-SLOT-A", platform: "ios" };
+  const slotA: BootedDevice = { name: "Binding A", deviceId: "IOS-SLOT-A", platform: "ios" };
   const free: BootedDevice = { name: "Free", deviceId: "IOS-FREE", platform: "ios" };
   const execA = "exec-a";
   const mcpA = "mcp-socket-a";
@@ -50,7 +50,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let pool: DevicePool;
-  let keyA: SlotKey;
+  let keyA: BindingKey;
   let allocatorCalls: string[][];
   let restoreVideoRecorder: () => void;
 
@@ -98,8 +98,8 @@ describe("managed connection executePlan device labels (#11397)", () => {
     Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
 
     const timer = new FakeTimer();
-    const registry = new FakeSlotRegistry(timer);
-    keyA = await assignManagedSlotDevice(registry, "ios", slotA.deviceId, "runner-a", execA);
+    const registry = new FakeBindingRegistry(timer);
+    keyA = await assignBindingDevice(registry, "ios", slotA.deviceId, "runner-a", execA);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -108,7 +108,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       createDevicePoolDependencies(sessionManager, "slots-hunt-plan-allocation", {
         timer,
         deviceManager: fakeDeviceUtils,
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     await pool.initializeWithDevices([slotA, free]);
@@ -175,7 +175,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
   beforeEach(setUp);
   afterEach(tearDown);
 
-  test("a label beyond the slot sessions is refused before the generic allocator is asked", async () => {
+  test("a label beyond the binding sessions is refused before the generic allocator is asked", async () => {
     const result = await runPlan(PLAN, { devices: ["A", "B"] });
 
     // The connection's only device is its slot device; label B needs a device from the generic pool.
@@ -209,7 +209,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     expect(viaSession).toMatchObject(refusal);
   });
 
-  test("a label whose declared platform the slot device cannot satisfy is refused", async () => {
+  test("a label whose declared platform the binding device cannot satisfy is refused", async () => {
     const result = await runPlan(
       [
         "name: slots-platform",
@@ -247,7 +247,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     beforeEach(() => {
       ToolRegistry.registerDeviceAware(
         "slotProbe",
-        "Slot probe",
+        "Binding probe",
         z.object({}).passthrough(),
         async () => ({ success: true }),
       );
@@ -260,7 +260,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     test.each([
       ["simulatorType", 'simulatorType: "iPad Pro"'],
       ["iosVersion", 'iosVersion: "17.5"'],
-    ])("a %s the slot device does not have is refused", async (_criterion, line) => {
+    ])("a %s the binding device does not have is refused", async (_criterion, line) => {
       slotDeviceIs({ simulatorType: "iPhone 16", iosVersion: "18.0" });
 
       const result = await runPlan(labelPlan(line));
@@ -273,7 +273,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       });
     });
 
-    test("criteria the slot device meets are served by it", async () => {
+    test("criteria the binding device meets are served by it", async () => {
       slotDeviceIs({ simulatorType: "iPhone 16", iosVersion: "18.0" });
 
       const result = await runPlan(labelPlan('simulatorType: "iPhone 16"', 'iosVersion: "18.0"'));
@@ -281,7 +281,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
     });
 
-    test("criteria the pool cannot evaluate for the slot device are not a refusal", async () => {
+    test("criteria the pool cannot evaluate for the binding device are not a refusal", async () => {
       // The harness device carries neither a simulator type nor an iOS version.
       const result = await runPlan(labelPlan('simulatorType: "iPad Pro"', 'iosVersion: "17.5"'));
 
@@ -289,11 +289,11 @@ describe("managed connection executePlan device labels (#11397)", () => {
     });
   });
 
-  test("a single label is served by the slot device without the generic allocator", async () => {
+  test("a single label is served by the binding device without the generic allocator", async () => {
     const probed: string[] = [];
     ToolRegistry.registerDeviceAware(
       "slotProbe",
-      "Slot probe",
+      "Binding probe",
       z.object({}).passthrough(),
       async (device: BootedDevice) => {
         probed.push(device.deviceId);
@@ -321,7 +321,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
 
   // #11421: the slot session belongs to the connection for its lifetime. Plan auto-release frees
   // the sessions a plan run owns; a managed connection's slot session is not one of them.
-  describe("the slot session outlives the plan (#11421)", () => {
+  describe("the binding session outlives the plan (#11421)", () => {
     const genericSession = "generic-session";
     let probed: string[];
 
@@ -343,7 +343,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
       probed = [];
       ToolRegistry.registerDeviceAware(
         "slotProbe",
-        "Slot probe",
+        "Binding probe",
         z.object({}).passthrough(),
         async (device: BootedDevice) => {
           probed.push(device.deviceId);
@@ -361,14 +361,14 @@ describe("managed connection executePlan device labels (#11397)", () => {
       expect(probed).toEqual([slotA.deviceId]);
     };
 
-    test("a successful plan leaves the slot session and its device with the connection", async () => {
+    test("a successful plan leaves the binding session and its device with the connection", async () => {
       const result = await runPlan(PROBE_PLAN);
 
       expect(result).toMatchObject({ success: true, deviceId: slotA.deviceId });
       await expectSlotSessionLive();
     });
 
-    test("a successful single-label plan leaves the slot session with the connection", async () => {
+    test("a successful single-label plan leaves the binding session with the connection", async () => {
       const result = await runPlan(
         planOf(
           "name: slots-label",
@@ -385,14 +385,14 @@ describe("managed connection executePlan device labels (#11397)", () => {
       await expectSlotSessionLive();
     });
 
-    test("a refused plan leaves the slot session with the connection", async () => {
+    test("a refused plan leaves the binding session with the connection", async () => {
       const result = await runPlan(PLAN, { devices: ["A", "B"] });
 
       expect(result.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
       await expectSlotSessionLive();
     });
 
-    test("a failed plan leaves the slot session with the connection", async () => {
+    test("a failed plan leaves the binding session with the connection", async () => {
       const result = await runPlan(
         planOf("name: slots-fail", "steps:", "  - tool: noSuchTool", "    params: {}"),
       );

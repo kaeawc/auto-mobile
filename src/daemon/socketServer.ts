@@ -146,7 +146,7 @@ import {
   admitInputOnHolderSession,
   InputDeviceOwnedError,
   assertControlNotOnForeignDaemonDevice,
-  assertInputNotOnForeignManagedSlotDevice,
+  assertInputNotOnForeignBindingDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
   parseInputRequesterSessionUuid,
@@ -5919,7 +5919,7 @@ export class UnixSocketServer {
       requesterSessionUuid,
     });
     const sessionManager = this.daemonState.getSessionManager();
-    await assertInputNotOnForeignManagedSlotDevice({
+    await assertInputNotOnForeignBindingDevice({
       action,
       deviceId,
       platform: device.platform,
@@ -8416,7 +8416,7 @@ export class UnixSocketServer {
     if (!this.daemonState.isInitialized()) {
       return;
     }
-    await assertInputNotOnForeignManagedSlotDevice({
+    await assertInputNotOnForeignBindingDevice({
       action: toolName,
       deviceId: targetDevice.deviceId,
       platform: targetDevice.platform,

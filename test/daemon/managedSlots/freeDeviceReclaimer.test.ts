@@ -1,8 +1,8 @@
 import type {
-  ManagedSlotCacheEvictor,
-  ManagedSlotEvictionCandidate,
-  ManagedSlotEvictionResult,
-} from "../../../src/daemon/managedSlots/managedSlotCacheEviction";
+  BindingCacheEvictor,
+  BindingEvictionCandidate,
+  BindingEvictionResult,
+} from "../../../src/daemon/sessionBroker/provisioning/cacheEviction";
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { DeviceInfo } from "../../../src/models";
 import {
@@ -15,13 +15,13 @@ import {
 } from "../../../src/daemon/managedSlots/freeDeviceReclaimer";
 import {
   FREE_DEVICE_STOP_CLAIM_STALE_MS,
-  MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
-  type SlotKey,
-} from "../../../src/daemon/managedSlots/slotRegistry";
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+  BINDING_ABANDONED_SCOPE_THRESHOLD_MS,
+  type BindingKey,
+} from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeClaims, FakeInventory } from "./fixtures/reconcilerFakes";
-import { assignManagedSlotDevice } from "./managedSlotFixtures";
+import { FakeClaims, FakeInventory } from "../sessionBroker/registry/fixtures/reconcilerFakes";
+import { assignBindingDevice } from "../sessionBroker/provisioning/bindingFixtures";
 
 // #11337: a free-pool device unadopted for an hour is shut down (not deleted) and its image kept,
 // so a later matching slot adopts it. Safety conditions are each pinned here through fakes.
@@ -46,7 +46,7 @@ function avd(name: string, over: Partial<DeviceInfo> = {}): DeviceInfo {
 
 describe("FreeDeviceReclaimer", () => {
   let timer: FakeTimer;
-  let registry: FakeSlotRegistry;
+  let registry: FakeBindingRegistry;
   let inventory: FakeInventory;
   let claims: FakeClaims;
   let stopper: FakeStopper;
@@ -54,7 +54,7 @@ describe("FreeDeviceReclaimer", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
-    registry = new FakeSlotRegistry(timer, () => false);
+    registry = new FakeBindingRegistry(timer, () => false);
     inventory = new FakeInventory();
     claims = new FakeClaims();
     stopper = new FakeStopper();
@@ -75,13 +75,13 @@ describe("FreeDeviceReclaimer", () => {
   /** A running device bound to a slot of `namespace`, then freed by an operator reset. */
   async function freeDevice(name: string, namespace = "runner-a"): Promise<void> {
     inventory.devices.push(avd(name));
-    const key = await assignManagedSlotDevice(registry, "android", name, namespace);
+    const key = await assignBindingDevice(registry, "android", name, namespace);
     await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
     await registry.completeScopeInvalidation(key.scopeKey);
   }
 
   function pastThreshold(): void {
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS);
   }
 
   test("shuts down a device unadopted for an hour and keeps its row as stopped", async () => {
@@ -109,7 +109,7 @@ describe("FreeDeviceReclaimer", () => {
 
   test("leaves a device alone until the threshold has passed", async () => {
     await freeDevice("amslot-a");
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
 
     const report = await reclaimer().sweep();
 
@@ -119,7 +119,7 @@ describe("FreeDeviceReclaimer", () => {
 
   test("a device already reported offline is only recorded as stopped", async () => {
     inventory.devices.push(avd("amslot-a", { isRunning: false }));
-    const key = await assignManagedSlotDevice(registry, "android", "amslot-a");
+    const key = await assignBindingDevice(registry, "android", "amslot-a");
     await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
     await registry.completeScopeInvalidation(key.scopeKey);
     pastThreshold();
@@ -164,7 +164,7 @@ describe("FreeDeviceReclaimer", () => {
 
     test("an external device the daemon did not create", async () => {
       inventory.devices.push(avd("my-own-avd"));
-      const key = await assignManagedSlotDevice(registry, "android", "my-own-avd");
+      const key = await assignBindingDevice(registry, "android", "my-own-avd");
       await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
       await registry.completeScopeInvalidation(key.scopeKey);
       pastThreshold();
@@ -186,14 +186,14 @@ describe("FreeDeviceReclaimer", () => {
       await expectUntouched("not_in_inventory");
     });
 
-    test("a device assigned to a slot of any scope", async () => {
+    test("a device assigned to a binding of any scope", async () => {
       await freeDevice("amslot-a");
       pastThreshold();
       // A later slot adopts it before the sweep claims it: the row is gone, nothing is stopped.
       claims.beforeDescribe = async () => {
-        const slot: SlotKey = await assignManagedSlotDevice(registry, "android", "amslot-b", "x");
+        const binding: BindingKey = await assignBindingDevice(registry, "android", "amslot-b", "x");
         await registry.commitBinding(
-          slot,
+          binding,
           { generation: 1, stableDeviceId: "amslot-b" },
           {
             stableDeviceId: "amslot-a",
@@ -232,9 +232,9 @@ describe("FreeDeviceReclaimer", () => {
     pastThreshold();
     let refusal: unknown;
     stopper.beforeStop = async () => {
-      const slot = await assignManagedSlotDevice(registry, "android", "amslot-b", "x");
+      const binding = await assignBindingDevice(registry, "android", "amslot-b", "x");
       refusal = await registry.commitBinding(
-        slot,
+        binding,
         { generation: 1, stableDeviceId: "amslot-b" },
         {
           stableDeviceId: "amslot-a",
@@ -444,11 +444,11 @@ describe("FreeDeviceReclaimer", () => {
     expect(stopper.calls).toHaveLength(1);
   });
 
-  class FakeAbsentEvictor implements ManagedSlotCacheEvictor {
-    calls: ManagedSlotEvictionCandidate[] = [];
-    result: ManagedSlotEvictionResult = { kind: "absent" };
+  class FakeAbsentEvictor implements BindingCacheEvictor {
+    calls: BindingEvictionCandidate[] = [];
+    result: BindingEvictionResult = { kind: "absent" };
     error: Error | undefined;
-    async evict(candidate: ManagedSlotEvictionCandidate): Promise<ManagedSlotEvictionResult> {
+    async evict(candidate: BindingEvictionCandidate): Promise<BindingEvictionResult> {
       this.calls.push(candidate);
       if (this.error) {
         throw this.error;
@@ -611,7 +611,7 @@ describe("FreeDeviceReclaimer", () => {
   test("young missing rows are never considered for release", async () => {
     await freeDevice("amslot-a");
     inventory.devices = [];
-    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+    timer.advanceTime(BINDING_ABANDONED_SCOPE_THRESHOLD_MS - 1);
     const evictor = new FakeAbsentEvictor();
     const sweep = reclaimer({ absentRowEvictor: () => evictor });
     expect((await sweep.sweep()).skipped).toEqual([]);

@@ -5,15 +5,15 @@ import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/se
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  openSqliteSlotRegistry,
-  type SqliteSlotRegistry,
-} from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { SlotProcessIdentity } from "../../../src/daemon/managedSlots/slotRegistry";
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { parseSessionConfig, type SessionConfig } from "../../../src/models/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
-const OWNER: SlotProcessIdentity = {
+const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "start-a",
@@ -33,7 +33,7 @@ function config(requestId: string): SessionConfig {
 }
 
 describe("session-only broker lifecycle", () => {
-  let registry: SqliteSlotRegistry;
+  let registry: SqliteBindingRegistry;
   let devices: FakeNativePort;
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
@@ -41,13 +41,13 @@ describe("session-only broker lifecycle", () => {
 
   beforeAll(async () => {
     // Warm SQLite/migration setup outside the per-test budget, as the shared DB harness does.
-    const warm = await openSqliteSlotRegistry({ dbPath: ":memory:" });
+    const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
     await warm.close();
   });
 
   beforeEach(async () => {
     ownerLive = true;
-    registry = await openSqliteSlotRegistry({
+    registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => ownerLive,
     });
@@ -85,7 +85,7 @@ describe("session-only broker lifecycle", () => {
     const resource = devices.sessions.get(result.sessionUuid)!;
     const assignment = await registry.getAssignment({
       scopeKey: resource.scopeKey,
-      slotIndex: resource.allocationIndex,
+      bindingIndex: resource.allocationIndex,
     });
     expect(isSessionBrokerDeviceName(assignment!.deviceName!)).toBe(true);
     return result.sessionUuid;
@@ -226,7 +226,7 @@ describe("session-only broker lifecycle", () => {
 
   test("consumer configuration rejects slot, scope, lane and capacity inputs", () => {
     expect(parseSessionConfig(config("plain"))).toEqual(config("plain"));
-    for (const field of ["slotIndex", "managedHostScope", "localSlotCapacity", "runnerNamespace"]) {
+    for (const field of ["bindingIndex", "managedHostScope", "localSlotCapacity", "runnerNamespace"]) {
       expect(() => parseSessionConfig({ ...config("bad"), [field]: 1 })).toThrow(
         "Invalid session configuration",
       );
@@ -234,7 +234,7 @@ describe("session-only broker lifecycle", () => {
     expect(() =>
       parseSessionConfig({
         ...config("bad"),
-        device: { ...config("bad").device, slotIndex: 0 },
+        device: { ...config("bad").device, bindingIndex: 0 },
       }),
     ).toThrow("invalid_request");
   });

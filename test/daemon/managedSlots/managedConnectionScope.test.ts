@@ -8,10 +8,10 @@ import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
   DeviceOutsideManagedSlotsError,
 } from "../../../src/daemon/managedSlots/managedSlotRefusal";
-import { computeSlotScopeKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import { computeBindingScopeKey } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 
 const identity = { managedHostScope: "host", runnerNamespace: "runner", runnerIncarnation: "run" };
-const binding = { scopeKey: computeSlotScopeKey(identity), sessionUuids: new Set<string>() };
+const binding = { scopeKey: computeBindingScopeKey(identity), sessionUuids: new Set<string>() };
 
 describe("managed connection host and scope decisions", () => {
   test("undefined bindings permit host mutation and any scope reset", () => {
@@ -77,21 +77,26 @@ describe("managed connection host and scope decisions", () => {
 });
 
 test.each([
-  { name: "android slot rejects ios", sessions: ["android-slot"], platform: "ios", refused: true },
   {
-    name: "mixed slots permit ios",
+    name: "android binding rejects ios",
+    sessions: ["android-slot"],
+    platform: "ios",
+    refused: true,
+  },
+  {
+    name: "mixed bindings permit ios",
     sessions: ["android-slot", "ios-slot"],
     platform: "ios",
     refused: false,
   },
   {
-    name: "mixed slots permit android",
+    name: "mixed bindings permit android",
     sessions: ["android-slot", "ios-slot"],
     platform: "android",
     refused: false,
   },
   {
-    name: "unknown slot permits routing",
+    name: "unknown binding permits routing",
     sessions: ["unknown-slot"],
     platform: "ios",
     refused: false,

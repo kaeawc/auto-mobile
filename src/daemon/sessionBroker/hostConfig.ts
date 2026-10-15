@@ -1,14 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
-import type { SlotScopeIdentity } from "../managedSlots/slotRegistry";
+import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
 /** Operator configuration, never a session requester input. */
 export const SESSION_BROKER_HOST_CONFIG_ENV = "AUTOMOBILE_SESSION_BROKER_CONFIG";
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */
-export const SESSION_BROKER_SCOPE: SlotScopeIdentity = {
+export const SESSION_BROKER_SCOPE: BindingScopeIdentity = {
   managedHostScope: "auto-mobile-host",
   runnerNamespace: "session-broker",
   runnerIncarnation: "private-pool-v1",

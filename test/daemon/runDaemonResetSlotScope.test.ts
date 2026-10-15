@@ -3,7 +3,7 @@ import {
   parseResetSlotScopeCommandArgs,
   runDaemonCommand,
 } from "../../src/daemon/cli/runDaemonCommand";
-import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../../src/daemon/constants";
+import { DAEMON_RESET_BINDING_SCOPE_METHOD } from "../../src/daemon/constants";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
@@ -23,7 +23,7 @@ const remoteState: DaemonStateLike = {
 
 async function run(args: string[], result: unknown) {
   const client = new FakeDaemonClient({
-    daemonMethodResults: new Map([[DAEMON_RESET_SLOT_SCOPE_METHOD, result]]),
+    daemonMethodResults: new Map([[DAEMON_RESET_BINDING_SCOPE_METHOD, result]]),
   });
   const output: unknown[] = [];
   const exited = new Error("fake exit");
@@ -87,7 +87,7 @@ describe("reset-slot-scope daemon command", () => {
     );
     expect(client.callDaemonMethodCalls).toEqual([
       {
-        method: DAEMON_RESET_SLOT_SCOPE_METHOD,
+        method: DAEMON_RESET_BINDING_SCOPE_METHOD,
         params: { runnerNamespace: "ns", runnerIncarnation: "boot-1", force: true },
       },
     ]);
@@ -117,7 +117,7 @@ describe("reset-slot-scope daemon command", () => {
     );
     expect(client.callDaemonMethodCalls).toEqual([
       {
-        method: DAEMON_RESET_SLOT_SCOPE_METHOD,
+        method: DAEMON_RESET_BINDING_SCOPE_METHOD,
         params: { runnerNamespace: "ns", runnerIncarnation: "boot-1" },
       },
     ]);
@@ -141,7 +141,7 @@ describe("reset-slot-scope daemon command", () => {
     ]);
   });
 
-  test("a refused --force exits 2 and says on stderr why each slot was left alone (#11545)", async () => {
+  test("a refused --force exits 2 and says on stderr why each binding was left alone (#11545)", async () => {
     const result = {
       outcome: "pending",
       retryable: true,
@@ -153,15 +153,15 @@ describe("reset-slot-scope daemon command", () => {
           freedDevices: [],
           forceRefusals: [
             {
-              slotIndex: 0,
+              bindingIndex: 0,
               reason: "within_settlement_cap",
               remainingMs: 123_000,
-              message: "Slot scope-1/0 is still settling; retry --force in 123000ms.",
+              message: "Binding scope-1/0 is still settling; retry --force in 123000ms.",
             },
             {
-              slotIndex: 2,
+              bindingIndex: 2,
               reason: "owner_liveness_unknown",
-              message: "Slot scope-1/2 is owned by another running daemon.",
+              message: "Binding scope-1/2 is owned by another running daemon.",
             },
           ],
         },
@@ -183,11 +183,11 @@ describe("reset-slot-scope daemon command", () => {
       ["stderr", "--force left 2 slot(s) alone:"],
       [
         "stderr",
-        "  scope-1 slot 0 [within_settlement_cap, remainingMs=123000]: Slot scope-1/0 is still settling; retry --force in 123000ms.",
+        "  scope-1 binding 0 [within_settlement_cap, remainingMs=123000]: Binding scope-1/0 is still settling; retry --force in 123000ms.",
       ],
       [
         "stderr",
-        "  scope-1 slot 2 [owner_liveness_unknown]: Slot scope-1/2 is owned by another running daemon.",
+        "  scope-1 binding 2 [owner_liveness_unknown]: Binding scope-1/2 is owned by another running daemon.",
       ],
       ["exit", 2],
     ]);
@@ -198,7 +198,7 @@ describe("reset-slot-scope daemon command", () => {
       outcome: "pending",
       scopes: [
         null,
-        { scopeKey: "scope-1", forceRefusals: [null, { slotIndex: "x" }] },
+        { scopeKey: "scope-1", forceRefusals: [null, { bindingIndex: "x" }] },
         { forceRefusals: 3 },
       ],
     });

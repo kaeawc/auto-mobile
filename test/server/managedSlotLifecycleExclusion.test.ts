@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { assertInputNotOnForeignManagedSlotDevice } from "../../src/daemon/inputDeviceOwnership";
+import { assertInputNotOnForeignBindingDevice } from "../../src/daemon/inputDeviceOwnership";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-  DeviceAssignedToManagedSlotError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+  DEVICE_ASSIGNED_TO_BINDING_CODE,
+  DeviceAssignedToBindingError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -26,9 +26,9 @@ import {
 } from "../../src/server/videoRecordingManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 /** Records each platform kill and stops there, so an admitted call proves only that it got past the gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {
@@ -46,15 +46,15 @@ class RecordingKillDeviceManager extends FakeDeviceUtils {
  * drive it. The managed-slot gate refuses every caller but the slot's own execution; `force` does
  * not override it.
  */
-describe("managed-slot lifecycle and input exclusion", () => {
+describe("binding lifecycle and input exclusion", () => {
   const slotDevice: BootedDevice = { name: "iPhone Slot", deviceId: "IOS-SLOT", platform: "ios" };
   const freeDevice: BootedDevice = { name: "iPhone Free", deviceId: "IOS-FREE", platform: "ios" };
   const exec = "slot-exec";
 
   let manager: RecordingKillDeviceManager;
   let sessionManager: SessionManager;
-  let registry: FakeSlotRegistry;
-  let slot: SlotKey;
+  let registry: FakeBindingRegistry;
+  let binding: BindingKey;
   let lifecycleCoordinator: InMemoryVirtualDeviceLifecycleCoordinator;
 
   const tool = (name: string) => ToolRegistry.getTool(name)!.handler;
@@ -98,15 +98,15 @@ describe("managed-slot lifecycle and input exclusion", () => {
       clearInstalledAppsForDevice: async () => {},
       timer,
     });
-    registry = new FakeSlotRegistry(timer);
-    slot = await assignManagedSlotDevice(registry, "ios", slotDevice.deviceId, "runner-a", exec);
+    registry = new FakeBindingRegistry(timer);
+    binding = await assignBindingDevice(registry, "ios", slotDevice.deviceId, "runner-a", exec);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "managed-slot-lifecycle", {
         timer,
         deviceManager: manager,
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     await pool.initializeWithDevices([slotDevice, freeDevice]);
@@ -123,7 +123,7 @@ describe("managed-slot lifecycle and input exclusion", () => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("killDevice of an idle slot device is refused for sessionless, other-session and forced callers", async () => {
+  test("killDevice of an idle binding device is refused for sessionless, other-session and forced callers", async () => {
     expect(sessionManager.getSessionForDevice(slotDevice.deviceId)).toBeNull();
     for (const [args, routing] of [
       [{ device: slotDevice }, undefined],
@@ -132,24 +132,24 @@ describe("managed-slot lifecycle and input exclusion", () => {
       [{ device: slotDevice, force: true }, undefined],
     ] as const) {
       const error = await kill(args, routing);
-      expect(error).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+      expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
       expect(
         JSON.parse(
           shapeToolCallError(error, { toolName: "killDevice", source: "MCP" }).content[0].text,
         ),
       ).toMatchObject({
         success: false,
-        code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
+        code: DEVICE_ASSIGNED_TO_BINDING_CODE,
         deviceId: slotDevice.deviceId,
-        scopeKey: slot.scopeKey,
-        declaredSlot: 0,
+        scopeKey: binding.scopeKey,
+        declaredBinding: 0,
         retryable: false,
       });
     }
     expect(manager.killed).toEqual([]);
   });
 
-  test("the slot's execution session reaches the platform kill; unassigned devices are unaffected", async () => {
+  test("the binding's execution session reaches the platform kill; unassigned devices are unaffected", async () => {
     expect(String(await kill({ device: slotDevice }, exec))).toContain("platform kill reached");
     await sessionManager.releaseSession("other-session", "explicit-release");
     expect(String(await kill({ device: freeDevice }))).toContain("platform kill reached");
@@ -157,7 +157,7 @@ describe("managed-slot lifecycle and input exclusion", () => {
     expect(manager.killed).toEqual([slotDevice.deviceId, freeDevice.deviceId]);
   });
 
-  test("deleteDevice of the slot device fails its precondition with slot evidence, force or not", async () => {
+  test("deleteDevice of the binding device fails its precondition with binding evidence, force or not", async () => {
     for (const force of [undefined, true]) {
       const response = (await tool("deleteDevice")(deleteArgs(force))) as {
         content: Array<{ text: string }>;
@@ -167,10 +167,10 @@ describe("managed-slot lifecycle and input exclusion", () => {
         success: false,
         state: "failed",
         failure: {
-          code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
+          code: DEVICE_ASSIGNED_TO_BINDING_CODE,
           phase: "precondition",
-          scopeKey: slot.scopeKey,
-          declaredSlot: 0,
+          scopeKey: binding.scopeKey,
+          declaredBinding: 0,
           stableId: slotDevice.deviceId,
           retryable: false,
         },
@@ -180,7 +180,7 @@ describe("managed-slot lifecycle and input exclusion", () => {
     expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
   });
 
-  test("a refused deleteDevice does not preempt the slot acquisition preparing the device (#11271)", async () => {
+  test("a refused deleteDevice does not preempt the binding acquisition preparing the device (#11271)", async () => {
     // The managed acquisition booting the slot device holds its lifecycle lease.
     const acquisition = await lifecycleCoordinator.reserve(
       { kind: "stable", platform: "ios", stableId: slotDevice.deviceId },
@@ -205,7 +205,7 @@ describe("managed-slot lifecycle and input exclusion", () => {
     const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
     expect(body).toMatchObject({
       success: false,
-      failure: { code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, phase: "precondition" },
+      failure: { code: DEVICE_ASSIGNED_TO_BINDING_CODE, phase: "precondition" },
     });
     expect(settled).toBe(true);
   });
@@ -242,8 +242,8 @@ describe("managed-slot lifecycle and input exclusion", () => {
     expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
   });
 
-  test("getApple of a stopped slot simulator is refused before any boot or bind", async () => {
-    await assignManagedSlotDevice(registry, "ios", "IOS-STOPPED", "runner-b");
+  test("getApple of a stopped binding simulator is refused before any boot or bind", async () => {
+    await assignBindingDevice(registry, "ios", "IOS-STOPPED", "runner-b");
     manager.setDeviceImages("ios", [
       { name: "iPhone Stopped", platform: "ios", deviceId: "IOS-STOPPED", isRunning: false },
     ]);
@@ -252,16 +252,14 @@ describe("managed-slot lifecycle and input exclusion", () => {
       (caught: unknown) => caught,
     );
 
-    expect((error as DeviceAssignedToManagedSlotError).code).toBe(
-      DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-    );
+    expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
     expect(manager.wasMethodCalled("startDevice")).toBe(false);
     expect(sessionManager.getSessionForDevice("IOS-STOPPED")).toBeNull();
   });
 
-  test("input frames to an idle slot device are refused except from the slot's execution", async () => {
+  test("input frames to an idle binding device are refused except from the binding's execution", async () => {
     const send = (requesterSessionUuid: string | undefined) =>
-      assertInputNotOnForeignManagedSlotDevice({
+      assertInputNotOnForeignBindingDevice({
         action: "input/tap",
         deviceId: slotDevice.deviceId,
         platform: "ios",
@@ -272,12 +270,10 @@ describe("managed-slot lifecycle and input exclusion", () => {
 
     for (const requester of [undefined, "other-session"]) {
       const error = await send(requester).catch((caught: unknown) => caught);
-      expect((error as DeviceAssignedToManagedSlotError).code).toBe(
-        DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-      );
+      expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
     }
     await send(exec);
-    await assertInputNotOnForeignManagedSlotDevice({
+    await assertInputNotOnForeignBindingDevice({
       action: "input/tap",
       deviceId: freeDevice.deviceId,
       platform: "ios",

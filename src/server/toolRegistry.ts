@@ -79,8 +79,8 @@ import {
   managedConnectionPlainToolRefusal,
 } from "../daemon/managedSlots/managedConnectionScope";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
-import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
@@ -1145,18 +1145,18 @@ async function isSessionlessReadTargetHeld(
       pool.getDevice(deviceId)?.platform,
       requestedPlatform,
     )) {
-      await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+      await managedSlotPoolGate(pool).assertNotAssignedToBinding?.({
         action: toolName,
         deviceId,
         platform,
-        maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+        maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
       });
       await assertControlNotOnForeignDaemonDevice({ deviceId, platform, gate: pool });
     }
     return false;
   } catch (error) {
     if (
-      error instanceof DeviceAssignedToManagedSlotError ||
+      error instanceof DeviceAssignedToBindingError ||
       error instanceof DeviceOwnedByOtherDaemonError
     ) {
       // A slot or another daemon holds the device: an expected verdict, so the read watches it.
@@ -2876,7 +2876,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         DaemonState.getInstance().getManagedConnectionScopes().forSlotSession(releaseSessionUuid)
       ) {
         logger.info(
-          `[PlanLifecycle] Keeping managed slot session ${releaseSessionUuid} and its device ` +
+          `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
             "after executePlan: it belongs to its connection",
         );
       } else if (
@@ -3252,12 +3252,12 @@ async function assertManagedSlotControlAccess(input: {
     pool.getDevice(deviceId)?.platform,
     input.platform,
   )) {
-    await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+    await managedSlotPoolGate(pool).assertNotAssignedToBinding?.({
       action: input.toolName,
       deviceId,
       platform,
       requesterSessionUuid,
-      maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+      maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
     });
     // A device no local session holds may be another daemon's (#11349).
     await assertControlNotOnForeignDaemonDevice({

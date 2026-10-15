@@ -34,7 +34,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * the new socket is a generic connection: `getAndroid`, `startDevice` and `provisionDevice` pass
  * the managed-connection gate.
  */
-describe("managed proxy re-bind after its slot session ended (#11399)", () => {
+describe("managed proxy re-bind after its binding session ended (#11399)", () => {
   const SLOT_SESSION = "00000000-0000-4000-8000-000000000001";
   const TOKEN = "managed-proxy-token";
   const SCOPE = "scope-a";
@@ -150,13 +150,13 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
           return client;
         },
       });
-      await proxy.acquireManagedSlots({
+      await proxy.acquireBindings({
         contractVersion: 1,
         managedHostScope: "host",
         runnerNamespace: "runner",
         runnerIncarnation: "boot",
-        localSlotCapacity: 1,
-        requests: [{ slotIndex: 1, role: "primary", platform: "android", requestedSpec: {} }],
+        localBindingCapacity: 1,
+        requests: [{ bindingIndex: 1, role: "primary", platform: "android", requestedSpec: {} }],
       });
       reconnectFixturePending = true;
     });
@@ -211,14 +211,14 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
         drained.push(sessionId);
         return {
           sessionId,
-          outcome: "reusable_for_this_slot",
+          outcome: "reusable_for_this_binding",
           settlement: "confirmed",
           alreadyReleased: false,
           cancellationRequested: 0,
           releaseForced: false,
           device: null,
-          slots: [],
-          slotFailures: [],
+          bindings: [],
+          bindingFailures: [],
         };
       },
     });
@@ -231,7 +231,7 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
         params: {
           sessionId: SLOT_SESSION,
           clientName: "managed-proxy",
-          managedSlots: {
+          bindings: {
             scopeKey: SCOPE,
             sessionUuids: [SLOT_SESSION, "00000000-0000-4000-8000-000000000002"],
             livenessOwnerToken: TOKEN,
@@ -295,7 +295,7 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
         params: {
           sessionId: SLOT_SESSION,
           clientName: "managed-proxy",
-          managedSlots: {
+          bindings: {
             scopeKey: SCOPE,
             sessionUuids: [SLOT_SESSION],
             livenessOwnerToken: TOKEN,

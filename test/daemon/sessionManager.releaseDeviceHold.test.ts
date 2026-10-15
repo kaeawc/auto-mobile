@@ -244,14 +244,14 @@ describe("session release device ownership hold", () => {
       return { settled: hold.promise, capMs: 10_000 };
     });
     const first = manager.releaseSession(SESSION, "daemon-shutdown");
-    const joined = manager.releaseSession(SESSION, "managed-slot-ownership-lost");
+    const joined = manager.releaseSession(SESSION, "binding-ownership-lost");
     expect(resolves).toBe(1);
     hold.resolve("skip-device-writes");
     expect(await first).toBe(DEVICE);
     expect(await joined).toBe(DEVICE);
     expect(writes).toEqual([]);
     expect(manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(
-      "managed-slot-ownership-lost",
+      "binding-ownership-lost",
     );
   });
 

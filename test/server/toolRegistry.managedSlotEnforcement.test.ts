@@ -12,14 +12,16 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
-  DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+import {
+  DEVICE_ASSIGNED_TO_BINDING_CODE,
+  DeviceAssignedToBindingError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { assertManagedConnectionPlainToolCall } from "../../src/server/managedConnectionToolGate";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -31,18 +33,18 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 /**
  * #11178 part b: the device-aware tool path refuses control of a device another managed slot holds
  * (idle or not, explicit deviceId or resolved target), and confines a managed connection's control
  * to its own slot devices and sessions. Reads stay open everywhere (owner decision Q6).
  */
-describe("ToolRegistry managed-slot enforcement (#11178)", () => {
-  const slotA: BootedDevice = { name: "Slot A", deviceId: "IOS-SLOT-A", platform: "ios" };
-  const slotB: BootedDevice = { name: "Slot B", deviceId: "IOS-SLOT-B", platform: "ios" };
+describe("ToolRegistry binding enforcement (#11178)", () => {
+  const slotA: BootedDevice = { name: "Binding A", deviceId: "IOS-SLOT-A", platform: "ios" };
+  const slotB: BootedDevice = { name: "Binding B", deviceId: "IOS-SLOT-B", platform: "ios" };
   const free: BootedDevice = { name: "Free", deviceId: "IOS-FREE", platform: "ios" };
   const execA = "exec-a";
   const mcpA = "mcp-socket-a";
@@ -53,8 +55,8 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
   let originalNavigationRecorder: unknown;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
-  let registry: FakeSlotRegistry;
-  let keyA: SlotKey;
+  let registry: FakeBindingRegistry;
+  let keyA: BindingKey;
   let timer: FakeTimer;
 
   const call = (name: string, args: Record<string, unknown>) =>
@@ -93,10 +95,10 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
     Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
 
     timer = new FakeTimer();
-    registry = new FakeSlotRegistry(timer);
-    keyA = await assignManagedSlotDevice(registry, "ios", slotA.deviceId, "runner-a", execA);
+    registry = new FakeBindingRegistry(timer);
+    keyA = await assignBindingDevice(registry, "ios", slotA.deviceId, "runner-a", execA);
     // Slot B is assigned but idle: no session holds it.
-    await assignManagedSlotDevice(registry, "ios", slotB.deviceId, "runner-b");
+    await assignBindingDevice(registry, "ios", slotB.deviceId, "runner-b");
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -105,7 +107,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
       createDevicePoolDependencies(sessionManager, "managed-slot-enforcement", {
         timer,
         deviceManager: fakeDeviceUtils,
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     await pool.initializeWithDevices([slotA, slotB, free]);
@@ -144,26 +146,24 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("a generic control call on another slot's idle device is refused; a read is not", async () => {
+  test("a generic control call on another binding's idle device is refused; a read is not", async () => {
     const refused = await outcome("controlProbe", { platform: "ios", deviceId: slotB.deviceId });
-    expect(refused).toBeInstanceOf(DeviceAssignedToManagedSlotError);
-    expect((refused as DeviceAssignedToManagedSlotError).code).toBe(
-      DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
-    );
+    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
+    expect((refused as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
 
     await call("readProbe", { platform: "ios", deviceId: slotB.deviceId });
     expect(handled).toEqual([`read:${slotB.deviceId}`]);
   });
 
-  test("a slot's own execution controls its device; it cannot reach another slot's", async () => {
+  test("a binding's own execution controls its device; it cannot reach another binding's", async () => {
     await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
     expect(handled).toEqual([`control:${slotA.deviceId}`]);
 
     const refused = await outcome("controlProbe", { sessionUuid: execA, deviceId: slotB.deviceId });
-    expect(refused).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
   });
 
-  test("a released execution loses control of the slot device even though its session lives on", async () => {
+  test("a released execution loses control of the binding device even though its session lives on", async () => {
     await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
     await registry.releaseExecution(keyA, execA);
     // Control calls share one registry read per second; the next read sees the cleared owner.
@@ -171,7 +171,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
 
     const refused = await outcome("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
 
-    expect(refused).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
     expect(handled).toEqual([`control:${slotA.deviceId}`]);
   });
 
@@ -182,7 +182,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
         .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
     });
 
-    test("controls its slot device", async () => {
+    test("controls its binding device", async () => {
       await call("controlProbe", {
         sessionUuid: execA,
         deviceId: slotA.deviceId,
@@ -230,7 +230,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
 
     // #11397: a plan step or nested tool call never passes the MCP ingress and carries no socket
     // session id; it is confined by the slot session it runs on.
-    test("an internal call on its slot session may not reach lifecycle tools", async () => {
+    test("an internal call on its binding session may not reach lifecycle tools", async () => {
       ToolRegistry.register("getAndroid", "Acquire probe", z.object({}).passthrough(), async () => {
         handled.push("acquire");
         return { success: true };
@@ -261,7 +261,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
     });
 
     // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
-    test("a sessionless plan step may name its slot session, not one another connection owns", async () => {
+    test("a sessionless plan step may name its binding session, not one another connection owns", async () => {
       const asManagedConnection = (sessionUuid: string): Promise<unknown> =>
         runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
           ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
@@ -290,7 +290,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
       expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
-    test("an internal call on its slot session may not control an unassigned device", async () => {
+    test("an internal call on its binding session may not control an unassigned device", async () => {
       let refused: unknown;
       try {
         await ToolRegistry.callInternal(
@@ -344,7 +344,7 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
       // Stopping is lifecycle too: even its own slot device stops only through slot release (#11271).
       const ownKill = gate(
         "killDevice",
-        { device: { deviceId: slotA.deviceId, name: "Slot A", platform: "ios" } },
+        { device: { deviceId: slotA.deviceId, name: "Binding A", platform: "ios" } },
         execA,
       );
       expect(ownKill).toThrow(DeviceOutsideManagedSlotsError);
@@ -482,7 +482,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
   });
 
-  test("mixed managed slots preserve the bound-session platform refusal", async () => {
+  test("mixed bindings preserve the bound-session platform refusal", async () => {
     await manager.createSession(IOS_SESSION, iosDevice.deviceId, "ios");
     manager.setDeviceReadiness(IOS_SESSION, "automationReady");
     DaemonState.getInstance()
@@ -498,14 +498,14 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect(answer.isError).toBe(true);
     const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
     expect(payload).toMatchObject({ code: "device_outside_bound_session", platform: "ios" });
-    expect(payload.error).not.toContain("None of its slot devices");
+    expect(payload.error).not.toContain("None of its binding devices");
     expect(tools.runs).toEqual([]);
     expect(sessions.map(({ expiresAt, lastUsedAt }) => ({ expiresAt, lastUsedAt }))).toEqual(
       clocks,
     );
   });
 
-  test("a platform-only read outside managed slots explains deviceId access", async () => {
+  test("a platform-only read outside bindings explains deviceId access", async () => {
     DaemonState.getInstance()
       .getManagedConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });

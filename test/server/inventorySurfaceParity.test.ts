@@ -7,7 +7,7 @@ import {
 import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
@@ -27,7 +27,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { type DiscoverySource, discoverySourceFor } from "../../src/utils/discoverySource";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -36,7 +36,7 @@ import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -228,15 +228,15 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    name: "managed-slot held",
+    name: "binding held",
     async build(ctx) {
-      const registry = new FakeSlotRegistry(ctx.timer);
-      await assignManagedSlotDevice(registry, "android", android.name);
+      const registry = new FakeBindingRegistry(ctx.timer);
+      await assignBindingDevice(registry, "android", android.name);
       const pool = poolFor(ctx, {
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, ctx.timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, ctx.timer),
       });
       await pool.initializeWithDevices([android]);
-      await pool.managedSlotStableIds("android");
+      await pool.bindingStableIds("android");
       return { pool, discovered: [android] };
     },
   },

@@ -84,14 +84,14 @@ test("a managed daemon stall tells the agent to wait for automatic reclaim", () 
 
 test("generic and failed managed daemon stalls keep the generic payload byte for byte", () => {
   const failed = { ...readyManagedSlotsResult(SESSION), outcome: "failed" as const };
-  for (const managedSlots of [undefined, failed]) {
-    const payloads = livenessHandoverNotificationPayloads(stalled, managedSlots);
+  for (const bindings of [undefined, failed]) {
+    const payloads = livenessHandoverNotificationPayloads(stalled, bindings);
     expect(payloads).toEqual([livenessHandoverPayload(stalled)]);
     expect(JSON.stringify(payloads[0])).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
   }
 });
 
-test("a mixed daemon stall keeps non-slot sessions on the generic notification", () => {
+test("a mixed daemon stall keeps non-binding sessions on the generic notification", () => {
   const other = { ...stalled.sessions[0], sessionUuid: OTHER };
   const mixed = { ...stalled, sessions: [other, stalled.sessions[0]] };
   const managed = livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(SESSION));
@@ -101,33 +101,33 @@ test("a mixed daemon stall keeps non-slot sessions on the generic notification",
   ]);
 });
 
-test("a daemon stall with only non-slot sessions keeps the generic notification byte for byte", () => {
+test("a daemon stall with only non-binding sessions keeps the generic notification byte for byte", () => {
   const payloads = livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(OTHER));
   expect(payloads).toEqual([livenessHandoverPayload(stalled)]);
   expect(JSON.stringify(payloads[0])).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
 });
 
-test("a lost session that is not one of the connection's slots keeps the handover", () => {
-  const managedSlots = readyManagedSlotsResult(SESSION);
+test("a lost session that is not one of the connection's bindings keeps the handover", () => {
+  const bindings = readyManagedSlotsResult(SESSION);
   const other = { ...handover.sessions[0], sessionUuid: OTHER };
   const mixed = { ...handover, sessions: [handover.sessions[0], other] };
-  expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
-    managedEndedPayload(managedSlots, SESSION, "session-not-found"),
+  expect(livenessHandoverNotificationPayloads(mixed, bindings)).toEqual([
+    managedEndedPayload(bindings, SESSION, "session-not-found"),
     livenessHandoverPayload({ ...handover, sessions: [other] }),
   ]);
 });
 
 test("a multi-session handover reports each managed session's own reason", () => {
-  const managedSlots = readyManagedSlotsResult(SESSION);
-  managedSlots.slots.push({ ...managedSlots.slots[0], slotIndex: 2, sessionUuid: OTHER });
+  const bindings = readyManagedSlotsResult(SESSION);
+  bindings.bindings.push({ ...bindings.bindings[0], bindingIndex: 2, sessionUuid: OTHER });
   const mixed = {
     ...handover,
     sessions: [handover.sessions[0], { ...handover.sessions[0], sessionUuid: OTHER }],
     releaseReasons: { [SESSION]: "heartbeat-timeout", [OTHER]: "daemon-shutdown" },
   };
-  expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
-    managedEndedPayload(managedSlots, SESSION, "heartbeat-timeout"),
-    managedEndedPayload(managedSlots, OTHER, "daemon-shutdown"),
+  expect(livenessHandoverNotificationPayloads(mixed, bindings)).toEqual([
+    managedEndedPayload(bindings, SESSION, "heartbeat-timeout"),
+    managedEndedPayload(bindings, OTHER, "daemon-shutdown"),
   ]);
   expect(livenessHandoverPayload(mixed)).toEqual(
     livenessHandoverPayload({ ...mixed, releaseReasons: undefined }),

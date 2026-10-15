@@ -5,12 +5,12 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DeviceAssignedToManagedSlotError,
-  MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
-  ManagedSlotDiscoveryIncompleteError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BINDING_DISCOVERY_INCOMPLETE_CODE,
+  BindingDiscoveryIncompleteError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import {
   DeviceCleanupInProgressError,
@@ -99,9 +99,9 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
         timer,
         deviceManager: manager,
         iosForeignDeviceOwnership: peerOwnership,
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => {
+        bindingExclusion: new RegistryBindingExclusion(async () => {
           if (!registryReadable) {
-            throw new Error("slot registry locked");
+            throw new Error("binding registry locked");
           }
           return { snapshotManagedDevices: async () => [] } as never;
         }, timer),
@@ -153,18 +153,18 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
     expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
   });
 
-  test("an unreadable managed-slot registry is a typed retryable refusal, not operation_failed", async () => {
+  test("an unreadable binding registry is a typed retryable refusal, not operation_failed", async () => {
     registryReadable = false;
     const killed = await killWire();
     expect(killed).toMatchObject({
-      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
 
     const deleted = await deleteBody();
     // Fails closed (nothing is destroyed) but loses its type: code is "operation_failed".
     expect(deleted.failure).toMatchObject({
-      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
     expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
@@ -189,8 +189,8 @@ describe("deleteDevice failure mapping agrees with killDevice's wire shaping", (
   const slotEntry = {
     platform: "ios",
     stableDeviceId: "IOS-PEER",
-    holder: "slot",
-    slotIndex: 1,
+    holder: "binding",
+    bindingIndex: 1,
   } as never;
   const cases: Array<[string, () => unknown]> = [
     [
@@ -200,11 +200,8 @@ describe("deleteDevice failure mapping agrees with killDevice's wire shaping", (
     ["owned by another daemon", () => new DeviceOwnedByOtherDaemonError("IOS-PEER", 4242)],
     ["shutting down", () => new DeviceShuttingDownError("IOS-PEER")],
     ["cleanup in progress", () => new DeviceCleanupInProgressError("IOS-PEER", 750)],
-    [
-      "managed slot",
-      () => new DeviceAssignedToManagedSlotError("deleteDevice", "IOS-PEER", slotEntry),
-    ],
-    ["discovery incomplete", () => new ManagedSlotDiscoveryIncompleteError("registry locked")],
+    ["managed slot", () => new DeviceAssignedToBindingError("deleteDevice", "IOS-PEER", slotEntry)],
+    ["discovery incomplete", () => new BindingDiscoveryIncompleteError("registry locked")],
     [
       "terminal release in progress",
       () =>

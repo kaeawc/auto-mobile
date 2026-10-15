@@ -28,7 +28,7 @@ import type { EmulatorLossIncident, EmulatorLossIncidentStore } from "./emulator
 import type { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import type { IdleDeviceReaper, IosLivenessSnapshot } from "./idleDeviceReaper";
-import type { ManagedSlotExclusion } from "./managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   SessionRecoveryIdentityLossError,
@@ -59,7 +59,7 @@ export interface DeviceAllocationPort extends Pick<
   readonly retryExecutor: Pick<RetryExecutor, "execute">;
   readonly emulatorLossIncidentStore: Pick<EmulatorLossIncidentStore, "list">;
   readonly emulatorLossLedger: Pick<EmulatorLossIncidentLedger, "emulatorLossRecoverySettlements">;
-  readonly managedSlotExclusion: Pick<ManagedSlotExclusion, "refresh"> | undefined;
+  readonly bindingExclusion: Pick<BindingExclusion, "refresh"> | undefined;
   readonly devices: Pick<ReadonlyMap<string, PooledDevice>, "get" | "size">;
   readonly idleDeviceReaper: Pick<
     IdleDeviceReaper,
@@ -428,9 +428,9 @@ export class DeviceAllocation {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    if (!recoveryTarget && this.port.managedSlotExclusion) {
+    if (!recoveryTarget && this.port.bindingExclusion) {
       // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
-      await this.port.managedSlotExclusion.refresh({ requireCurrent: true });
+      await this.port.bindingExclusion.refresh({ requireCurrent: true });
     }
     if (!recoveryTarget && this.port.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform);

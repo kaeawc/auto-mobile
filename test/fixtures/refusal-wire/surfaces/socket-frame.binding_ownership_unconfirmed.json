@@ -1,0 +1,16 @@
+{
+  "surface": "socket-frame",
+  "name": "binding_ownership_unconfirmed",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Session '11111111-2222-4333-8444-555555555555' binding ownership is not recorded for this daemon yet (the binding registry is busy or the binding is not ready); retry shortly.",
+    "code": "binding_ownership_unconfirmed",
+    "retryable": true,
+    "retryAfterMs": 1000,
+    "details": {
+      "sessionUuid": "11111111-2222-4333-8444-555555555555"
+    }
+  }
+}

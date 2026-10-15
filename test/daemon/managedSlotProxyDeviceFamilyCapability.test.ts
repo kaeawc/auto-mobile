@@ -4,7 +4,8 @@ import {
   acquireManagedSlotsThroughDaemon,
   type ManagedSlotProxyAcquisitionPorts,
 } from "../../src/daemon/managedSlotProxyAcquisition";
-import { parseManagedSlotConfig, type ManagedSlotConfig } from "../../src/models/managedSlotConfig";
+import { parseBindingConfig } from "../../src/models/managedSlotConfig";
+import { type BrokerProvisionRequest } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
@@ -16,17 +17,17 @@ const SESSION = "session-1";
 function configFor(
   platform: "android" | "ios",
   deviceFamily?: "phone" | "tablet",
-): ManagedSlotConfig {
-  return parseManagedSlotConfig({
+): BrokerProvisionRequest {
+  return parseBindingConfig({
     contractVersion: 1,
     managedHostScope: "host",
     runnerNamespace: "runner",
     runnerIncarnation: "incarnation",
-    localSlotCapacity: 1,
+    localBindingCapacity: 1,
     preparationTimeoutMs: 100,
     requests: [
       {
-        slotIndex: 0,
+        bindingIndex: 0,
         role: "app",
         platform,
         requestedSpec: {
@@ -83,13 +84,13 @@ function rig(options: { capabilities: readonly string[] }) {
   };
 }
 
-async function acquire(config: ManagedSlotConfig, harness: ReturnType<typeof rig>) {
+async function acquire(config: BrokerProvisionRequest, harness: ReturnType<typeof rig>) {
   const pending = acquireManagedSlotsThroughDaemon(config, harness.ports);
   await drainMicrotasks(48);
   return await pending;
 }
 
-describe("managed slot proxy deviceFamily capability", () => {
+describe("binding proxy deviceFamily capability", () => {
   test("forwards the owner PID but omits its proxy-only start identity", async () => {
     const harness = rig({ capabilities: OLD_CAPABILITIES });
     const base = configFor("ios");
@@ -128,7 +129,7 @@ describe("managed slot proxy deviceFamily capability", () => {
       expect(result.failure?.nextAction).toMatch(/upgrade.*daemon/i);
       expect(result.failure?.nextAction).toMatch(/restart/i);
       expect(result.failure?.nextAction).toContain("deviceFamily");
-      expect(result.slots).toEqual([]);
+      expect(result.bindings).toEqual([]);
       expect(harness.calls.map((call) => call.method)).toEqual(["daemon/capabilities"]);
       expect(harness.tracked).toEqual([]);
       expect(harness.held).toEqual([]);

@@ -5,7 +5,7 @@ import {
   MANAGED_EXECUTION_ENDED_CODE,
   RELAUNCH_EXECUTION_NEXT_ACTION,
 } from "../models/deviceSessionRecovery";
-import type { ManagedSlotResultEntry } from "../models/managedSlotsResult";
+import type { BindingResultEntry } from "../daemon/sessionBroker/provisioning/acquisitionResult";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
@@ -89,11 +89,11 @@ export function terminalSessionRefusalFields(ownerPid?: number) {
 export function managedExecutionEndedPayload({
   sessionUuid,
   reason,
-  slot,
+  binding,
 }: {
   sessionUuid?: string;
   reason: string;
-  slot?: Pick<ManagedSlotResultEntry, "slotIndex" | "assignmentGeneration"> | null;
+  binding?: Pick<BindingResultEntry, "bindingIndex" | "assignmentGeneration"> | null;
 }) {
   return {
     error: {
@@ -107,10 +107,10 @@ export function managedExecutionEndedPayload({
       ...idleReleaseField(reason),
       retryable: false as const,
       nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
-      ...(slot
+      ...(binding
         ? {
-            slotIndex: slot.slotIndex,
-            assignmentGeneration: slot.assignmentGeneration,
+            bindingIndex: binding.bindingIndex,
+            assignmentGeneration: binding.assignmentGeneration,
           }
         : {}),
     },

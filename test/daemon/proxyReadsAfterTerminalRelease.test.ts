@@ -138,15 +138,15 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
 
   async function acquireManagedBinding(): Promise<void> {
     expect(proxy.getTerminalSessionRelease()).toBeUndefined();
-    const result = await proxy.acquireManagedSlots({
+    const result = await proxy.acquireBindings({
       contractVersion: 1,
       managedHostScope: "host",
       runnerNamespace: "runner",
       runnerIncarnation: "boot",
-      localSlotCapacity: 1,
+      localBindingCapacity: 1,
       requests: [
         {
-          slotIndex: 1,
+          bindingIndex: 1,
           role: "primary",
           platform: "android",
           requestedSpec: { runtime: "system-images;android-35;google_apis;arm64-v8a" },

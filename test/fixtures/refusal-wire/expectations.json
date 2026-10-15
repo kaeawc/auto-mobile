@@ -3,15 +3,27 @@
   "codes": {
     "prototype_hidden": {
       "expected": "fail",
-      "fields": { "code": "prototype_hidden", "retryable": false, "acquireNewSession": false }
+      "fields": {
+        "code": "prototype_hidden",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     },
     "prototype_suspended": {
       "expected": "fail",
-      "fields": { "code": "prototype_suspended", "retryable": false, "acquireNewSession": false }
+      "fields": {
+        "code": "prototype_suspended",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     },
     "orphan_recorder_active": {
       "expected": "retry",
-      "fields": { "code": "orphan_recorder_active", "retryable": true, "acquireNewSession": false }
+      "fields": {
+        "code": "orphan_recorder_active",
+        "retryable": true,
+        "acquireNewSession": false
+      }
     },
     "ambiguous_session_selector": {
       "expected": "fail",
@@ -73,10 +85,10 @@
         "acquireNewSession": false
       }
     },
-    "device_assigned_to_managed_slot": {
+    "device_assigned_to_binding": {
       "expected": "fail",
       "fields": {
-        "code": "device_assigned_to_managed_slot",
+        "code": "device_assigned_to_binding",
         "retryable": false,
         "acquireNewSession": false
       }
@@ -164,16 +176,16 @@
         "acquireNewSession": false
       }
     },
-    "managed_slot_ownership_unconfirmed": {
+    "binding_ownership_unconfirmed": {
       "expected": "retry",
       "fields": {
-        "code": "managed_slot_ownership_unconfirmed",
+        "code": "binding_ownership_unconfirmed",
         "retryable": true,
         "acquireNewSession": false,
         "retryAfterMs": 1000
       }
     },
-    "session_ownership_lost.managed_slot_ownership_lost_at_gate": {
+    "session_ownership_lost.binding_ownership_lost_at_gate": {
       "expected": "acquire-new-session",
       "fields": {
         "code": "session_ownership_lost",
@@ -189,234 +201,234 @@
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.cancelled": {
+    "binding_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.capacity_exhausted": {
+    "binding_acquisition_failed.capacity_exhausted": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.capacity_exhausted.capacity": {
+    "binding_acquisition_failed.capacity_exhausted.capacity": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.capacity_exhausted.capacity_external": {
+    "binding_acquisition_failed.capacity_exhausted.capacity_external": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.cleanup_pending": {
+    "binding_acquisition_failed.cleanup_pending": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.concurrent_modification": {
+    "binding_acquisition_failed.concurrent_modification": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.contract_unsupported": {
+    "binding_acquisition_failed.contract_unsupported": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.registry_schema_unsupported": {
+    "binding_acquisition_failed.registry_schema_unsupported": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.daemon_unavailable": {
+    "binding_acquisition_failed.daemon_unavailable": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.device_busy": {
+    "binding_acquisition_failed.device_busy": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.discovery_incomplete": {
+    "binding_acquisition_failed.discovery_incomplete": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.execution_hold_failed": {
+    "binding_acquisition_failed.execution_hold_failed": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.execution_policy_failed": {
+    "binding_acquisition_failed.execution_policy_failed": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.liveness_owner_conflict": {
+    "binding_acquisition_failed.liveness_owner_conflict": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.managed_slot_config_invalid": {
+    "binding_acquisition_failed.binding_config_invalid": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.managed_slot_group_unsupported": {
+    "binding_acquisition_failed.binding_group_unsupported": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.managed_slots_unsupported": {
+    "binding_acquisition_failed.bindings_unsupported": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.provision_failed": {
+    "binding_acquisition_failed.provision_failed": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.readiness_incomplete": {
+    "binding_acquisition_failed.readiness_incomplete": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.reconcile_in_progress": {
+    "binding_acquisition_failed.reconcile_in_progress": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.runtime_incompatible": {
+    "binding_acquisition_failed.runtime_incompatible": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.scope_invalidated": {
+    "binding_acquisition_failed.scope_invalidated": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.scope_not_valid": {
+    "binding_acquisition_failed.scope_not_valid": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.scope_transition_pending": {
+    "binding_acquisition_failed.scope_transition_pending": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.slot_in_use": {
+    "binding_acquisition_failed.binding_in_use": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.slot_settling": {
+    "binding_acquisition_failed.binding_settling": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.spec_unsupported": {
+    "binding_acquisition_failed.spec_unsupported": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.stale_session": {
+    "binding_acquisition_failed.stale_session": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.timeout": {
+    "binding_acquisition_failed.timeout": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
@@ -733,7 +745,7 @@
         "acquireNewSession": true
       }
     },
-    "session_ownership_lost.released_managed_slot_ownership_lost": {
+    "session_ownership_lost.released_binding_ownership_lost": {
       "expected": "acquire-new-session",
       "fields": {
         "code": "session_ownership_lost",
@@ -779,18 +791,18 @@
         "recovering": true
       }
     },
-    "managed_slot_acquisition_failed.managed_slot_budget_exhausted.budget": {
+    "binding_acquisition_failed.binding_budget_exhausted.budget": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }
     },
-    "managed_slot_acquisition_failed.managed_slot_budget_exhausted": {
+    "binding_acquisition_failed.binding_budget_exhausted": {
       "expected": "fail",
       "fields": {
-        "code": "managed_slot_acquisition_failed",
+        "code": "binding_acquisition_failed",
         "retryable": false,
         "acquireNewSession": false
       }

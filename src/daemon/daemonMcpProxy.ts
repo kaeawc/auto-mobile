@@ -186,16 +186,19 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "./sessionBroker/provisioning/executionLiveness";
 import {
   TimerManagedConnectionRebind,
   classifyManagedConnectionRebindFailure,
   type ManagedConnectionRebind,
 } from "./managedSlots/managedConnectionRebind";
 import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
-import { RegistryRetryPacing } from "./managedSlots/registryRetryPacing";
-import type { ManagedSlotConfig } from "../models/managedSlotConfig";
-import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
+import { RegistryRetryPacing } from "./sessionBroker/registry/registryRetryPacing";
+import type { BrokerProvisionRequest } from "./sessionBroker/provisioning/provisionRequest";
+import {
+  bindingForSession,
+  type BindingsResult,
+} from "./sessionBroker/provisioning/acquisitionResult";
 import {
   acquireSessionThroughDaemon,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
@@ -626,7 +629,7 @@ function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): 
       ? String(result.outcome)
       : "unknown";
   const message = `[DaemonMcpProxy] Released managed execution session ${sessionId}: ${outcome}`;
-  if (outcome === "reusable_for_this_slot") {
+  if (outcome === "reusable_for_this_binding") {
     logger.info(message);
   } else {
     logger.warn(message);
@@ -875,7 +878,7 @@ export class DaemonMcpProxy {
   /** Slot sessions whose acquisition abandoned its hold; never resumed or re-held (#12055). */
   private readonly abandonedManagedSessions = new Set<string>();
   /** The managed slot acquisition's result, once it ran (#11173). */
-  private managedSlotsResult: ManagedSlotsResult | undefined;
+  private managedSlotsResult: BindingsResult | undefined;
   /** The grants' scope is available before their holds finish and publish ready. */
   private acquiringManagedSlotBinding:
     | {
@@ -1337,7 +1340,7 @@ export class DaemonMcpProxy {
           throw error;
         }
         // Expected daemon outages and pending rehydration must not publish ready.
-        logger.debug(`[ManagedSlots] Waiting to acknowledge hold for ${hold.sessionUuid}`, error);
+        logger.debug(`[Bindings] Waiting to acknowledge hold for ${hold.sessionUuid}`, error);
         const registration =
           error instanceof ManagedExecutionRegistrationError
             ? classifyManagedConnectionRebindFailure(error.cause)
@@ -1360,7 +1363,7 @@ export class DaemonMcpProxy {
    * the config's preparation deadline and aborted by {@link close}. Never throws: a failure is a
    * typed `failed` result, which the MCP server exposes instead of device tools.
    */
-  async acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> {
+  async acquireBindings(config: BrokerProvisionRequest): Promise<BindingsResult> {
     const abort = new AbortController();
     let acquiredSessions: readonly string[] = [];
     this.managedSlotsAcquisitionAbort = abort;
@@ -1537,11 +1540,11 @@ export class DaemonMcpProxy {
         client.callDaemonMethod(
           DAEMON_RELEASE_BROKER_SESSION_METHOD,
           { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
-          { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+          { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
         ),
       {
         timer: this.timer,
-        timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+        timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
         label: `Release broker session ${sessionUuid}`,
       },
     );
@@ -1659,7 +1662,7 @@ export class DaemonMcpProxy {
       await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
         sessionId: binding.sessionUuids[0],
         clientName: MANAGED_SLOT_PROXY_CLIENT_NAME,
-        managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
+        bindings: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
       });
       if (sameSocket() && this.acquiringManagedSlotBinding?.scopeKey === binding.scopeKey) {
         this.acquiringManagedSlotBinding.boundClient = client;
@@ -1693,7 +1696,7 @@ export class DaemonMcpProxy {
   }
 
   /** The managed slot acquisition result, once {@link acquireManagedSlots} ran. */
-  getManagedSlotsResult(): ManagedSlotsResult | undefined {
+  getManagedSlotsResult(): BindingsResult | undefined {
     return this.managedSlotsResult;
   }
 
@@ -1731,7 +1734,7 @@ export class DaemonMcpProxy {
             DAEMON_RELEASE_EXECUTION_METHOD,
             // The daemon refuses a release by anyone but the session's current owner (#11232).
             { sessionId, livenessOwnerToken: this.livenessOwnerToken },
-            { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+            { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
           );
           logManagedExecutionReleaseOutcome(sessionId, result);
         } catch (error) {
@@ -1792,11 +1795,11 @@ export class DaemonMcpProxy {
               client.callDaemonMethod(
                 DAEMON_RELEASE_SESSION_METHOD,
                 { sessionId, livenessOwnerToken: this.livenessOwnerToken },
-                { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+                { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
               ),
             {
               timer: this.timer,
-              timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+              timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
               label: `Release owned session ${sessionId}`,
             },
           );
@@ -4283,7 +4286,7 @@ export class DaemonMcpProxy {
     return (
       terminal !== undefined &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
-      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) !== null
+      (bindingForSession(this.managedSlotsResult, terminal.sessionUuid) !== null
         ? typeof args.deviceId === "string" && args.deviceId.trim().length > 0
         : this.releaseSurfacedFor === terminal.sessionUuid) &&
       this.isDeviceReadOnlyTool(name, args)

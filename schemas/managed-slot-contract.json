@@ -2,7 +2,10 @@
   "$comment": "Managed-slot contract published with the package (#12060). test/models/managedSlotContract.test.ts fails when the code drifts from this file; update both together.",
   "contractFileVersion": 1,
   "contractVersions": [1],
-  "launchConfig": { "flag": "--managed-slot-config", "env": "AUTOMOBILE_MANAGED_SLOT_CONFIG" },
+  "launchConfig": {
+    "flag": "--managed-slot-config",
+    "env": "AUTOMOBILE_MANAGED_SLOT_CONFIG"
+  },
   "capabilityProbeMethod": "daemon/capabilities",
   "acquireMethod": "daemon/acquireManagedSlots",
   "initializeExperimentalKey": "automobile/managedSlots",
@@ -17,10 +20,10 @@
   },
   "maxGroupSize": 1,
   "configErrorCodes": [
-    "managed_slot_config_invalid",
+    "binding_config_invalid",
     "contract_unsupported",
-    "managed_slot_group_unsupported",
-    "managed_slots_unsupported"
+    "binding_group_unsupported",
+    "bindings_unsupported"
   ],
   "registry": {
     "migrations": [
@@ -52,7 +55,11 @@
     {
       "id": "v1-on-current-daemon",
       "description": "A single-slot v1 frontend can acquire on the current daemon.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
       "supported": true,
       "outcome": "acquire",
@@ -62,7 +69,11 @@
     {
       "id": "frontend-daemon-build-mismatch",
       "description": "A frontend whose daemon handshake reports a version or build mismatch is refused before acquisition.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
       "supported": false,
       "outcome": "contract_unsupported",
@@ -73,7 +84,11 @@
     {
       "id": "v1-on-v1-only-daemon",
       "description": "A base v1 config can acquire on a daemon advertising only the base capability.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": ["managed-slots/v1"],
       "supported": true,
       "outcome": "acquire",
@@ -83,7 +98,11 @@
     {
       "id": "device-family-on-v1-only-daemon",
       "description": "A deviceFamily config is refused by a daemon lacking its additive capability.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": true },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": true
+      },
       "daemonCapabilities": ["managed-slots/v1"],
       "supported": false,
       "outcome": "contract_unsupported",
@@ -93,7 +112,11 @@
     {
       "id": "device-family-on-current-daemon",
       "description": "A deviceFamily config can acquire when the daemon advertises its additive capability.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": true },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": true
+      },
       "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
       "supported": true,
       "outcome": "acquire",
@@ -103,7 +126,11 @@
     {
       "id": "any-on-daemon-without-managed-slots",
       "description": "A managed frontend is refused by a daemon without managed-slot support, including 0.0.84.",
-      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 1,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": [],
       "supported": false,
       "outcome": "contract_unsupported",
@@ -113,7 +140,11 @@
     {
       "id": "contract-version-2",
       "description": "Contract version 2 is refused during config parsing.",
-      "frontend": { "contractVersion": 2, "groupSize": 1, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 2,
+        "groupSize": 1,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
       "supported": false,
       "outcome": "contract_unsupported",
@@ -123,10 +154,14 @@
     {
       "id": "multi-device-group",
       "description": "Groups of two devices are refused during config parsing.",
-      "frontend": { "contractVersion": 1, "groupSize": 2, "usesDeviceFamily": false },
+      "frontend": {
+        "contractVersion": 1,
+        "groupSize": 2,
+        "usesDeviceFamily": false
+      },
       "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
       "supported": false,
-      "outcome": "managed_slot_group_unsupported",
+      "outcome": "binding_group_unsupported",
       "refusedBeforeMutation": true,
       "verifiedBy": "unit-test"
     },

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { androidTransportCouldAliasHeldDevice } from "../../src/daemon/frameDeviceIdentity";
-import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import type { ManagedDeviceEntry } from "../../src/daemon/managedSlots/slotRegistry";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import type { ManagedDeviceEntry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { BootedDevice } from "../../src/models";
 import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
@@ -21,7 +21,7 @@ const row = (deviceId: string, transportId = deviceId): BootedDevice =>
   withAndroidTransportId({ deviceId, name: deviceId, platform: "android" }, transportId);
 const timers: FakeTimer[] = [];
 afterEach(() => timers.splice(0).forEach((timer) => timer.reset()));
-function harness(managedSlotExclusion?: ManagedSlotExclusion) {
+function harness(bindingExclusion?: BindingExclusion) {
   const timer = new FakeTimer();
   timers.push(timer);
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -36,7 +36,7 @@ function harness(managedSlotExclusion?: ManagedSlotExclusion) {
       deviceManager: manager,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       androidAdbFactory: new FakeAdbClientFactory(adb),
-      managedSlotExclusion,
+      bindingExclusion,
     }),
   );
   return { pool, adb, manager, timer };
@@ -166,19 +166,19 @@ describe("positive evidence distinguishing an unassignable control transport", (
   });
 });
 
-describe("managed-slot Android hold snapshot", () => {
+describe("binding Android hold snapshot", () => {
   test("refreshes with the input's one-second budget and counts only unrepresented Android holds", async () => {
     const entry: ManagedDeviceEntry = {
       platform: "android",
       stableDeviceId: "Pixel",
-      holder: "slot",
+      holder: "binding",
       scopeKey: "scope",
-      slotIndex: 0,
+      bindingIndex: 0,
       scopeState: "valid",
       execSessionUuid: "slot-session",
     };
     const refreshes: unknown[] = [];
-    const exclusion: ManagedSlotExclusion = {
+    const exclusion: BindingExclusion = {
       refresh: async (options) => {
         refreshes.push(options);
       },
@@ -192,7 +192,7 @@ describe("managed-slot Android hold snapshot", () => {
   });
 
   test("recognizes a session's pooled emulator by its stable AVD id", async () => {
-    const exclusion: ManagedSlotExclusion = {
+    const exclusion: BindingExclusion = {
       refresh: async () => {},
       stableIdsFor: () => new Set(["Pixel"]),
       holderOf: () => undefined,

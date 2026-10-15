@@ -17,32 +17,32 @@
 import type { BackoffPolicy } from "../../utils/Backoff";
 import type { ActionableError } from "../../models/ActionableError";
 import {
-  ManagedSlotOwnershipLostError,
-  ManagedSlotOwnershipUnconfirmedError,
-} from "./managedSlotRefusal";
+  BindingOwnershipLostError,
+  BindingOwnershipUnconfirmedError,
+} from "../sessionBroker/provisioning/refusal";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { ReleaseDeviceHold } from "../sessionManager";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./managedExecutionRelease";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "../sessionBroker/provisioning/executionRelease";
 import {
   RegistryRetryPacing,
   REGISTRY_RETRY_INITIAL_DELAY_MS,
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
   REGISTRY_BUSY_WRITE_MS,
-} from "./registryRetryPacing";
+} from "../sessionBroker/registry/registryRetryPacing";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
   journalOwnersEqual,
   type ClaimExecutionResult,
-  type SlotAssignmentRecord,
-  type SlotProcessIdentity,
-  type SlotRegistry,
-} from "./slotRegistry";
+  type BindingAssignmentRecord,
+  type BindingProcessIdentity,
+  type BindingRegistry,
+} from "../sessionBroker/registry/bindingRegistry";
 
 export type ManagedExecutionReownRegistry = Pick<
-  SlotRegistry,
+  BindingRegistry,
   "findExecutionAssignments" | "claimExecution"
 >;
 
@@ -54,7 +54,7 @@ export interface ManagedExecutionReownerDependencies {
    */
   registryExists?: () => boolean;
   /** This daemon, as recorded for a slot's execution owner. */
-  owner: () => SlotProcessIdentity;
+  owner: () => BindingProcessIdentity;
   timer?: Timer;
   retryBackoff?: BackoffPolicy;
   /** Live admission for new re-owns; pending holds and present unconfirmed sessions also retry. */
@@ -91,7 +91,7 @@ interface ReleaseHold {
 
 type OwnershipState = "unconfirmed" | "lost";
 type ReownAttempt = {
-  assignments: SlotAssignmentRecord[];
+  assignments: BindingAssignmentRecord[];
   outcome: "confirmed" | "retry" | "lost";
   error?: Error;
 };
@@ -104,7 +104,7 @@ export class ManagedExecutionReowner {
   private readonly attempts = new Map<string, Promise<ReownAttempt>>();
   /** A deadline abandons the waiter, never the operation or its late result. */
   private readonly registryOpens = new Map<string, Promise<ManagedExecutionReownRegistry>>();
-  private readonly ownerReads = new Map<string, Promise<SlotAssignmentRecord[]>>();
+  private readonly ownerReads = new Map<string, Promise<BindingAssignmentRecord[]>>();
   private readonly ownerClaims = new Map<string, Promise<ClaimExecutionResult>>();
   private readonly background = new Map<string, Promise<void>>();
   /** Only a retry waiting for backoff/quiet/a turn can consume a hold's one expedite. */
@@ -135,7 +135,7 @@ export class ManagedExecutionReowner {
   async reown(
     sessionUuids: readonly string[],
     options?: { rehydrated?: boolean },
-  ): Promise<SlotAssignmentRecord[]> {
+  ): Promise<BindingAssignmentRecord[]> {
     if (this.closed || sessionUuids.length === 0 || this.deps.registryExists?.() === false) {
       return [];
     }
@@ -143,7 +143,7 @@ export class ManagedExecutionReowner {
     if (options?.rehydrated) {
       this.markUnconfirmed(sessionUuids.filter((id) => !this.recoveredSessions.has(id)));
     }
-    const assignments: SlotAssignmentRecord[] = [];
+    const assignments: BindingAssignmentRecord[] = [];
     for (const id of sessionUuids) {
       assignments.push(...(await this.reownInline(id)));
     }
@@ -170,7 +170,7 @@ export class ManagedExecutionReowner {
       (error: unknown) => {
         // Failed recovery leaves no usable session; the recovery path reports the failure.
         if (!this.closed) {
-          logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
+          logger.debug(`[Bindings] Recovery of ${sessionUuid} failed before re-owning`, error);
         }
         this.recovering.delete(sessionUuid);
         this.isPresent(sessionUuid);
@@ -259,7 +259,7 @@ export class ManagedExecutionReowner {
 
   private warnDroppedState(id: string, device: string): void {
     logger.warn(
-      `[ManagedSlots] Session ${id} on device ${device}: saved device state was dropped because ownership could not be confirmed.`,
+      `[Bindings] Session ${id} on device ${device}: saved device state was dropped because ownership could not be confirmed.`,
     );
   }
 
@@ -292,7 +292,7 @@ export class ManagedExecutionReowner {
     ) {
       episode.warned = true;
       logger.warn(
-        `[ManagedSlots] Session ${id} ownership unconfirmed for ${ageMs} ms (${episode.attempts} attempts): ${errorMessage(error)}; retries continue`,
+        `[Bindings] Session ${id} ownership unconfirmed for ${ageMs} ms (${episode.attempts} attempts): ${errorMessage(error)}; retries continue`,
         error,
       );
     }
@@ -307,7 +307,7 @@ export class ManagedExecutionReowner {
     }
   }
 
-  private async reownInline(id: string): Promise<SlotAssignmentRecord[]> {
+  private async reownInline(id: string): Promise<BindingAssignmentRecord[]> {
     if (!this.canAttempt(id) || this.ownership.get(id) === "lost") {
       return [];
     }
@@ -328,7 +328,7 @@ export class ManagedExecutionReowner {
         // A closed or resolved episode cannot act on a late registry result.
         if (!this.closed) {
           logger.debug(
-            `[ManagedSlots] Re-owning managed execution ${id} failed after resolution`,
+            `[Bindings] Re-owning managed execution ${id} failed after resolution`,
             error,
           );
         }
@@ -336,7 +336,7 @@ export class ManagedExecutionReowner {
       }
       this.logUnconfirmed(
         id,
-        `[ManagedSlots] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
+        `[Bindings] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
         error,
       );
       this.retryInBackground(id);
@@ -352,9 +352,9 @@ export class ManagedExecutionReowner {
   automationRefusal(sessionUuid: string): ActionableError | undefined {
     switch (this.ownershipState(sessionUuid)) {
       case "unconfirmed":
-        return new ManagedSlotOwnershipUnconfirmedError(sessionUuid);
+        return new BindingOwnershipUnconfirmedError(sessionUuid);
       case "lost":
-        return new ManagedSlotOwnershipLostError(sessionUuid);
+        return new BindingOwnershipLostError(sessionUuid);
       default:
         return undefined;
     }
@@ -438,7 +438,7 @@ export class ManagedExecutionReowner {
       this.forgetRegistrySteps(id);
       this.ownership.delete(id);
       logger.info(
-        `[ManagedSlots] Session ${id} ownership confirmed after ${(this.deps.timer ?? defaultTimer).now() - this.episode(id).sinceMs} ms (${this.episode(id).attempts} attempts); re-owned by daemon ${this.deps.owner().daemonId}.`,
+        `[Bindings] Session ${id} ownership confirmed after ${(this.deps.timer ?? defaultTimer).now() - this.episode(id).sinceMs} ms (${this.episode(id).attempts} attempts); re-owned by daemon ${this.deps.owner().daemonId}.`,
       );
       this.resolveHold(id, "teardown");
       this.episodes.get(id)?.stop.abort();
@@ -449,7 +449,7 @@ export class ManagedExecutionReowner {
       this.forgetRegistrySteps(id);
       this.ownership.set(id, "lost");
       logger.warn(
-        `[ManagedSlots] Session '${id}' no longer owns its managed slot; acquire a new session.`,
+        `[Bindings] Session '${id}' no longer owns its managed slot; acquire a new session.`,
       );
       this.resolveHold(id, "skip-device-writes");
       this.episodes.get(id)?.stop.abort();
@@ -463,7 +463,7 @@ export class ManagedExecutionReowner {
     try {
       hook?.(id);
     } catch (error) {
-      logger.warn(`[ManagedSlots] Ownership-${outcome} hook failed for ${id}`, error);
+      logger.warn(`[Bindings] Ownership-${outcome} hook failed for ${id}`, error);
     }
   }
 
@@ -473,11 +473,11 @@ export class ManagedExecutionReowner {
 
   private logRetry(
     id: string,
-    failure: unknown = new Error("managed slot ownership unconfirmed"),
+    failure: unknown = new Error("binding ownership unconfirmed"),
   ): void {
     this.logUnconfirmed(
       id,
-      `[ManagedSlots] Re-owning managed execution ${id} failed; retrying: ${errorMessage(failure)}`,
+      `[Bindings] Re-owning managed execution ${id} failed; retrying: ${errorMessage(failure)}`,
       failure,
     );
   }
@@ -517,7 +517,7 @@ export class ManagedExecutionReowner {
         if (!admitted && !this.closed && !stopped.aborted) {
           // Recovery admission or an ended hold makes this best-effort retry unnecessary.
           logger.debug(
-            `[ManagedSlots] Re-own retry no longer admitted for ${id}: ${errorMessage(error)}`,
+            `[Bindings] Re-own retry no longer admitted for ${id}: ${errorMessage(error)}`,
           );
         }
         if (!admitted) {
@@ -618,7 +618,7 @@ export class ManagedExecutionReowner {
     sessionUuid: string,
     registry: ManagedExecutionReownRegistry,
     stopped: AbortSignal,
-  ): Promise<SlotAssignmentRecord[]> {
+  ): Promise<BindingAssignmentRecord[]> {
     // Consume an abandoned write/read before checking current ownership; its old result is not proof.
     const retainedClaim = this.ownerClaims.get(sessionUuid);
     if (retainedClaim) {
@@ -630,7 +630,7 @@ export class ManagedExecutionReowner {
       );
       if (!this.closed) {
         logger.debug(
-          `[ManagedSlots] Session ${sessionUuid} retained claim completed (${claimed.kind}); checking current ownership`,
+          `[Bindings] Session ${sessionUuid} retained claim completed (${claimed.kind}); checking current ownership`,
         );
       }
     }
@@ -645,7 +645,7 @@ export class ManagedExecutionReowner {
       await read();
       if (!this.closed) {
         logger.debug(
-          `[ManagedSlots] Session ${sessionUuid} retained ownership read completed; checking current ownership`,
+          `[Bindings] Session ${sessionUuid} retained ownership read completed; checking current ownership`,
         );
       }
     }
@@ -690,7 +690,7 @@ export class ManagedExecutionReowner {
           this.ownerClaims,
           () =>
             registry.claimExecution(
-              { scopeKey: assignment.scopeKey, slotIndex: assignment.slotIndex },
+              { scopeKey: assignment.scopeKey, bindingIndex: assignment.bindingIndex },
               { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
               { ...owner, sessionUuid },
               { supersedesSessionUuid: sessionUuid },
@@ -720,21 +720,21 @@ export class ManagedExecutionReowner {
   private recordRefusal(
     result: ReownAttempt,
     kind: string,
-    assignment: SlotAssignmentRecord,
+    assignment: BindingAssignmentRecord,
     sessionUuid: string,
   ): void {
-    if (kind === "slot_in_use") {
+    if (kind === "binding_in_use") {
       result.outcome = "lost";
       // A marked session gets one permanent-loss warning from settleOwnership.
       if (this.ownership.has(sessionUuid)) {
         return;
       }
     }
-    if (kind !== "slot_in_use" && result.outcome !== "lost") {
+    if (kind !== "binding_in_use" && result.outcome !== "lost") {
       result.outcome = "retry";
     }
     result.error = new Error(
-      `Slot ${assignment.slotIndex} of ${assignment.scopeKey} was not re-owned for session ${sessionUuid}: ${kind}`,
+      `Binding ${assignment.bindingIndex} of ${assignment.scopeKey} was not re-owned for session ${sessionUuid}: ${kind}`,
     );
   }
 }

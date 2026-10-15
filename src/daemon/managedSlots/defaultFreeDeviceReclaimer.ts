@@ -1,25 +1,25 @@
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DevicePool } from "../devicePool";
-import { defaultManagedSlotToolInvoker } from "./daemonManagedSlotAcquisition";
-import { freeDeviceBusyReason } from "./freeDeviceBusyReason";
+import { defaultBindingToolInvoker } from "../sessionBroker/provisioning/daemonDeviceAcquisition";
+import { freeDeviceBusyReason } from "../sessionBroker/provisioning/freeDeviceBusyReason";
 import { FreeDeviceReclaimer } from "./freeDeviceReclaimer";
 import { PoolManagedSlotDeviceStopper } from "./poolManagedSlotDeviceStopper";
 import {
-  DeviceManagerSlotInventory,
-  PoolManagedSlotDeviceClaims,
-} from "./managedSlotReconcilerPorts";
-import type { LiveExecutionSessions } from "./slotOwnerLiveness";
-import type { ManagedSlotJournal } from "./slotJournal";
-import { JournaledManagedSlotCacheEvictor } from "./managedSlotCacheEviction";
-import type { SlotRegistry } from "./slotRegistry";
+  DeviceManagerBindingInventory,
+  PoolBindingDeviceClaims,
+} from "../sessionBroker/provisioning/reconcilerPorts";
+import type { LiveExecutionSessions } from "../sessionBroker/registry/ownerLiveness";
+import type { BindingJournal } from "../sessionBroker/registry/bindingJournal";
+import { JournaledBindingCacheEvictor } from "../sessionBroker/provisioning/cacheEviction";
+import type { BindingRegistry } from "../sessionBroker/registry/bindingRegistry";
 
 /** What the daemon starts and stops; undefined means no sweep runs. */
 export type FreeDeviceReclaimerHandle = Pick<FreeDeviceReclaimer, "start" | "stop">;
 
 export type FreeDeviceReclaimerFactory = (deps: {
-  registry: () => Promise<SlotRegistry>;
-  journalFor?: (registry: SlotRegistry) => ManagedSlotJournal | undefined;
+  registry: () => Promise<BindingRegistry>;
+  journalFor?: (registry: BindingRegistry) => BindingJournal | undefined;
   /** False while the host registry does not exist; the sweep then never creates it. */
   registryExists: () => boolean;
   pool: DevicePool;
@@ -49,7 +49,7 @@ export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
   if (process.env.NODE_ENV === "test") {
     return undefined;
   }
-  let evictor: JournaledManagedSlotCacheEvictor | undefined;
+  let evictor: JournaledBindingCacheEvictor | undefined;
   return new FreeDeviceReclaimer({
     registry: async () => {
       const resolved = await registry();
@@ -58,9 +58,9 @@ export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
     },
     absentRowEvictor: () => evictor,
     registryExists,
-    inventory: new DeviceManagerSlotInventory(new MultiPlatformDeviceManager()),
-    claims: new PoolManagedSlotDeviceClaims(pool, executions),
-    stopper: new PoolManagedSlotDeviceStopper(pool, defaultManagedSlotToolInvoker),
+    inventory: new DeviceManagerBindingInventory(new MultiPlatformDeviceManager()),
+    claims: new PoolBindingDeviceClaims(pool, executions),
+    stopper: new PoolManagedSlotDeviceStopper(pool, defaultBindingToolInvoker),
     isBusy: (device) => freeDeviceBusyReason(pool, device),
     claimedBy,
     timer,
@@ -69,9 +69,9 @@ export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
 
 /** Resolve the acquisition journal lazily per sweep; discovery alone cannot release a row. */
 export function createAbsentRowEvictor(
-  registry: SlotRegistry,
-  journalFor: ((registry: SlotRegistry) => ManagedSlotJournal | undefined) | undefined,
-): JournaledManagedSlotCacheEvictor | undefined {
+  registry: BindingRegistry,
+  journalFor: ((registry: BindingRegistry) => BindingJournal | undefined) | undefined,
+): JournaledBindingCacheEvictor | undefined {
   const journal = journalFor?.(registry);
-  return journal ? new JournaledManagedSlotCacheEvictor(registry, () => journal) : undefined;
+  return journal ? new JournaledBindingCacheEvictor(registry, () => journal) : undefined;
 }

@@ -1,6 +1,7 @@
 import XCTest
 @testable import XCTestRunner
 import XCTestRunnerTestSupport
+import Yams
 
 @MainActor
 final class XCTestRunnerTests: XCTestCase {
@@ -296,14 +297,15 @@ final class XCTestRunnerTests: XCTestCase {
 
         let encoded = mcpClient.executePlanCalls.first?.arguments["planContent"] as? String
         let decoded = try XCTUnwrap(decodePlanContent(from: encoded))
-        XCTAssertEqual(decoded, """
-        name: Substitution
-        steps:
-          - tool: inputText
-            text: "C:\\\\temp#1 \\"x\\""
-          - tool: inputText
-            text: "shoes #1\\n  - tool: terminateApp"
-        """)
+        let plan = try XCTUnwrap(Yams.compose(yaml: decoded))
+        XCTAssertEqual(plan["name"]?.scalar?.string, "Substitution")
+        let steps = try XCTUnwrap(plan["steps"]?.sequence)
+        XCTAssertEqual(steps.count, 2, "Parameter values must not inject a step")
+        XCTAssertEqual(steps.map { $0["tool"]?.scalar?.string }, ["inputText", "inputText"])
+        XCTAssertEqual(steps.map { $0["text"]?.scalar?.string }, [
+            #"C:\temp#1 "x""#,
+            "shoes #1\n  - tool: terminateApp",
+        ])
     }
 
     func testPlanPlatformOverridesDefault() async throws {

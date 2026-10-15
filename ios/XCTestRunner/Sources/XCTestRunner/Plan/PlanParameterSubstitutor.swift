@@ -3,6 +3,7 @@ import Yams
 
 /// Substitutes once on Yams' tree, including mapping keys, without letting values add YAML structure.
 /// Quoted/block scalars remain strings; plain-safe replacements retain implicit scalar typing.
+/// Yams reads `{a:"${x}"}` as one plain key with an empty value; substitution follows that tree.
 enum PlanParameterSubstitutor {
     static func substituteText(in text: String, parameters: [String: String]) -> String {
         guard !parameters.isEmpty else { return text }
@@ -20,7 +21,7 @@ enum PlanParameterSubstitutor {
             guard placeholders.tokens.keys.contains(where: {
                 parameters[String($0.dropFirst(2).dropLast())] != nil
             }) else { return plan }
-            let replaced = try substitute(root, placeholders: placeholders, parameters: parameters, flow: false)
+            let replaced = try substitute(root, placeholders: placeholders, parameters: parameters)
             return try Yams.serialize(node: replaced)
         } catch let error as AutoMobilePlanExecutor.ExecutorError {
             throw error
@@ -30,7 +31,7 @@ enum PlanParameterSubstitutor {
     }
 
     private static func substitute(
-        _ node: Node, placeholders: PlanYamlPlaceholders, parameters: [String: String], flow: Bool
+        _ node: Node, placeholders: PlanYamlPlaceholders, parameters: [String: String]
     )
         throws -> Node
     {
@@ -41,21 +42,19 @@ enum PlanParameterSubstitutor {
                     substitute(
                         pair.key,
                         placeholders: placeholders,
-                        parameters: parameters,
-                        flow: mapping.style == .flow
+                        parameters: parameters
                     ),
                     substitute(
                         pair.value,
                         placeholders: placeholders,
-                        parameters: parameters,
-                        flow: mapping.style == .flow
+                        parameters: parameters
                     )
                 )
             }
             return .mapping(Node.Mapping(pairs, mapping.tag, .block, mapping.mark, mapping.anchor))
         case let .sequence(sequence):
             let values = try sequence.map {
-                try substitute($0, placeholders: placeholders, parameters: parameters, flow: sequence.style == .flow)
+                try substitute($0, placeholders: placeholders, parameters: parameters)
             }
             return .sequence(Node.Sequence(values, sequence.tag, .block, sequence.mark, sequence.anchor))
         case let .scalar(scalar):
@@ -78,14 +77,6 @@ enum PlanParameterSubstitutor {
             }
             guard original != value else {
                 return .scalar(Node.Scalar(original, scalar.tag, scalar.style, scalar.mark, scalar.anchor))
-            }
-            // Preserve the existing rejection for ambiguous unquoted JSON-like flow keys.
-            if flow, scalar.style == .plain, original.contains(":\"") || original.contains(":'") {
-                throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
-                    "Plan line \(scalar.mark?.line ?? 1): an unquoted flow key directly followed by a quote after "
-                        + "':' is read differently by YAML parsers, so a parameter cannot be substituted "
-                        + "safely. Put a space after the ':' or quote the key."
-                )
             }
             if scalar.style == .plain, let plain = plainScalar(value) {
                 return .scalar(Node.Scalar(value, plain.tag, .plain, scalar.mark, scalar.anchor))

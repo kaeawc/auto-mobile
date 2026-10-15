@@ -198,10 +198,17 @@ final class PlanParameterSubstitutorTests: XCTestCase {
         try assertYamlEqual(sub(#"p: {"a": "${x}"}"#, ["x": #"\"#]), #"p: {"a": "\\"}"#)
     }
 
-    func testUnquotedFlowKeyDirectlyBeforeAQuoteIsAccepted() throws {
-        try assertYamlEqual(sub(#"p: {a:"${x}"}"#, ["x": "v"]), #"p: {a: "v"}"#)
-        // No placeholder in it: copied through untouched.
-        try assertYamlEqual(sub(#"p: {a:"x"} # ${x}"#, ["x": "v"]), #"p: {a:"x"} # ${x}"#)
+    func testUnspacedFlowKeyBeforeAQuoteIsOnePlainKey() throws {
+        let mapping = try XCTUnwrap(Yams.compose(yaml: #"p: {a:"v"}"#)?["p"]?.mapping)
+        XCTAssertEqual(mapping.count, 1)
+        XCTAssertEqual(mapping.first?.key.scalar?.string, #"a:"v""#)
+        XCTAssertEqual(mapping.first?.key.scalar?.style, .plain)
+        XCTAssertEqual(mapping.first?.value.scalar?.string, "")
+        // Substitution changes the plain key while preserving its empty value.
+        try assertYamlEqual(sub(#"p: {a:"${x}"}"#, ["x": "v"]), #"p: {a:"v"}"#)
+        try assertYamlEqual(sub(#"p: {a: "${x}"}"#, ["x": #"v"quoted"#]), #"p: {a: "v\"quoted"}"#)
+        // The key stays unchanged; tree serialization drops the comment and its placeholder.
+        try assertYamlEqual(sub(#"p: {a:"x"} # ${x}"#, ["x": "v"]), #"p: {a:"x"}"#)
     }
 
     // MARK: Plain-scalar continuation lines and flow state

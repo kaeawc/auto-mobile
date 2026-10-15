@@ -62,8 +62,7 @@ class PairTests(unittest.TestCase):
             launch, scripts = prepare(args, True, guard_ok)
             launch = LaunchSpec(launch.command,
                                 [*launch.args, "--advertise-session", json.dumps(receipt)], launch.env)
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(asyncio.run(two(args, launch, scripts)), 0)
+            self.assertEqual(asyncio.run(two(args, launch, scripts)), 0)
             a, b = [[json.loads(line) for line in
                      (Path(tmp) / "lifetime-001" / f"{name}.jsonl").read_text().splitlines()]
                     for name in "AB"]

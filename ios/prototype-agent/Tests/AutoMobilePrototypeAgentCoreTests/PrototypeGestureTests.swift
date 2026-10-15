@@ -129,8 +129,9 @@ final class PrototypeGestureTests: XCTestCase {
             try node(
                 #"{"type":"text","text":"Tap","onTap":[{"type":"emit","name":"tap"}],"onLongPress":[{"type":"emit","name":"hold"}],"onDoubleTap":[{"type":"emit","name":"double"}]}"#
             )
-        XCTAssertEqual(root.gesturePlan.layers, [.longPress, .doubleTap, .singleTap])
+        XCTAssertEqual(root.gesturePlan.layers, [.longPress, .tapResolver])
         XCTAssertTrue(root.gesturePlan.consumesSingleTap)
+        XCTAssertTrue(root.gesturePlan.resolvesDoubleTapManually)
     }
 
     func testGestureOnlyPlansNeverInstallSingleTap() throws {
@@ -142,7 +143,9 @@ final class PrototypeGestureTests: XCTestCase {
             let root = try node("{\"type\":\"text\",\"text\":\"Tap\",\(fields)}")
             XCTAssertFalse(root.gesturePlan.layers.isEmpty)
             XCTAssertFalse(root.gesturePlan.layers.contains(.singleTap))
+            XCTAssertFalse(root.gesturePlan.layers.contains(.tapResolver))
             XCTAssertFalse(root.gesturePlan.consumesSingleTap)
+            XCTAssertFalse(root.gesturePlan.resolvesDoubleTapManually)
         }
     }
 
@@ -150,9 +153,30 @@ final class PrototypeGestureTests: XCTestCase {
         let plain = try node(#"{"type":"text","text":"Plain"}"#)
         XCTAssertEqual(plain.gesturePlan.layers, [])
         XCTAssertFalse(plain.gesturePlan.consumesSingleTap)
+        XCTAssertFalse(plain.gesturePlan.resolvesDoubleTapManually)
         let tapped = try node(#"{"type":"text","text":"Tap","onTap":[{"type":"emit","name":"tap"}]}"#)
         XCTAssertEqual(tapped.gesturePlan.layers, [.singleTap])
         XCTAssertTrue(tapped.gesturePlan.consumesSingleTap)
+        XCTAssertFalse(tapped.gesturePlan.resolvesDoubleTapManually)
+    }
+
+    func testTapResolverPlanRequiresBothNonemptyActionLists() throws {
+        let action = try XCTUnwrap(
+            node(#"{"type":"text","text":"Tap","onTap":[{"type":"emit","name":"tap"}]}"#).onTap?
+                .first
+        )
+        let both = PrototypeGesturePlan(onTap: [action], onLongPress: nil, onDoubleTap: [action])
+        XCTAssertEqual(both.layers, [.tapResolver])
+        XCTAssertTrue(both.consumesSingleTap)
+        XCTAssertTrue(both.resolvesDoubleTapManually)
+
+        let doubleOnly = PrototypeGesturePlan(onTap: [], onLongPress: nil, onDoubleTap: [action])
+        XCTAssertEqual(doubleOnly.layers, [.doubleTap])
+        XCTAssertFalse(doubleOnly.resolvesDoubleTapManually)
+
+        let singleOnly = PrototypeGesturePlan(onTap: [action], onLongPress: [], onDoubleTap: [])
+        XCTAssertEqual(singleOnly.layers, [.singleTap])
+        XCTAssertFalse(singleOnly.resolvesDoubleTapManually)
     }
 
     func testTheAgentAdvertisesGestures() {

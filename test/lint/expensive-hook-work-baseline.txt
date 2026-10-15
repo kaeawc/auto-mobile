@@ -17,6 +17,7 @@ test/daemon/daemonSocketReachability.test.ts	recursive-rm
 test/daemon/debugTools.test.ts	recursive-rm
 test/daemon/debugToolsNonDestructive.test.ts	recursive-rm
 test/daemon/deviceGestureRecordingSocketServerStartOwnership.test.ts	heavy-harness
+test/daemon/deviceHoldCharacterization.test.ts	heavy-harness
 test/daemon/deviceLeaseOwnerQuery.test.ts	recursive-rm
 test/daemon/devicePool.autolock.test.ts	heavy-harness
 test/daemon/devicePool.criteriaRollback.test.ts	heavy-harness

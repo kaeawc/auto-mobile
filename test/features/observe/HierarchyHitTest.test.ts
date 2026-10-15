@@ -122,9 +122,14 @@ describe("hierarchy hitTest preview", () => {
     );
     expect(result.firstCandidate).toBeNull();
     expect(result.candidates).toEqual([]);
-    expect(() => previewHierarchyHitTest({ x: 320, y: 0 }, observe(), "android")).toThrow(
-      "outside screen bounds",
-    );
+    let thrown: unknown;
+    try {
+      previewHierarchyHitTest({ x: 320, y: 0 }, observe(), "android");
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as Error).message.startsWith("hitTest coordinates (")).toBe(true);
+    expect((thrown as Error).message.includes("tapAt")).toBe(false);
   });
 
   test("caps candidates at 25 with deterministic ties", () => {

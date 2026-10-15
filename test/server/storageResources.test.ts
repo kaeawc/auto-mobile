@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   registerStorageResources,
-  setStorageResourcesAdbClientFactoryForTesting,
+  type StorageResourceDependencies,
 } from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -13,6 +13,14 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import type { KeyValueEntry } from "../../src/features/storage/storageTypes";
+
+let deps: StorageResourceDependencies = {};
+function useStorageResourcesAdbClientFactoryForTesting(
+  value: StorageResourceDependencies["adbClientFactory"] | null,
+): void {
+  deps = { ...deps, adbClientFactory: value ?? undefined };
+  registerStorageResources(deps);
+}
 
 const ANDROID_SHARED_PREFERENCES_XML = readFileSync(
   new URL("../fixtures/android-shared-preferences.xml", import.meta.url),
@@ -30,14 +38,14 @@ describe("storageResources", () => {
   const originalIosGetInstance = IOSCtrlProxyClient.getInstance;
   beforeEach(() => {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
-    registerStorageResources();
+    registerStorageResources(deps);
   });
 
   afterEach(() => {
     PlatformDeviceManagerFactory.setInstance(null);
     AndroidCtrlProxyClient.getInstance = originalGetInstance;
     IOSCtrlProxyClient.getInstance = originalIosGetInstance;
-    setStorageResourcesAdbClientFactoryForTesting(null);
+    useStorageResourcesAdbClientFactoryForTesting(null);
   });
 
   function readResource(uri: string) {
@@ -72,7 +80,7 @@ describe("storageResources", () => {
       if (suffix.endsWith("entries")) {
         const adb = new FakeAdbExecutor();
         adb.setCommandError("cat shared_prefs/", new Error("run-as is unavailable"));
-        setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+        useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
       }
       const content = await readResource(
         `automobile:devices/emulator-5554/storage/com.example.nondebug/${suffix}`,
@@ -137,7 +145,7 @@ describe("storageResources", () => {
       "cat shared_prefs/settings.xml",
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => {
         throw new ProviderUnavailableError(
@@ -173,7 +181,7 @@ describe("storageResources", () => {
       "cat shared_prefs/settings.xml",
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => {
         throw new ProviderUnavailableError(
@@ -209,7 +217,7 @@ describe("storageResources", () => {
         createExecResult("package:com.example.app", ""),
       );
     }
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => {
         throw new ProviderUnavailableError(
@@ -247,7 +255,7 @@ describe("storageResources", () => {
       "cat shared_prefs/settings.xml",
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async (packageName: string, _fileName: string) => {
         if (packageName === "com.example.runas") {
@@ -277,7 +285,7 @@ describe("storageResources", () => {
     );
     const entries = [{ key: "enabled", type: "BOOLEAN" as const, value: "true" }];
     const adb = new FakeAdbExecutor();
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => entries,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
@@ -296,7 +304,7 @@ describe("storageResources", () => {
       new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
     );
     const adb = new FakeAdbExecutor();
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     const failure = new Error("invalid preference request");
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => {
@@ -326,7 +334,7 @@ describe("storageResources", () => {
         "cat shared_prefs/settings.xml",
         createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
       );
-      setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+      useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
       AndroidCtrlProxyClient.getInstance = mock(() => ({
         getPreferenceEntries: async () => {
           throw new Error(message);
@@ -347,7 +355,7 @@ describe("storageResources", () => {
     );
     const adb = new FakeAdbExecutor();
     adb.setCommandError("cat shared_prefs/settings.xml", new Error("run-as permission denied"));
-    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       getPreferenceEntries: async () => {
         throw new ProviderUnavailableError("CtrlProxy provider is unavailable");

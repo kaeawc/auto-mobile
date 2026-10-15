@@ -1,3 +1,4 @@
+import { bindDevice } from "./deviceBinding";
 import { launchProcessLiveness } from "./transitionalAdbBindWait";
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
 import { heldDeviceBindRefusal, InputDeviceOwnedError } from "./inputDeviceOwnership";
@@ -315,8 +316,7 @@ export class DeviceAutolockManager {
     this.pool.assertDeviceCleanupComplete(deviceId);
     const sessionId = this.idGenerator.next();
     const assignmentSnapshot = this.pool.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.pool.nextLastUsedAt();
     device.assignmentCount++;
     device.autolockSessionId = sessionId;

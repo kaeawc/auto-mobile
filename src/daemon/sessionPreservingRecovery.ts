@@ -1,3 +1,4 @@
+import { unbindDevice } from "./deviceBinding";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type {
   PooledDevice,
@@ -264,8 +265,7 @@ export class SessionPreservingRecoveryRunner {
       );
     }
     if (this.canRemoveReleasedDevice(device, sessionId, assignmentCount)) {
-      device.sessionId = null;
-      device.status = "idle";
+      unbindDevice(device);
       this.pool.noteDeviceStateChanged?.(device);
       this.pool.suppressAutoStartForDevice(device);
       await this.pool.removeDevice(device.id, true, device);

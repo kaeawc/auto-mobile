@@ -1,3 +1,4 @@
+import { bindDevice, unbindDevice } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { logger } from "../utils/logger";
@@ -372,8 +373,7 @@ export class DeviceReplacement {
   }
 
   releaseCapturedDeviceForShutdown(device: PooledDevice): void {
-    device.sessionId = null;
-    device.status = "idle";
+    unbindDevice(device);
     device.errorCount = 0;
     this.port.lastReleasedDeviceId = device.id;
     this.port.notifyDeviceStateChanged(device);
@@ -486,8 +486,7 @@ export class DeviceReplacement {
         `Replacement device '${replacementDevice.id}' disconnected while its recovery session was being rebound.`,
       );
     }
-    replacementDevice.sessionId = session.sessionId;
-    replacementDevice.status = "busy";
+    bindDevice(replacementDevice, session.sessionId);
     this.port.pooledSessionIdentities.set(replacementDevice, session);
     // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
     // reads as "unlocked" and would let any session drive the recovered device

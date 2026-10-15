@@ -22,6 +22,15 @@ const NOTIFY_CALLEES = new Set([
 // Arrow callbacks (lock bodies, timers) belong to the named function that wrote the state.
 const FUNCTION_TYPES = new Set(["FunctionDeclaration", "FunctionExpression"]);
 const STATE_PROPERTIES = new Set(["status", "sessionId"]);
+// Binding writes now go through the pool-side owner; notification obligations
+// still belong to these callers, including the silent rollback exception.
+const BINDING_MUTATORS = new Set([
+  "bindDevice",
+  "unbindDevice",
+  "restoreBinding",
+  "markDeviceError",
+  "clearDeviceError",
+]);
 
 /** Functions whose writes only roll a failed, never-notified claim back to its prior state. */
 const ROLLBACK_ONLY = new Set(["devicePool.ts#restoreSessionAssignment"]);
@@ -77,6 +86,9 @@ function scanFile(path: string): FunctionScan[] {
     }
     if (current && node.type === "CallExpression" && NOTIFY_CALLEES.has(calleeName(node) ?? "")) {
       current.notifies++;
+    }
+    if (current && node.type === "CallExpression" && BINDING_MUTATORS.has(calleeName(node) ?? "")) {
+      current.writes++;
     }
     for (const [key, value] of Object.entries(node)) {
       const nextMethod =

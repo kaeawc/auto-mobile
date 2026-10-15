@@ -5,19 +5,10 @@ import ts from "typescript";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
 import {
-  PRODUCT_PATH_ENV_VARIABLES as HARNESS_PRODUCT_PATH_ENV_VARIABLES,
-  NON_PATH_ENV_VARIABLES as HARNESS_NON_PATH_ENV_VARIABLES,
+  PRODUCT_PATH_ENV_VARIABLES,
+  NON_PATH_ENV_VARIABLES,
   productEnvClassificationIssues,
 } from "../../scripts/manual-test/productPathEnv";
-
-// The removed launch input remains in the separately maintained harness until step b2.
-const PRODUCT_PATH_ENV_VARIABLES = HARNESS_PRODUCT_PATH_ENV_VARIABLES.filter(
-  (row) => row.name !== "AUTOMOBILE_MANAGED_SLOT_CONFIG",
-);
-// This removed operator input is still classified by the separately maintained harness.
-const NON_PATH_ENV_VARIABLES = HARNESS_NON_PATH_ENV_VARIABLES.filter(
-  (name) => name !== "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
-);
 
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;

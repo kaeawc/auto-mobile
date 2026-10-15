@@ -1,17 +1,8 @@
-// REBASE NOTE: work/12495-remove-device-slots adds isProductBrokerDevice in persistedIdentity.ts.
-// After rebasing onto it, replace this module's body with
-// `export { isProductBrokerDevice as isSessionBrokerDeviceName } from "./persistedIdentity";`.
-const SESSION_BROKER_DEVICE_NAME_PREFIXES = [
-  "ambroker-",
-  // amslot- is the legacy prefix still recognized for cleanup.
-  "amslot-",
-] as const;
+import { BROKER_DEVICE_NAME_PREFIX } from "./persistedIdentity";
 
-export function isSessionBrokerDeviceName(name: string): boolean {
-  return SESSION_BROKER_DEVICE_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
-}
+export { isProductBrokerDevice as isSessionBrokerDeviceName } from "./persistedIdentity";
 
 /** Representative product-owned name for fakes; keep recognized prefixes private. */
 export function exampleSessionBrokerDeviceName(suffix: string): string {
-  return `${SESSION_BROKER_DEVICE_NAME_PREFIXES[0]}${suffix}`;
+  return `${BROKER_DEVICE_NAME_PREFIX}${suffix}`;
 }

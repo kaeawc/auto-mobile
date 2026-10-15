@@ -226,7 +226,12 @@ describe("session-only broker lifecycle", () => {
 
   test("consumer configuration rejects slot, scope, lane and capacity inputs", () => {
     expect(parseSessionConfig(config("plain"))).toEqual(config("plain"));
-    for (const field of ["bindingIndex", "managedHostScope", "localSlotCapacity", "runnerNamespace"]) {
+    for (const field of [
+      "bindingIndex",
+      "managedHostScope",
+      "localSlotCapacity",
+      "runnerNamespace",
+    ]) {
       expect(() => parseSessionConfig({ ...config("bad"), [field]: 1 })).toThrow(
         "Invalid session configuration",
       );

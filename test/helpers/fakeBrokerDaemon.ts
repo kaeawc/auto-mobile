@@ -4,8 +4,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { BrokerDaemonClient } from "../../scripts/manual-test/brokerDaemonClient";
 import type { BrokerScenarioFakeControls } from "../../scripts/manual-test/brokerScenarios";
-import { openSqliteSlotRegistry } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
-import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
+import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionBroker } from "../../src/daemon/sessionBroker/broker";
 import { bindBrokerRegistration } from "../../src/daemon/sessionBroker/handlers";
@@ -29,7 +29,7 @@ export async function createFakeBrokerDaemon(
 ) {
   const timer = options.timer ?? new FakeTimer();
   const ids = options.ids ?? new FakeIdGenerator();
-  const registry = await openSqliteSlotRegistry({
+  const registry = await openSqliteBindingRegistry({
     dbPath: ":memory:",
     timer,
     isExecOwnerLive: () => true,
@@ -80,7 +80,7 @@ export async function createFakeBrokerDaemon(
   });
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   sessions.stopCleanupTimer();
-  const scopes = new ManagedConnectionScopes();
+  const scopes = new BrokerConnectionScopes();
   const service = new SessionBrokerService(
     broker,
     scope.scope.scopeKey,
@@ -90,7 +90,7 @@ export async function createFakeBrokerDaemon(
   const state: DaemonStateAccess = {
     isInitialized: () => true,
     getSessionBrokerService: () => service,
-    getManagedConnectionScopes: () => scopes,
+    getBrokerConnectionScopes: () => scopes,
     getSessionManager: () => sessions,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
@@ -147,7 +147,7 @@ export async function createFakeBrokerDaemon(
       for (const resource of await store.listResources()) {
         const assignment = await registry.getAssignment({
           scopeKey: resource.scopeKey,
-          slotIndex: resource.allocationIndex,
+          bindingIndex: resource.allocationIndex,
         });
         if (assignment?.stableDeviceId && assignment.deviceName) {
           inventory.push({

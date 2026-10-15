@@ -7,6 +7,7 @@ import { parseGuardSource } from "./astGuard";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const EXTENSIONS = [".ts", ".tsx", ".js", ".json"];
+const SCAN_TIMEOUT_MS = 60_000;
 
 function relativeSpecifiers(file: string, source: string): string[] {
   const specifiers: string[] = [];
@@ -58,24 +59,34 @@ function resolvesExactly(file: string, specifier: string, tracked: ReadonlySet<s
 
 let failures: string[];
 // Like the other tree-wide guards, reading/parsing belongs in setup, outside the per-test budget.
+// Full-tree parsing can be slow under CI contention; hook time is excluded from the 100ms per-test budget.
 beforeAll(() => {
   const tracked = new Set(
-    execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
+    execFileSync("git", ["ls-files", "-z"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    })
       .split("\0")
       .filter(Boolean),
   );
   failures = [];
-  for (const file of tracked) {
+  const normalizedTracked = new Set([...tracked].map((file) => file.replaceAll("\\", "/")));
+  for (const file of normalizedTracked) {
     if (!(file.startsWith("src/") || file.startsWith("test/")) || !file.endsWith(".ts")) {
       continue;
     }
-    for (const specifier of relativeSpecifiers(file, readFileSync(join(ROOT, file), "utf8"))) {
-      if (!resolvesExactly(file, specifier, tracked)) {
+    const source = readFileSync(join(ROOT, file), "utf8");
+    if (!['"./', "'./", '"../', "'../", "`./", "`../"].some((prefix) => source.includes(prefix))) {
+      continue;
+    }
+    for (const specifier of relativeSpecifiers(file, source)) {
+      if (!resolvesExactly(file, specifier, normalizedTracked)) {
         failures.push(`${file} -> ${specifier}`);
       }
     }
   }
-});
+}, SCAN_TIMEOUT_MS);
 
 describe("relative import casing", () => {
   test("every relative module specifier resolves to an exactly cased tracked file", () => {

@@ -1,0 +1,31 @@
+name: Attestation Gate (shadow)
+description: Compute and record advisory attestation decisions without changing CI execution
+inputs:
+  commit-sha:
+    description: Commit whose checked-out tree is being attested
+    default: ${{ github.sha }}
+  tier:
+    description: Attestation tier
+    default: "1"
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.14
+    - name: Install dependencies
+      shell: bash
+      run: bash scripts/ci/install-bun-deps.sh
+    - name: Record shadow decision
+      shell: bash
+      continue-on-error: true
+      env:
+        ATTESTATION_TIER: ${{ inputs.tier }}
+        ATTESTATION_COMMIT_SHA: ${{ inputs.commit-sha }}
+        AUTOMOBILE_LOG_SINK: stderr
+      run: bun scripts/ci/attestation-gate.ts --tier "$ATTESTATION_TIER"
+    - uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: attestation-shadow-${{ inputs.tier }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/attestation-shadow.jsonl

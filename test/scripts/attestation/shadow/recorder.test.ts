@@ -14,8 +14,9 @@ describe("ShadowStore", () => {
     const rename = fs.rename.bind(fs);
     let temporaryContentsAtRename: string | undefined;
     fs.rename = async (oldPath: string, newPath: string) => {
-      if (oldPath === metricsPath + ".tmp") {
-        temporaryContentsAtRename = fs.getWrittenFiles().get(oldPath);
+      // Source paths use path.join (backslashes on Windows); read via the fake's normalizing API.
+      if (oldPath.replace(/\\/g, "/") === metricsPath + ".tmp") {
+        temporaryContentsAtRename = await fs.readFile(oldPath);
       }
       await rename(oldPath, newPath);
     };
@@ -40,6 +41,13 @@ describe("ShadowStore", () => {
       metrics: { generatedAtMs: 100 },
     });
     expect(fs.getWrittenFiles().has(metricsPath + ".tmp")).toBe(false);
+  });
+  test("fake filesystem reads resolve backslashed paths to normalized keys", async () => {
+    const fs = new FakeFileSystem();
+    await fs.writeFile("\\shadow\\a.tmp", "data", "utf8");
+    expect(await fs.readFile("/shadow/a.tmp")).toBe("data");
+    expect(await fs.readFile("\\shadow\\a.tmp")).toBe("data");
+    expect(fs.getWrittenFiles().get("\\shadow\\a.tmp")).toBeUndefined();
   });
   test("fake filesystem keys never contain backslashes", async () => {
     const fs = new FakeFileSystem();

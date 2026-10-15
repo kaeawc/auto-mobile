@@ -138,7 +138,7 @@ test("owned iOS simulator loss and same-UDID return preserve the session with a 
     await evictAsMissing(pool, captured);
 
     expect(sessions.getSession("ios-session")).toBeNull();
-    expect(await persistence.getSession?.("ios-session")).toMatchObject({
+    expect(await persistence.getSession("ios-session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${IOS_SIMULATOR.deviceId}`,
     });
@@ -193,7 +193,7 @@ test("awaiting-owner iOS simulator loss is admitted and rehydrates onto the same
 
     manager.bootedDevices = [];
     await evictAsMissing(pool, captured);
-    expect(await persistence.getSession?.("ios-session")).toMatchObject({
+    expect(await persistence.getSession("ios-session")).toMatchObject({
       release_reason: `device-restart:${IOS_SIMULATOR.deviceId}`,
     });
 
@@ -296,7 +296,7 @@ test("physical iOS device loss remains terminal", async () => {
 
   try {
     await evictAsMissing(pool, captured);
-    const persisted = await persistence.getSession?.("physical-session");
+    const persisted = await persistence.getSession("physical-session");
 
     expect(sessions.getSession("physical-session")).toBeNull();
     expect(persisted?.release_reason).toBeDefined();

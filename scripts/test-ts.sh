@@ -563,7 +563,7 @@ unit_shard_is_contended() {
 
 report_contended_unit_shard() {
   local shard="$1" suffix="$2" message
-  printf -v message 'RUNNER-CONTENDED: unit shard %d hit its %ss wall-clock budget%s on a starved runner (probe slowdown %sx >= %sx); not retrying on the same runner. Re-run the job to get a fresh runner.' \
+  printf -v message 'RUNNER-CONTENDED: unit shard %d hit its %ss wall-clock budget%s on a starved runner (probe slowdown %sx >= %sx); not retrying on the same runner. Attempt 1 is rerun automatically on a fresh runner; on attempt 2 or later, do not rerun by hand: file or classify it as a new issue.' \
     "$shard" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" "$suffix" "$contended_slowdown" "$unit_contended_slowdown"
   printf '%s\n' "$message" >&2
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then

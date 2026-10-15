@@ -72,7 +72,7 @@ for (const autolock of [false, true]) {
         expect(pool.getDevice(id)).toMatchObject({ sessionId: "owner", status: "busy" });
       }
       expect(pool.getAvailableDeviceCount()).toBe(0);
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         device_id: "emulator-5556",
         status: "active",
         released_at_ms: null,
@@ -103,12 +103,12 @@ for (const autolock of [false, true]) {
         status: "busy",
       });
       expect(manager.getDeviceForSession("owner")).toBe("emulator-5556");
-      expect(await persistence.getSession?.("owner")).toMatchObject({
+      expect(await persistence.getSession("owner")).toMatchObject({
         device_id: "emulator-5556",
         status: "active",
         released_at_ms: null,
       });
-      expect(await persistence.getSession?.(nextOwner!)).toMatchObject({
+      expect(await persistence.getSession(nextOwner!)).toMatchObject({
         device_id: "emulator-5554",
         status: "active",
       });
@@ -141,7 +141,7 @@ test("idle assignment restores a tentative claim when the session already holds 
     expect(pool.getAvailableDeviceCount()).toBe(1);
     expect(manager.getSession("owner")).toBe(session);
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5554");
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5554",
       status: "active",
       released_at_ms: null,
@@ -182,7 +182,7 @@ test("public rebind cannot cross warm autolock's activity-refresh assignment fen
     });
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5554");
     expect(pool.getDevice("emulator-5556")).toMatchObject({ sessionId: null, status: "idle" });
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5554",
       status: "active",
     });
@@ -193,7 +193,7 @@ test("public rebind cannot cross warm autolock's activity-refresh assignment fen
     expect(pool.getDevice("emulator-5556")).toMatchObject({ sessionId: "owner", status: "busy" });
     expect(manager.getDeviceForSession("owner")).toBe("emulator-5556");
     expect(pool.getAvailableDeviceCount()).toBe(1);
-    expect(await persistence.getSession?.("owner")).toMatchObject({
+    expect(await persistence.getSession("owner")).toMatchObject({
       device_id: "emulator-5556",
       status: "active",
       released_at_ms: null,

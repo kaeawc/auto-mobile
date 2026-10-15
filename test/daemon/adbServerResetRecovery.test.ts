@@ -1814,7 +1814,7 @@ describe("ADB server reset session recovery", () => {
         `device-restart:${original.name}`,
         `device-restart:${original.name}`,
       ]);
-      expect(await persistence.getSession?.("session-1")).toMatchObject({
+      expect(await persistence.getSession("session-1")).toMatchObject({
         status: "released",
         release_reason: `device-restart:${original.name}`,
         released_at_ms: expect.any(Number),
@@ -1870,7 +1870,7 @@ describe("ADB server reset session recovery", () => {
 
       await expect(pool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured)).resolves.toBe(true);
       expect(releaseAttempts).toBe(2);
-      expect(await persistence.getSession?.("session-1")).toMatchObject({
+      expect(await persistence.getSession("session-1")).toMatchObject({
         status: "released",
         release_reason: `device-disconnected:${original.deviceId}`,
         released_at_ms: expect.any(Number),

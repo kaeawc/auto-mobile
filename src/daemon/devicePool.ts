@@ -1517,10 +1517,13 @@ export class DevicePool {
       get timer() {
         return pool.timer;
       },
+      reserveDeviceForReadiness: (...args) => this.reserveDeviceForReadiness(...args),
       assertCallerOwnsDeviceSession: (client, session, device) =>
         this.assertCallerOwnsDeviceSession(client, session, device),
       notifyReservationChanged: (deviceId, platform) =>
         this.notifyReservationChanged(deviceId, platform),
+      notifyRehydrationReservationChanged: (target) =>
+        this.notifyRehydrationReservationChanged(target),
       notifyDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
       getRecoveringAndroidTargets: () => this.getRecoveringAndroidTargets(),
@@ -7250,10 +7253,10 @@ export class DevicePool {
     this.notifyDeviceStateChanged(device);
   }
 
-  async reserveDeviceForReadiness(
+  reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    stableRuntimeName = expectedIdentity.name,
+    stableRuntimeName?: string,
     verifiedAndroidAvdName?: string,
     autolockClient?: AutolockClient & { restartResumeSessionId?: string },
     enforceAndroidRecoveryExclusion = false,
@@ -7269,7 +7272,7 @@ export class DevicePool {
   }
 
   /** An admitted owner may prepare R even if R's control call recovered it during boot. */
-  async reserveRestartRecoveryReadiness(
+  reserveRestartRecoveryReadiness(
     device: BootedDevice,
     stableRuntimeName: string,
     sessionId: string,
@@ -7567,11 +7570,11 @@ export class DevicePool {
    * not listed yet. A device a managed slot holds is not reserved: the slot wins, and the row
    * recovers or fails through the normal path. When two rows name one device the first keeps it.
    */
-  async reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
+  reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
     return this.deviceReservations.reserveDevicesForRehydration(rows);
   }
 
-  private async reserveRehydrationDevices(
+  private reserveRehydrationDevices(
     rows: readonly RehydrationDeviceReservation[],
     stillCurrent: () => boolean = () => true,
     restartHandoff = false,
@@ -7579,34 +7582,15 @@ export class DevicePool {
     return this.deviceReservations.reserveRehydrationDevices(rows, stillCurrent, restartHandoff);
   }
 
-  private replaceRehydrationReservation(
-    sessionId: string,
-    target: RehydrationDeviceReservation["target"],
-    restartHandoff: boolean,
-  ): void {
-    return this.deviceReservations.replaceRehydrationReservation(sessionId, target, restartHandoff);
-  }
-
   /** The reserved device's bucket moved, but the reservation names it by identity: tell observers of every match. */
   private notifyRehydrationReservationChanged(
     target: Pick<RehydrationDeviceReservation["target"], "platform" | "stableDeviceId">,
   ): void {
-    return this.deviceReservations.notifyRehydrationReservationChanged(target);
-  }
-
-  private armDeviceRestartReservationExpiry(sessionId: string, releasedAtMs: number): void {
-    return this.deviceReservations.armDeviceRestartReservationExpiry(sessionId, releasedAtMs);
+    return this.deviceReservations.emitRehydrationReservationChanged(target);
   }
 
   private scheduleDeviceRestartReservationExpiry(sessionId: string, deadline: number): void {
     return this.deviceReservations.scheduleDeviceRestartReservationExpiry(sessionId, deadline);
-  }
-
-  private async checkDeviceRestartReservationExpiry(
-    sessionId: string,
-    target: RehydrationDeviceReservation["target"],
-  ): Promise<void> {
-    return this.deviceReservations.checkDeviceRestartReservationExpiry(sessionId, target);
   }
 
   private releaseDeviceRestartReservation(sessionId: string): void {

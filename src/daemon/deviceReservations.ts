@@ -75,12 +75,16 @@ export interface DeviceReservationsPort {
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "hasUnresolvedEmulatorName">;
   readonly managedSlotExclusion: Pick<ManagedSlotExclusion, "refresh" | "holderOf"> | undefined;
   readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">;
+  reserveDeviceForReadiness: DeviceReservations["reserveDeviceForReadiness"];
   assertCallerOwnsDeviceSession(
     client: AutolockClient | undefined,
     session: Session,
     device: PooledDevice,
   ): boolean;
   notifyReservationChanged(deviceId: string, platform: Platform): void;
+  notifyRehydrationReservationChanged(
+    target: Pick<RehydrationDeviceReservation["target"], "platform" | "stableDeviceId">,
+  ): void;
   notifyDeviceStateChanged(device: Pick<PooledDevice, "id" | "platform">): void;
   getDevicesByPlatform(platform: Platform): PooledDevice[];
   getRecoveringAndroidTargets(): { names: Set<string>; serials: Set<string> };
@@ -147,7 +151,7 @@ export class DeviceReservations {
     const permission = { sessionId, deviceId: device.deviceId, owners: new Set<symbol>() };
     this.restartReadiness.add(permission);
     try {
-      const reservation = await this.reserveDeviceForReadiness(
+      const reservation = await this.port.reserveDeviceForReadiness(
         device.deviceId,
         device,
         stableRuntimeName,
@@ -393,15 +397,15 @@ export class DeviceReservations {
     });
     this.port.rehydrationReservations.set(sessionId, entry);
     if (previous && targetChanged) {
-      this.notifyRehydrationReservationChanged(previous);
+      this.port.notifyRehydrationReservationChanged(previous);
     }
     if (targetChanged) {
-      this.notifyRehydrationReservationChanged(target);
+      this.port.notifyRehydrationReservationChanged(target);
     }
   }
 
   /** The reserved device's bucket moved, but the reservation names it by identity: tell observers of every match. */
-  notifyRehydrationReservationChanged(
+  emitRehydrationReservationChanged(
     target: Pick<RehydrationDeviceReservation["target"], "platform" | "stableDeviceId">,
   ): void {
     for (const device of this.port.getDevicesByPlatform(target.platform)) {
@@ -516,7 +520,7 @@ export class DeviceReservations {
       this.port.timer.clearTimeout(target.expiryTimer);
     }
     logger.info(`[DevicePool] Released the restart-recovery reservation for ${sessionId}`);
-    this.notifyRehydrationReservationChanged(target);
+    this.port.notifyRehydrationReservationChanged(target);
   }
 
   /**

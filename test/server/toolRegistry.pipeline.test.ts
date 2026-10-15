@@ -4,7 +4,6 @@ import {
   DefaultAfterToolCallHandler,
   ToolRegistry,
   ToolRegistryClass,
-  getJsonTextFailureFallbackCount,
 } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -44,7 +43,6 @@ import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLed
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { logger } from "../../src/utils/logger";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -311,21 +309,18 @@ describe("ToolRegistry device-aware pipeline", () => {
       label: "marked text-only failure",
       response: () => createJSONToolResponse({ success: false, error: "device unavailable" }),
       deviceLossWins: true,
-      fallbackCount: 0,
     },
     {
-      label: "unmarked text-only failure",
+      label: "unmarked JSON text is not sniffed as failure",
       response: () => ({ content: [{ type: "text", text: '{"success":false}' }] }),
-      deviceLossWins: true,
-      fallbackCount: 1,
+      deviceLossWins: false,
     },
     {
-      label: "repeated unmarked failures warn once without device output",
+      label: "unmarked JSON text with an error is not sniffed as failure",
       response: () => ({
         content: [{ type: "text", text: '{"success":false,"error":"device-secret"}' }],
       }),
-      deviceLossWins: true,
-      fallbackCount: 2,
+      deviceLossWins: false,
     },
     {
       label: "structured success wins over marked text failure",
@@ -334,58 +329,46 @@ describe("ToolRegistry device-aware pipeline", () => {
         structuredContent: { success: true },
       }),
       deviceLossWins: false,
-      fallbackCount: 0,
     },
     {
       label: "explicit success wins over marked text failure",
       response: () => ({ ...createJSONToolResponse({ success: false }), success: true }),
       deviceLossWins: false,
-      fallbackCount: 0,
     },
     {
       label: "isError wins over structured success",
       response: () => ({ structuredContent: { success: true }, isError: true }),
       deviceLossWins: true,
-      fallbackCount: 0,
     },
     {
       label: "explicit failure wins over structured success",
       response: () => ({ structuredContent: { success: true }, success: false }),
       deviceLossWins: true,
-      fallbackCount: 0,
     },
     {
       label: "structured failure wins over explicit success",
       response: () => ({ structuredContent: { success: false }, success: true }),
       deviceLossWins: true,
-      fallbackCount: 0,
     },
     {
       label: "plain text",
       response: () => ({ content: [{ type: "text", text: "plain text" }] }),
       deviceLossWins: false,
-      fallbackCount: 0,
     },
     {
       label: "text success",
       response: () => createJSONToolResponse({ success: true, value: "ok" }),
       deviceLossWins: false,
-      fallbackCount: 0,
     },
     {
       label: "text without success",
       response: () => createJSONToolResponse({ value: "ok" }),
       deviceLossWins: false,
-      fallbackCount: 0,
     },
-  ])("classifies $label after device loss", async ({ response, deviceLossWins, fallbackCount }) => {
-    let controller = new AbortController();
+  ])("classifies $label after device loss", async ({ response, deviceLossWins }) => {
+    const controller = new AbortController();
     const finalizedResponse = response();
-    const fallback = { count: 0, warned: false };
-    const initialGlobalFallbackCount = getJsonTextFailureFallbackCount();
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
-      jsonTextFailureFallback: fallback,
       executionTargetResolver: {
         async resolveExecutionTarget(input: any) {
           return {
@@ -421,33 +404,15 @@ describe("ToolRegistry device-aware pipeline", () => {
       async () => ({ success: true }),
     );
 
-    try {
-      for (let iteration = 0; iteration < Math.max(1, fallbackCount); iteration++) {
-        controller = new AbortController();
-        const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
-          {},
-          undefined,
-          controller.signal,
-        );
-        if (deviceLossWins) {
-          await expect(call).rejects.toBeInstanceOf(DeviceLostError);
-        } else {
-          await expect(call).resolves.toEqual(finalizedResponse);
-        }
-      }
-      expect(fallback.count).toBe(fallbackCount);
-      expect(getJsonTextFailureFallbackCount()).toBe(initialGlobalFallbackCount);
-      const fallbackWarnings = warn.mock.calls.filter(([message]) =>
-        String(message).includes("JSON-text failure fallback"),
-      );
-      expect(fallbackWarnings).toHaveLength(fallbackCount > 0 ? 1 : 0);
-      if (fallbackCount > 0) {
-        expect(fallbackWarnings[0]).toEqual([
-          "[ToolRegistry] JSON-text failure fallback: unmarked response with one text content block",
-        ]);
-      }
-    } finally {
-      warn.mockRestore();
+    const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
+      {},
+      undefined,
+      controller.signal,
+    );
+    if (deviceLossWins) {
+      await expect(call).rejects.toBeInstanceOf(DeviceLostError);
+    } else {
+      await expect(call).resolves.toEqual(finalizedResponse);
     }
   });
 

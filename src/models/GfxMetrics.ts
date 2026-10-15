@@ -25,4 +25,7 @@ export interface GfxMetrics {
 
   /** Whether UI was determined to be stable */
   isStable: boolean;
+
+  /** Stability wait ended early after consecutive polls without valid frame stats. */
+  idleEndReason?: "noFrameStats";
 }

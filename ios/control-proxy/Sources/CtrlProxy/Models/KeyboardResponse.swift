@@ -1,0 +1,42 @@
+import Foundation
+
+public struct KeyboardActionResult: Sendable {
+    public let open: Bool
+    public let method: String?
+    public let error: String?
+
+    public init(open: Bool, method: String? = nil, error: String? = nil) {
+        self.open = open
+        self.method = method
+        self.error = error
+    }
+}
+
+public struct KeyboardResponse: Codable, Sendable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let open: Bool
+    public let totalTimeMs: Int64
+    public let error: String?
+    public let method: String?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        open: Bool,
+        totalTimeMs: Int64,
+        error: String? = nil,
+        method: String? = nil
+    ) {
+        type = ResponseType.keyboardResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.open = open
+        self.totalTimeMs = totalTimeMs
+        self.error = error
+        self.method = method
+    }
+}

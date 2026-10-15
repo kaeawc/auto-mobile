@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.os.Build
 import android.util.Log
 import android.view.Display
 import java.lang.reflect.InvocationTargetException
@@ -22,7 +23,7 @@ private val panelUniqueIdResolver =
   )
 
 /**
- * Physical panel ID uses a hidden API, blocked on API 36, resolved once per process. When
+ * Physical panel ID uses a hidden API, skipped on API 36+, resolved once per process. When
  * unavailable, the host maps the logical displayId to a panel itself.
  */
 internal fun panelUniqueIdOf(display: Display?): String? = panelUniqueIdResolver.resolve(display)
@@ -32,14 +33,19 @@ internal class PanelUniqueIdResolver<D : Any>(
   private val lookup: () -> ((D) -> String?)?,
   private val onUnavailable: (Throwable?) -> Unit = {},
   private val onTransientFailure: (Throwable) -> Unit = {},
+  private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) {
+  private companion object {
+    private const val MAX_SDK_WITH_HIDDEN_UNIQUE_ID = 35
+  }
+
   private val lock = Any()
   private var resolved = false
   private var transientFailureLogged = false
   private var accessor: ((D) -> String?)? = null
 
   fun resolve(display: D?): String? {
-    if (display == null) return null
+    if (display == null || sdkInt > MAX_SDK_WITH_HIDDEN_UNIQUE_ID) return null
     // Serialize invocation too, so no caller can invoke after another caller latches a failure.
     return synchronized(lock) {
       if (resolved && accessor == null) return@synchronized null

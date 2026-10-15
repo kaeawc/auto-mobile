@@ -984,7 +984,8 @@ and device unbinding clear the corresponding buffers and host status.
 `awaitEvent` requires `id`; it waits for one event in the current session/device/id
 scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`,
 `dismissed`, or `appearance_changed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
-are valid only for `awaitEvent`. An event of a kind this host does not know (a newer device) is
+are valid only for `awaitEvent`.
+Input and state changes (text input, toggles, sliders etc.) arrive as kind `emit` with `eventName` `change` (there is no separate `change` kind), with payload `{key,value}` for one changed key or `{keys,values}` for several. An event of a kind this host does not know (a newer device) is
 logged and skipped: it is never returned, but its sequence still counts toward `lastSequence`. Its `timeoutMs` defaults to 30000 ms and cannot
 exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
 headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
@@ -1660,7 +1661,10 @@ read/write authorization. `getAppPermissions` reports it as `unknown` with
 success with `applied: true`, `verified: false`, and a warning. Verification is
 unavailable from the host without app instrumentation: launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
-insufficient. Physical-device permission limits are unchanged.
+insufficient. Results include `accessLevel` (`readWrite` for Photos and
+`addOnly` for photos-add); an unverified stored Photos grant includes
+`evidence: "storedTccGrant"`. Effective native status still requires app
+instrumentation. Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.

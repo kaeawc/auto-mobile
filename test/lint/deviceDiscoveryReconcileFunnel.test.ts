@@ -57,13 +57,19 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 4,
+      calls: 2,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity. " +
-        "The third call only asks whether an emulator a start did not launch is visible to this adb, " +
-        "and whose foreign lease it carries, before readiness; it never consults pooled identity. " +
-        "The fourth (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
+        "The second (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
         "stats surfaces' live set; it reads cached discovery and never consults pooled identity.",
+    },
+    "src/daemon/deviceAutoStart.ts": {
+      calls: 2,
+      reason:
+        "Auto-start discovery moved from devicePool (#11807): candidate selection checks booted " +
+        "images to avoid duplicate starts, and adoption checks whether an unlaunched emulator is " +
+        "visible to this adb and whose foreign lease it carries before readiness. Neither call " +
+        "joins discovery to pooled identity.",
     },
     "src/daemon/devicePoolRefresh.ts": {
       calls: 1,

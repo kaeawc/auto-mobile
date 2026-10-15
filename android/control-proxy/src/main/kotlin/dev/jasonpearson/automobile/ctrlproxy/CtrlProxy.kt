@@ -5283,8 +5283,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 displayId = displayId,
                 logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
                 onFinished = { success, error ->
-                  if (success) lifecycle.completed(onResult = onResult)
-                  else lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
+                  if (success) {
+                    serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+                      gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
+                    }
+                  } else {
+                    lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
+                  }
                 },
                 nowMs = android.os.SystemClock::elapsedRealtime,
               )

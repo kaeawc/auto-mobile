@@ -64,6 +64,12 @@ function record(value: unknown): Raw | undefined {
 
 /** Node children live only in `child` and `children` (schemas/prototype-spec-contract.json). */
 function childrenOf(node: Raw, path: string): { node: Raw; path: string }[] {
+  if (node.type === "stack") {
+    return Object.entries(record(node.screens) ?? {}).flatMap(([name, value]) => {
+      const child = record(value);
+      return child ? [{ node: child, path: `${path}.screens[${JSON.stringify(name)}]` }] : [];
+    });
+  }
   const single = record(node.child);
   if (single) {
     return [{ node: single, path: `${path}.child` }];

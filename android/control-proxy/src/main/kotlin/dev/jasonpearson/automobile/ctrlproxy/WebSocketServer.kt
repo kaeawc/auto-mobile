@@ -364,10 +364,25 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    add("prototype_flow_grid_v1")
+    // Prototype specs honour pager axis, spacing, peek padding and fixed page sizes. Hosts refuse
+    // these options on older APKs, which otherwise silently render a horizontal full-page pager.
+    add("prototype_pager_options_v1")
     // Prototype specs resolve read-only data, path repeat items, and data text/conditions. Older
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
     add("prototype_data_model_v1")
+    // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
+    // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
+    add("prototype_text_field_options_v1")
+    add("prototype_gestures_v1")
+    // In-tree search fields support query edits, search actions and active-key result subtrees.
+    add("prototype_search_bar_v1")
+    add("prototype_rich_text_v1")
+    // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
+    add("prototype_emit_context_v1")
+    // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
+    add("prototype_checks_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved
@@ -386,6 +401,7 @@ class WebSocketServer(
     add("prototype_show_in_place_v1")
     // Atomic in-place data, state and node patches report revisions and state conflicts (#11675).
     add("prototype_patch_v1")
+    add("prototype_stack_v1")
     // Prototype nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
     // window's own origin. Older APKs decode anchors and ignore them, so hosts refuse anchors
     // there.
@@ -401,6 +417,7 @@ class WebSocketServer(
     // ignore the field, so hosts keep reporting that an app-layer screenshot includes the
     // prototype.
     add("screenshot_hide_prototype_v1")
+    add("prototype_menus_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -1034,10 +1051,7 @@ class WebSocketServer(
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */
-  private suspend fun sendErrorResponse(
-    connection: ConnectedClient,
-    response: WebSocketResponse,
-  ) {
+  private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
@@ -1093,9 +1107,7 @@ class WebSocketServer(
   /** Suspends until a client is currently connected, including after a reconnect. */
   suspend fun awaitClientConnection() {
     val connection =
-      synchronized(connections) {
-        if (connections.isEmpty()) activeClientConnection else null
-      }
+      synchronized(connections) { if (connections.isEmpty()) activeClientConnection else null }
     connection?.await()
   }
 
@@ -1217,9 +1229,7 @@ class WebSocketServer(
     // (#3190, #6621); their handler errors and queue-full rejections target the origin directly.
     val recordsOwner = recordsRequestOwner(request)
     if (recordsOwner) {
-      request.requestId?.let { requestId ->
-        registerRequestOwner(requestId, connection)
-      }
+      request.requestId?.let { requestId -> registerRequestOwner(requestId, connection) }
     }
     // The read loop enqueues; one per-client FIFO worker executes commands in wire order.
     // Owned replies retain atomic owner routing; unowned errors target this origin directly and

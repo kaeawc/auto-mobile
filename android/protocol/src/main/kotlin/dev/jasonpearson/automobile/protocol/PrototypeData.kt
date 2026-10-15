@@ -1,6 +1,18 @@
 package dev.jasonpearson.automobile.protocol
 
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
@@ -237,6 +249,7 @@ object PrototypeDataResolver {
         own.mapValues { (key, value) ->
           when (key) {
             "repeat" -> resolveRepeat(value, repeats)
+            "enabledWhen",
             "visibleWhen" -> resolveCondition(value, data)
             "styleWhen" -> resolveStyles(value, data)
             else -> value
@@ -328,6 +341,17 @@ object PrototypeDataResolver {
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
+    val screens = node["screens"] as? JsonObject
+    if (screens != null)
+      return JsonObject(
+        node +
+          ("screens" to
+            JsonObject(
+              screens.mapValues { (_, entry) ->
+                if (entry is JsonObject) transform(entry) else entry
+              },
+            )),
+      )
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(
       node +
@@ -352,6 +376,11 @@ object PrototypeDataResolver {
   private fun hasBindings(node: JsonObject): Boolean {
     val textBound =
       PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
+        if (
+          kind == PrototypeBindableKind.EMIT_BINDING &&
+            (value as? JsonObject)?.containsKey("data") == true
+        )
+          return@first true
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
           true
@@ -364,6 +393,7 @@ object PrototypeDataResolver {
     val own =
       (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
         textBound ||
+        conditionBound(node["enabledWhen"]) ||
         conditionBound(node["visibleWhen"]) ||
         stylesBound
     val child = node["child"] as? JsonObject
@@ -371,6 +401,9 @@ object PrototypeDataResolver {
       if (child != null) hasBindings(child)
       else
         (node["children"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().any(::hasBindings)
-    return own || nested
+    val screensBound =
+      (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
+        ?: false
+    return own || nested || screensBound
   }
 }

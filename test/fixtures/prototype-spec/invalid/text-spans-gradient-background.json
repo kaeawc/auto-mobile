@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "x",
+          "style": {
+            "background": {
+              "type": "linear",
+              "stops": [
+                {
+                  "color": "#000000",
+                  "position": 0
+                },
+                {
+                  "color": "#FFFFFF",
+                  "position": 1
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].style.background.dark",
+  "expectedMessage": "Required property"
+}

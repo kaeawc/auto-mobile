@@ -54,10 +54,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
@@ -108,10 +113,10 @@ internal fun RenderPrototypeIconButton(
     prototypeIcon(source.icon)?.let { Icon(it, contentDescription = null) }
   }
   when (source.variant) {
-    "filled" -> FilledIconButton(onClick, modifier, content = content)
-    "tonal" -> FilledTonalIconButton(onClick, modifier, content = content)
-    "outlined" -> OutlinedIconButton(onClick, modifier, content = content)
-    else -> IconButton(onClick, modifier, content = content)
+    "filled" -> FilledIconButton(onClick, modifier, enabled = node.enabled, content = content)
+    "tonal" -> FilledTonalIconButton(onClick, modifier, enabled = node.enabled, content = content)
+    "outlined" -> OutlinedIconButton(onClick, modifier, enabled = node.enabled, content = content)
+    else -> IconButton(onClick, modifier, enabled = node.enabled, content = content)
   }
 }
 
@@ -123,6 +128,23 @@ internal fun RenderPrototypeFab(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeFabNode ?: return
+  if (!node.enabled) {
+    Surface(
+      modifier,
+      shape = MaterialTheme.shapes.large,
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+    ) {
+      Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        prototypeIcon(source.icon)?.let {
+          Icon(it, null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+        }
+        source.label?.let {
+          Text(it, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+        }
+      }
+    }
+    return
+  }
   val actions = source.onTap.orEmpty()
   val onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) }
   val icon: @Composable () -> Unit = {
@@ -302,9 +324,7 @@ internal fun RenderPrototypeDialog(
     Box(
       Modifier.fillMaxSize()
         .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
-        .clickable {
-          interact(PrototypeInteraction.SheetDismiss(source.openWhen))
-        },
+        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
     Surface(
       modifier
@@ -459,7 +479,7 @@ internal fun RenderPrototypeTimePicker(
           )
       }
   }
-  TimePicker(state, modifier)
+  PrototypePickerEnabled(node, modifier) { TimePicker(state) }
 }
 
 /**
@@ -492,7 +512,7 @@ internal fun RenderPrototypeDatePicker(
           interact(PrototypeInteraction.Choose(source.stateKey, date, source.onTap.orEmpty()))
       }
   }
-  DatePicker(state, modifier, showModeToggle = false)
+  PrototypePickerEnabled(node, modifier) { DatePicker(state, showModeToggle = false) }
 }
 
 private val UTC: TimeZone = TimeZone.getTimeZone("UTC")
@@ -520,4 +540,34 @@ internal fun prototypeDateString(millis: Long): String {
     calendar.get(Calendar.MONTH) + 1,
     calendar.get(Calendar.DAY_OF_MONTH),
   )
+}
+
+/**
+ * Material pickers expose no enabled parameter; block their pointer and semantic input together.
+ */
+@Composable
+private fun PrototypePickerEnabled(
+  node: PrototypeRenderNode,
+  modifier: Modifier,
+  content: @Composable () -> Unit,
+) {
+  val target =
+    if (node.enabled) modifier
+    else
+      modifier
+        .alpha(0.38f)
+        .focusProperties { canFocus = false }
+        .clearAndSetSemantics {
+          disabled()
+          node.testTag?.let { testTag = it }
+          contentDescription = node.contentDescription ?: node.text
+        }
+        .pointerInput(Unit) {
+          awaitPointerEventScope {
+            while (true) {
+              awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+            }
+          }
+        }
+  Box(target) { content() }
 }

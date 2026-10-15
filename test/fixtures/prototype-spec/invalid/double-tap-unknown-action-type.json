@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "gestures",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "picked": "",
+      "liked": false
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onDoubleTap": [
+        {
+          "type": "unknown"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onDoubleTap[0].type"
+}

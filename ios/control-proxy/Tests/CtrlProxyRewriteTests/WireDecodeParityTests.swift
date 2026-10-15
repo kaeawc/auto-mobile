@@ -1,3 +1,4 @@
+@testable import CtrlProxyRewrite
 import CtrlProxyTestSupport
 import Foundation
 import XCTest
@@ -75,6 +76,18 @@ final class WireDecodeParityTests: XCTestCase {
         }
     }
 
+    func testHostNeverSendsEmptyEnvelopesAreKnownRequests() throws {
+        for type in ["get_current_focus", "get_traversal_order"] {
+            XCTAssertNotNil(RequestType(rawValue: type))
+            let data = try wireJSON(["type": type, "requestId": "fixture-request-id"])
+            _ = try JSONDecoder().decode(WebSocketRequest.self, from: data)
+            let decoded = try RewriteWireDecoder.decode(data)
+            XCTAssertEqual(decoded.type, type)
+        }
+        // request_two_finger_swipe requires x1/y1/x2/y2; set_network_fault_rules requires rules.
+        // Neither is an empty/optional payload, so minimal-envelope decoding does not apply.
+    }
+
     /// Unknown discriminators surface the exact wire error string
     /// (`"Unknown command type: <type>"`, matched by the TS `rewriteUnknownCommandError`).
     func testUnknownCommandErrorTextMatches() {
@@ -140,7 +153,13 @@ final class WireDecodeParityTests: XCTestCase {
             }
             XCTAssertEqual(actualArray.count, expectedArray.count, context, file: file, line: line)
             for (index, pair) in zip(expectedArray, actualArray).enumerated() {
-                assertValueEqual(expected: pair.0, actual: pair.1, context: "\(context)[\(index)]", file: file, line: line)
+                assertValueEqual(
+                    expected: pair.0,
+                    actual: pair.1,
+                    context: "\(context)[\(index)]",
+                    file: file,
+                    line: line
+                )
             }
             return
         }

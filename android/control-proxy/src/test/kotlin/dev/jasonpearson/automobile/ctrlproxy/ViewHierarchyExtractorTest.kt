@@ -135,6 +135,61 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `concurrent prototype windows receive metadata for their own title only`() {
+    val own = "dev.jasonpearson.automobile.ctrlproxy"
+    val metadata =
+      mapOf(
+        "AutoMobile Prototype:full" to PrototypeWindowMetadata("fullscreen", true),
+        "AutoMobile Prototype:sheet" to PrototypeWindowMetadata("sheet", false),
+        "AutoMobile Prototype:float" to PrototypeWindowMetadata("floating", false),
+        PROTOTYPE_WINDOW_TITLE to PrototypeWindowMetadata("sheet", false),
+      )
+    val stamping =
+      ViewHierarchyExtractor(
+        ownPrototypeMetadata = { pkg, title ->
+          if (pkg == own) metadata[title?.toString()] else null
+        },
+      )
+    val titles = metadata.keys.toList() + "AutoMobile Highlight"
+    val result =
+      stamping.extractFromAllWindows(
+        titles.mapIndexed { index, title ->
+          fakeWindow(
+            index + 1,
+            index,
+            fakeNode(
+              packageName = own,
+              text = title,
+              bounds = Rect(0, index * 300, 1080, index * 300 + 200),
+            ),
+            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+            bounds = Rect(0, index * 300, 1080, index * 300 + 200),
+            title = title,
+          )
+        } +
+          fakeWindow(
+            6,
+            6,
+            fakeNode(packageName = "other", text = "foreign", bounds = Rect(0, 1800, 1080, 2000)),
+            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+            bounds = Rect(0, 1800, 1080, 2000),
+            title = "AutoMobile Prototype:full",
+          ),
+        null,
+      )
+    for ((index, title) in titles.withIndex()) {
+      val window = result.windows!!.single { it.id == index + 1 }
+      assertEquals(metadata[title]?.placement, window.prototypePlacement)
+      assertEquals(metadata[title]?.opaque, window.prototypeOpaque)
+      assertEquals(listOf("full", "sheet", "float", null, null)[index], window.prototypeId)
+    }
+    val foreign = result.windows!!.single { it.id == 6 }
+    assertNull(foreign.prototypePlacement)
+    assertNull(foreign.prototypeOpaque)
+    assertNull(foreign.prototypeId)
+  }
+
+  @Test
   fun `window extraction selects only the requested display roots`() {
     val inner =
       fakeWindow(201, 0, fakeNode(packageName = "app.inner", text = "Inner"), focused = true)

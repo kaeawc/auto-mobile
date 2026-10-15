@@ -97,6 +97,7 @@ fun prototypeLayoutParams(
   /** Keyboard height from the screen bottom (#10262); only a bottom sheet is moved by it. */
   imeLiftPx: Int = 0,
   opaque: Boolean = false,
+  surfaceId: String? = null,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -112,7 +113,7 @@ fun prototypeLayoutParams(
       else PixelFormat.TRANSLUCENT,
     )
     .apply {
-      title = PROTOTYPE_WINDOW_TITLE
+      title = prototypeWindowTitle(surfaceId)
       when (placement) {
         is PrototypePlacement.Fullscreen -> {
           width = match

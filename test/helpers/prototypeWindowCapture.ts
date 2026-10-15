@@ -58,6 +58,7 @@ export function capturedTwoWindowHierarchy(): ViewHierarchyResult {
 export function capturedPrototypeHierarchy(
   options: {
     fullScreen?: boolean;
+    prototypeId?: string;
     prototypePlacement?: PrototypePlacement;
     prototypeOpaque?: boolean;
   } = {},
@@ -70,6 +71,7 @@ export function capturedPrototypeHierarchy(
           type: ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY,
           packageName: CTRL_PROXY_PACKAGE,
           ...(options.fullScreen ? { bounds: { ...RELABELLED_CAPTURE.screen } } : {}),
+          ...(options.prototypeId === undefined ? {} : { prototypeId: options.prototypeId }),
           ...(options.prototypePlacement ? { prototypePlacement: options.prototypePlacement } : {}),
           ...(options.prototypeOpaque === undefined
             ? {}

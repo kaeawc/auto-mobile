@@ -21,6 +21,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DEFAULT_CTRL_PROXY_PACKAGE
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import kotlin.math.max
 import kotlin.math.min
@@ -784,6 +785,7 @@ internal constructor(
       isFocused = window.isFocused,
       bounds = ElementBounds(bounds),
       packageName = packageName,
+      prototypeId = if (prototypeMetadata != null) prototypeIdOfTitle(window.title) else null,
       prototypePlacement = prototypeMetadata?.placement,
       prototypeOpaque = prototypeMetadata?.opaque,
       prototypeAppearance = prototypeMetadata?.appearance,

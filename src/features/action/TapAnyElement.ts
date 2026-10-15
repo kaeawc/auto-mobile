@@ -105,7 +105,7 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
-  dispatchIosSecondTap,
+  dispatchIosDoubleTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
@@ -251,13 +251,6 @@ export const TAP_ANY_SEARCH_UNTIL_MAX_MS = 12000;
 export const TAP_ANY_ORDINARY_TAP_DURATION_MS = ORDINARY_TAP_DURATION_MS;
 
 /**
- * Fixed delay `executeIosTapWithCoordinates` sleeps between the two presses
- * of a `doubleTap`. Exported for the same reason as
- * `TAP_ANY_ORDINARY_TAP_DURATION_MS` above (issue #6276).
- */
-export const TAP_ANY_DOUBLE_TAP_GAP_MS = 200;
-
-/**
  * The actual per-request CtrlProxy timeout `executeIosTapWithCoordinates`/
  * `executeIosTapWithVoiceOver` apply to an ordinary tap/doubleTap gesture.
  * `TAP_ANY_ORDINARY_TAP_DURATION_MS` is fixed, so
@@ -268,11 +261,14 @@ export const TAP_ANY_DOUBLE_TAP_GAP_MS = 200;
 export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS =
   resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(TAP_ANY_ORDINARY_TAP_DURATION_MS);
 
+/** Android's sequential double-tap gap; iOS no longer waits between host requests. */
+export const TAP_ANY_DOUBLE_TAP_GAP_MS = 200;
+
 /**
- * Worst-case WALL-CLOCK time for an ordinary `tap`/`doubleTap` gesture: `doubleTap` issues two
- * sequential CtrlProxy requests separated by `TAP_ANY_DOUBLE_TAP_GAP_MS`, and EACH request can
- * independently consume the full `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS` before CtrlProxy
- * replies (or the request times out) -- not just the on-device press duration
+ * Worst-case WALL-CLOCK time for an ordinary `tap`/`doubleTap` gesture: Android's sequential
+ * fallback issues two CtrlProxy requests separated by `TAP_ANY_DOUBLE_TAP_GAP_MS`, and EACH
+ * request can independently consume the full `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS`
+ * before CtrlProxy replies (or the request times out) -- not just the on-device press duration
  * (`TAP_ANY_ORDINARY_TAP_DURATION_MS`), which is what an earlier round of this arithmetic
  * charged (issue #6306 review, P2): with near-deadline observations that undersizing let the
  * outer floor expire mid-gesture even though the CtrlProxy requests themselves were still
@@ -280,6 +276,7 @@ export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS =
  * (`resolveTapAnyOrdinaryTapBudgetMs` in `src/daemon/mcpRequestTimeout.ts`) shares this single
  * derived value instead of duplicating the arithmetic -- using the doubleTap worst case for
  * both `tap` and `doubleTap` only ever over-budgets a plain `tap`, never under-budgets it.
+ * iOS now uses one runner request within this conservative shared budget.
  */
 export const TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS =
   2 * TAP_ANY_ORDINARY_TAP_CTRL_PROXY_TIMEOUT_MS + TAP_ANY_DOUBLE_TAP_GAP_MS;
@@ -1327,14 +1324,7 @@ export class TapAnyElement extends BaseVisualChange {
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
-        signal,
-        timeoutMs,
-      });
-      await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence.assertCurrent();
-      await dispatchIosSecondTap(xcTestClient, { x, y }, tapDuration, { signal, timeoutMs });
+      await dispatchIosDoubleTap(xcTestClient, x, y, tapDuration, undefined, { signal, timeoutMs });
       return;
     }
 

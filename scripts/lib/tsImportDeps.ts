@@ -67,10 +67,42 @@ function isRuntimeRequire(node: ts.CallExpression): boolean {
   );
 }
 
-function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
+export function relativeModuleSpecifiers(
+  sourceFile: ts.SourceFile,
+  options: { includeTypeOnly?: boolean } = {},
+): string[] {
   const specifiers: string[] = [];
 
   const visit = (node: ts.Node): void => {
+    if (options.includeTypeOnly === false) {
+      if (ts.isImportDeclaration(node) && node.importClause) {
+        const clause = node.importClause;
+        const bindings = clause.namedBindings;
+        if (
+          clause.isTypeOnly ||
+          (!clause.name &&
+            bindings &&
+            ts.isNamedImports(bindings) &&
+            bindings.elements.length > 0 &&
+            bindings.elements.every((element) => element.isTypeOnly))
+        ) {
+          return;
+        }
+      }
+      if (
+        ts.isExportDeclaration(node) &&
+        (node.isTypeOnly ||
+          (node.exportClause &&
+            ts.isNamedExports(node.exportClause) &&
+            node.exportClause.elements.length > 0 &&
+            node.exportClause.elements.every((element) => element.isTypeOnly)))
+      ) {
+        return;
+      }
+      if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) {
+        return;
+      }
+    }
     if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
@@ -143,8 +175,9 @@ function pickCandidates(
   fallback: string,
   repoRoot: string,
   knownPaths: KnownPathLookup,
+  exists: (candidate: string) => boolean = existsSync,
 ): string[] {
-  const existing = candidates.find((candidate) => existsSync(candidate));
+  const existing = candidates.find((candidate) => exists(candidate));
   if (existing) {
     return [existing];
   }
@@ -154,11 +187,12 @@ function pickCandidates(
   return known.length > 0 ? known : [fallback];
 }
 
-function resolveRelativeSpecifier(
+export function resolveRelativeSpecifier(
   importingFile: string,
   specifier: string,
   repoRoot: string,
   knownPaths: KnownPathLookup,
+  exists: (candidate: string) => boolean = existsSync,
 ): string[] {
   const literalPath = path.resolve(path.dirname(importingFile), specifier);
   const extension = path.extname(specifier);
@@ -170,6 +204,7 @@ function resolveRelativeSpecifier(
       literalPath,
       repoRoot,
       knownPaths,
+      exists,
     );
   }
   // A known explicit extension is trusted literally without a filesystem probe; anything else (no extension or an unrecognized dotted suffix) uses extensionless resolution.
@@ -177,10 +212,17 @@ function resolveRelativeSpecifier(
     return [literalPath];
   }
   return pickCandidates(
-    [`${literalPath}.ts`, `${literalPath}.tsx`, path.join(literalPath, "index.ts")],
+    [
+      `${literalPath}.ts`,
+      `${literalPath}.tsx`,
+      path.join(literalPath, "index.ts"),
+      `${literalPath}.mts`,
+      `${literalPath}.json`,
+    ],
     `${literalPath}.ts`,
     repoRoot,
     knownPaths,
+    exists,
   );
 }
 
@@ -209,7 +251,8 @@ export function resolveRelativeImportPaths(
     let source: string;
     try {
       source = readFileSync(absolutePath, "utf8");
-    } catch {
+    } catch (error) {
+      console.error(`tsImportDeps: cannot read ${absolutePath}: ${String(error)}`);
       // A file can disappear between existsSync and readFileSync; skipping it is safe here.
       return;
     }

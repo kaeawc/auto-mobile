@@ -50,10 +50,12 @@ class DeferredSessionPersistence extends FakeDeviceSessionPersistence {
     this.releaseActiveSessionWrite = resolve;
   });
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     this.activeSessionUuid = record.sessionUuid;
     this.signalActiveSessionWriteStarted!();
     await this.activeSessionWrite;
+    // Complete the write we parked so ownership and cancellation observe a real active row.
+    return await super.upsertActiveSession(record);
   }
 
   finishActiveSessionWrite(): void {

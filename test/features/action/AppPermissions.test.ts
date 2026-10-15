@@ -1,3 +1,4 @@
+import { FixtureTccReader } from "../../helpers/iosTccPhotosFixtures";
 import { readFileSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
@@ -26,6 +27,7 @@ const iosSimulator: BootedDevice = {
   name: "iPhone 16",
   platform: "ios",
   deviceId: "12345678-1234-1234-1234-123456789ABC",
+  iosVersion: "27.0",
 };
 
 const iosPhysical: BootedDevice = {
@@ -604,19 +606,7 @@ describe("AppPermissions", () => {
 
   test("passes simulator Photos verification metadata through the facade", async () => {
     const simctl = new FakeSimCtlClient();
-    // Issue-reported TCC values; no real simulator capture is available.
-    const tccReader: TccPermissionReader = {
-      readPermissions: async () => [
-        {
-          service: "kTCCServicePhotos",
-          client: "com.example.app",
-          auth_version: 1,
-          auth_value: 2,
-          allowed: null,
-          prompt_count: null,
-        },
-      ],
-    };
+    const tccReader = new FixtureTccReader("full");
     const permissions = new AppPermissions(iosSimulator, { simctl, tccReader });
     const getResult = await permissions.getPermissions("com.example.app", {
       permissions: ["photos"],
@@ -629,7 +619,7 @@ describe("AppPermissions", () => {
       accessLevel: "readWrite",
       evidence: "storedTccGrant",
       reason: expect.stringContaining("native PHPhotoLibrary"),
-      raw: expect.objectContaining({ auth_version: 1 }),
+      raw: expect.objectContaining({ auth_version: 2 }),
     });
     const setResult = await permissions.setPermissions("com.example.app", {
       action: "grant",

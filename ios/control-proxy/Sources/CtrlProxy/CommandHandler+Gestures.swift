@@ -103,6 +103,10 @@ extension CommandHandler {
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
         let diagnostics: TapDiagnostics? = try await performContextCheckedGesture(expected: request.frameContext) {
+            if request.doubleTap == true {
+                try self.gesturePerformer.doubleTap(x: request.x, y: request.y)
+                return nil
+            }
             if request.diagnostics == true {
                 return try self.gesturePerformer.tapWithDiagnostics(
                     x: request.x, y: request.y, durationMs: duration, strategy: request.tapStrategy

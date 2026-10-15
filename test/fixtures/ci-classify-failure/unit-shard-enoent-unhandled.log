@@ -1,0 +1,32 @@
+2026-10-15T14:33:55.0235355Z FAIL: unit shard 1 exited with status 1
+2026-10-15T14:34:18.4479402Z ##[group]test/server/deviceTools.appResourceDependencies.test.ts:
+2026-10-15T14:34:18.4479406Z 
+2026-10-15T14:34:18.4479482Z # Unhandled error between tests
+2026-10-15T14:34:18.4479540Z -------------------------------
+2026-10-15T14:34:18.4479788Z error: ENOENT reading "/home/runner/work/auto-mobile/auto-mobile/src/server/ResourceRegistry.ts"
+2026-10-15T14:34:18.4479898Z -------------------------------
+2026-10-15T14:34:18.4479902Z 
+2026-10-15T14:34:18.4480289Z ##[group]test/server/deviceTools.provisionDevice.managedSlotPreBoot.test.ts:
+2026-10-15T14:34:18.4480295Z 
+2026-10-15T14:34:18.4480377Z # Unhandled error between tests
+2026-10-15T14:34:18.4480439Z -------------------------------
+2026-10-15T14:34:18.4480640Z error: ENOENT reading "/home/runner/work/auto-mobile/auto-mobile/src/server/ResourceRegistry.ts"
+2026-10-15T14:34:18.4480726Z -------------------------------
+2026-10-15T14:34:18.4480728Z 
+2026-10-15T14:34:18.4480954Z ##[group]test/server/databaseResourcesMalformedUri.test.ts:
+2026-10-15T14:34:18.4480956Z 
+2026-10-15T14:34:18.4481034Z # Unhandled error between tests
+2026-10-15T14:34:18.4481116Z -------------------------------
+2026-10-15T14:34:18.4481329Z error: ENOENT reading "/home/runner/work/auto-mobile/auto-mobile/src/server/ResourceRegistry.ts"
+2026-10-15T14:34:18.4481410Z -------------------------------
+2026-10-15T14:34:18.4481412Z 
+2026-10-15T14:34:18.4485635Z ##[group]test/server/deviceGestureRecordingStopInFlightOwnership.test.ts:
+2026-10-15T14:34:18.4485638Z 
+2026-10-15T14:34:18.4485762Z # Unhandled error between tests
+2026-10-15T14:34:18.4485820Z -------------------------------
+2026-10-15T14:34:18.4486025Z error: ENOENT reading "/home/runner/work/auto-mobile/auto-mobile/src/server/ResourceRegistry.ts"
+2026-10-15T14:34:18.4486099Z -------------------------------
+2026-10-15T14:34:18.4486101Z 
+2026-10-15T14:34:17.3420813Z 
+2026-10-15T14:34:17.3421416Z ##[group]test/shutdownCleanup.test.ts:
+2026-10-15T14:34:17.3421821Z (pass) runShutdownCleanupStages > runs every cleanup stage exactly once when socket fails [0.85ms]

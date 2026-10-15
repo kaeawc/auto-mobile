@@ -1,5 +1,6 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, spyOn } from "bun:test";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -229,12 +230,15 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     const path = await import("path");
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
     const originalEmbeddedSdkEnabled = serverConfig.isEmbeddedSdkEnabled();
+    const flagService = FeatureFlagService.getInstance();
+    const initializeSpy = spyOn(flagService, "initialize").mockResolvedValue();
 
     try {
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(true);
-      setDebugModeEnabled(true);
       createMcpServer({ daemonMode: true });
+      // Flags are stubbed so no persisted/default flag application races the debug toggle.
+      setDebugModeEnabled(true);
 
       const schemaContent = await fs.readFile(schemaPath, "utf-8");
       const committed = JSON.parse(schemaContent) as ToolSchemaDefinition[];
@@ -268,6 +272,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(originalEmbeddedSdkEnabled);
       setDebugModeEnabled(false);
+      initializeSpy.mockRestore();
     }
   });
 

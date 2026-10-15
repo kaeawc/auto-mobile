@@ -231,6 +231,9 @@ extension PrototypeRepeat {
         if let child = fields["child"] {
             try validateEmitContexts(child, path: "\(path).child", scope: childScope, repeats: &repeats)
         }
+        for (screen, screenPath) in PrototypeStacks.screenChildren(in: fields, path: path) {
+            try validateEmitContexts(screen, path: screenPath, scope: childScope, repeats: &repeats)
+        }
     }
 
     private static func validateEmitActions(_ raw: JSONValue?, path: String, scope: EmitScope?) throws {

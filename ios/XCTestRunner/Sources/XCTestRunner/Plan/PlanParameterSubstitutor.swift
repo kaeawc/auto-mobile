@@ -22,7 +22,8 @@ enum PlanParameterSubstitutor {
                 parameters[String($0.dropFirst(2).dropLast())] != nil
             }) else { return plan }
             let replaced = try substitute(root, placeholders: placeholders, parameters: parameters)
-            return try Yams.serialize(node: replaced)
+            // Keep secret values contiguous and printable Unicode literal for recovery redaction.
+            return try Yams.serialize(node: replaced, width: -1, allowUnicode: true)
         } catch let error as AutoMobilePlanExecutor.ExecutorError {
             throw error
         } catch {

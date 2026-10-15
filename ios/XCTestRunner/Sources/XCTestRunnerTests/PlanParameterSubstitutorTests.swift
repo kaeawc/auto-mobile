@@ -49,7 +49,9 @@ final class PlanParameterSubstitutorTests: XCTestCase {
 
     func testDoubleQuotedControlAndUnicode() throws {
         try assertYamlEqual(sub(line(#""${p}""#), ["p": "\u{01}\u{7F}"]), expected(#""\u0001\u007f""#))
-        try assertYamlEqual(sub(line(#""${p}""#), ["p": "Ünï — 日本語 😀"]), expected("\"Ünï — 日本語 😀\""))
+        let out = try sub(line(#""${p}""#), ["p": "Ünï — 日本語 😀"])
+        assertYamlEqual(out, expected("\"Ünï — 日本語 😀\""))
+        XCTAssertTrue(out.contains("Ünï — 日本語"), "printable Unicode must remain literal for secret redaction")
     }
 
     func testDoubleQuotedEmbeddedAndAdjacentPlaceholders() throws {

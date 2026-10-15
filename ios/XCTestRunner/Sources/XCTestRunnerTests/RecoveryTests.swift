@@ -2,6 +2,7 @@ import Tachikoma
 import XCTest
 @testable import XCTestRunner
 import XCTestRunnerTestSupport
+import Yams
 
 // Unit tests for AI-assisted failure recovery. All tests are hermetic: the model is faked
 // (`StubModelResponder`) so nothing here touches the network or needs an API key.
@@ -600,6 +601,70 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
       - tool: tapOn
         text: "${ENVIRONMENT}"
     """
+
+    func testNonAsciiSecretIsRedactedFromSubstitutedRecoveryPlan() async throws {
+        let value = "contraseña 日本語"
+        try await assertSubstitutedPlanSecretIsRedacted(value, serializedFragment: value)
+    }
+
+    func testControlAndTabSecretIsRedactedFromSubstitutedRecoveryPlan() async throws {
+        try await assertSubstitutedPlanSecretIsRedacted("ab\u{01}cd\tend", serializedFragment: #"ab\x01cd\tend"#)
+    }
+
+    func testLongSecretWithSpacesIsRedactedFromSubstitutedRecoveryPlan() async throws {
+        let value = String(repeating: "long secret with spaces ", count: 8) + "end"
+        XCTAssertGreaterThan(value.count, 120)
+        try await assertSubstitutedPlanSecretIsRedacted(value, serializedFragment: value)
+    }
+
+    private func assertSubstitutedPlanSecretIsRedacted(
+        _ value: String,
+        serializedFragment: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    )
+        async throws
+    {
+        let client = RecoveryMCPClient()
+        // The secret occurs only in the plan, so redacting an error cannot satisfy these assertions.
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "inputText", "error": "step failed"]
+        ))
+        let captor = CapturingModelResponder()
+        let handler = makeCapturingHandler(client: client, captor: captor)
+        let executor = makeExecutor(
+            client: client, handler: handler, parameters: ["TOKEN": value, "ENVIRONMENT": visible]
+        )
+
+        _ = try await executor.execute(testMetadata: nil)
+
+        let request = try XCTUnwrap(captor.captured.first, file: file, line: line)
+        let text = requestText(request)
+        XCTAssertTrue(
+            text.contains("text: \"\(SecretRedaction.placeholder)\""),
+            "the whole substituted plan scalar must be redacted", file: file, line: line
+        )
+        XCTAssertFalse(text.contains(value), file: file, line: line)
+        XCTAssertFalse(text.contains(serializedFragment), file: file, line: line)
+        XCTAssertTrue(text.contains(visible), file: file, line: line)
+
+        let daemonPlan = try XCTUnwrap(decodedDaemonPlanContent(client.executePlanCalls.first), file: file, line: line)
+        XCTAssertTrue(
+            daemonPlan.contains(serializedFragment),
+            "the emitted secret must stay contiguous",
+            file: file,
+            line: line
+        )
+        let steps = try XCTUnwrap(Yams.compose(yaml: daemonPlan)?["steps"]?.sequence, file: file, line: line)
+        XCTAssertEqual(
+            steps[1]["text"]?.scalar?.string,
+            value,
+            "the daemon must get the real secret",
+            file: file,
+            line: line
+        )
+    }
 
     func testSecretIsRedactedFromModelRequestWhileNonSecretIsPreserved() async throws {
         let client = RecoveryMCPClient()
@@ -1563,6 +1628,26 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
 /// Direct redaction tests for `SecretRedaction` — the type now only expands Unicode forms and scrubs;
 /// resolution/substitution is the executor's job (tested end-to-end below). (#6029 convergence)
 final class SecretRedactionTests: XCTestCase {
+    func testRedactsLibyamlDoubleQuotedEscapesAndTheirJsonTransportForms() throws {
+        let secret = "start\u{00}\u{07}\u{08}\t\n\u{0B}\u{0C}\r\u{1B}\"\\\u{01}\u{1F}\u{7F}\u{9F}"
+            + "\u{85}\u{A0}\u{2028}\u{2029}\u{FEFF}\u{FFFE}\u{FFFF}😀end"
+        let escaped = #"start\0\a\b\t\n\v\f\r\e\"\\\x01\x1F\x7F\x9F\N"#
+            + "\u{A0}" + #"\L\P\uFEFF\uFFFE\uFFFF\U0001F600end"#
+        let emitted = try PlanParameterSubstitutor.substitute(
+            in: #"text: "${TOKEN}""#, parameters: ["TOKEN": secret]
+        )
+        XCTAssertEqual(emitted, "text: \"\(escaped)\"\n", "pin the spellings to the installed Yams emitter")
+        let values = SecretRedaction.secretValues([secret])
+        var transported = escaped
+        for _ in 0 ..< 3 {
+            XCTAssertEqual(
+                SecretRedaction.redact("before \(transported) after", secretValues: values),
+                "before \(SecretRedaction.placeholder) after"
+            )
+            transported = SecretRedaction.jsonEscaped(transported)
+        }
+    }
+
     func testSecretParameterValuesMatchesExactlyAndDoesNotOverRedact() {
         let values = SecretRedaction.secretParameterValues(
             declaredKeys: ["TOKEN"], parameters: ["TOKEN": "S", "VIS": "v"]

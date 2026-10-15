@@ -18,8 +18,9 @@ enum SecretRedaction {
     /// Expand the executor-supplied concrete secret strings into the exact byte forms to scrub: each
     /// value in its NFC and NFD Unicode forms — so a decomposed on-screen/error occurrence still
     /// matches a composed value (and vice versa) — and, for each of those, its JSON-string-escaped
-    /// form. The recovery loop's tool/observe results are JSON (issue #6094), so a secret containing
-    /// a JSON-special character (`"`, `\`, newline, tab, CR) appears only in escaped form there and
+    /// form, plus its YAML double-quoted form. The recovery loop's tool/observe results are JSON
+    /// (issue #6094), so a secret containing a JSON-special character (`"`, `\`, newline, tab, CR)
+    /// appears only in escaped form there and
     /// the literal `redact` would miss it. Blank inputs are dropped. Dedup is by UTF-16 code units,
     /// NOT `Set<String>`, because Swift string equality is canonical and would collapse the distinct
     /// forms we deliberately keep (a no-op escape equals its raw form and is dropped by dedup).
@@ -33,13 +34,52 @@ enum SecretRedaction {
                 // the enclosing MCP `JsonElement` over an already-encoded `content[].text`, so a
                 // special-character secret can appear double-escaped (#6094). Raw + single + double
                 // covers all three; a no-op escape equals its predecessor and is dropped by dedup.
-                var encoded = form
-                for _ in 0 ..< 3 {
-                    if seen.insert(Array(encoded.utf16)).inserted {
-                        result.append(encoded)
+                // Substituted plans use libyaml's double-quoted escapes, which differ from JSON's
+                // for control characters. Cover JSON transport layers around that YAML form too.
+                for representation in [form, yamlEscaped(form)] {
+                    var encoded = representation
+                    for _ in 0 ..< 3 {
+                        if seen.insert(Array(encoded.utf16)).inserted {
+                            result.append(encoded)
+                        }
+                        encoded = jsonEscaped(encoded)
                     }
-                    encoded = jsonEscaped(encoded)
                 }
+            }
+        }
+        return result
+    }
+
+    /// Inner scalar spelling from Yams 6.2.2's libyaml `yaml_emitter_write_double_quoted_scalar`
+    /// with allowUnicode enabled and unlimited width. This encodes values; it does not parse YAML.
+    /// Match its named escapes and uppercase hex digits, including the checkout's IS_PRINTABLE
+    /// exclusions (C1 controls, BOM, noncharacters, and supplementary Unicode).
+    private static func yamlEscaped(_ value: String) -> String {
+        var result = ""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x00: result += "\\0"
+            case 0x07: result += "\\a"
+            case 0x08: result += "\\b"
+            case 0x09: result += "\\t"
+            case 0x0A: result += "\\n"
+            case 0x0B: result += "\\v"
+            case 0x0C: result += "\\f"
+            case 0x0D: result += "\\r"
+            case 0x1B: result += "\\e"
+            case 0x22: result += "\\\""
+            case 0x5C: result += "\\\\"
+            case 0x85: result += "\\N"
+            case 0x2028: result += "\\L"
+            case 0x2029: result += "\\P"
+            case 0x01 ... 0x1F, 0x7F ... 0x9F:
+                result += String(format: "\\x%02X", scalar.value)
+            case 0xFEFF, 0xFFFE, 0xFFFF:
+                result += String(format: "\\u%04X", scalar.value)
+            case 0x10000 ... 0x10FFFF:
+                result += String(format: "\\U%08X", scalar.value)
+            default:
+                result.unicodeScalars.append(scalar)
             }
         }
         return result

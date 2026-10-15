@@ -1,6 +1,23 @@
 {
   "description": "Refusals that cross the wire outside an MCP tool result, which the runners' refusal classifier never reads: socket-frame (the control socket failure frame, from mcpRequestFailureDetails), delete-device (deleteDevice's failure result, fields under failure), managed-slots-result (the ManagedSlotsResult of the MCP initialize outcome and the automobile:managed-slots resource, failure on the slot), overload-frame (the control socket failure with typed fields under overloadFailure) and webrtc-stream-response (the aux-socket viewer refusal with errorCode beside error). Each file is <surface>.<name>.json, regenerated with UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/refusalWireContract.test.ts test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts. expected uses the vocabulary of ../expectations.json; fields pins the code, retryable, acquireNewSession (nextAction is acquire_new_session), a positive retryAfterMs, and the evidence (details, or capacity for a slot failure). A field absent from a row is absent on the wire. Additional surfaces pin production refusal results (recording-start-result, proxy-tool-result, provision-envelope), device-loss-outcome and liveness-handover bodies, managed-slots-response, and the code-bearing serializer fragments device-session-error-fields and request-failure-fields. Synchronous fixtures are regenerated with bun scripts/generate-refusal-wire-fixtures.ts; asynchronous captures are checked and updated by their declared owning tests. retryable is omitted from fields when the wire carries no retry intent.",
   "fixtures": {
+    "press-button-result.unsupported_button": {
+      "expected": "fail",
+      "fields": {
+        "code": "unsupported_button",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.prototype_hidden": {
+      "expected": "fail",
+      "fields": {
+        "code": "prototype_hidden",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": { "prototypeHiddenReason": "app_layer_window_hidden" }
+      }
+    },
     "socket-frame.prototype_suspended": {
       "expected": "fail",
       "fields": {

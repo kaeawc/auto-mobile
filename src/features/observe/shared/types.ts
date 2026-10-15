@@ -11,6 +11,8 @@ import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
+import type { PrototypeAssetCache } from "../../prototype/prototypeAssetCache";
+import type { SavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 
 // =============================================================================
 // Performance Timing
@@ -78,6 +80,8 @@ export interface ActionTimingResult extends BaseResult {
  * Provides access to shared state and functionality from the main client.
  */
 export interface DelegateContext {
+  prototypeAssetCache?: { serial: string; cache: PrototypeAssetCache };
+  savedPrototypeMirror?: { serial: string; mirror: SavedPrototypeMirror };
   /** Platform-specific serialization at the request construction boundary. */
   serializeRequest?(message: Record<string, unknown>): string;
   /**

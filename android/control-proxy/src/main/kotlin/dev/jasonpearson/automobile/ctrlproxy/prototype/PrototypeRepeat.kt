@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.EmitContextResolver
 import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
 import dev.jasonpearson.automobile.protocol.PrototypeBadgeNode
@@ -8,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
@@ -19,6 +21,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
 import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
+import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
+import dev.jasonpearson.automobile.protocol.PrototypeGridNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconNode
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
@@ -27,6 +31,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemCheckbox
 import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
+import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
+import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
@@ -37,11 +43,14 @@ import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
 import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
+import dev.jasonpearson.automobile.protocol.PrototypeSearchBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeSelectNode
 import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
@@ -50,6 +59,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
@@ -65,36 +76,50 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     is PrototypeBoxNode -> repeat
     is PrototypeRowNode -> repeat
     is PrototypeColumnNode -> repeat
+    is PrototypeFlowNode -> repeat
+    is PrototypeGridNode -> repeat
     else -> null
   }
 
 /**
  * The children [node] renders, with `repeat` expanded before layout: the template children are
- * instantiated once per item, in item order, each bound to its item and `{index}`. Instance
- * children live under `path.repeat[item].children[template]`, so a row keeps its identity (and its
- * Compose key) for as long as it keeps its index. Without a `repeat` this is the plain child list.
- * Pass [bind] false to walk the shape only (limit guards) without copying any node.
+ * instantiated once per item, in item order. With [bind] true, each child is bound to its item and
+ * `{index}` and lives under `path.repeat[key].children[template]`, using `repeat.key` when present
+ * and falling back to its index, so a row keeps its identity (and its Compose key). Pass [bind]
+ * false to walk the shape only (limit guards and anchor validation) without copying any node; these
+ * walks always use `path.repeat[index].children[template]` to preserve validation paths. Without a
+ * `repeat` this is the plain child list.
  */
 internal fun prototypeChildEntries(
   node: PrototypeNode,
   path: String,
   bind: Boolean = true,
 ): List<PrototypeChildEntry> {
+  if (node is PrototypeStackNode)
+    return node.screens.map { (name, child) ->
+      PrototypeChildEntry(child, "$path.screens[${JsonPrimitive(name)}]")
+    }
   val children = prototypeDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
     val single =
-      node is PrototypeScrollNode || node is PrototypeBottomSheetNode || node is PrototypeDialogNode
+      node is PrototypeScrollNode ||
+        node is PrototypeBottomSheetNode ||
+        node is PrototypeDialogNode ||
+        node is PrototypeSearchBarNode
     return children.mapIndexed { index, child ->
       PrototypeChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
   }
   return repeat.items.flatMapIndexed { itemIndex, item ->
     val instance = RepeatInstance(repeat.`as`, item, itemIndex)
+    val identity =
+      if (bind) repeat.key?.let { item[it]?.renderedText() } ?: itemIndex.toString()
+      else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
         if (bind) child.bound(instance) else child,
-        "$path.repeat[$itemIndex].children[$index]",
+        "$path.repeat[$identity].children[$index]",
       )
     }
   }
@@ -102,6 +127,8 @@ internal fun prototypeChildEntries(
 
 private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val onTap = onTap?.map { it.bound(instance) }
+  val onLongPress = onLongPress?.map { it.bound(instance) }
+  val onDoubleTap = onDoubleTap?.map { it.bound(instance) }
   val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
   fun List<PrototypeNode>.bound() = map { it.bound(instance) }
@@ -109,6 +136,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeBoxNode ->
       copy(
         onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
@@ -116,6 +145,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeRowNode ->
       copy(
         onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
@@ -123,9 +154,32 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeColumnNode ->
       copy(
         onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
+      )
+    is PrototypeFlowNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
+    is PrototypeGridNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
+    is PrototypeStackNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        screens = screens.mapValues { (_, child) -> child.bound(instance) },
       )
     is PrototypePagerNode ->
       copy(
@@ -137,6 +191,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeCardNode ->
       copy(
         onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
@@ -144,9 +200,18 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeTextNode ->
       copy(
         onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
-        text = instance.interpolate(text),
+        text = text?.let(instance::interpolate),
+        spans =
+          spans?.map { span ->
+            span.copy(
+              text = instance.interpolate(span.text),
+              onTap = span.onTap?.map { it.bound(instance) },
+            )
+          },
       )
     is PrototypeScrollNode ->
       copy(
@@ -163,11 +228,39 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
       )
-    is PrototypeImageNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is PrototypeIconNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeImageNode ->
+      copy(
+        onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeIconNode ->
+      copy(
+        onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeSearchBarNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        stateKey = instance.interpolate(stateKey),
+        activeKey = activeKey?.let(instance::interpolate),
+        placeholder = placeholder?.let(instance::interpolate),
+        trailingActions = trailingActions?.map { it.bound(instance) },
+        onSubmit = onSubmit?.map { it.bound(instance) },
+        child = child?.bound(instance),
+      )
     is PrototypeTextFieldNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -189,6 +282,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSwitchNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -196,6 +291,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeCheckboxNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -203,6 +300,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeButtonNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -210,6 +308,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSliderNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -217,6 +317,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeChipNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -224,13 +325,42 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeRadioGroupNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
+    is PrototypeSelectNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        stateKey = instance.interpolate(stateKey),
+        label = label?.let(instance::interpolate),
+        options = options.map { it.copy(label = instance.interpolate(it.label)) },
+      )
+    is PrototypeMenuNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
+        items =
+          items.map { item ->
+            if (item is PrototypeMenuEntry)
+              item.copy(
+                label = instance.interpolate(item.label),
+                trailingText = item.trailingText?.let(instance::interpolate),
+                onTap = item.onTap?.map { it.bound(instance) },
+              )
+            else item
+          },
+      )
     is PrototypeListItemNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -249,9 +379,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         child = child?.bound(instance),
       )
     is PrototypeIconButtonNode ->
-      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+      copy(
+        enabledWhen = enabledWhen?.bound(instance),
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeFabNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -294,6 +430,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeTimePickerNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -302,6 +440,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeDatePickerNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -327,7 +467,20 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
     is PrototypeSetStateAction ->
       copy(key = instance.interpolate(key), value = instance.interpolateScalar(value))
-    is PrototypeEmitAction -> copy(name = instance.interpolate(name))
+    is PrototypeEmitAction ->
+      copy(
+        name = instance.interpolate(name),
+        requireValid = requireValid?.map(instance::interpolate),
+        context =
+          context?.let {
+            PrototypeRepeatTemplate.bindEmitContext(
+              it,
+              instance.alias,
+              instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+              instance.index,
+            )
+          },
+      )
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
@@ -336,6 +489,7 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
 
 private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeCondition =
   copy(
+    valid = valid?.let { PrototypeValidityKeys.Multiple(it.keys().map(instance::interpolate)) },
     key = key?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
     notEquals = notEquals?.let(instance::interpolateScalar),
@@ -373,3 +527,16 @@ private fun RepeatInstance.interpolate(text: String): String =
         item[segment.name]?.renderedText() ?: "{$alias.${segment.name}}"
     }
   }
+
+private fun PrototypeCheck.bound(instance: RepeatInstance): PrototypeCheck {
+  val message = instance.interpolate(message)
+  return when (this) {
+    is PrototypeCheck.Required -> copy(message = message)
+    is PrototypeCheck.MinLength -> copy(message = message)
+    is PrototypeCheck.MaxLength -> copy(message = message)
+    is PrototypeCheck.Min -> copy(message = message)
+    is PrototypeCheck.Max -> copy(message = message)
+    is PrototypeCheck.Format -> copy(message = message)
+    is PrototypeCheck.Pattern -> copy(message = message)
+  }
+}

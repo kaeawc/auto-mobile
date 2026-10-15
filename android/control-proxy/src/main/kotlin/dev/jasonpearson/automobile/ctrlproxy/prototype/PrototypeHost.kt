@@ -91,7 +91,7 @@ data class PrototypeHiddenCapture<T>(val value: T, val prototypeExcluded: Boolea
  */
 data class PrototypeRequest(
   val placement: PrototypePlacement = PrototypePlacement.Floating(),
-  /** True only while a text field is visible: the window is focusable (takes keys) just then. */
+  /** True only while an editable field is visible; navigation focus is tracked separately. */
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
   val displayId: Int = Display.DEFAULT_DISPLAY,
@@ -99,6 +99,8 @@ data class PrototypeRequest(
    * The window type; changing it on a shown prototype adds a new window rather than relayouting.
    */
   val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
+  /** Names the window so the hierarchy can attribute it to this surface. */
+  val surfaceId: String? = null,
   /**
    * The prototype outlives its host session (#10494); non-fullscreen windows carry a close control.
    * The controller defaults persistent fullscreen specs to the bar unless chrome is explicit.
@@ -111,9 +113,24 @@ data class PrototypeRequest(
   val theme: StateFlow<PrototypeShownTheme>? = null,
   /** Direct host callers retain the legacy bar; the controller resolves the spec default. */
   val chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
+  /**
+   * The authored surface alone hides the whole window in every reachable mode. The theme is live,
+   * so this must account for all reachable palettes, not just the currently shown one.
+   */
+  val opaqueSurface: Boolean = false,
+  /** Foreground scoping belongs to this surface; locks remain a host-wide safety check. */
+  val isSuspended: () -> Boolean = { false },
+  /** Re-add a re-shown surface above its siblings while retaining its runtime state. */
+  val bringToFront: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
+  /** Navigation takes Back even without an editable field; IME handling stays separate. */
+  val hasStackBack: Boolean = false,
+  val onHostBack: (suspend () -> Unit)? = null,
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
+  val focusable: Boolean
+    get() = hasTextField || hasStackBack
+
   init {
     require(opacityPercent in 0..100) { "Opacity must be in 0..100" }
     require(displayId >= 0) { "displayId must be non-negative: $displayId" }
@@ -126,6 +143,10 @@ data class PrototypeRequest(
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
 interface PrototypeHost {
+  /** True only during a temporary screenshot hide. */
+  val isHiddenForCapture: Boolean
+    get() = false
+
   val isShowing: Boolean
   val currentPlacement: PrototypePlacement?
   val isTouchThroughActive: Boolean
@@ -147,6 +168,9 @@ interface PrototypeHost {
    * previous setting, so the caller can retry. A detached window is reported like [relayout].
    */
   suspend fun setTextFieldVisible(visible: Boolean): Boolean
+
+  /** Changes Back focusability without changing text-field or keyboard state. */
+  suspend fun setStackBackEnabled(enabled: Boolean): Boolean
 
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as
@@ -204,11 +228,12 @@ interface PrototypeHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible the window is focusable, and Back dismisses the prototype through
- * the request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen
- * dismiss row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered
- * through [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a
- * visible text field the window is not focusable and never sees Back at all.
+ * While a text field is visible or a stack can pop the window is focusable. Back first navigates
+ * through the controller; without navigation it dismisses the prototype through the request's
+ * `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss row. Back
+ * arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
+ * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
+ * text field or navigated stack the window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and
@@ -241,6 +266,7 @@ class DefaultPrototypeHost(
     ::viewPrototypeEscapeScheduler,
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -261,6 +287,9 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+
+  override val isHiddenForCapture: Boolean
+    get() = window?.view?.visibility == View.INVISIBLE
 
   override val isShowing: Boolean
     get() = window != null
@@ -301,14 +330,16 @@ class DefaultPrototypeHost(
 
   private fun showOnMain(request: PrototypeRequest): Boolean =
     PrototypeTrace.section(PrototypeTrace.HOST_SHOW) {
-      if (destroyed || isBlocked()) return@section false
+      if (destroyed || isBlocked() || request.isSuspended()) return@section false
       val current = window
       // An in-place update keeps the window's own display target; a fresh context per update would
-      // be created on every non-default-display request only to be discarded. A window's type
-      // cannot change after it is added, so a layer change attaches a new window like a display
-      // change.
+      // be created on every non-default-display request only to be discarded. A window's type and
+      // accessibility title are fixed at add time, so a layer or surface id change attaches a new
+      // window like a display change.
       val inPlace = current?.takeIf {
-        it.displayId == request.displayId && it.request.layer == request.layer
+        it.displayId == request.displayId &&
+          it.request.layer == request.layer &&
+          it.request.surfaceId == request.surfaceId
       }
       val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
       val params =
@@ -319,6 +350,9 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
+          hasStackBack = request.hasStackBack,
+          opaque = prototypeWindowOpaque(request),
+          surfaceId = request.surfaceId,
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -326,7 +360,7 @@ class DefaultPrototypeHost(
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
       inPlace?.anchoredOrigin = null
-      if (inPlace != null) updateInPlace(inPlace, request, params)
+      if (inPlace != null && !request.bringToFront) updateInPlace(inPlace, request, params)
       else addWindow(target, request, params, replacing = current)
     }
 
@@ -351,7 +385,7 @@ class DefaultPrototypeHost(
     current.request = request
     placement = request.placement
     applyContent(current)
-    current.back.sync(request.hasTextField)
+    current.back.sync(request.focusable)
     return true
   }
 
@@ -405,7 +439,7 @@ class DefaultPrototypeHost(
     placement = request.placement
     owner.resume()
     replacing?.let(::retire)
-    added.back.sync(request.hasTextField)
+    added.back.sync(request.focusable)
     onWindowAttached()
     return true
   }
@@ -476,7 +510,7 @@ class DefaultPrototypeHost(
 
   override suspend fun relayout(): Boolean = mainThread.onMain {
     val current = window ?: return@onMain true
-    if (isBlocked()) return@onMain dismissOnMain()
+    if (isBlocked() || current.request.isSuspended()) return@onMain dismissOnMain()
     relayoutOnMain(current)
   }
 
@@ -489,10 +523,15 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
+        hasStackBack = current.request.hasStackBack,
+        opaque = prototypeWindowOpaque(current.request),
+        surfaceId = current.request.surfaceId,
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
+      return true
     return update(current, params)
   }
 
@@ -503,7 +542,17 @@ class DefaultPrototypeHost(
     if (!visible) hideKeyboard(current.view)
     current.request = previous.copy(hasTextField = visible)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(visible) else current.request = previous
+    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    applied
+  }
+
+  override suspend fun setStackBackEnabled(enabled: Boolean): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    val previous = current.request
+    if (previous.hasStackBack == enabled) return@onMain true
+    current.request = previous.copy(hasStackBack = enabled)
+    val applied = relayoutOnMain(current)
+    if (applied) current.back.sync(current.request.focusable) else current.request = previous
     applied
   }
 
@@ -515,7 +564,7 @@ class DefaultPrototypeHost(
 
   private fun backDecision(event: KeyEvent): PrototypeBackDecision =
     prototypeBackDecision(
-      window?.request?.hasTextField == true,
+      window?.request?.focusable == true,
       event.keyCode,
       event.action,
       event.isCanceled,
@@ -523,15 +572,20 @@ class DefaultPrototypeHost(
 
   /** The one Back target for the key-event path and the predictive-back callback. */
   private fun dismissFromBack() {
-    val request = window?.request?.takeIf { it.hasTextField } ?: return
-    backScope.launch { request.onHostDismiss() }
+    val request = window?.request?.takeIf { it.focusable } ?: return
+    backScope.launch { (request.onHostBack ?: request.onHostDismiss)() }
   }
 
   override suspend fun setOpacity(percent: Int) {
     require(percent in 0..100) { "Opacity must be in 0..100" }
     mainThread.onMain {
       window?.let {
-        it.request = it.request.copy(opacityPercent = percent)
+        val previousRequest = it.request
+        val newRequest = previousRequest.copy(opacityPercent = percent)
+        it.request = newRequest
+        if (prototypeWindowOpaque(previousRequest) != prototypeWindowOpaque(newRequest)) {
+          relayoutOnMain(it)
+        }
         applyContent(it)
       }
     }
@@ -656,7 +710,8 @@ class DefaultPrototypeHost(
   private suspend fun restoreAfterCapture(view: View) {
     try {
       mainThread.onMain {
-        if (!isBlocked()) view.visibility = View.VISIBLE
+        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true)
+          view.visibility = View.VISIBLE
         else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {
@@ -703,13 +758,14 @@ enum class PrototypeBackDecision {
   /** Swallow the key without acting (the down half of a Back press, or a canceled up). */
   CONSUME,
 
-  /** Back completed on a focusable prototype: dismiss it as the user. */
+  /** Back completed on a focusable prototype: dispatch to its pop-or-dismiss target. */
   DISMISS,
 }
 
 /**
  * Back reaches the prototype only while its window is focusable, which is exactly while a text
- * field is visible. Dismissal fires once, on the up half of an uncanceled press.
+ * field is visible or stack navigation can pop. Dispatch fires once, on the up half of an
+ * uncanceled press.
  */
 fun prototypeBackDecision(
   focusable: Boolean,
@@ -735,8 +791,14 @@ internal class PrototypeComposeView(
   escapeSchedulerFactory: (View) -> PrototypeEscapeScheduler = ::viewPrototypeEscapeScheduler,
   touchSlop: Int = ViewConfiguration.get(context).scaledTouchSlop,
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  accessibilitySchedulerFactory: (View) -> PrototypeEscapeScheduler =
+    ::viewPrototypeEscapeScheduler,
+  nowMs: () -> Long = android.os.SystemClock::uptimeMillis,
 ) : AbstractComposeView(context) {
   private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
+  private val accessibilityCoalescer = PrototypeAccessibilityCoalescer(nowMs)
+  private val accessibilityScheduler = accessibilitySchedulerFactory(this)
+  private var cancelAccessibilityTrailing: (() -> Unit)? = null
   val escapeState = PrototypeEscapeState()
   private var escapeActive = false
   private var lastTouch: MotionEvent? = null
@@ -771,11 +833,44 @@ internal class PrototypeComposeView(
   }
 
   override fun onDetachedFromWindow() {
+    cancelAccessibilityTrailing?.invoke()
+    cancelAccessibilityTrailing = null
+    accessibilityCoalescer.reset()
     escapeTracker.reset()
     lastTouch?.recycle()
     lastTouch = null
     escapeState.hide()
     super.onDetachedFromWindow()
+  }
+
+  override fun onRequestSendAccessibilityEvent(
+    child: View,
+    event: android.view.accessibility.AccessibilityEvent,
+  ): Boolean {
+    if (!isCoalescibleAccessibilityEvent(event.eventType, event.contentChangeTypes)) {
+      return super.onRequestSendAccessibilityEvent(child, event)
+    }
+    when (accessibilityCoalescer.onCoalescible()) {
+      PrototypeAccessibilityCoalescer.Action.EMIT_NOW -> emitAccessibilitySubtreeChanged()
+      PrototypeAccessibilityCoalescer.Action.SCHEDULE_TRAILING -> {
+        cancelAccessibilityTrailing =
+          accessibilityScheduler.schedule(accessibilityCoalescer.remainingMs()) {
+            cancelAccessibilityTrailing = null
+            accessibilityCoalescer.onTrailingFired()
+            emitAccessibilitySubtreeChanged()
+          }
+      }
+      PrototypeAccessibilityCoalescer.Action.NONE -> Unit
+    }
+    return false
+  }
+
+  private fun emitAccessibilitySubtreeChanged() {
+    notifySubtreeAccessibilityStateChanged(
+      this,
+      this,
+      android.view.accessibility.AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE,
+    )
   }
 
   override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -873,6 +968,12 @@ data class PrototypeHostChrome(
   val closeVisible: Boolean = false,
   val escape: Boolean = false,
 )
+
+internal fun prototypeWindowOpaque(request: PrototypeRequest): Boolean =
+  request.opaqueSurface &&
+    request.placement is PrototypePlacement.Fullscreen &&
+    request.opacityPercent == 100 &&
+    !prototypeHostChrome(request).dismissVisible
 
 fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
   val fullscreen = request.placement is PrototypePlacement.Fullscreen

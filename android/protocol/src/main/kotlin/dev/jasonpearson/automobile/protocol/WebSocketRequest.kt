@@ -452,6 +452,10 @@ data class AddHighlight(
  * display it is on (ignoring [displayId]) and each pager's page. [reset] true starts it fresh
  * instead. Hosts send `reset` only when true; an older device ignores it and always starts fresh.
  *
+ * [replaceOthers] defaults to true, preserving the original single-window behavior. Hosts send it
+ * only when false and only to a device advertising `prototype_multi_surface_v1`; an older device
+ * ignores this field and always replaces every prototype already on screen.
+ *
  * [appearance] pins what "the system setting" means for this show (`prototype_appearance_v1`), so a
  * spec with `theme.mode: "system"` or no mode can be previewed in either mode without flipping the
  * device. Absent means [PrototypeAppearanceOverride.DEVICE]. Every show states it afresh: a same-id
@@ -466,6 +470,7 @@ data class ShowPrototype(
   val displayId: Int? = null,
   val reset: Boolean = false,
   val appearance: PrototypeAppearanceOverride? = null,
+  val replaceOthers: Boolean = true,
 ) : WebSocketRequest()
 
 @Serializable
@@ -500,6 +505,32 @@ data class PatchPrototype(
   val baseRevision: Long? = null,
   val ops: JsonArray,
 ) : WebSocketRequest()
+
+@Serializable
+@SerialName("save_prototype")
+data class SavePrototype(
+  override val requestId: String? = null,
+  val spec: PrototypeSpec,
+  val label: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("pin_saved_prototype")
+data class PinSavedPrototype(
+  override val requestId: String? = null,
+  val id: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("list_saved_prototypes")
+data class ListSavedPrototypes(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
+@SerialName("delete_saved_prototype")
+data class DeleteSavedPrototype(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
 
 /**
  * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the

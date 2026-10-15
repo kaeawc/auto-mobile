@@ -158,9 +158,9 @@ It does not create separate adb servers or make host capacity independent.
 ## Host preflight and staggered boots
 
 `preflight --batch-dir "$B" [--strict]` reports platform, power source and charge,
-system-wide sleep assertions, lid state and clamshell sleep behavior, the three
+system-wide sleep assertions, lid state and clamshell sleep behavior, low-power mode (read from `lowpowermode` or `powermode`; absence of both is not a warning), the three
 load averages, CPU count, and free/total memory bytes. macOS reads `pmset -g batt`,
-`pmset -g assertions`, and `ioreg`; other platforms report those sections as
+`pmset -g assertions`, `pmset -g`, and `ioreg`; other platforms report those sections as
 unsupported. Failed readers carry `unavailable` reasons. Memory is reported
 without warnings. The command needs a private batch path, but no `batch.json`.
 It prints one JSON document and exits 0; `--strict` exits 1 when warnings exist.

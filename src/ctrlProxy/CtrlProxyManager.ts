@@ -1,4 +1,13 @@
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
+import {
+  defaultSavedPrototypeMirror,
+  type SavedPrototypeMirror,
+} from "../features/prototype/savedPrototypeMirror";
+import {
+  AndroidSavedPrototypeRestoreDevice,
+  restoreSavedPrototypes,
+  type SavedPrototypeRestoreReport,
+} from "../features/prototype/savedPrototypeRestore";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -73,6 +82,9 @@ export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
 // API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
 // another 2 seconds for scheduler and adb polling delay before giving up.
 export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
+export interface CtrlProxySetupResult extends ProxySetupResult {
+  savedPrototypeRestore?: SavedPrototypeRestoreReport;
+}
 /**
  * Bound on each device write in the rebind's mutating section (remove, force-stop,
  * re-add, restore). Those writes run under a private signal because the caller's
@@ -132,7 +144,7 @@ function extractInstallFailureCode(message: string): string | undefined {
  */
 export interface CtrlProxyManager extends ProxyManager {
   assertNotDrivenByOtherDaemon?(signal?: AbortSignal): Promise<void>;
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
+  setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxySetupResult>;
   isEnabled(): Promise<boolean>;
   /**
    * Re-toggle CtrlProxy's accessibility-service entry when dumpsys shows it is
@@ -165,6 +177,7 @@ export interface CtrlProxyManager extends ProxyManager {
 }
 
 interface AccessibilityVersionCheckResult {
+  savedPrototypeRestore?: SavedPrototypeRestoreReport;
   status:
     | "skipped"
     | "not_installed"
@@ -286,6 +299,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static adbFactory: AdbClientFactory = defaultAdbClientFactory;
 
   private timer: Timer;
+  private savedPrototypeMirror: SavedPrototypeMirror = defaultSavedPrototypeMirror();
+  private savedPrototypeRestorer: typeof restoreSavedPrototypes = restoreSavedPrototypes;
+
+  public setSavedPrototypeMirrorForTesting(mirror: SavedPrototypeMirror): void {
+    this.savedPrototypeMirror = mirror;
+  }
+  public setSavedPrototypeRestorerForTesting(restorer: typeof restoreSavedPrototypes): void {
+    this.savedPrototypeRestorer = restorer;
+  }
 
   // Shared utilities for download and checksum
   private readonly fileDownloader: FileDownloader;
@@ -2114,6 +2136,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       result.attemptedReinstall = true;
+      const hasMirroredPrototypes = isInstalled && (await this.warnBeforePrototypeUninstall());
       if (isInstalled) {
         await this.executeApkStage(
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
@@ -2124,6 +2147,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await this.install(apkPath);
       perf.endOperation("installApk");
       await this.enable();
+      // Restore saved storage only; re-pinning shortcuts would show a confirmation dialog.
+      const savedPrototypeRestore = hasMirroredPrototypes
+        ? await this.restoreAfterReinstall()
+        : undefined;
       logger.info(
         `[CTRL_PROXY] APK ${isInstalled ? "reinstalled" : "installed"} and service enabled`,
       );
@@ -2131,6 +2158,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return {
         ...result,
         status: isInstalled ? "reinstalled" : "installed",
+        savedPrototypeRestore,
       };
     } catch (reinstallError) {
       if (reinstallError instanceof CtrlProxyApkStageError) {
@@ -2149,6 +2177,63 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         cause: reinstallError,
       };
     }
+  }
+
+  private async warnBeforePrototypeUninstall(): Promise<boolean> {
+    try {
+      const entries = await this.savedPrototypeMirror.list(this.device.deviceId);
+      if (entries.length === 0) {
+        return false;
+      }
+      logger.warn(
+        `[CTRL_PROXY] Uninstall will delete saved prototypes from ${this.device.deviceId}; restoring from host mirror: ${entries.map((entry) => `${entry.id} (${entry.label})`).join(", ")}`,
+      );
+      return true;
+    } catch (error) {
+      logger.warn("[CTRL_PROXY] Cannot inspect saved prototype mirror before uninstall", error);
+      return false;
+    }
+  }
+  private async restoreAfterReinstall(): Promise<SavedPrototypeRestoreReport> {
+    try {
+      const binding = await raceWithDeadline(() => this.waitForAccessibilityServiceBinding(), {
+        timer: this.timer,
+        timeoutMs: REBIND_BIND_WAIT_BUDGET_MS,
+        label: "Saved prototype restore accessibility service binding",
+      });
+      if (binding === "unhealthy") {
+        logger.warn(
+          "[CTRL_PROXY] Accessibility service binding unavailable before prototype restore; attempting restore",
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        "[CTRL_PROXY] Accessibility service binding wait failed before prototype restore; attempting restore",
+        error,
+      );
+    }
+    let report: SavedPrototypeRestoreReport;
+    try {
+      report = await this.savedPrototypeRestorer(
+        this.device.deviceId,
+        this.savedPrototypeMirror,
+        new AndroidSavedPrototypeRestoreDevice(this.device, this.timer),
+      );
+    } catch (error) {
+      logger.warn("[CTRL_PROXY] Saved prototype restore after reinstall failed", error);
+      report = {
+        restored: [],
+        skipped: [],
+        failed: [{ id: "*", code: "restore_failed", reason: errorMessage(error) }],
+      };
+    }
+    if (report.failed.length > 0) {
+      logger.warn(
+        `[CTRL_PROXY] Saved prototype restore failed for: ${report.failed.map((failure) => failure.id).join(", ")}`,
+        report,
+      );
+    }
+    return report;
   }
 
   /**
@@ -2703,7 +2788,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private async recheckSetup(perf: PerformanceTracker): Promise<ProxySetupResult> {
+  private async recheckSetup(perf: PerformanceTracker): Promise<CtrlProxySetupResult> {
     try {
       const [installed, enabled] = await perf.track("recheckStatus", async () => {
         return Promise.all([this.isInstalled(), this.isEnabled()]);
@@ -2741,7 +2826,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private setupCompatibilityResult(
     compatibilityResult: AccessibilityVersionCheckResult,
     perf: PerformanceTracker,
-  ): ProxySetupResult | null {
+  ): CtrlProxySetupResult | null {
     if (compatibilityResult.status === "failed") {
       perf.end();
       const error =
@@ -2767,6 +2852,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         success: true,
         message: "Accessibility Service upgraded to a compatible version",
         perfTiming: perf.getTimings(),
+        ...(compatibilityResult.savedPrototypeRestore === undefined
+          ? {}
+          : { savedPrototypeRestore: compatibilityResult.savedPrototypeRestore }),
       };
     }
 
@@ -2778,7 +2866,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     isAlreadyInstalled: boolean,
     isAlreadyEnabled: boolean,
     perf: PerformanceTracker,
-  ): ProxySetupResult | null {
+  ): CtrlProxySetupResult | null {
     if (!force && isAlreadyInstalled && isAlreadyEnabled) {
       perf.end();
       return {
@@ -2797,7 +2885,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async setup(
     force: boolean = false,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<ProxySetupResult> {
+  ): Promise<CtrlProxySetupResult> {
     if (this.attemptedAutomatedSetup) {
       return this.recheckSetup(perf);
     }
@@ -2810,7 +2898,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private async setupAfterForeignForwardGuard(
     force: boolean,
     perf: PerformanceTracker,
-  ): Promise<ProxySetupResult> {
+  ): Promise<CtrlProxySetupResult> {
     perf.serial("a11yServiceSetup");
     let apkPath: string | null = null;
 

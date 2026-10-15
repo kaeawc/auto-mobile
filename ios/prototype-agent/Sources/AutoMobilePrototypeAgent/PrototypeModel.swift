@@ -11,8 +11,13 @@ final class PrototypeModel {
     private(set) var spec: PrototypeSpec?
     /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
     private(set) var showRevision = 0
+    /// Transient presentation only; never written to or reported as spec state.
+    var expandedSelect: PrototypeNode?
+    var menuBounds: [ObjectIdentifier: CGRect] = [:]
     private(set) var state: [String: JSONValue] = [:]
+    private(set) var shownErrors: Set<String> = []
     private(set) var pages: [String: Int] = [:]
+    private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
     private(set) var escapeRevealed = false
@@ -29,9 +34,21 @@ final class PrototypeModel {
         // of an unchanged (non-Equatable) spec merely by copying the session back.
         if replacingSpec || session.isShown != next.isShown { spec = next.spec }
         session = next
+        if let selected = expandedSelect {
+            let root = next.spec?.root
+            let blocker = root?.openModals(state: next.state, pages: next.pages)
+                .last { ["dialog", "menu"].contains($0.type) }
+            if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
+                (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
+            {
+                expandedSelect = nil
+            }
+        }
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
+        if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
         if pages != next.pages { pages = next.pages }
+        if stacks != next.stacks { stacks = next.stacks }
         if appearance != next.appearance { appearance = next.appearance }
         if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
     }
@@ -46,6 +63,8 @@ final class PrototypeModel {
     private(set) var keyboardFrame: CGRect?
     @ObservationIgnored private(set) var keyboardDuration: Double?
     var assets: [String: UIImage] = [:]
+    var fontFaces: [String: String] = [:]
+    var assetProblems: [PrototypeSavedProblem] = []
 
     func setKeyboard(frame: CGRect?, duration: Double?) {
         keyboardDuration = duration
@@ -101,8 +120,11 @@ final class PrototypeModel {
 
     @ObservationIgnored private let clock: PrototypeClock
 
-    init(clock: PrototypeClock = SystemPrototypeClock()) {
+    let mode: PrototypeLifecycleMode
+
+    init(clock: PrototypeClock = SystemPrototypeClock(), mode: PrototypeLifecycleMode = .session) {
         self.clock = clock
+        self.mode = mode
     }
 
     /// Local override of the five-minute idle TTL; no wire field carries it. Applies from the next
@@ -114,7 +136,8 @@ final class PrototypeModel {
 
     /// Re-arms snackbar timeouts against the snackbars the session now has open.
     private func syncSnackbarTimeouts() {
-        let open = session.spec?.root.openModals(state: session.state, pages: session.pages) ?? []
+        let open = session.spec?.root
+            .openModals(state: session.state, pages: session.pages, stacks: session.stacks) ?? []
         snackbarTimeouts.sync(openModals: open)
     }
 
@@ -153,10 +176,11 @@ final class PrototypeModel {
         var next = session
         next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
         publish(next, replacingSpec: true)
+        expandedSelect = nil
         showRevision += 1
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
-        idleTimer.arm()
+        if mode.expiresWhenIdle { idleTimer.arm() }
         onVisibilityChange?(true)
     }
 
@@ -186,6 +210,42 @@ final class PrototypeModel {
 
     // MARK: Interactions
 
+    /// Reading stacks registers the SwiftUI dependency; the pop policy itself stays in core.
+    var stackPopTarget: String? {
+        _ = spec
+        _ = state
+        _ = pages
+        _ = stacks
+        return session.stackPopTarget
+    }
+
+    @discardableResult
+    func popTopmostStack() -> Bool {
+        guard stackPopTarget != nil else { return false }
+        apply { $0.popTopmostStack() }
+        return true
+    }
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        // Read the observed fields; the session itself is observation-ignored.
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    func blur(_ node: PrototypeNode) {
+        apply(activity: false) { session in
+            session.blur(node)
+            return []
+        }
+    }
+
     func run(_ actions: [PrototypeAction]) {
         apply { $0.run(actions) }
     }
@@ -205,7 +265,7 @@ final class PrototypeModel {
         // SwiftUI reports the settled page on appear; only a page that changed is activity.
         let before = session.pages[pager]
         apply(activity: false) { $0.setPage(pager, target) }
-        if session.isShown, session.pages[pager] != before { idleTimer.arm() }
+        if session.isShown, session.pages[pager] != before, mode.expiresWhenIdle { idleTimer.arm() }
     }
 
     func toggle(_ key: String, then actions: [PrototypeAction]) {
@@ -249,6 +309,7 @@ final class PrototypeModel {
     /// The last host connection is gone: the prototype ends with `reason: disconnect` and its
     /// uploaded assets are dropped, shown or not (Android's `onClientCountChanged(0)`).
     func hostDisconnected() {
+        guard mode.endsWithHost else { return }
         dismiss(reason: .disconnect)
         if !assets.isEmpty {
             assets = [:]
@@ -269,7 +330,7 @@ final class PrototypeModel {
         // redraw value-holding controls so they show those values instead of the refused input.
         if PrototypeRefusedChange.leftValuesUnchanged(before: previous, after: next) { refusedChangeRevision += 1 }
         if session.isShown {
-            if activity { idleTimer.arm() }
+            if activity, mode.expiresWhenIdle { idleTimer.arm() }
         } else {
             idleTimer.cancel()
         }
@@ -289,10 +350,13 @@ final class PrototypeModel {
             "shown": session.isShown,
             "id": spec?.id as Any? ?? NSNull(),
             "pages": pages,
+            "stacks": stacks.mapValues(\.wireObject),
             "state": JSONValue.object(state).foundationObject,
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,
         ]
+        if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
+        if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
         if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
         // Only a shown prototype has a resolved mode.
         if let appearance = session.appearance { status["appearance"] = appearance.wireObject }

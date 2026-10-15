@@ -10,17 +10,28 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     const scope = { deviceId: "device", sessionUuid: "one" };
     store.record(scope, "show", { id: "panel" }, ok);
-    const pushed = { ...event(1), pages: { pager: 2 } };
+    const pushed = {
+      ...event(1),
+      pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true as const,
+    };
     store.recordEvent(scope, pushed);
     pushed.pages.pager = 9;
+    pushed.context.nested.id = 9;
     pushed.state.title = "changed";
     const status = store.status(scope);
     const snapshot = status.prototypes[0];
     expect(snapshot).toMatchObject({
       pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true,
       state: { title: "Hello" },
       lastKnown: true,
     });
+    if (snapshot.context) {
+      snapshot.context.nested = null;
+    }
     if (snapshot.pages && snapshot.state) {
       snapshot.pages.pager = 7;
       snapshot.state.title = "caller mutation";
@@ -28,6 +39,8 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     store.record(scope, "show", { id: "panel" }, { success: false });
     expect(store.status(scope).prototypes[0]).toMatchObject({
       pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true,
       state: { title: "Hello" },
       lastKnown: true,
     });
@@ -99,10 +112,14 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
         lastKnown: true,
       },
     ]);
-    // The device holds one prototype: a different report replaces the earlier presence.
+    // Each reported id retains the earlier siblings and their snapshots.
     store.adopt(scope, { id: "other", pages: {}, state: {} });
-    expect(store.status(scope).prototypes.map((entry) => entry.id)).toEqual(["other"]);
+    expect(store.status(scope).prototypes.map((entry) => entry.id)).toEqual(["panel", "other"]);
     store.dismissed(scope, "other");
+    expect(store.status(scope).prototypes).toMatchObject([
+      { id: "panel", state: { title: "typed" } },
+    ]);
+    store.dismissed(scope, "panel");
     expect(store.status(scope).prototypes).toEqual([]);
   });
 });
@@ -333,6 +350,18 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   expect(store.status(scope).prototypes).toEqual([]);
 });
 
+test("inspect hidden reason is stored and cleared when the next inspect omits it", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "hidden" };
+  const entry = { id: "panel", state: {}, pages: {}, persistent: true };
+  for (const hiddenReason of ["app_layer_window_hidden", "device_blocked"] as const) {
+    store.adopt(scope, { ...entry, hiddenReason });
+    expect(store.status(scope).prototypes[0].hiddenReason).toBe(hiddenReason);
+    store.adopt(scope, entry);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("hiddenReason");
+  }
+});
+
 describe("patch spec and data hooks", () => {
   const scope = { deviceId: "device", sessionUuid: "one" };
   function track(store: InMemoryPrototypeStatusStore) {
@@ -362,7 +391,7 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });
-  test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession", "adopt"])(
+  test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",
     (hook) => {
       const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -382,18 +411,51 @@ describe("patch spec and data hooks", () => {
       if (hook === "clearSession") {
         store.clearSession("one");
       }
-      if (hook === "adopt") {
-        store.adopt(scope, { id: "other", pages: {}, state: {} });
-      }
+
       expect(store.shownSpecs.read("device", "panel")).toEqual({ kind: "unknown" });
     },
   );
-  test("failed dismiss, wrong-id dismissal and same-id adoption retain the spec", () => {
+  test("failed dismiss, wrong-id dismissal and sibling/same-id adoption retain the spec", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     track(store);
     store.record(scope, "dismiss", { id: "panel" }, { success: false });
     store.dismissed(scope, "other");
+    store.adopt(scope, { id: "other", pages: {}, state: {} });
     store.adopt(scope, { id: "panel", pages: {}, state: {} });
     expect(store.shownSpecs.read("device", "panel").kind).toBe("known");
   });
+});
+
+test("stack snapshots are copied through events, pending shows and inspect adoption", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "stacks" };
+  const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+  store.recordEvent(scope, { ...event(1), stacks });
+  store.record(scope, "show", { id: "panel" }, ok);
+  stacks.nav.path[0] = "mutated";
+  expect(store.status(scope).prototypes[0].stacks).toEqual({
+    nav: { path: ["home", "detail"], depth: 2 },
+  });
+  store.status(scope).prototypes[0].stacks!.nav.path.push("caller");
+  expect(store.status(scope).prototypes[0].stacks!.nav.path).toHaveLength(2);
+  store.adopt(scope, {
+    id: "panel",
+    pages: {},
+    state: {},
+    stacks: { nav: { path: ["home"], depth: 1 } },
+  });
+  expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
+  store.adopt(scope, { id: "panel", pages: {}, state: {} });
+  expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
+});
+
+test("show snapshots expose initial stacks until a device snapshot supersedes them", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "initial-stacks" };
+  const stacks = { nav: { path: ["home"], depth: 1 } };
+  store.record(scope, "show", { id: "panel" }, { success: true, stacks });
+  stacks.nav.path[0] = "caller";
+  expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
+  store.recordEvent(scope, event(1));
+  expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
 });

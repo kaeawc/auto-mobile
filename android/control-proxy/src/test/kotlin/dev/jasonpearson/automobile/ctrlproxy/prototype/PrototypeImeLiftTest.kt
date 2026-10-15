@@ -37,6 +37,7 @@ class PrototypeImeLiftTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
@@ -106,8 +107,10 @@ class PrototypeImeLiftTest {
       )
     placements.forEach { placement ->
       host.show(PrototypeRequest(placement))
-      host.relayout()
-      val params = manager.updated.last()
+      val updates = manager.updateAttempts
+      assertTrue(host.relayout())
+      assertEquals(updates, manager.updateAttempts)
+      val params = manager.updated.lastOrNull() ?: manager.added.last()
       val expectedY = if (placement is PrototypePlacement.Floating) 16 else 0
       assertEquals("$placement", expectedY, params.y)
       assertEquals("$placement", LayoutParams.SOFT_INPUT_ADJUST_UNSPECIFIED, params.softInputMode)
@@ -121,6 +124,7 @@ class PrototypeImeLiftTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         RecordingPrototypeWindowManager(main, history).also { manager = it },
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         densityProvider = { 2f },

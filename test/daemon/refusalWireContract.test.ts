@@ -1,3 +1,4 @@
+import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
 import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -32,6 +33,7 @@ import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
+import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
 import * as sessionManager from "../../src/daemon/sessionManager";
 import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
@@ -49,6 +51,7 @@ import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
+import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
@@ -111,6 +114,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
+  "daemon/proxy/daemonErrors": daemonErrors,
   "daemon/sessionManager": sessionManager,
   "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
@@ -126,6 +130,8 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
+  "models/SdkTooOldError": sdkTooOld,
+  "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
@@ -134,7 +140,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
-const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/ios/iosPrototypeInstallerErrors":
+    "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.",
+};
 
 interface CodedErrorModule {
   module: string;
@@ -552,6 +561,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     // Preserve absence of retry intent rather than inventing a boolean on this wire.
     expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
     return { typed: { code: String(payload.errorCode) } };
+  }
+  if (fixture.surface === "press-button-result") {
+    return { typed: payload as TypedFields };
   }
   if (fixture.surface === "delete-device") {
     const text = (payload as unknown as RefusalWireResult).content[0].text;

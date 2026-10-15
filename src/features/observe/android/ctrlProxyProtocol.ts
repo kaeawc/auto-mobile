@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import type { PrototypePatchOp } from "../../prototype/prototypePatch";
 import type {
   PrototypePatchConflict,
@@ -452,6 +453,8 @@ export interface ShowPrototypeMessage {
    * always starts fresh, which is what `reset` asks for.
    */
   reset?: true;
+  /** Only false is sent; retaining siblings requires prototype_multi_surface_v1. */
+  replaceOthers?: false;
   /**
    * What "the system setting" means for this show: `light` or `dark` pins it, without changing the
    * device. Omitted for the device's own setting. Requires prototype_appearance_v1: an older device
@@ -497,6 +500,82 @@ export interface PatchPrototypeMessage {
 }
 export const PROTOTYPE_PATCH_CAPABILITY = "prototype_patch_v1";
 
+export const PROTOTYPE_SAVED_CAPABILITY = "prototype_saved_v1";
+
+/** `@SerialName("save_prototype")` → `SavePrototype`. */
+export interface SavePrototypeMessage {
+  type: "save_prototype";
+  requestId: string;
+  spec: PrototypeSpec;
+  label: string;
+  icon?: string;
+}
+/** `@SerialName("list_saved_prototypes")` → `ListSavedPrototypes`. */
+export interface ListSavedPrototypesMessage {
+  type: "list_saved_prototypes";
+  requestId: string;
+}
+/** `@SerialName("delete_saved_prototype")` → `DeleteSavedPrototype`. */
+export interface DeleteSavedPrototypeMessage {
+  type: "delete_saved_prototype";
+  requestId: string;
+  id: string;
+}
+export interface PinSavedPrototypeMessage {
+  type: "pin_saved_prototype";
+  requestId: string;
+  id: string;
+  icon?: string;
+}
+export interface SavedPrototypePinInfo {
+  id: string;
+  status: "requested" | "already_pinned";
+  shortcut?: SavedPrototypeShortcutUpdate;
+}
+export type SavedPrototypeShortcutUpdate = "updated" | "rate_limited";
+export interface SavedPrototypeInfo {
+  id: string;
+  slug: string;
+  replaced: boolean;
+  shortcut?: SavedPrototypeShortcutUpdate;
+}
+export interface SavedPrototypeEntry {
+  id: string;
+  label: string;
+  slug: string;
+  savedAt: number;
+  pinned: boolean;
+}
+export const SAVED_PROTOTYPE_ERROR_CODES = [
+  "pin_unsupported",
+  "device_locked",
+  "pin_failed",
+  "invalid_id",
+  "invalid_label",
+  "spec_too_large",
+  "invalid_spec",
+  "invalid_asset_id",
+  "duplicate_asset_id",
+  "unsupported_mime_type",
+  "empty_asset",
+  "asset_too_large",
+  "count_limit",
+  "total_limit",
+  "missing_asset",
+  "saved_count_limit",
+  "storage_failure",
+  "unsupported_existing",
+  "not_found",
+  "unsupported_format",
+  "internal_error",
+] as const;
+export type SavedPrototypeErrorCode = (typeof SAVED_PROTOTYPE_ERROR_CODES)[number];
+export function isSavedPrototypeErrorCode(value: unknown): value is SavedPrototypeErrorCode {
+  return (
+    typeof value === "string" && (SAVED_PROTOTYPE_ERROR_CODES as readonly string[]).includes(value)
+  );
+}
+
 export interface InspectPrototypesMessage {
   type: "inspect_prototypes";
   requestId: string;
@@ -521,6 +600,11 @@ export interface RemovePrototypeAssetMessage {
 }
 
 export interface PrototypeResult {
+  saved?: SavedPrototypeInfo;
+  pin?: SavedPrototypePinInfo;
+  savedPrototypes?: SavedPrototypeEntry[];
+  errorCode?: SavedPrototypeErrorCode;
+  hiddenReason?: PrototypeHiddenReason;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
   revision?: number;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
@@ -538,6 +622,7 @@ export interface PrototypeResult {
   missingAssets?: string[];
   /** Only the reply to `inspect_prototypes`: the prototypes the device is showing right now. */
   prototypes?: PrototypeStatusEntry[];
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
@@ -553,10 +638,12 @@ export interface PrototypeStatusEntry {
   persistent: boolean;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Highest `prototype_event` sequence the device allocated for this prototype; no rewind. */
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
+  hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
 }
@@ -580,8 +667,11 @@ export interface PrototypeAssetResult extends PrototypeResult {
 export const PROTOTYPE_EVENT_KINDS = [
   "emit",
   "page_changed",
+  "screen_changed",
   "dismissed",
   "appearance_changed",
+  "change",
+  "validation_failed",
 ] as const;
 export type PrototypeEventKind = (typeof PROTOTYPE_EVENT_KINDS)[number];
 /**
@@ -602,10 +692,17 @@ export interface PrototypeEvent {
    */
   sequence: number;
   kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
+  /** change: current validity for checked state keys. */
+  validity?: Record<string, boolean>;
+  /** validation_failed: failing keys from an atomic requireValid guard. */
+  keys?: string[];
   name: string | null;
   payload: PrototypeJson;
+  context?: Record<string, PrototypeJson>;
+  contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
 }
 
 // =============================================================================
@@ -907,6 +1004,10 @@ export type CtrlProxyRequest =
   | DismissPrototypeMessage
   | InspectPrototypesMessage
   | PatchPrototypeMessage
+  | SavePrototypeMessage
+  | PinSavedPrototypeMessage
+  | ListSavedPrototypesMessage
+  | DeleteSavedPrototypeMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
@@ -997,6 +1098,9 @@ export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_re
  */
 export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 
+// ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry (briefs/prototype-capability-gate-registry)
+export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
+
 /**
  * Advertised by a CtrlProxy whose prototype renderer lays an anchored node out at its screen-space dp
  * bounds, relative to its own window's origin (#9316). An older device decodes anchors and ignores
@@ -1004,8 +1108,24 @@ export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
  */
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
+/** Renders text field options; an older device decodes and ignores or misdraws the options. */
+export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_options_v1";
+
+/** In-window menu and select nodes. */
+export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
+
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
+export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
+export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** Editable in-tree search field with active results and submit/trailing actions. */
+export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
+
+/** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
+export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
+
+/** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms
@@ -1013,11 +1133,17 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
+export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
+
+/** Renders styled text spans and their independent tap actions. */
+export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
   "prototype_identifier_test_tag_only_v1";
+export const PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY =
+  "prototype_text_field_material_style_v1";
 export const PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY = "prototype_bottom_sheet_drag_v1";
 export const PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY = "prototype_icon_set_material_v1";
 /** iOS draws the canonical SF Symbols table and available filled/outlined icon forms. */
@@ -1073,10 +1199,13 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_commit_trace_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
+  PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   PROTOTYPE_WINDOW_METADATA_CAPABILITY,
@@ -1229,6 +1358,10 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   dismiss_prototype: true,
   inspect_prototypes: true,
   patch_prototype: true,
+  save_prototype: true,
+  pin_saved_prototype: true,
+  list_saved_prototypes: true,
+  delete_saved_prototype: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,
   list_preference_files: true,
@@ -1506,6 +1639,7 @@ export const ctrlProxyRequests = {
     spec: PrototypeSpec;
     displayId?: number;
     reset?: boolean;
+    replaceOthers?: boolean;
     appearance?: PrototypeAppearanceOverride;
   }): ShowPrototypeMessage {
     return {
@@ -1514,10 +1648,43 @@ export const ctrlProxyRequests = {
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
+      ...(args.replaceOthers === false ? { replaceOthers: false as const } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },
 
+  savePrototype(args: {
+    requestId: string;
+    spec: PrototypeSpec;
+    label: string;
+    icon?: string;
+  }): SavePrototypeMessage {
+    return {
+      type: "save_prototype",
+      requestId: args.requestId,
+      spec: args.spec,
+      label: args.label,
+      ...(args.icon === undefined ? {} : { icon: args.icon }),
+    };
+  },
+  pinSavedPrototype(args: {
+    requestId: string;
+    id: string;
+    icon?: string;
+  }): PinSavedPrototypeMessage {
+    return {
+      type: "pin_saved_prototype",
+      requestId: args.requestId,
+      id: args.id,
+      ...(args.icon === undefined ? {} : { icon: args.icon }),
+    };
+  },
+  listSavedPrototypes(args: { requestId: string }): ListSavedPrototypesMessage {
+    return { type: "list_saved_prototypes", requestId: args.requestId };
+  },
+  deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
+    return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
+  },
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {
       type: "patch_prototype",
@@ -1836,3 +2003,5 @@ export const ctrlProxyRequests = {
     return { type: "stop_recording" };
   },
 } as const;
+
+export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";

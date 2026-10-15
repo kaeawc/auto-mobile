@@ -41,6 +41,47 @@ class PrototypeSemanticsTest {
   }
 
   @Test
+  fun `gesture-only owners keep labels handles and child gesture boundaries`() {
+    val variants =
+      listOf(
+        PrototypeRowNode(onLongPress = tap, children = listOf(PrototypeTextNode(text = "Hold"))),
+        PrototypeRowNode(onDoubleTap = tap, children = listOf(PrototypeTextNode(text = "Hold"))),
+      )
+    for (source in variants) {
+      val owner = mapPrototypeSpec(semanticsSpec(source)).root
+      assertTrue(prototypeNodeTappable(owner))
+      assertEquals("Hold", prototypeMergedTapLabel(owner, prototypeNodeTappable(owner)))
+      val child =
+        owner.children.single().copy(source = PrototypeTextNode(text = "Hold", onLongPress = tap))
+      assertNull(prototypeMergedTapLabel(owner.copy(children = listOf(child)), true))
+      val iconOwner =
+        mapPrototypeSpec(
+            semanticsSpec(source.copy(children = listOf(PrototypeIconNode(name = "home")))),
+          )
+          .root
+      assertEquals(setOf(iconOwner.children.single().identity), prototypeHandleVisuals(iconOwner))
+      assertEquals(
+        "home",
+        prototypeContentDescription(
+          "row",
+          "",
+          null,
+          prototypeNodeTappable(iconOwner),
+          iconOwner.children,
+        ),
+      )
+      for (role in
+        setOf("textField") +
+          PROTOTYPE_MODAL_ROLES +
+          PROTOTYPE_COMPONENT_ROLES +
+          PROTOTYPE_SELECTION_ROLES +
+          PROTOTYPE_MATERIAL_ROLES) {
+        assertFalse(role, prototypeNodeTappable(owner.copy(role = role)))
+      }
+    }
+  }
+
+  @Test
   fun `visuals are handles when their tap owner has no text`() {
     val back = PrototypeIconNode(name = "arrow_back")
     val home = PrototypeIconNode(name = "home")

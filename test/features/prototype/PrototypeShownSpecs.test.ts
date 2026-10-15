@@ -13,6 +13,50 @@ function shown(store: PrototypeShownSpecs, device = "d", id = "panel") {
   return read;
 }
 describe("PrototypeShownSpecs", () => {
+  test.each([false, true])("overlapping additive ids both commit (reverse: %s)", (reverse) => {
+    const store = new PrototypeShownSpecs();
+    const a = store.beginShow("d", "a", false);
+    const b = store.beginShow("d", "b", false);
+    const shows = [
+      { ticket: a, id: "a" },
+      { ticket: b, id: "b" },
+    ];
+    if (reverse) {
+      shows.reverse();
+    }
+    for (const { ticket, id } of shows) {
+      store.endShow("d", ticket, { id, spec, replaceOthers: false });
+    }
+    expect(store.read("d", "a")).toMatchObject({ kind: "known", spec });
+    expect(store.read("d", "b")).toMatchObject({ kind: "known", spec });
+  });
+  test.each([false, true])(
+    "a newer same-id or replacing show supersedes additive (%s)",
+    (replaceOthers) => {
+      const store = new PrototypeShownSpecs();
+      const a = store.beginShow("d", "a", false);
+      const id = replaceOthers ? "b" : "a";
+      const newer = { data: { count: 2 } };
+      const b = store.beginShow("d", id, replaceOthers);
+      store.endShow("d", b, { id, spec: newer, replaceOthers });
+      store.endShow("d", a, { id: "a", spec, replaceOthers: false });
+      expect(store.read("d", id)).toMatchObject({ kind: "known", spec: newer });
+      if (replaceOthers) {
+        expect(store.read("d", "a")).toEqual({ kind: "unknown" });
+      }
+    },
+  );
+  test("a refused additive show forgets only its own id", () => {
+    const store = new PrototypeShownSpecs();
+    for (const id of ["a", "b"]) {
+      const ticket = store.beginShow("d", id, false);
+      store.endShow("d", ticket, { id, spec, replaceOthers: false });
+    }
+    const refused = store.beginShow("d", "a", false);
+    store.endShow("d", refused, undefined, true);
+    expect(store.read("d", "a")).toEqual({ kind: "unknown" });
+    expect(store.read("d", "b")).toMatchObject({ kind: "known", spec });
+  });
   test("successful shows clone and reads remain busy while any ticket is open", () => {
     const store = new PrototypeShownSpecs();
     const first = store.beginShow("d");

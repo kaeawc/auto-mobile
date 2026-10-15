@@ -13,6 +13,14 @@ public func amPrototypeAgentStart() {
     }
 }
 
+/// For an app linking the agent directly (the viewer); run instead of, not after, the Loader.c injection constructor.
+@_cdecl("am_prototype_agent_start_standalone")
+public func amPrototypeAgentStartStandalone() {
+    DispatchQueue.main.async {
+        PrototypeAgent.bootStandalone()
+    }
+}
+
 /// A distinct selector target keeps each scene registration's identity and synchronous delivery.
 @MainActor
 private final class PrototypeSceneActivationObserver: NSObject {
@@ -58,11 +66,96 @@ final class PassthroughWindow: UIWindow {
 
 @MainActor
 final class PrototypeAgent: NSObject {
-    static let shared = PrototypeAgent()
+    private static var instance: PrototypeAgent?
+    static var shared: PrototypeAgent {
+        if let instance { return instance }
+        let agent = PrototypeAgent(mode: .session)
+        instance = agent
+        return agent
+    }
 
-    let model = PrototypeModel()
+    static func bootStandalone() {
+        if let instance {
+            NSLog(
+                "[AutoMobilePrototypeAgent] standalone requested after the agent already started in %@ mode; ignoring",
+                String(describing: instance.model.mode)
+            )
+            return
+        }
+
+        let agent = PrototypeAgent(mode: .standalone)
+        instance = agent
+        agent.boot()
+    }
+
+    static func bootViewerHost(model: PrototypeModel, container: String, savedSpecId: String?, layoutDirectory: URL) {
+        guard instance == nil else { return }
+        let agent = PrototypeAgent(model: model)
+        instance = agent
+        agent.viewerHosted = true
+        agent.booted = true
+        agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, layoutDirectory: layoutDirectory)
+        let publisher = PrototypeEndpointPublisher(root: container)
+        agent.viewerEndpoint = publisher
+        let server = PrototypeServer(
+            configuration: PrototypeAgentConfiguration(port: 0, token: publisher.token),
+            capabilities: PrototypeViewerHostCapabilities.advertised(
+                model.mode.advertising(PrototypeTestHooks.capabilities(enabled: false))
+            ),
+            maxAuthenticatedClients: 1,
+            onReady: { [weak agent] port in
+                do {
+                    try publisher.publish(port: port)
+                } catch {
+                    NSLog(
+                        "[AutoMobilePrototypeAgent] could not publish viewer endpoint (error code %ld)",
+                        (error as NSError).code
+                    )
+                    publisher.retract()
+                    agent?.server?.close()
+                }
+            },
+            handler: { [weak agent] message, reply in
+                agent?.handle(message, reply: reply)
+            }
+        )
+        server.onFailed = { publisher.retract() }
+        model.onEvent = { [weak agent, weak server] event in
+            guard let agent else { return }
+            for pending in agent.outbox.publish(event) {
+                server?.broadcast(pending)
+            }
+        }
+        server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
+        agent.server = server
+        server.start()
+    }
+
+    static func retractViewerEndpoint() {
+        instance?.viewerEndpoint?.retract()
+    }
+
+    let model: PrototypeModel
+    private var outbox: PrototypeEventOutbox<[String: Any]>
+
+    init(mode: PrototypeLifecycleMode = .session) {
+        model = PrototypeModel(mode: mode)
+        outbox = PrototypeEventOutbox(mode: mode)
+        super.init()
+    }
+
+    private init(model: PrototypeModel) {
+        self.model = model
+        outbox = PrototypeEventOutbox(mode: model.mode)
+        super.init()
+    }
+
+    private var viewerHosted = false
+    private var viewerEndpoint: PrototypeEndpointPublisher?
+    private var viewerSaveBack: PrototypeViewerSaveBack?
     private var window: PassthroughWindow?
     private var server: PrototypeServer?
+    private var booted = false
     private var layers: PrototypeLayersViewController?
     private var sceneObserver: PrototypeSceneActivationObserver?
     // Selector observers are weakly held by NotificationCenter. Retain each registration just as
@@ -82,6 +175,11 @@ final class PrototypeAgent: NSObject {
     private var captureHold = PrototypeCaptureHold(now: { ProcessInfo.processInfo.systemUptime })
 
     func boot() {
+        guard !booted else {
+            NSLog("[AutoMobilePrototypeAgent] already booted; ignoring")
+            return
+        }
+
         let configuration: PrototypeAgentConfiguration
         switch PrototypeAgentConfiguration.from(environment: ProcessInfo.processInfo.environment) {
         case let .success(parsed):
@@ -91,6 +189,8 @@ final class PrototypeAgent: NSObject {
             NSLog("[AutoMobilePrototypeAgent] not starting: %@", failure.description)
             return
         }
+
+        booted = true
         testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
             "[AutoMobilePrototypeAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",
@@ -101,11 +201,16 @@ final class PrototypeAgent: NSObject {
         )
         let server = PrototypeServer(
             configuration: configuration,
-            capabilities: PrototypeTestHooks.capabilities(enabled: testHooksEnabled)
+            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(enabled: testHooksEnabled))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
-        model.onEvent = { [weak server] event in server?.broadcast(event) }
+        model.onEvent = { [weak self, weak server] event in
+            guard let self else { return }
+            for pending in outbox.publish(event) {
+                server?.broadcast(pending)
+            }
+        }
         server.onClientCountChanged = { [weak self] count in self?.clientCountChanged(count) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
@@ -322,6 +427,12 @@ final class PrototypeAgent: NSObject {
         if let rejection = PrototypeTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
             return result(false, rejection)
         }
+        if viewerHosted,
+           type == PrototypeAgentProtocol.hideForCaptureRequest || type == PrototypeAgentProtocol
+           .restoreAfterCaptureRequest
+        {
+            return result(false, "not supported by the prototype viewer")
+        }
         do {
             switch type {
             case "simulate_tap":
@@ -331,7 +442,7 @@ final class PrototypeAgent: NSObject {
                 switch model.simulateTap(identifier: identifier) {
                 case .success: result(true)
                 case .failure(.notShown): result(false, "No prototype is shown")
-                case .failure(.notFound): result(false, "No node with id or testTag \(identifier)")
+                case .failure(.notFound): result(false, "No node with testTag \(identifier)")
                 case .failure(.notTappable): result(false, "Node \(identifier) has no onTap")
                 }
             case "show_prototype":
@@ -347,8 +458,8 @@ final class PrototypeAgent: NSObject {
                 guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
                     return result(false, "appearance: Expected device, light or dark")
                 }
-                // The show result reports the device's appearance, so read it before resolving.
-                syncDeviceAppearance()
+                // The viewer controller owns device appearance; the injected agent reads it here.
+                if !viewerHosted { syncDeviceAppearance() }
                 model.show(
                     spec,
                     reset: message["reset"] as? Bool == true,
@@ -357,9 +468,13 @@ final class PrototypeAgent: NSObject {
                         try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
                     }
                 )
+                if let specJSON = message["spec"] {
+                    viewerSaveBack?.persistIfSaved(specId: spec.id, specJSON: specJSON)
+                }
                 warnAboutFontAssets(for: spec)
                 warnAboutUnknownThemeColors(for: spec)
                 var extra = missingAssetsExtra()
+                extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
                 if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
                 // The host can leave before this queued show runs; nothing would remove it later.
                 if connectedClients == 0 { model.hostDisconnected() }
@@ -387,9 +502,26 @@ final class PrototypeAgent: NSObject {
                 if let id = message["id"] as? String { model.removeAsset(id) }
                 result(true)
             case "get_prototype_status":
+                for pending in outbox.drainForInspect() {
+                    server?.broadcast(pending)
+                }
                 var status = model.status()
-                status["visible"] = window?.isHidden == false
+                status["visible"] = viewerHosted || window?.isHidden == false
+                if model.mode == .standalone {
+                    status["persistent"] = true
+                    status["droppedEvents"] = outbox.droppedEvents
+                }
                 result(true, extra: ["status": status])
+            case "inspect_prototypes" where model.mode == .standalone:
+                for pending in outbox.drainForInspect() {
+                    server?.broadcast(pending)
+                }
+                var status = model.status()
+                status["persistent"] = true
+                result(true, extra: [
+                    "prototypes": model.session.isShown ? [status] : [],
+                    "droppedEvents": outbox.droppedEvents,
+                ])
             case PrototypeAgentProtocol.hideForCaptureRequest:
                 hideForCapture(
                     deadlineMs: PrototypeCaptureHold
@@ -414,6 +546,9 @@ final class PrototypeAgent: NSObject {
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
         if count < 1 { model.hostDisconnected() }
+        for pending in outbox.clientCountChanged(count) {
+            server?.broadcast(pending)
+        }
     }
 
     // MARK: Hide for capture
@@ -449,10 +584,9 @@ final class PrototypeAgent: NSObject {
         updateAccessibility(session: model.session)
     }
 
-    /// One warning per shown spec: an uploaded font cannot be loaded on iOS, so its text uses the
-    /// system font. The ids also come back in `missingAssets`, like any asset the host has not sent.
+    /// One warning per shown spec for font assets without a registered face.
     private func warnAboutFontAssets(for spec: PrototypeSpec) {
-        let fonts = model.fontAssets()
+        let fonts = model.fontAssets().filter { model.fontFaces[$0] == nil }
         guard !fonts.isEmpty else { return }
         prototypeLog.warning(
             "prototype \(spec.id, privacy: .public): fontFamily asset unsupported on iOS, using system font for \(fonts.joined(separator: ","), privacy: .public)"
@@ -488,7 +622,9 @@ final class PrototypeAgent: NSObject {
 /// Shared gate for the root view and controller; focused SwiftUI nodes can reach either chain.
 @MainActor
 private func performPrototypeAccessibilityEscape(_ model: PrototypeModel?) -> Bool {
-    guard let model, model.hasEscape else { return false }
+    guard let model else { return false }
+    if model.popTopmostStack() { return true }
+    guard model.hasEscape else { return false }
     model.dismiss(reason: .user)
     return true
 }
@@ -631,7 +767,11 @@ struct PrototypeRootView: View {
         // An open dialog makes the page behind it inert for accessibility, as it is for touches
         // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
         // `PrototypeLayersViewController.apply` sets on the page's hosting view.
-        let pageAccessibility = model.spec?.root.layerAccessibility(state: model.state, pages: model.pages)
+        let pageAccessibility = model.spec?.root.layerAccessibility(
+            state: model.state,
+            pages: model.pages,
+            stacks: model.stacks
+        )
             ?? .container
         ZStack {
             if let spec = model.spec {
@@ -700,6 +840,15 @@ struct PrototypeRootView: View {
         // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
         // this ignores every region too, so no second lift can stack on the sheet's (#11042).
         .ignoresSafeArea()
+        // Observe edge drags alongside authored gestures without reserving a tappable strip.
+        .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
+            if value.startLocation.x <= 20,
+               value.translation.width >= 60,
+               abs(value.translation.height) < abs(value.translation.width)
+            {
+                model.popTopmostStack()
+            }
+        })
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -708,7 +857,7 @@ struct PrototypeRootView: View {
         let motion = PrototypeMotion(specMotion: spec.motion, reduceMotion: reduceMotion)
         return PrototypeAnchorLayer(
             entries: spec.root.windowAnchorLayer(
-                state: model.state, pages: model.pages, retainExiting: motion.enabled
+                state: model.state, pages: model.pages, stacks: model.stacks, retainExiting: motion.enabled
             ),
             model: model,
             sheet: placement.type == "sheet"

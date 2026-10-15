@@ -637,20 +637,30 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports prototypes.                   |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.        |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### prototype
 
+On Android, `show replaceOthers: false` retains other prototype windows (requires
+`prototype_multi_surface_v1`), up to four distinct ids; a fifth is refused listing the shown ids.
+A same-id show with false replaces only that prototype; omitted or true replaces the other ids.
+`dismiss {id}` removes one, `dismiss {all: true}` removes all, and `status` lists every shown id.
+`inspect` reconciles the full list. iOS shows one prototype at a time and refuses false.
+See [multiple surfaces (phase 1)](design-docs/plat/android/prototype-ux.md#multiple-surfaces-phase-1).
+
 Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show. Text field options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) similarly require `prototype_text_field_options_v1`; without it nothing is shown.
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
+`onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
+`prototype_gestures_v1`, with the same refusal before uploads or show.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
 
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
-`show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`, or `deleteSaved`. `show` requires a full `spec` (id,
 window, optional data and state, root) and always renders the whole spec. Instead of an inline
 `spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
 (exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
@@ -660,6 +670,28 @@ The path is never sent to the device. A spec holds up to 2000 nodes, and a `repe
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
 
+Android saved prototypes require `prototype_saved_v1`: `save` takes `spec`, optional `assets`,
+`label` (defaults to `spec.id`, 1–120 characters) and `icon` (an asset uploaded in the same call).
+`listSaved` reads saved entries; `deleteSaved` requires `id`. A missing Android capability
+returns `unsupported_capability`. On iOS simulators these actions use the host installer,
+without a prototype agent connection. Physical iOS devices return `unsupported_platform`.
+The viewer template comes from the verified release asset, or from `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`
+(build it with `scripts/ios/prototype-viewer-build.sh`).
+The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it for the default icon.
+iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
+`pinned:false` and no `savedAt` because the simulator cannot recover the save time.
+`deleteSaved` also accepts the authored prototype id on iOS.
+Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
+not available yet: save still succeeds with `pinned:"unsupported"`. iOS places the app icon
+on the home screen; deleting the prototype removes it, and `removeIcon:true` warns that
+separate icon removal does not apply. On Android deletion warns that
+an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
+home-screen icon may remain. Store failures return actionable errors with `errorCode`:
+`invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
+`duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
+`total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,
+`not_found`, `unsupported_format`, or `internal_error`.
+
 A `show` whose `spec.id` is the prototype already on screen replaces it in place:
 it stays on the display it is on, and each pager keeps its current page (matched
 by pager id, clamped to the new page count). The new spec's `state` is
@@ -667,7 +699,7 @@ authoritative: values the user changed by tapping or typing are not carried
 over unless the spec includes them, and the rebuilt tree starts any text field
 from the spec's value. `reset: true` starts it fresh instead: pages come from
 the spec and `display` is resolved again. A show with a different id, or with
-nothing on screen, replaces any other prototype as before. A CtrlProxy that
+nothing on screen, replaces any other prototype by default (`replaceOthers: false` retains them). A CtrlProxy that
 predates in-place replacement ignores `reset` and always starts fresh.
 
 Two optional window fields need a CtrlProxy advertising
@@ -728,10 +760,14 @@ Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing prototype schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
-no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
+no screenshot. Nodes include box/row/column/flow/grid (flow/grid require `prototype_flow_grid_v1`), text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.
+`emit.context` resolves named state/item/index/page/data/value bindings and requires
+`prototype_emit_context_v1` (data bindings also require `prototype_data_model_v1`).
+Events return `context`, with `contextTruncated: true` only when the resolved UTF-8 JSON
+exceeds the byte budget; the longest fitting prefix is kept.
 A spec may also carry a `theme` (light/dark mode, a seed colour, per-role colour
 overrides, typography and shapes), per-node `style` and `styleWhen` fields,
 `transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make
@@ -791,14 +827,21 @@ translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
 `theme.colors.light` / `theme.colors.dark`) need a device advertising
 `prototype_theme_modes_v1`.
 
+Optional pager `axis` (horizontal default or vertical), `pageSpacing` (dp gap),
+strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
+require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
+are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+Current page is the first fully visible page; page events and navigation bindings
+keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
+
 ### Patch (#11675)
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
-content (`/data`), state (`/state`) or one node by id (`replaceNode`). The host action,
-wire contract and capability gate exist, but **no device advertises
-`prototype_patch_v1` yet**. Every patch is refused before sending: update CtrlProxy
-on Android, or relaunch the app with `launchApp prototype: true` on iOS when a
-supporting agent is available; until then, send the whole spec with `show`.
+content (`/data`), state (`/state`) or one node by id (`replaceNode`) of the shown prototype. Android CtrlProxy advertises
+`prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
+and requires the whole spec with `show`.
 
 `{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
 `{requestId, id, baseRevision?, ops}` only to a device advertising
@@ -831,7 +874,7 @@ key since that revision, returning the current revision and those keys' values.
 
 There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
-host tracks a cloned copy of the device spec from the last acknowledged show,
+host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and
 runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
@@ -842,8 +885,9 @@ patch refuse as busy. Shows are not delayed by patches. If a dispatched show
 and an acknowledged patch overlap, their device-side order is unknown: the host
 forgets its spec, warns, and requires a further successful show before patching.
 A failed dispatched show, dismissed event, successful dismiss, session release,
-device removal or unbinding also ends tracking. An adopted different id ends
-tracking; inspecting the same tracked id retains it. A timeout or connection loss after
+device removal or unbinding also ends tracking. Inspect retains each reported tracked id
+and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
+with `replaceOthers: false` also retains the acknowledged specs. A timeout or connection loss after
 patch dispatch is indeterminate and requires a new show. A failure before dispatch
 keeps the tracked copy. An atomic device
 refusal leaves the tracked copy unchanged. A successful patch refreshes shown
@@ -973,7 +1017,7 @@ CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCou
 is kept until explicit dismiss or scope release. Events carry only id, sequence and
 timestamp, so a late event from the previous showing cannot be told apart from the new
 showing's and is accepted if it arrives after the new show. A successful show of
-another id replaces the device's prototype: the replaced prototype's waiters settle with
+another id replaces other prototypes by default (`replaceOthers: false` retains them): the replaced prototypes' waiters settle with
 `reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
 buffered until consumed or the next explicit show/dismiss. Consuming it clears all
 remaining pending events and, once no waiter remains, removes the entry, so a later
@@ -1610,6 +1654,14 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+On iOS Simulator, a stored TCC Photos grant is not proof of effective full
+read/write authorization. `getAppPermissions` reports it as `unknown` with
+`verified: false`; `setAppPermissions` reports a dispatched Photos grant as
+success with `applied: true`, `verified: false`, and a warning. Verification is
+unavailable from the host without app instrumentation: launch the app and check
+`PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
+insufficient. Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.
@@ -2890,3 +2942,60 @@ An explicit CLI/env choice applies to that connection only: proxies relay it on
 the connection profile, never restart the shared daemon for it, and never persist it.
 Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).
+
+## Checks
+
+Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
+show and patch results using this feature on older devices. Inputs `textField`, `slider`,
+`checkbox`, `switch`, `radioGroup`, `datePicker` and `timePicker` accept `checks` (1–8 entries)
+and `validateOn: "change" | "blur" | "submit"` (omitted means blur). Each check contains a
+nonempty `message` and exactly one rule. `validateOn` controls error display, never validity.
+The first failing message is displayed.
+
+- `required: true`: trimmed nonempty text, true for checkbox/switch, nonempty selection for
+  radioGroup/datePicker, present number for slider/timePicker.
+- `minLength` / `maxLength`: nonnegative integer UTF-16 lengths, textField only.
+- `min` / `max`: finite numeric inclusive bounds, slider and pickers only. Text fields hold
+  strings and have no numeric subtype. Date state remains YYYY-MM-DD; bounds are UTC epoch
+  milliseconds. Time pickers retain hourKey/minuteKey; checks apply independently to both keys.
+- `format`: textField only, one of email, phone, digits, decimal, url.
+- `pattern`: textField only, the restricted grammar below, at most 128 UTF-16 units.
+
+Empty string, null or missing value passes all rules except required. Whitespace is only empty
+for required. Pattern and format matching use at most 4096 UTF-16 units. Required and length checks inspect the complete value.
+Every validity reference must name declared state with at least one check. Multiple checked
+controls sharing a key must all pass. Numeric/length lower bounds must not exceed upper bounds.
+
+Formats use these exact whole-value expressions (ASCII digits):
+
+- email: `[^\s@]+@[^\s@]+\.[^\s@]+` (Unicode names allowed).
+- phone: optional leading +, then 7–15 characters from ASCII digits, space, hyphen and parentheses;
+  at least seven digits. The leading + is outside the character count. Punctuation need not balance.
+- digits: `[0-9]+`.
+- decimal: `-?[0-9]+(\.[0-9]+)?` (no exponent or leading +).
+- url: `https?://[^\s/?#]+([/?#]\S*)?` (lowercase scheme, Unicode hosts allowed).
+
+Format whitespace follows JavaScript whitespace (including NBSP); no format trims its value.
+Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
+`[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
+CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
+escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
+`? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
+properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
+`\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
+Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
+These exact rules and error substrings are pinned in the language-neutral checks fixtures.
+
+Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
+are valid, including fields whose errors are not yet shown. They compose with all/any/not in
+visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
+`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+whole action list atomically, shows errors on every listed field, and sends
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.

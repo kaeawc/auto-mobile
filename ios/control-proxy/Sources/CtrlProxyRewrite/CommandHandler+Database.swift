@@ -4,33 +4,18 @@ extension CommandHandler {
     // MARK: - Database
 
     func handleExecuteSql(_ request: RequestExecuteSql, startTime: Date) async -> ExecuteSqlResponse {
-        guard let client = sdkDatabaseClient else {
-            return ExecuteSqlResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let databasePath = request.databasePath else {
-            return ExecuteSqlResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("databasePath").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let query = request.query else {
-            return ExecuteSqlResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("query").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            guard let databasePath = request.databasePath else {
+                throw CommandError.missingParameter("databasePath")
+            }
+            guard let query = request.query else {
+                throw CommandError.missingParameter("query")
+            }
 
-        do {
-            try await validateDatabaseAppId(request.appId)
+            try await self.validateDatabaseAppId(request.appId)
             let result = try await client.executeSQL(
                 databasePath: databasePath,
                 query: query,
@@ -39,11 +24,10 @@ extension CommandHandler {
                 readOnly: request.readOnly
             )
             if let error = result.error {
-                return ExecuteSqlResponse(
+                return ExecuteSqlResponse.failure(
                     requestId: request.requestId,
-                    success: false,
                     error: error,
-                    totalTimeMs: totalTimeMs(from: startTime)
+                    totalTimeMs: self.totalTimeMs(from: startTime)
                 )
             }
             return ExecuteSqlResponse(
@@ -55,42 +39,22 @@ extension CommandHandler {
                 rowsAffected: result.rowsAffected,
                 diagnostic: result.diagnostic,
                 truncated: result.truncated,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return ExecuteSqlResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }
 
     func handleListDatabases(_ request: RequestListDatabases, startTime: Date) async -> ListDatabasesResponse {
-        guard let client = sdkDatabaseClient else {
-            return ListDatabasesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        do {
-            try await validateDatabaseAppId(request.appId)
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            try await self.validateDatabaseAppId(request.appId)
             return try await ListDatabasesResponse(
                 requestId: request.requestId,
                 success: true,
                 databases: client.listDatabases(),
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return ListDatabasesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }
@@ -101,98 +65,53 @@ extension CommandHandler {
     )
         async -> StorageCapabilitiesResponse
     {
-        guard let client = sdkDatabaseClient else {
-            return StorageCapabilitiesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        do {
-            try await validateDatabaseAppId(request.appId)
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            try await self.validateDatabaseAppId(request.appId)
             let capabilities = try await client.storageCapabilities()
             return StorageCapabilitiesResponse(
                 requestId: request.requestId,
                 success: true,
                 capabilities: capabilities,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return StorageCapabilitiesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }
 
     func handleListTables(_ request: RequestListTables, startTime: Date) async -> ListTablesResponse {
-        guard let client = sdkDatabaseClient else {
-            return ListTablesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let databasePath = request.databasePath else {
-            return ListTablesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("databasePath").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            guard let databasePath = request.databasePath else {
+                throw CommandError.missingParameter("databasePath")
+            }
 
-        do {
-            try await validateDatabaseAppId(request.appId)
+            try await self.validateDatabaseAppId(request.appId)
             return try await ListTablesResponse(
                 requestId: request.requestId,
                 success: true,
                 tables: client.listTables(databasePath: databasePath),
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return ListTablesResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }
 
     func handleGetTableData(_ request: RequestGetTableData, startTime: Date) async -> TableDataResponse {
-        guard let client = sdkDatabaseClient else {
-            return TableDataResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let databasePath = request.databasePath else {
-            return TableDataResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("databasePath").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let table = request.table else {
-            return TableDataResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("table").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            guard let databasePath = request.databasePath else {
+                throw CommandError.missingParameter("databasePath")
+            }
+            guard let table = request.table else {
+                throw CommandError.missingParameter("table")
+            }
 
-        do {
-            try await validateDatabaseAppId(request.appId)
+            try await self.validateDatabaseAppId(request.appId)
             let data = try await client.getTableData(
                 databasePath: databasePath,
                 table: table,
@@ -206,14 +125,7 @@ extension CommandHandler {
                 rows: data.rows,
                 total: data.total,
                 diagnostic: data.diagnostic,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return TableDataResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }
@@ -234,47 +146,25 @@ extension CommandHandler {
     )
         async -> TableStructureResponse
     {
-        guard let client = sdkDatabaseClient else {
-            return TableStructureResponse(
-                requestId: request.requestId,
-                success: false,
-                error: databaseUnavailableMessage,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let databasePath = request.databasePath else {
-            return TableStructureResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("databasePath").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        guard let table = request.table else {
-            return TableStructureResponse(
-                requestId: request.requestId,
-                success: false,
-                error: CommandError.missingParameter("table").localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            guard let databasePath = request.databasePath else {
+                throw CommandError.missingParameter("databasePath")
+            }
+            guard let table = request.table else {
+                throw CommandError.missingParameter("table")
+            }
 
-        do {
-            try await validateDatabaseAppId(request.appId)
+            try await self.validateDatabaseAppId(request.appId)
             let structure = try await client.getTableStructure(databasePath: databasePath, table: table)
             return TableStructureResponse(
                 requestId: request.requestId,
                 success: true,
                 columns: structure.columns,
                 diagnostic: structure.diagnostic,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } catch {
-            return TableStructureResponse(
-                requestId: request.requestId,
-                success: false,
-                error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: self.totalTimeMs(from: startTime)
             )
         }
     }

@@ -148,30 +148,61 @@ enum PrototypeDataText {
     static func bind(_ text: String, data: [String: JSONValue]?) -> String {
         let units = Array(text.utf16)
         var result = ""
-        var cursor = 0
         var literalStart = 0
+        scan(units) { open, close, pointer in
+            result += String(decoding: units[literalStart ..< open], as: UTF16.self)
+            result += rendered(pointer, data: data)
+            literalStart = close + 1
+            return true
+        }
+        result += String(decoding: units[literalStart...], as: UTF16.self)
+        return result
+    }
+
+    static func exceedsSubstitutionLimit(_ text: String, data: [String: JSONValue]?) -> Bool {
+        substitutionLength(text, data: data).length > PrototypeLimits.maxSubstitutedTextLength
+    }
+
+    /// Recognition is independent of rendered length: empty replacements still rebuild text.
+    static func substitutionLength(
+        _ text: String, data: [String: JSONValue]?
+    )
+        -> (recognized: Bool, length: Int)
+    {
+        var recognized = false
+        var length = 0
+        scan(Array(text.utf16)) { _, _, pointer in
+            recognized = true
+            length += rendered(pointer, data: data).utf16.count
+            return length <= PrototypeLimits.maxSubstitutedTextLength
+        }
+        return (recognized, length)
+    }
+
+    private static func rendered(_ pointer: String, data: [String: JSONValue]?) -> String {
+        guard let value = PrototypeDataPointer.resolve(data, pointer: pointer),
+              PrototypeDataValues.isScalar(value) else { return "" }
+        return value.displayString
+    }
+
+    /// Returning false stops the shared scanner before any oversized binding is constructed.
+    private static func scan(_ units: [UInt16], visit: (Int, Int, String) -> Bool) {
+        var cursor = 0
         while cursor < units.count {
             let end = min(units.count, cursor + 2 + 5 + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
                units[(cursor + 1) ..< end].starts(with: [100, 97, 116, 97, 58]),
                let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
-                let inner = units[(cursor + 1) ..< close]
-                let pointer = inner.starts(with: [100, 97, 116, 97, 58])
-                    ? String(decoding: inner.dropFirst(5), as: UTF16.self) : ""
+                let pointer = String(decoding: units[(cursor + 6) ..< close], as: UTF16.self)
                 if PrototypeDataPointer.isValid(pointer) {
-                    result += String(decoding: units[literalStart ..< cursor], as: UTF16.self)
-                    let value = PrototypeDataPointer.resolve(data, pointer: pointer)
-                    result += value.map { PrototypeDataValues.isScalar($0) ? $0.displayString : "" } ?? ""
+                    guard visit(cursor, close, pointer) else { return }
                     cursor = close + 1
-                    literalStart = cursor
                     continue
                 }
             }
             cursor += 1
         }
-        result += String(decoding: units[literalStart...], as: UTF16.self)
-        return result
     }
 }
 
@@ -190,7 +221,9 @@ enum PrototypeDataResolver {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
         if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        if let value = fields["visibleWhen"] { fields["visibleWhen"] = resolveCondition(value, data: data) }
+        for key in ["visibleWhen", "enabledWhen"] {
+            if let value = fields[key] { fields[key] = resolveCondition(value, data: data) }
+        }
         if case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
@@ -202,6 +235,9 @@ enum PrototypeDataResolver {
             fields["child"] = resolveRoot(child, data: data, repeats: &repeats)
         } else if case let .array(children)? = fields["children"] {
             fields["children"] = .array(children.map { resolveRoot($0, data: data, repeats: &repeats) })
+        }
+        if case let .object(screens)? = fields["screens"] {
+            fields["screens"] = .object(screens.mapValues { resolveRoot($0, data: data, repeats: &repeats) })
         }
         return .object(fields)
     }

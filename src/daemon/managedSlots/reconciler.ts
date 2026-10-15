@@ -1396,9 +1396,18 @@ export class ManagedSlotReconciler {
       return await this.changePlatform(context, assignment);
     }
 
-    const inventory = await this.deps.inventory.list(request.platform, { signal: request.signal });
-    evidence.inventoryComplete = inventory.complete;
-    this.checkBudget(request);
+    const discover = async () => {
+      const inventory = await this.deps.inventory.list(request.platform, {
+        signal: request.signal,
+      });
+      evidence.inventoryComplete = inventory.complete;
+      this.checkBudget(request);
+      return inventory;
+    };
+    const inventory =
+      assignment.stableDeviceId === null
+        ? await this.withEmptySlotCleanup(context, assignment, discover)
+        : await discover();
 
     if (assignment.stableDeviceId === null) {
       return await this.fillEmptySlot(context, assignment, inventory);
@@ -1534,11 +1543,14 @@ export class ManagedSlotReconciler {
   ): Promise<ReadyResult> {
     const { request, evidence } = context;
     if (assignment.stableDeviceId === null) {
-      const inventory = await this.deps.inventory.list(request.platform, {
-        signal: request.signal,
+      const inventory = await this.withEmptySlotCleanup(context, assignment, async () => {
+        const inventory = await this.deps.inventory.list(request.platform, {
+          signal: request.signal,
+        });
+        evidence.inventoryComplete = inventory.complete;
+        this.checkBudget(request);
+        return inventory;
       });
-      evidence.inventoryComplete = inventory.complete;
-      this.checkBudget(request);
       return await this.fillEmptySlot(context, assignment, inventory);
     }
     const inventory = await this.deps.inventory.list(assignment.platform, {
@@ -1726,19 +1738,22 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     inventory: ManagedSlotInventorySnapshot,
   ): Promise<ReadyResult> {
-    if (!inventory.complete) {
-      // Without complete discovery we can neither find adoptable devices nor rule out a
-      // leftover of this slot, so do nothing rather than create a duplicate.
-      throw new ReconcileAbort(
-        failure("discovery_incomplete", "Device discovery was incomplete for an empty slot."),
-      );
-    }
-    const candidate = await this.findAdoptionCandidate(context, inventory.devices);
-    if (assignment.platform !== context.request.platform) {
+    const candidate = await this.withEmptySlotCleanup(context, assignment, async () => {
+      if (!inventory.complete) {
+        // Without complete discovery we can neither find adoptable devices nor rule out a
+        // leftover of this slot, so do nothing rather than create a duplicate.
+        throw new ReconcileAbort(
+          failure("discovery_incomplete", "Device discovery was incomplete for an empty slot."),
+        );
+      }
+      const candidate = await this.findAdoptionCandidate(context, inventory.devices);
       // Validate creation before moving an empty slot; adoption needs no creation catalog.
-      if (!candidate) {
+      if (assignment.platform !== context.request.platform && !candidate) {
         await this.assertCreatable(context);
       }
+      return candidate;
+    });
+    if (assignment.platform !== context.request.platform) {
       assignment = await this.emptyOnRequestedPlatform(context, assignment);
     }
     if (candidate) {
@@ -1870,14 +1885,25 @@ export class ManagedSlotReconciler {
     options: { capacityAsserted?: boolean } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
-    this.checkBudget(request);
     if (replacing === undefined) {
-      await this.assertCreatable(context);
-    }
-    // A replacement asserted capacity before deleting, counting the slot its old device frees;
-    // asking again here could refuse after the deletion while that device is still being counted.
-    if (!options.capacityAsserted) {
-      await this.assertBootCapacity(request);
+      try {
+        this.checkBudget(request);
+        await this.assertCreatable(context);
+        if (!options.capacityAsserted) {
+          await this.assertBootCapacity(request);
+        }
+      } catch (error) {
+        // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
+        await this.removeNeverBoundSlot(context, assignment, "pre-provision refusal");
+        throw error;
+      }
+    } else {
+      this.checkBudget(request);
+      // A replacement asserted capacity before deleting, counting the slot its old device frees;
+      // asking again here could refuse after deletion while that device is still being counted.
+      if (!options.capacityAsserted) {
+        await this.assertBootCapacity(request);
+      }
     }
     const name = managedSlotDeviceName(
       request.key,
@@ -2101,11 +2127,32 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     settled: SlotJournalEntry | undefined,
   ): Promise<void> {
-    if (
-      assignment.generation !== 0 ||
-      assignment.stableDeviceId !== null ||
-      settled?.phase !== "rolled_back"
-    ) {
+    if (settled?.phase !== "rolled_back") {
+      return;
+    }
+    await this.removeNeverBoundSlot(context, assignment, `failed creation entry ${settled.id}`);
+  }
+
+  private async withEmptySlotCleanup<T>(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      // removeNeverBoundSlot logs cleanup failures and preserves the original refusal.
+      await this.removeNeverBoundSlot(context, assignment, "empty-slot discovery refusal");
+      throw error;
+    }
+  }
+
+  private async removeNeverBoundSlot(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    reason: string,
+  ): Promise<void> {
+    if (assignment.generation !== 0 || assignment.stableDeviceId !== null) {
       return;
     }
     try {
@@ -2115,8 +2162,7 @@ export class ManagedSlotReconciler {
       });
     } catch (error) {
       logger.warn(
-        `[ManagedSlots] removing never-bound slot after failed creation entry ${settled.id} failed: ` +
-          errorMessage(error),
+        `[ManagedSlots] removing never-bound slot after ${reason} failed: ${errorMessage(error)}`,
         error,
       );
     }

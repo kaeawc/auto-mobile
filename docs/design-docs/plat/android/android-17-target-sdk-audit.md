@@ -1,0 +1,51 @@
+# Android 17 behaviour changes for targetSdk 37 (CtrlProxy audit)
+
+Issue #12274 (part of #12270, blocks #12276). Audit of `android/control-proxy` on
+main against the Android 17 behaviour changes that apply once an app targets API 37.
+`targetSdk` is bumped to 37 by #12276 (`android/gradle/libs.versions.toml`), with
+`buildTools` 37.0.0; `compileSdk` remains 37. The Robolectric maximum stays 35,
+with the CtrlProxy SDK 24 and Playground SDK 30 test pins preserved.
+
+Method: static search of `android/control-proxy/src/main` (manifest, Kotlin, resources).
+Nothing here is device-verified; items marked "device check" are owed to the API 37
+emulator lane (#12273).
+
+## Results
+
+| Change                                                      | Result                            | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Background activity launches through `IntentSender`         | Not affected                      | No `PendingIntent`, `IntentSender` or `MODE_BACKGROUND_ACTIVITY_START_*` in `android/control-proxy/src/main`. The only `startActivity` calls are `MainActivity.kt:164` (`ACTION_ACCESSIBILITY_SETTINGS`, from the foreground activity) and `PermissionManager.kt:76` (`ACTION_MANAGE_OVERLAY_PERMISSION`, `FLAG_ACTIVITY_NEW_TASK`). Neither passes an `IntentSender`.                                                                                                                                                                                        |
+| Reflective `static final` writes, `MessageQueue` reflection | Not affected                      | No `setAccessible`, `MessageQueue` or `Unsafe` in `android/control-proxy/src/main`. Reflection in main is read-only lookup: `DeviceStateTransitions.kt:48-50` and `CtrlProxy.kt:6952-6953` (both owned by #12271), and `PrototypeIcons.kt:56` (`Class.forName` of a bundled Compose icon class). Robolectric tests use `ReflectionHelpers.setField`/`getField` on instance fields and Java `getDeclaredMethod`, never static finals (`CtrlProxyGestureServiceFixture.kt:44-71`, `SdkAnrBroadcastHandlerTest.kt:276-294`, `CtrlProxyOnDestroyTest.kt:80-209`). |
+| Local network permission (`ACCESS_LOCAL_NETWORK`)           | Likely not affected; device check | The only listener binds loopback: `WebSocketServer.kt:612` (`embeddedServer(CIO, host = "127.0.0.1", ...)`) and the port probe at `WebSocketServer.kt:47`. CtrlProxy opens no outbound LAN connections. The host reaches the port through `adb forward`. Owed: confirm on the API 37 lane that `observe` over the forwarded port works with no `ACCESS_LOCAL_NETWORK` grant.                                                                                                                                                                                  |
+| Cross-profile loopback block                                | Not affected                      | Work-profile reads do not use loopback. `SdkCapabilitiesDiscovery.kt:25-26,75-78` addresses another user's provider through `content://<userId>@<authority>` (binder, gated on `INTERACT_ACROSS_USERS`, declared at `AndroidManifest.xml:21`). No socket crosses profiles.                                                                                                                                                                                                                                                                                    |
+| Certificate Transparency, ECH                               | Not affected                      | CtrlProxy makes no TLS connections of its own: no `HttpURLConnection`, `HttpClient`, `SSLContext`, `TrustManager` or `DownloadManager` in `android/control-proxy/src/main`, and the Ktor client is `testImplementation` only (`build.gradle.kts:148-151`). `MANAGE_CA_CERTIFICATES` (`AndroidManifest.xml`) serves the target apps' interception, not CtrlProxy traffic.                                                                                                                                                                                      |
+| Large screens (orientation/resizability locks ignored)      | Not affected                      | The manifest has no `screenOrientation`, `resizeableActivity`, `minAspectRatio` or `maxAspectRatio`, and `MainActivity` never sets `requestedOrientation`. `SavedPrototypeActivity` (#12264) exists on this base; its manifest entry has no orientation, resizability or aspect-ratio locks. Its `configChanges` handles orientation/screen-size changes without locking them.                                                                                                                                                                                |
+| IME `TextAttribute.Builder.setTextSuggestionSelected()`     | Follow-up, not required           | `CtrlProxyIme.kt` commits text with `commitText` and uses no `TextAttribute`. An optional accessibility improvement, API 37 only, so it must be `SDK_INT`-guarded.                                                                                                                                                                                                                                                                                                                                                                                            |
+| Memory limits (`MemoryLimiter:AnonSwap` exits)              | Device check                      | No `ApplicationExitInfo` use in `android/control-proxy/src/main`. Owed: read `ActivityManager.getHistoricalProcessExitReasons` for CtrlProxy after a long soak on the API 37 lane (#12273).                                                                                                                                                                                                                                                                                                                                                                   |
+
+## Checklist for #12276 (the bump)
+
+- [x] Set `build-android-targetSdk = "37"` and `build-android-buildTools = "37.0.0"` in #12276; keep `compileSdk` at 37 and the Robolectric pins unchanged.
+- [ ] Run the `control-proxy` unit tests, `detektMain detektTest` and `scripts/prepush-android.sh` (driver validation; no Gradle run in this implementation lane).
+- [ ] On the API 37 emulator, confirm the WebSocket over `adb forward` works with no `ACCESS_LOCAL_NETWORK` grant (owed: API 37 lane (#12273)).
+- [ ] After a long soak, check `ApplicationExitInfo` for `MemoryLimiter:AnonSwap` exits (owed: API 37 lane (#12273)).
+- [ ] Verify `MainActivity` and the IME keyboard in multi-window and large-screen configurations (owed: API 37 lane (#12273)).
+- [x] Repeat the non-test source re-grep and check the `SavedPrototypeActivity` manifest on this base (results below).
+- [ ] Sequence after #12271 (non-SDK reflection) and #12272 (Robolectric SDK pins).
+
+## Bump-time re-grep (#12276)
+
+Repeated on 2026-10-15 across `android/control-proxy/src/main` and
+`android/playground`, excluding `test`, `androidTest`, `testFixtures` and `build`
+directories: no matches for `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`,
+`setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`.
+`SavedPrototypeActivity` exists in `control-proxy/src/main/kotlin/.../prototype/`.
+Its `control-proxy/src/main/AndroidManifest.xml` entry has no `screenOrientation`,
+`resizeableActivity`, `minAspectRatio` or `maxAspectRatio`; no source orientation
+lock was found either. Device verification remains owed: API 37 lane (#12273).
+
+## Not done here
+
+The reflective call sites owned by #12271 were not touched. No device or emulator
+checks were run in the #12276 implementation lane; Gradle validation is delegated
+to the driver.

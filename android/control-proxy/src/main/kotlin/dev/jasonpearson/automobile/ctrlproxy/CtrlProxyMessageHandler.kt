@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
+import dev.jasonpearson.automobile.protocol.DeleteSavedPrototype
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
 import dev.jasonpearson.automobile.protocol.DismissPrototype
 import dev.jasonpearson.automobile.protocol.DragResult
@@ -19,8 +20,10 @@ import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
+import dev.jasonpearson.automobile.protocol.ListSavedPrototypes
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.PatchPrototype
+import dev.jasonpearson.automobile.protocol.PinSavedPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
@@ -60,6 +63,7 @@ import dev.jasonpearson.automobile.protocol.RequestSettingsPut
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SavePrototype
 import dev.jasonpearson.automobile.protocol.SetAccessibilityFlags
 import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
 import dev.jasonpearson.automobile.protocol.SetNetworkErrorSimulation
@@ -112,21 +116,11 @@ class CtrlProxyMessageHandler(
     // Exhaustive over the sealed hierarchy: adding a new WebSocketRequest subclass without a branch
     // here is a compile error, which is the whole point of retiring the string-typed `when`.
     when (request) {
-      is RequestHierarchy ->
-        actions.requestHierarchy(
-          request.disableAllFiltering,
-          request.maxDepth,
-          request.maxNodes,
-          request.displayId,
-          request.requestId,
-        )
+      is RequestHierarchy -> actions.requestHierarchy(request)
       is RequestHierarchyIfStale ->
         actions.requestHierarchyIfStale(request.sinceTimestamp, request.requestId)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
-      is RequestScreenshot ->
-        if (request.hidePrototypes)
-          actions.requestScreenshot(request.requestId, request.displayId, hidePrototypes = true)
-        else actions.requestScreenshot(request.requestId, request.displayId)
+      is RequestScreenshot -> actions.requestScreenshot(request)
       is RequestSwipe -> {
         if (request.displayId != null) {
           GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
@@ -148,16 +142,7 @@ class CtrlProxyMessageHandler(
           ?.let { (field, value) ->
             return swipeError(request.requestId, field, value)
           }
-        actions.requestSwipe(
-          request.requestId,
-          request.x1,
-          request.y1,
-          request.x2,
-          request.y2,
-          request.duration,
-          request.frameContext,
-          request.displayId,
-        )
+        actions.requestSwipe(request)
       }
       is RequestTapCoordinates -> {
         if (request.displayId != null) {
@@ -189,14 +174,7 @@ class CtrlProxyMessageHandler(
             request.displayId,
           )
         } else {
-          actions.requestTapCoordinates(
-            request.requestId,
-            request.x,
-            request.y,
-            request.duration,
-            request.frameContext,
-            request.displayId,
-          )
+          actions.requestTapCoordinates(request)
         }
       }
       is RequestTwoFingerSwipe -> {
@@ -222,16 +200,7 @@ class CtrlProxyMessageHandler(
           ?.let { (field, value) ->
             return swipeError(request.requestId, field, value)
           }
-        actions.requestTwoFingerSwipe(
-          request.requestId,
-          request.x1,
-          request.y1,
-          request.x2,
-          request.y2,
-          request.duration,
-          request.offset,
-          request.displayId,
-        )
+        actions.requestTwoFingerSwipe(request)
       }
       is RequestDrag -> {
         if (request.displayId != null) {
@@ -260,18 +229,7 @@ class CtrlProxyMessageHandler(
               error = nonFiniteError(field, value),
             )
           }
-        actions.requestDrag(
-          request.requestId,
-          request.x1,
-          request.y1,
-          request.x2,
-          request.y2,
-          request.resolvedPressDurationMs,
-          request.resolvedDragDurationMs,
-          request.holdDurationMs,
-          request.frameContext,
-          request.displayId,
-        )
+        actions.requestDrag(request)
       }
       is RequestPinch -> {
         if (request.displayId != null) {
@@ -303,16 +261,7 @@ class CtrlProxyMessageHandler(
               error = nonFiniteError(field, value),
             )
           }
-        actions.requestPinch(
-          request.requestId,
-          request.centerX,
-          request.centerY,
-          request.distanceStart,
-          request.distanceEnd,
-          request.rotationDegrees,
-          request.duration,
-          request.displayId,
-        )
+        actions.requestPinch(request)
       }
       is RequestGestureStart -> {
         if (request.displayId != null) {
@@ -329,13 +278,7 @@ class CtrlProxyMessageHandler(
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
           return swipeError(request.requestId, field, value)
         }
-        actions.requestGestureStart(
-          request.requestId,
-          request.gestureId,
-          request.x,
-          request.y,
-          request.displayId,
-        )
+        actions.requestGestureStart(request)
       }
       is RequestGestureMove -> {
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
@@ -355,53 +298,17 @@ class CtrlProxyMessageHandler(
           request.cancel,
         )
       }
-      is RequestSetText ->
-        if (request.frameContext == null) {
-          actions.requestSetText(
-            request.requestId,
-            request.text,
-            request.resourceId,
-            request.dismissKeyboard,
-          )
-        } else {
-          actions.requestSetText(
-            request.requestId,
-            request.text,
-            request.resourceId,
-            request.dismissKeyboard,
-            request.frameContext,
-          )
-        }
+      is RequestSetText -> actions.requestSetText(request)
       is RequestInsertTextState -> actions.requestInsertTextState(request.requestId)
-      is RequestInsertText ->
-        actions.requestInsertText(
-          request.requestId,
-          request.text,
-          request.expectedSuffix,
-          request.acceptsCaretNotPlaced,
-          request.precedingState,
-        )
-      is RequestCommitText ->
-        actions.requestCommitText(
-          request.requestId,
-          request.text,
-          request.priorImeId,
-          request.delivery,
-          request.timeoutMs,
-          request.trace,
-        )
+      is RequestInsertText -> actions.requestInsertText(request)
+      is RequestCommitText -> actions.requestCommitText(request)
       is RequestCancelImeCommit ->
         actions.requestCancelImeCommit(request.requestId, request.targetRequestId)
       is RequestSetKeyboardProfile ->
         actions.requestSetKeyboardProfile(request.requestId, request.profileId)
       is RequestListKeyboardProfiles ->
         actions.requestListKeyboardProfiles(request.requestId, request.supportedCatalogVersions)
-      is RequestImeAction ->
-        if (request.frameContext == null) {
-          actions.requestImeAction(request.requestId, request.action)
-        } else {
-          actions.requestImeAction(request.requestId, request.action, request.frameContext)
-        }
+      is RequestImeAction -> actions.requestImeAction(request)
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
       is RequestClickFocusedInput -> actions.requestClickFocusedInput(request.requestId)
       is RequestAction ->
@@ -444,12 +351,7 @@ class CtrlProxyMessageHandler(
         } else {
           log("remove_ca_cert missing alias and certificate; ignoring")
         }
-      is RequestGlobalAction ->
-        if (request.frameContext == null) {
-          actions.requestGlobalAction(request.requestId, request.action)
-        } else {
-          actions.requestGlobalAction(request.requestId, request.action, request.frameContext)
-        }
+      is RequestGlobalAction -> actions.requestGlobalAction(request)
       is ValidateFrameContext ->
         actions.validateFrameContext(request.requestId, request.frameContext)
       is RequestDeviceInfo -> actions.requestDeviceInfo(request.requestId)
@@ -498,6 +400,7 @@ class CtrlProxyMessageHandler(
           request.displayId,
           request.reset,
           request.appearance,
+          request.replaceOthers,
         )
       }
       is DismissPrototype -> {
@@ -512,15 +415,13 @@ class CtrlProxyMessageHandler(
         actions.dismissPrototype(request.requestId, request.id, request.all)
       }
       is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
+      is SavePrototype ->
+        actions.savePrototype(request.requestId, request.spec, request.label, request.icon)
+      is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
+      is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
+      is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
       is PatchPrototype ->
-        return PrototypeResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = request.requestId,
-          success = false,
-          error =
-            "patch_prototype: this CtrlProxy does not advertise prototype_patch_v1 and cannot patch a " +
-              "shown prototype; send the whole spec with show_prototype",
-        )
+        actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
       is PutPrototypeAsset ->
         actions.putPrototypeAsset(
           request.requestId,

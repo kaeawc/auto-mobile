@@ -2,9 +2,11 @@ import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
+import org.gradle.api.tasks.PathSensitivity
 
 plugins {
   id("automobile.kotlin-common")
+  id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.serialization)
@@ -27,7 +29,7 @@ android {
     minSdk = libs.versions.build.android.minSdk.get().toInt()
     targetSdk = libs.versions.build.android.targetSdk.get().toInt()
     versionCode = 1
-    versionName = "0.0.84-SNAPSHOT"
+    versionName = "0.0.85-SNAPSHOT"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -47,10 +49,9 @@ android {
 
   buildFeatures { compose = true }
 
-  // Robolectric needs the merged resources to render Compose Material 3 off-device (its components
-  // read library string resources); used by the prototype renderer screenshot tests. The default
-  // Robolectric SDK this would otherwise change is pinned in
-  // src/test/resources/robolectric.properties.
+  // Robolectric needs merged resources to render Compose Material 3 off-device. The
+  // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+
+  // fails on JDK 21).
   testOptions { unitTests.isIncludeAndroidResources = true }
 
   compileOptions {
@@ -182,6 +183,22 @@ val screenshotProperties =
   )
 
 tasks.withType<Test>().configureEach {
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeSpecFixtures")
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/ime-commit-contract.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("imeCommitContract")
+  inputs
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/spec.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkSpec")
+  inputs
+    .file(layout.projectDirectory.file("../../benchmark/prototype-frame/scenarios.json"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeFrameBenchmarkScenarios")
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }

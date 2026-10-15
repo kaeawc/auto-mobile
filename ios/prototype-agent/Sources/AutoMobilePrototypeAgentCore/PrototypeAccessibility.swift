@@ -22,6 +22,7 @@ func interpolatePrototypeText(
     let scalars = Array(text.unicodeScalars)
     var out = String.UnicodeScalarView()
     var index = 0
+    var substitutedLength = 0
     while index < scalars.count {
         guard let end = interpolationTokenEnd(scalars, from: index) else {
             out.append(scalars[index])
@@ -30,7 +31,13 @@ func interpolatePrototypeText(
         }
         let key = String(String.UnicodeScalarView(scalars[(index + 1) ..< (end - 1)]))
         let token = String(String.UnicodeScalarView(scalars[index ..< end]))
-        out.append(contentsOf: resolveInterpolation(key: key, token: token, state: state, pager: pager).unicodeScalars)
+        let value = resolveInterpolation(key: key, state: state, pager: pager)
+        if let value, value.utf16.count <= PrototypeLimits.maxSubstitutedTextLength - substitutedLength {
+            substitutedLength += value.utf16.count
+            out.append(contentsOf: value.unicodeScalars)
+        } else {
+            out.append(contentsOf: token.unicodeScalars)
+        }
         index = end
     }
     return String(out)
@@ -58,17 +65,16 @@ private func isInterpolationKeyPart(_ scalar: Unicode.Scalar) -> Bool {
 
 private func resolveInterpolation(
     key: String,
-    token: String,
     state: [String: JSONValue],
     pager: PagerPosition?
 )
-    -> String
+    -> String?
 {
     if key == "page" || key == "pageCount" {
-        guard let pager else { return token }
+        guard let pager else { return nil }
         return key == "page" ? String(pager.page + 1) : String(pager.count)
     }
-    return state[key]?.displayString ?? token
+    return state[key]?.displayString
 }
 
 extension PrototypeNode {
@@ -89,7 +95,7 @@ extension PrototypeNode {
             interpolatePrototypeText($0, state: state, pager: pager)
         }
         if let authored, !authored.isEmpty { return authored }
-        let shown = interpolatePrototypeText(text ?? "", state: state, pager: pager)
+        let shown = plainText(state: state, pager: pager)
         if !shown.isEmpty { return shown }
         if type == "icon", tappable, let name, !name.isEmpty { return name }
         // Icon-only controls (#10439): an extended FAB's label, else the icon name.

@@ -4,7 +4,24 @@ import kotlin.math.abs
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /** Canonical errors are computed from JSON structure, never from decoder exception strings. */
 data class PrototypeSpecError(val path: String, val message: String)
@@ -42,11 +59,14 @@ object PrototypeSpecValidator {
       .jsonObject
   private val definitions = contract.getValue("definitions").jsonObject
   private val limits = contract.getValue("limits").jsonObject
+  val MAX_PROTOTYPE_TEXT_SPANS: Int = limit("MAX_PROTOTYPE_TEXT_SPANS")
   val MAX_PROTOTYPE_NODES: Int = limit("MAX_PROTOTYPE_NODES")
+  val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
   val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
   val MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES")
+  val MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES: Int = limit("MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES")
   val MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH")
   val MAX_PROTOTYPE_SELECTOR_DEPTH: Int = limit("MAX_PROTOTYPE_SELECTOR_DEPTH")
   val MAX_PROTOTYPE_CONDITION_DEPTH: Int = limit("MAX_PROTOTYPE_CONDITION_DEPTH")
@@ -55,7 +75,11 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")
+  val MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH")
+  val MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL")
   val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
+  val MAX_PROTOTYPE_STACK_SCREENS: Int = limit("MAX_PROTOTYPE_STACK_SCREENS")
+  val MAX_PROTOTYPE_STACK_DEPTH: Int = limit("MAX_PROTOTYPE_STACK_DEPTH")
   internal val maxRepeatItems: Int =
     definitions
       .getValue("repeat")
@@ -117,8 +141,15 @@ object PrototypeSpecValidator {
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
-    checked.nodes.removeAll { boundKeys(it.value).isEmpty() }
-    checked.actions.removeAll { it.value.text("type") !in stateWriteActionTypes }
+    checked.nodes.removeAll {
+      boundKeys(it.value).isEmpty() &&
+        it.value["enabledWhen"] == null &&
+        it.value["visibleWhen"] == null &&
+        it.value["styleWhen"] == null
+    }
+    checked.actions.removeAll {
+      it.value.text("type") !in stateWriteActionTypes && it.value["requireValid"] == null
+    }
     val serializer = MapSerializer(String.serializer(), PrototypeScalar.serializer())
     // An omitted state adds its field name and comma; a present state replaces only its value.
     // Compact serialization preserves all non-state bytes, including UTF-8 and escaped strings.
@@ -226,8 +257,10 @@ object PrototypeSpecValidator {
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+        ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: pagerErrors(context)
+        ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
     if (error != null) return PrototypeSpecValidation.Failure(error)
     return try {
@@ -239,6 +272,28 @@ object PrototypeSpecValidator {
     } catch (_: SerializationException) {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
+  }
+
+  /** A span belongs to the direct grid parent, including repeat templates. */
+  private fun gridSpanErrors(context: Context): PrototypeSpecError? {
+    val parents = mutableMapOf<String, JsonObject>()
+    for ((node, path) in context.nodes) {
+      if (node.containsKey("span")) {
+        val parent =
+          parents[path] ?: return fail("$path.span", "span requires a direct grid parent")
+        if (parent.text("type") != "grid") {
+          return fail("$path.span", "span requires a direct grid parent")
+        }
+        val columns = (parent["columns"] as? JsonPrimitive)?.doubleOrNull
+        if (columns != null && node.number("span", 0.0) > columns) {
+          return fail("$path.span", "span exceeds grid columns")
+        }
+      }
+      (node["children"] as? JsonArray)?.indices?.forEach { index ->
+        parents["$path.children[$index]"] = node
+      }
+    }
+    return null
   }
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
@@ -264,6 +319,12 @@ object PrototypeSpecValidator {
           },
         )
       }
+      "screenMap" ->
+        JsonObject(
+          (value as JsonObject).mapValues { (_, child) ->
+            normalizeIntegers(child, rule.getValue("item").jsonObject)
+          },
+        )
       "array" ->
         JsonArray(
           (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
@@ -325,6 +386,120 @@ object PrototypeSpecValidator {
       ?: listItemBindingErrors(checked, data)
       ?: sheetBindingErrors(checked, data)
       ?: stateActionErrors(checked, data)
+      ?: checkErrors(checked, data)
+
+  private fun checkErrors(context: Context, data: JsonObject): PrototypeSpecError? {
+    val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
+    val keys =
+      context.nodes
+        .flatMap { located ->
+          if ((located.value["checks"] as? JsonArray).isNullOrEmpty()) emptyList()
+          else
+            listOfNotNull(
+                located.value.text("stateKey"),
+                located.value.text("hourKey"),
+                located.value.text("minuteKey"),
+              )
+              .filter(state::containsKey)
+        }
+        .toSet()
+    for ((value, path) in context.nodes) {
+      nodeCheckError(value, path)?.let {
+        return it
+      }
+      conditionCheckError(value["visibleWhen"], "$path.visibleWhen", keys)?.let {
+        return it
+      }
+      conditionCheckError(value["enabledWhen"], "$path.enabledWhen", keys)?.let {
+        return it
+      }
+      for ((index, entry) in (value["styleWhen"] as? JsonArray).orEmpty().withIndex()) {
+        conditionCheckError(
+            (entry as? JsonObject)?.get("when"),
+            "$path.styleWhen[$index].when",
+            keys,
+          )
+          ?.let {
+            return it
+          }
+      }
+    }
+    for ((value, path) in context.actions) {
+      value["requireValid"]?.let {
+        keyCheckError(it, path, keys)?.let { error ->
+          return error
+        }
+      }
+    }
+    return null
+  }
+
+  private fun nodeCheckError(node: JsonObject, path: String): PrototypeSpecError? {
+    val checks = (node["checks"] as? JsonArray).orEmpty().map { it.jsonObject }
+    for ((index, check) in checks.withIndex()) {
+      val kind = check.keys.first { it != "message" }
+      val at = "$path.checks[$index].$kind"
+      val fits =
+        when (kind) {
+          "minLength",
+          "maxLength",
+          "format",
+          "pattern" -> node.text("type") == "textField"
+          "min",
+          "max" -> node.text("type") in setOf("slider", "datePicker", "timePicker")
+          else -> true
+        }
+      if (!fits) return fail(at, "Check $kind does not fit ${node.text("type")}")
+      check.text("pattern")?.let {
+        val result = PrototypeCheckPattern.parse(it)
+        if (!result.ok) return fail(at, checkNotNull(result.message))
+      }
+    }
+    for ((lower, upper) in listOf("min" to "max", "minLength" to "maxLength")) {
+      val low = checks.mapNotNull { (it[lower] as? JsonPrimitive)?.doubleOrNull }.maxOrNull()
+      val high = checks.mapNotNull { (it[upper] as? JsonPrimitive)?.doubleOrNull }.minOrNull()
+      if (low != null && high != null && low > high) {
+        val index = checks.indexOfFirst { (it[upper] as? JsonPrimitive)?.doubleOrNull == high }
+        return fail("$path.checks[$index].$upper", "$lower exceeds $upper")
+      }
+    }
+    return null
+  }
+
+  private fun keyCheckError(
+    value: JsonElement,
+    path: String,
+    keys: Set<String>,
+  ): PrototypeSpecError? {
+    val requested = if (value is JsonArray) value else listOf(value)
+    return if (
+      requested.any { (it as? JsonPrimitive)?.takeIf { key -> key.isString }?.content !in keys }
+    )
+      fail(path, "Validity key must be declared state with at least one check")
+    else null
+  }
+
+  private fun conditionCheckError(
+    value: JsonElement?,
+    path: String,
+    keys: Set<String>,
+  ): PrototypeSpecError? {
+    val condition = value as? JsonObject ?: return null
+    condition["valid"]?.let {
+      return keyCheckError(it, path, keys)
+    }
+    condition["not"]?.let {
+      return conditionCheckError(it, "$path.not", keys)
+    }
+    for (form in listOf("all", "any")) {
+      for ((index, child) in (condition[form] as? JsonArray).orEmpty().withIndex()) {
+        conditionCheckError(child, "$path.$form[$index]", keys)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
 
   private class Context {
     var root: JsonElement? = null
@@ -375,6 +550,8 @@ object PrototypeSpecValidator {
       "object" -> visitObject(value, rule, path, context, depth)
       "array" -> visitArray(value, rule, path, context, depth)
       "map" -> visitMap(value, rule, path, context, depth)
+      "screenMap" -> visitScreenMap(value, rule, path, context, depth)
+      "record" -> visitRecord(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       "data" -> dataError(value)
       else ->
@@ -464,7 +641,22 @@ object PrototypeSpecValidator {
     depth: Int,
   ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
+    // Text constraints precede field walking, matching the host's first-error ordering.
+    if (rule === definitions.getValue("node").jsonObject.getValue("variants").jsonObject["text"]) {
+      val exactlyOne = rule.getValue("exactlyOne").jsonArray
+      if (exactlyOne.count { data.containsKey(it.jsonPrimitive.content) } != 1) {
+        val spans = data.containsKey("spans")
+        return fail(
+          keyPath(path, if (spans) "spans" else "text"),
+          if (spans) "text and spans cannot both be set" else "text node needs text or spans",
+        )
+      }
+      if ((data["spans"] as? JsonArray)?.size?.let { it > MAX_PROTOTYPE_TEXT_SPANS } == true)
+        return fail(keyPath(path, "spans"), "Text span limit exceeded")
+    }
     val fields = rule.getValue("fields").jsonObject
+    if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
+      return fail("$path.child", "Search bar child requires activeKey")
     for (key in (data.keys + fields.keys).sorted()) {
       val childPath = keyPath(path, key)
       val field = fields[key] as? JsonObject ?: return fail(childPath, "Unknown property")
@@ -582,6 +774,45 @@ object PrototypeSpecValidator {
     return null
   }
 
+  private fun visitScreenMap(
+    value: JsonElement,
+    rule: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    val screens = value as? JsonObject ?: return fail(path, "Expected object")
+    if (screens.size !in 1..MAX_PROTOTYPE_STACK_SCREENS)
+      return fail(path, "Screen count out of range")
+    for (name in screens.keys.sorted()) {
+      val at = "$path[${canonicalString(name)}]"
+      if (name.isEmpty()) return fail(at, "Empty screen name")
+      val error = walk(screens.getValue(name), rule.getValue("item").jsonObject, at, context, depth)
+      if (error != null) return error
+    }
+    return null
+  }
+
+  private fun visitRecord(
+    value: JsonElement,
+    rule: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    val data = value as? JsonObject ?: return fail(path, "Expected object")
+    if (data.size > rule.number("maxEntries", Double.POSITIVE_INFINITY))
+      return fail(path, "Record entry limit exceeded")
+    for ((key, child) in data) {
+      val at = keyPath(path, key)
+      if (key.isEmpty()) return fail(at, "Invalid context name")
+      walk(child, rule.getValue("item").jsonObject, at, context, depth)?.let {
+        return it
+      }
+    }
+    return null
+  }
+
   private fun visitChoice(
     value: JsonElement,
     rule: JsonObject,
@@ -628,14 +859,17 @@ object PrototypeSpecValidator {
       "color" -> text != null && colorPattern.matches(text)
       "number" -> numberValid(value, rule)
       "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
+      "true" -> primitive != null && !primitive.isString && primitive.booleanOrNull == true
       "scalar" ->
         text != null ||
           (primitive != null &&
             !primitive.isString &&
             (primitive.booleanOrNull != null || primitive.doubleOrNull?.isFinite() == true))
-      "enum" ->
-        text != null && rule.getValue("values").jsonArray.any { it.jsonPrimitive.content == text }
-      "json" -> jsonCost(value) <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
+      "enum" -> rule.getValue("values").jsonArray.any { it == value }
+      "json" ->
+        jsonCost(value).let {
+          it.isFinite() && it <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
+        }
       else -> false
     }
   }
@@ -690,16 +924,52 @@ object PrototypeSpecValidator {
     return if (value.doubleOrNull?.isFinite() == true) 32.0 else Double.POSITIVE_INFINITY
   }
 
+  private fun stackErrors(context: Context): PrototypeSpecError? {
+    val stacks = mutableMapOf<String, JsonObject>()
+    for ((value, path) in context.nodes) {
+      if (value.text("type") != "stack") continue
+      val id = checkNotNull(value.text("id"))
+      if (stacks.containsKey(id)) return fail("$path.id", "Duplicate stack id")
+      val screens = value.getValue("screens").jsonObject
+      val start = checkNotNull(value.text("start"))
+      if (!screens.containsKey(start)) return fail("$path.start", "Unknown start screen")
+      stacks[id] = screens
+    }
+    for ((value, path) in context.actions) {
+      val id = value.text("stack") ?: continue
+      val screens = stacks[id] ?: return fail("$path.stack", "Unknown stack id")
+      val screen = value.text("screen")
+      if (screen != null && !screens.containsKey(screen))
+        return fail("$path.screen", "Unknown stack screen")
+    }
+    return null
+  }
+
   private fun pagerErrors(context: Context): PrototypeSpecError? {
     val pagers = mutableSetOf<String>()
     for ((value, path) in context.nodes) {
       if (value.text("type") != "pager") continue
       val id = checkNotNull(value.text("id"))
       if (!pagers.add(id)) return fail("$path.id", "Duplicate pager id")
+      if (
+        value.text("axis") == "vertical" &&
+          context.nodes.any { (ancestor, ancestorPath) ->
+            ancestor.text("type") == "scroll" &&
+              ancestor.text("axis") != "horizontal" &&
+              path.startsWith("$ancestorPath.")
+          }
+      )
+        return fail("$path.axis", "A vertical pager cannot appear inside a vertical scroll")
     }
     for ((value, path) in context.nodes + context.actions) {
       val pager = value.text("pager") ?: continue
       if (!pagers.contains(pager)) return fail("$path.pager", "Unknown pager id")
+    }
+    for ((value, path) in context.actions) {
+      for ((name, binding) in (value["context"] as? JsonObject).orEmpty()) {
+        val page = (binding as? JsonObject)?.text("page") ?: continue
+        if (page !in pagers) return fail(keyPath("$path.context", name), "Unknown pager id")
+      }
     }
     return null
   }
@@ -710,13 +980,22 @@ object PrototypeSpecValidator {
     path: String,
     stored: JsonPrimitive?,
   ): PrototypeSpecError? {
-    val name = if (value.text("type") == "segmentedButton") "Segmented button" else "Radio group"
+    val name =
+      when (value.text("type")) {
+        "segmentedButton" -> "Segmented button"
+        "select" -> "Select"
+        else -> "Radio group"
+      }
     if (stored == null || !stored.isString)
       return fail("$path.stateKey", "$name requires a string state key")
     val values = mutableSetOf<String?>()
     for ((index, option) in (value["options"] as? JsonArray).orEmpty().withIndex()) {
       if (!values.add((option as? JsonObject)?.text("value")))
-        return fail("$path.options[$index].value", "Duplicate radio option value")
+        return fail(
+          "$path.options[$index].value",
+          if (value.text("type") == "select") "Duplicate select option value"
+          else "Duplicate radio option value",
+        )
     }
     return null
   }
@@ -829,6 +1108,31 @@ object PrototypeSpecValidator {
     else null
   }
 
+  /** Individual fields are contract-typed; relationships follow the host's textFieldErrors. */
+  private fun textFieldErrors(
+    value: JsonObject,
+    path: String,
+    stored: JsonPrimitive?,
+  ): PrototypeSpecError? {
+    if (stored?.isString != true)
+      return fail("$path.stateKey", "Text field requires a string state key")
+    val lineField = listOf("minLines", "maxLines").firstOrNull { value.containsKey(it) }
+    if (!value.flag("multiline") && lineField != null)
+      return fail("$path.$lineField", "Requires multiline: true")
+    if (
+      value.flag("multiline") && (value.flag("secure") || value.text("keyboardType") == "password")
+    )
+      return fail("$path.multiline", "Multiline text cannot be secure")
+    val minLines = (value["minLines"] as? JsonPrimitive)?.intOrNull
+    val maxLines = (value["maxLines"] as? JsonPrimitive)?.intOrNull
+    if (minLines != null && maxLines != null && minLines > maxLines)
+      return fail("$path.minLines", "minLines cannot exceed maxLines")
+    val maxLength = (value["maxLength"] as? JsonPrimitive)?.intOrNull
+    if (maxLength != null && stored.content.length > maxLength)
+      return fail("$path.stateKey", "Text field value exceeds maxLength")
+    return null
+  }
+
   private fun componentBindingErrors(
     value: JsonObject,
     path: String,
@@ -836,6 +1140,7 @@ object PrototypeSpecValidator {
   ): PrototypeSpecError? {
     val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
     return when (value.text("type")) {
+      "textField" -> textFieldErrors(value, path, stored)
       "slider" -> sliderErrors(value, path, stored)
       "chip" -> chipErrors(value, path, stored)
       "fab" -> fabErrors(value, path)
@@ -861,14 +1166,22 @@ object PrototypeSpecValidator {
     }
     val key = value.text("stateKey") ?: return null
     val stored = state[key] as? JsonPrimitive
-    if (value.text("type") == "textField" && stored?.isString != true)
+    if (value.text("type") in setOf("textField", "searchBar") && stored?.isString != true)
       return fail("$path.stateKey", "Text field requires a string state key")
+    if (value.text("type") == "searchBar") {
+      val active = value.text("activeKey")?.let { state[it] as? JsonPrimitive }
+      if (
+        value.text("activeKey") != null &&
+          (active == null || active.isString || active.booleanOrNull == null)
+      )
+        return fail("$path.activeKey", "Search bar requires a boolean active key")
+    }
     if (
       value.text("type") in setOf("switch", "checkbox") &&
         (stored == null || stored.isString || stored.booleanOrNull == null)
     )
       return fail("$path.stateKey", "Toggle control requires a boolean state key")
-    if (value.text("type") in setOf("radioGroup", "segmentedButton")) {
+    if (value.text("type") in setOf("radioGroup", "segmentedButton", "select")) {
       radioGroupErrors(value, path, stored)?.let {
         return it
       }
@@ -892,7 +1205,12 @@ object PrototypeSpecValidator {
 
   /** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
   private val modalNames =
-    mapOf("bottomSheet" to "Sheet", "dialog" to "Dialog", "snackbar" to "Snackbar")
+    mapOf(
+      "bottomSheet" to "Sheet",
+      "dialog" to "Dialog",
+      "snackbar" to "Snackbar",
+      "menu" to "Menu",
+    )
 
   private fun openWhenErrors(
     value: JsonObject,
@@ -933,6 +1251,7 @@ object PrototypeSpecValidator {
   private fun boundKeys(value: JsonObject): List<String> =
     listOfNotNull(
       value.text("stateKey"),
+      value.text("activeKey"),
       value.text("hourKey"),
       value.text("minuteKey"),
       (value["trailing"] as? JsonObject)?.text("stateKey"),

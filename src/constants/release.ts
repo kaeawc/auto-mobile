@@ -64,6 +64,12 @@ export interface ReleaseChecksumEntry {
    */
   prototypeAgentSha256?: string;
   /**
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-viewer archive
+   * (`AutoMobilePrototypeViewer.zip`, #12255). Optional: releases that
+   * predate it degrade to "viewer unavailable".
+   */
+  prototypeViewerSha256?: string;
+  /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
    * `ditto -c -k --keepParent` so the nested system extension keeps its
@@ -78,6 +84,18 @@ export interface ReleaseChecksumEntry {
  * Each entry represents a validated release build.
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "0.0.85",
+    apkSha256: "0e27ecf86d6c9c034d35fcb4bcc1f0235ad7aa49c5bce59459a979d7efa57c20",
+    ipaSha256: "70b14816e153e190ebf13461510382f0ef08852caa3f2d75451a49ac00f9e0ca",
+    runnerSha256: "ff0ed610f1616d0e83e79355b75cec3f04ad5193788bae9c8a7697e8f2b5f549",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "77c3a86153ce9cc906f96da73d617d21d4bad1081270157cfbe80a6c83ea5e59",
+    screenCaptureHelperSha256: "b0d7a7eb1c319a46cca5b49279ae90556af40acdc3e8c2e860d9e9f857bcf1b6",
+    prototypeAgentSha256: "d729d1511995c36b2f9fbbfbb2a081fc2a5ab910c063c390d5b1b8082bbf64a9",
+    prototypeViewerSha256: "928a2eed6311fbbd1173497f1f936a4ba2381ceb42aceddc1b302f9286a6cb75",
+    networkFilterSha256: "cd065f488ba7c6d708fc0d3246e77f00f7340736ecff510ae1fcbd7e580f38d4",
+  },
   {
     version: "0.0.84",
     apkSha256: "9e551d6d686c3e25100346302aaad3383fa185ede00c102a221c3183830f4651",
@@ -597,11 +615,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "0b04d28dd1ba91db31827d29f74d256b29cedab2e39236724ba29c47fe67b28b",
-  ipaSha256: "4ff20af100c962b4e0566064e817af008e56a293212b68e850f6092c9fda1208",
+  apkSha256: "5540b0947c053ed8b67a7e1b1b046b6395c61947bc6b2cd961672b7a467dbc00",
+  ipaSha256: "80f7ff8c940d32cda9e7051a90c806bf7855072d7bfc96281e8ca573d81adbdf",
   runnerSha256Target: "xctest",
   videoJarSha256: "77c3a86153ce9cc906f96da73d617d21d4bad1081270157cfbe80a6c83ea5e59",
-  runnerSha256: "f6ebd4868859e10ec4d74bb09a2d7376c0ee492d7dd6b0e0f011c4e1d1f30c94",
+  runnerSha256: "a7965e41129d83f40e4987d60b7f0ba728aed3c734253d2fd1628afd5f50eeb1",
 };
 
 /**
@@ -975,6 +993,30 @@ export function resolvePrototypeAgentChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.prototypeAgentSha256 ?? "";
+}
+
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator prototype viewer (#12255). */
+export const PROTOTYPE_VIEWER_ARCHIVE_FILENAME = "AutoMobilePrototypeViewer.zip";
+
+/** Download URL for the iOS-simulator prototype-viewer archive. */
+export function resolvePrototypeViewerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected prototype-viewer archive SHA-256 for the pinned version; "" when unknown. */
+export function resolvePrototypeViewerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.prototypeViewerSha256 ?? "";
 }
 
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */

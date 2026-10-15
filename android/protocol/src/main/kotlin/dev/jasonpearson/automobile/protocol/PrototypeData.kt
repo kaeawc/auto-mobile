@@ -1,6 +1,18 @@
 package dev.jasonpearson.automobile.protocol
 
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
@@ -102,6 +114,7 @@ internal object PrototypeDataValues {
 
 /** Per-call caches; JSON values are read-only and projected rows are shared, never mutated. */
 internal class PrototypeRepeatData(private val data: JsonObject?) {
+  private val renderings = mutableMapOf<String, String>()
   private val sources = mutableMapOf<String, JsonArray?>()
   private val counts = mutableMapOf<String, Int>()
   private val projections = mutableMapOf<String, List<JsonObject>>()
@@ -113,6 +126,15 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
     }
     return sources[pointer]
   }
+
+  fun rendered(pointer: String): String =
+    renderings.getOrPut(pointer) {
+      PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
+    }
+
+  /** Null signals an oversized substitution; never construct that resolved string. */
+  fun text(text: String, charge: (Long) -> Boolean): String? =
+    PrototypeDataText.boundedBind(text, ::rendered, charge)
 
   fun cells(pointer: String): Int =
     counts.getOrPut(pointer) {
@@ -175,11 +197,36 @@ internal object PrototypeDataText {
 
   fun hasBinding(text: String): Boolean = placeholders(text).isNotEmpty()
 
-  fun bind(text: String, data: JsonObject?): String = buildString {
+  fun boundedBind(
+    text: String,
+    resolve: (String) -> String,
+    charge: (Long) -> Boolean,
+  ): String? {
+    val spans = placeholders(text)
+    var length = 0L
+    for (span in spans) {
+      length += resolve(span.pointer).length
+      if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) return null
+    }
+    if (spans.isEmpty()) return text
+    if (!charge(text.length.toLong() + length)) return null
+    return bind(text, spans, resolve)
+  }
+
+  fun bind(text: String, data: JsonObject?): String =
+    bind(text, placeholders(text)) { pointer ->
+      PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
+    }
+
+  private fun bind(
+    text: String,
+    spans: List<Placeholder>,
+    resolve: (String) -> String,
+  ): String = buildString {
     var cursor = 0
-    for (placeholder in placeholders(text)) {
+    for (placeholder in spans) {
       append(text.substring(cursor, placeholder.start))
-      append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, placeholder.pointer)))
+      append(resolve(placeholder.pointer))
       cursor = placeholder.end
     }
     append(text.substring(cursor))
@@ -202,6 +249,7 @@ object PrototypeDataResolver {
         own.mapValues { (key, value) ->
           when (key) {
             "repeat" -> resolveRepeat(value, repeats)
+            "enabledWhen",
             "visibleWhen" -> resolveCondition(value, data)
             "styleWhen" -> resolveStyles(value, data)
             else -> value
@@ -293,6 +341,17 @@ object PrototypeDataResolver {
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
+    val screens = node["screens"] as? JsonObject
+    if (screens != null)
+      return JsonObject(
+        node +
+          ("screens" to
+            JsonObject(
+              screens.mapValues { (_, entry) ->
+                if (entry is JsonObject) transform(entry) else entry
+              },
+            )),
+      )
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(
       node +
@@ -317,6 +376,11 @@ object PrototypeDataResolver {
   private fun hasBindings(node: JsonObject): Boolean {
     val textBound =
       PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
+        if (
+          kind == PrototypeBindableKind.EMIT_BINDING &&
+            (value as? JsonObject)?.containsKey("data") == true
+        )
+          return@first true
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
           true
@@ -329,6 +393,7 @@ object PrototypeDataResolver {
     val own =
       (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
         textBound ||
+        conditionBound(node["enabledWhen"]) ||
         conditionBound(node["visibleWhen"]) ||
         stylesBound
     val child = node["child"] as? JsonObject
@@ -336,6 +401,9 @@ object PrototypeDataResolver {
       if (child != null) hasBindings(child)
       else
         (node["children"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().any(::hasBindings)
-    return own || nested
+    val screensBound =
+      (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
+        ?: false
+    return own || nested || screensBound
   }
 }

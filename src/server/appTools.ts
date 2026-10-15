@@ -66,7 +66,15 @@ import {
 } from "../features/prototype/ios/prototypeAgentInjection";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
+import {
+  createPrototypeViewerAttacher,
+  prototypeViewerConnections,
+  type PrototypeViewerLaunchAttacher,
+  type PrototypeViewerConnections,
+} from "../features/prototype/ios/prototypeViewerAttach";
 
 export interface InstalledAppResourceRefresh {
   invalidate(deviceId: string): void;
@@ -157,6 +165,9 @@ export interface LaunchAppToolDependencies {
   idGenerator: IdGenerator;
   /** Agent records shared by launchApp, terminateApp and the prototype tool. */
   prototypeAgentRegistry: PrototypeAgentRegistry;
+  prototypeViewerAttacher: PrototypeViewerLaunchAttacher;
+  prototypeViewerConnections: Pick<PrototypeViewerConnections, "release" | "releaseDevice">;
+  timer: Timer;
   /** Created on first `prototype: true`, so a normal launch never resolves the agent dylib. */
   createPrototypeAgentInjector(registry: PrototypeAgentRegistry): PrototypeAgentLaunchInjector;
 }
@@ -178,10 +189,19 @@ let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
 
 function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
   if (!launchAppToolDependencies) {
+    let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
     launchAppToolDependencies = {
       createLaunchApp: (device) => new LaunchApp(device),
       idGenerator: defaultIdGenerator,
       prototypeAgentRegistry,
+      prototypeViewerConnections,
+      timer: defaultTimer,
+      prototypeViewerAttacher: {
+        attach: (device, bundleId) => {
+          viewerAttacher ??= createPrototypeViewerAttacher();
+          return viewerAttacher.attach(device, bundleId);
+        },
+      },
       createPrototypeAgentInjector: createDefaultPrototypeAgentInjector,
     };
   }
@@ -194,6 +214,10 @@ export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependen
     createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     prototypeAgentRegistry: deps.prototypeAgentRegistry ?? currentDeps.prototypeAgentRegistry,
+    prototypeViewerAttacher: deps.prototypeViewerAttacher ?? currentDeps.prototypeViewerAttacher,
+    prototypeViewerConnections:
+      deps.prototypeViewerConnections ?? currentDeps.prototypeViewerConnections,
+    timer: deps.timer ?? currentDeps.timer,
     createPrototypeAgentInjector:
       deps.createPrototypeAgentInjector ?? currentDeps.createPrototypeAgentInjector,
   };
@@ -1213,6 +1237,12 @@ const launchAppHandler = async (
       ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
       : result;
     const response = buildLaunchAppResponse(args.appId, safeResult);
+    await attachLaunchedViewer(
+      dependencies.prototypeViewerAttacher,
+      dependencies.timer,
+      device,
+      args,
+    );
     return createStructuredToolResponse(
       prototypeLaunch ? await prototypeLaunch.attach(response, result.pid) : response,
     );
@@ -1225,6 +1255,34 @@ const launchAppHandler = async (
     }
   }
 };
+
+async function attachLaunchedViewer(
+  attacher: LaunchAppToolDependencies["prototypeViewerAttacher"],
+  timer: Timer,
+  device: BootedDevice,
+  args: Pick<LaunchAppActionArgs, "appId" | "prototype">,
+): Promise<void> {
+  if (args.prototype || device.platform !== "ios" || resolveIosDeviceKind(device) !== "simulator") {
+    return;
+  }
+  let timedOut = false;
+  try {
+    await raceWithDeadline(() => attacher.attach(device, args.appId), {
+      timer,
+      timeoutMs: 3000,
+      label: "Optional prototype viewer attach",
+      onTimeout: () => {
+        timedOut = true;
+        logger.debug("[AppTools] Optional prototype viewer attach timed out.");
+      },
+    });
+  } catch {
+    // Expected for every app that is not a viewer; safe to swallow because launch already succeeded.
+    if (!timedOut) {
+      logger.debug("[AppTools] Optional prototype viewer attach was unavailable.");
+    }
+  }
+}
 
 /** The agent fields a client may see; the auth token stays in the daemon. */
 function describePrototypeAgent(agent: PrototypeAgentRecord) {
@@ -1308,6 +1366,10 @@ const terminateAppHandler = async (
     if (device.platform === "ios") {
       // Only after a successful termination: a failed one leaves the agent running and reachable.
       getLaunchAppToolDependencies().prototypeAgentRegistry.release(device.deviceId, args.appId);
+      getLaunchAppToolDependencies().prototypeViewerConnections.release(
+        device.deviceId,
+        args.appId,
+      );
     }
 
     return createStructuredToolResponse({
@@ -1506,8 +1568,10 @@ let unsubscribePrototypeAgentLifecycle: (() => void) | undefined;
 
 /** A released session or a removed device ends every agent recorded on its device. */
 function subscribePrototypeAgentLifecycle(): () => void {
-  const releaseDevice = (deviceId: string) =>
+  const releaseDevice = (deviceId: string) => {
     getLaunchAppToolDependencies().prototypeAgentRegistry.releaseDevice(deviceId);
+    getLaunchAppToolDependencies().prototypeViewerConnections.releaseDevice(deviceId);
+  };
   const cleanups = [
     SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot, extras) => {
       // An upgrade-only re-announcement's device may belong to its next owner by now (#11206).

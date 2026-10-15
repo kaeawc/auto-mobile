@@ -6,8 +6,8 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-  id("automobile.kotlin-common")
-  alias(libs.plugins.android.library)
+  id("automobile.android-library")
+  id("automobile.robolectric-sdk-pin")
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.mavenPublish)
@@ -16,14 +16,6 @@ plugins {
 
 android {
   namespace = "dev.jasonpearson.automobile.sdk"
-  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
-
-  defaultConfig {
-    minSdk = 24
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    consumerProguardFiles("consumer-rules.pro")
-  }
 
   testOptions {
     unitTests.isReturnDefaultValues = true
@@ -37,18 +29,6 @@ android {
     .kotlin
     .directories
     .add("../build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/api")
-
-  buildTypes {
-    release {
-      isMinifyEnabled = false
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-    }
-  }
-
-  compileOptions {
-    sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-    targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-  }
 
   buildFeatures { compose = true }
 }

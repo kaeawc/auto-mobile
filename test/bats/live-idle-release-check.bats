@@ -36,7 +36,18 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FAKE}/adb.calls"
 if [[ "$1" == "-s" && "$3" == "get-state" ]]; then
-  printf '%s\n' "${FAKE_ADB_STATE:-device}"
+  calls=0
+  [[ ! -f "${FAKE}/adb.get-state.calls" ]] || calls="$(cat "${FAKE}/adb.get-state.calls")"
+  calls=$((calls + 1))
+  printf '%s\n' "${calls}" > "${FAKE}/adb.get-state.calls"
+  if [[ -n "${FAKE_ADB_STATE_SEQUENCE:-}" ]]; then
+    IFS=',' read -r -a states <<< "${FAKE_ADB_STATE_SEQUENCE}"
+    index=$((calls - 1))
+    ((index < ${#states[@]})) || index=$((${#states[@]} - 1))
+    printf '%s\n' "${states[index]}"
+  else
+    printf '%s\n' "${FAKE_ADB_STATE:-device}"
+  fi
   exit 0
 fi
 if [[ "$1" == "-s" && "$3 $4 $5" == "emu avd name" ]]; then
@@ -112,7 +123,12 @@ scan_device() {
 }
 
 active_sessions() {
-  local dir dev entries=() jitter
+  local dir dev entries=() jitter query_count=0 local_id
+  if [[ -n "${FAKE_SWAP_SESSION_AFTER_QUERIES:-}" ]]; then
+    [[ ! -f "${FAKE}/active-sessions.queries" ]] || query_count="$(cat "${FAKE}/active-sessions.queries")"
+    query_count=$((query_count + 1))
+    printf '%s\n' "${query_count}" > "${FAKE}/active-sessions.queries"
+  fi
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     scan_device "$(basename "${dir}")"
@@ -120,13 +136,19 @@ active_sessions() {
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     dev="$(basename "${dir}")"
+    # FAKE_SWAP_SESSION_AFTER_QUERIES: swap the holder session after N active-sessions queries.
+    local_id="$(cat "${dir}/session")"
+    if [[ -n "${FAKE_SWAP_SESSION_AFTER_QUERIES:-}" ]] &&
+      ((query_count > FAKE_SWAP_SESSION_AFTER_QUERIES)) && [[ "${dev}" == emulator-5560 ]]; then
+      local_id="${FAKE_SESSION_UUID}-swapped"
+    fi
     # FAKE_ACTIVITY_JITTER_MS: once the session has idled 8 s, the unmoved lastToolActivityAt reads
     # back that many ms earlier, as the daemon's wall/monotonic conversion does (#11368).
     jitter=0
     if (($(cat "${dir}/last_beat") - $(cat "${dir}/last_tool") >= 8000)); then
       jitter=$((-${FAKE_ACTIVITY_JITTER_MS:-0}))
     fi
-    entries+=("$(jq -cn --arg id "$(cat "${dir}/session")" --arg dev "${dev}" \
+    entries+=("$(jq -cn --arg id "${local_id}" --arg dev "${dev}" \
       --argjson tool "$(($(cat "${dir}/last_tool") + jitter))" --argjson beat "$(cat "${dir}/last_beat")" \
       --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
       '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
@@ -242,6 +264,25 @@ while IFS= read -r line; do
     fi
   fi
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
+  if [[ "${tool}" == homeScreen && -n "${FAKE_CONTROL_ERROR:-}" ]]; then
+    calls=0
+    [[ ! -f "${FAKE}/control.calls" ]] || calls="$(cat "${FAKE}/control.calls")"
+    calls=$((calls + 1))
+    printf '%s\n' "${calls}" > "${FAKE}/control.calls"
+    if ((calls <= ${FAKE_CONTROL_ERROR_CALLS:-1})); then
+      error="${FAKE_CONTROL_ERROR}"
+      # Optional | separated per-call errors let recovery-budget tests prove the latest failure wins.
+      if [[ -n "${FAKE_CONTROL_ERROR_SEQUENCE:-}" ]]; then
+        IFS='|' read -r -a errors <<< "${FAKE_CONTROL_ERROR_SEQUENCE}"
+        index=$((calls - 1))
+        ((index < ${#errors[@]})) || index=$((${#errors[@]} - 1))
+        error="${errors[index]}"
+      fi
+      reply "${id}" "$(jq -cn --arg text "${error}" \
+        '{isError: true, content: [{type: "text", text: $text}]}')"
+      continue
+    fi
+  fi
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
   # A released owner cannot re-use its connection binding or its old UUID.
@@ -442,6 +483,70 @@ run_check() {
   for scenario in active no-heartbeat idle stdin-eof selector observe-only stream; do
     [ -s "${EVIDENCE}/${scenario}.sessions.log" ]
   done
+}
+
+@test "active recovers from a transient adb disappearance" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    run_check --scenario active
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS active"* ]]
+  [[ "${output}" == *"active: adb lost emulator-5560 (transient); waiting for it to return"* ]]
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 3 ]
+}
+
+@test "active fails after three adb disappearance recoveries" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    FAKE_CONTROL_ERROR_CALLS=4 run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"device 'emulator-5560' not found"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -eq 4 ]
+  [ "$(grep -c 'active: adb lost' <<< "${output}")" -eq 3 ]
+}
+
+@test "active fails with the control error when adb never returns" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    FAKE_CONTROL_ERROR_CALLS=1 FAKE_ADB_STATE_SEQUENCE="device,offline" run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"device 'emulator-5560' not found"* ]]
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 61 ]
+  [ "$(cat "${FAKE}/control.calls")" -eq 1 ]
+}
+
+@test "active fails when a different session holds the device" {
+  FAKE_SWAP_SESSION_AFTER_QUERIES=1 run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"* ]]
+  [[ "${output}" == *"is now held by session"* ]]
+}
+
+@test "active reports the latest control error when the budget is exhausted" {
+  FAKE_CONTROL_ERROR="unused" \
+    FAKE_CONTROL_ERROR_SEQUENCE="device 'emulator-5560' not found first|device 'emulator-5560' not found second|device 'emulator-5560' not found third|device 'emulator-5560' not found last" \
+    FAKE_CONTROL_ERROR_CALLS=4 run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"not found last"* ]]
+  [[ "${output}" != *"not found first"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -eq 4 ]
+}
+
+@test "active still detects a release after a recovery" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    FAKE_CONTROL_ERROR_CALLS=1 FAKE_ADB_STATE_SEQUENCE="device,offline,device" \
+    FAKE_RELEASE_AFTER_MS=7000 run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"while the proxy heartbeated and called tools"* ]]
+  [[ "${output}" == *"active: adb lost emulator-5560 (transient); waiting for it to return"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -ge 3 ]
+}
+
+@test "active fails immediately for an unrelated control tool error" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: permission denied" \
+    run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"permission denied"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -eq 1 ]
+  [[ "${output}" != *"active: adb lost"* ]]
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 1 ]
 }
 
 @test "fails the active scenario when the device is released while in use" {

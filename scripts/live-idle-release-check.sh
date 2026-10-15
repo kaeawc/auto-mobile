@@ -671,21 +671,52 @@ release_by_proxy_exit() {
   wait_for_release "${deadline}" || die "${serial} still held after the proxy exited"
 }
 
+# active_recoveries and active_control_error are scoped to scenario_active so the
+# recovery budget covers the whole scenario, not just one control call.
+active_control_call() {
+  local arguments="$1" result attempt state
+  while true; do
+    if call_tool "${CONTROL_TOOL}" "${arguments}" 120 "device '${serial}' not found"; then
+      return 0
+    else
+      result=$?
+    fi
+    [[ "${result}" -eq 3 ]] || die "active control call failed with status ${result}"
+    active_control_error="tools/call returned an error: $(jq -c '.result.content' <<< "${last_response}")"
+    ((active_recoveries < 3)) || die "${active_control_error}"
+    active_recoveries=$((active_recoveries + 1))
+    log "active: adb lost ${serial} (transient); waiting for it to return"
+    state=""
+    for ((attempt = 0; attempt < 60; attempt++)); do
+      state="$("${ADB}" -s "${serial}" get-state 2> /dev/null || true)"
+      [[ "${state}" != device ]] || break
+      "${SLEEP_CMD}" 1 || die "could not wait for ${serial} to return: ${active_control_error}"
+    done
+    [[ "${state}" == device ]] || die "${active_control_error}"
+  done
+}
+
 scenario_active() {
   current_scenario="active"
   acquire_device
-  local start now
+  local start now active_recoveries=0 active_control_error=""
   start="$(now_ms)"
   now="${start}"
   while ((now - start < active_ms)); do
-    call_tool "${CONTROL_TOOL}" "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')" 120
+    active_control_call "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')"
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} was released after $((now - start)) ms while the proxy heartbeated and called tools"
+    local held_session
+    held_session="$(entry_field "${entry}" sessionId)"
+    [[ "${held_session}" == "${session_id}" ]] || die "active: ${serial} is now held by session ${held_session}, not ${session_id}"
     sleep_ms "${call_interval_ms}"
     now="$(now_ms)"
   done
   query_device_entry
   [[ -n "${entry}" ]] || die "${serial} was released at the end of the active window"
+  local held_session
+  held_session="$(entry_field "${entry}" sessionId)"
+  [[ "${held_session}" == "${session_id}" ]] || die "active: ${serial} is now held by session ${held_session}, not ${session_id}"
   log "active: held for $((now - start)) ms of calls (idle window ${idle_timeout_ms} ms)"
   release_by_proxy_exit
   finish_scenario

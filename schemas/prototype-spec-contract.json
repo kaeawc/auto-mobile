@@ -13,7 +13,15 @@
     "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 500,
     "MAX_PROTOTYPE_DATA_POINTER_LENGTH": 256,
     "MAX_PROTOTYPE_REPEAT_PATH_CELLS": 65536,
-    "MAX_PROTOTYPE_PATCH_OPS": 64
+    "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH": 16384,
+    "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL": 4194304,
+    "MAX_PROTOTYPE_PATCH_OPS": 64,
+    "MAX_PROTOTYPE_PAGER_DP": 10000,
+    "MAX_PROTOTYPE_TEXT_SPANS": 64,
+    "MAX_PROTOTYPE_STACK_SCREENS": 32,
+    "MAX_PROTOTYPE_STACK_DEPTH": 32,
+    "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
+    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096
   },
   "definitions": {
     "offset": {
@@ -22,14 +30,18 @@
         "x": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },
         "y": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         }
@@ -41,14 +53,18 @@
         "x": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },
         "y": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },
@@ -56,7 +72,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         },
@@ -64,7 +81,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         }
@@ -103,7 +121,7 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "data", "all", "any", "not"],
+      "exactlyOne": ["key", "data", "all", "any", "not", "valid"],
       "dependents": {
         "key|data": ["equals", "notEquals", "gt", "lt"]
       },
@@ -178,6 +196,25 @@
             "kind": "pointer"
           },
           "optional": true
+        },
+        "valid": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "boundKey"
+              },
+              {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "boundKey"
+                }
+              }
+            ]
+          },
+          "optional": true
         }
       }
     },
@@ -243,7 +280,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": false
             }
@@ -265,7 +303,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001
+                "min": 1e-6,
+                "max": 10000
               },
               "optional": false
             }
@@ -280,7 +319,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -288,7 +328,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -296,7 +337,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -304,7 +346,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         }
@@ -317,7 +360,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         },
@@ -523,7 +567,8 @@
         {
           "kind": "number",
           "integer": false,
-          "min": 0
+          "min": 0,
+          "max": 10000
         },
         {
           "kind": "enum",
@@ -536,7 +581,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -544,7 +590,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -552,7 +599,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -560,7 +608,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             }
@@ -589,7 +638,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 10000
           },
           "optional": true
         },
@@ -597,7 +647,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -605,7 +656,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -613,7 +665,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -621,7 +674,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -657,7 +711,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 1000
           },
           "optional": true
         },
@@ -679,7 +734,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 10000
           },
           "optional": true
         },
@@ -736,7 +792,17 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
+          },
+          "optional": true
+        },
+        "runSpacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -744,7 +810,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 1000
           },
           "optional": true
         },
@@ -784,14 +851,17 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 1000
           },
           "optional": true
         },
         "letterSpacing": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -1000,
+            "max": 1000
           },
           "optional": true
         },
@@ -1022,7 +1092,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001
+                "min": 1e-6,
+                "max": 10000
               },
               "optional": false
             }
@@ -1090,6 +1161,97 @@
                 "kind": "json",
                 "maxBytes": 4096,
                 "maxDepth": 24
+              },
+              "optional": true
+            },
+            "context": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "state": {
+                          "rule": {
+                            "kind": "boundKey"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "item": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "index": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "page": {
+                          "rule": {
+                            "kind": "string"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "rule": {
+                            "kind": "json",
+                            "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "optional": true
+            },
+            "requireValid": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "boundKey"
+                }
               },
               "optional": true
             }
@@ -1234,6 +1396,90 @@
               "optional": true
             }
           }
+        },
+        "push": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["push"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screen": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "pop": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pop"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "popToRoot": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["popToRoot"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "replace": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["replace"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screen": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
         }
       }
     },
@@ -1269,6 +1515,32 @@
               "optional": true
             },
             "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
               "rule": {
                 "kind": "array",
                 "item": {
@@ -1319,6 +1591,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -1391,6 +1671,32 @@
               },
               "optional": true
             },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
             "style": {
               "rule": {
                 "kind": "ref",
@@ -1429,6 +1735,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -1501,6 +1815,32 @@
               },
               "optional": true
             },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
             "style": {
               "rule": {
                 "kind": "ref",
@@ -1542,6 +1882,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -1567,6 +1915,277 @@
                 "name": "repeat"
               },
               "optional": true
+            }
+          }
+        },
+        "flow": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["flow"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
+            },
+            "maxLines": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "grid": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["grid"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
+            },
+            "columns": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "number",
+                    "integer": true,
+                    "min": 1,
+                    "max": 12
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "minWidth": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": false,
+                          "min": 5e-324
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
             }
           }
         },
@@ -1611,92 +2230,20 @@
               },
               "optional": true
             },
-            "style": {
-              "rule": {
-                "kind": "ref",
-                "name": "style"
-              },
-              "optional": true
-            },
-            "styleWhen": {
+            "onLongPress": {
               "rule": {
                 "kind": "array",
                 "item": {
                   "kind": "ref",
-                  "name": "styleWhenEntry"
+                  "name": "action"
                 },
                 "min": 1,
-                "max": 8,
-                "unique": false
+                "unique": false,
+                "max": 32
               },
               "optional": true
             },
-            "visibleWhen": {
-              "rule": {
-                "kind": "ref",
-                "name": "condition"
-              },
-              "optional": true
-            },
-            "transition": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "fade", "expand", "slide"]
-              },
-              "optional": true
-            },
-            "anchor": {
-              "rule": {
-                "kind": "ref",
-                "name": "anchor"
-              },
-              "optional": true
-            },
-            "safeAreaPadding": {
-              "rule": {
-                "kind": "ref",
-                "name": "safeAreaPadding"
-              },
-              "optional": true
-            },
-            "text": {
-              "rule": {
-                "kind": "string",
-                "empty": true
-              },
-              "optional": false
-            }
-          }
-        },
-        "image": {
-          "kind": "object",
-          "fields": {
-            "type": {
-              "rule": {
-                "kind": "enum",
-                "values": ["image"]
-              },
-              "optional": false
-            },
-            "id": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "testTag": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "contentDescription": {
-              "rule": {
-                "kind": "string"
-              },
-              "optional": true
-            },
-            "onTap": {
+            "onDoubleTap": {
               "rule": {
                 "kind": "array",
                 "item": {
@@ -1747,6 +2294,160 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "text": {
+              "rule": {
+                "kind": "string",
+                "empty": true
+              },
+              "optional": true
+            },
+            "spans": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "textSpan"
+                },
+                "min": 1,
+                "max": 64,
+                "unique": false
+              },
+              "optional": true
+            }
+          },
+          "exactlyOne": ["text", "spans"]
+        },
+        "image": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["image"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -1814,6 +2515,32 @@
               },
               "optional": true
             },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
             "style": {
               "rule": {
                 "kind": "ref",
@@ -1852,6 +2579,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -1960,6 +2695,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2051,6 +2794,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2068,6 +2819,97 @@
               "rule": {
                 "kind": "string",
                 "empty": true
+              },
+              "optional": true
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["filled", "outlined"]
+              },
+              "optional": true
+            },
+            "supportingText": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "keyboardType": {
+              "rule": {
+                "kind": "enum",
+                "values": ["text", "number", "decimal", "email", "phone", "url", "password"]
+              },
+              "optional": true
+            },
+            "secure": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "multiline": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "minLines": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 20
+              },
+              "optional": true
+            },
+            "maxLines": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 20
+              },
+              "optional": true
+            },
+            "maxLength": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 10000
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2155,6 +2997,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2171,6 +3021,32 @@
             "label": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2258,6 +3134,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2274,6 +3158,32 @@
             "label": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2361,6 +3271,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2387,6 +3305,13 @@
                 "name": "iconName"
               },
               "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -2397,6 +3322,150 @@
               "rule": {
                 "kind": "enum",
                 "values": ["radioGroup"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            },
+            "options": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "radioOption"
+                },
+                "min": 2,
+                "max": 16,
+                "unique": false
+              },
+              "optional": false
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            }
+          }
+        },
+        "select": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["select"]
               },
               "optional": false
             },
@@ -2493,10 +3562,24 @@
                   "name": "radioOption"
                 },
                 "min": 2,
-                "max": 16,
+                "max": 32,
                 "unique": false
               },
               "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
             }
           }
         },
@@ -2582,6 +3665,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2612,6 +3703,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "listItemTrailing"
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2699,6 +3797,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2736,6 +3842,32 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2823,6 +3955,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -2846,6 +3986,13 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -2880,6 +4027,32 @@
               "optional": true
             },
             "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onLongPress": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onDoubleTap": {
               "rule": {
                 "kind": "array",
                 "item": {
@@ -2930,6 +4103,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -3043,6 +4224,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -3061,6 +4250,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["standard", "filled", "tonal", "outlined"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -3148,6 +4344,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -3172,6 +4376,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["small", "regular", "large"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -3256,6 +4467,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -3366,6 +4585,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -3493,6 +4720,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -3591,6 +4826,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -3685,6 +4928,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -3799,6 +5050,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -3850,6 +5109,125 @@
               "rule": {
                 "kind": "ref",
                 "name": "node"
+              },
+              "optional": true
+            }
+          }
+        },
+        "menu": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["menu"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "items": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "menuItem"
+                },
+                "min": 1,
+                "max": 16,
+                "unique": false
+              },
+              "optional": false
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             }
@@ -3934,6 +5312,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -4057,6 +5443,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -4079,6 +5473,32 @@
             "is24Hour": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -4166,6 +5586,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -4178,6 +5606,32 @@
                 "kind": "boundKey"
               },
               "optional": false
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -4260,6 +5714,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -4368,6 +5830,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -4386,6 +5856,49 @@
                 "unique": false
               },
               "optional": false
+            },
+            "axis": {
+              "rule": {
+                "kind": "enum",
+                "values": ["horizontal", "vertical"]
+              },
+              "optional": true
+            },
+            "pageSpacing": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "peek": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "start": {
+                    "rule": {
+                      "kind": "ref",
+                      "name": "pagerDp"
+                    },
+                    "optional": true
+                  },
+                  "end": {
+                    "rule": {
+                      "kind": "ref",
+                      "name": "pagerDp"
+                    },
+                    "optional": true
+                  }
+                }
+              },
+              "optional": true
+            },
+            "pageSize": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerPageSize"
+              },
+              "optional": true
             }
           }
         },
@@ -4468,6 +5981,14 @@
               "rule": {
                 "kind": "ref",
                 "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             },
@@ -4594,6 +6115,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -4711,6 +6240,14 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
@@ -4761,6 +6298,288 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            }
+          }
+        },
+        "searchBar": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["searchBar"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            },
+            "placeholder": {
+              "rule": {
+                "kind": "string",
+                "empty": true
+              },
+              "optional": true
+            },
+            "leadingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": true
+            },
+            "trailingActions": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "appBarAction"
+                },
+                "min": 1,
+                "max": 2,
+                "unique": false
+              },
+              "optional": true
+            },
+            "activeKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["bar", "docked"]
+              },
+              "optional": true
+            },
+            "onSubmit": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "child": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "stack": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["stack"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "start": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screens": {
+              "rule": {
+                "kind": "screenMap",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                }
+              },
+              "optional": false
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             }
@@ -7686,6 +9505,66 @@
         }
       }
     },
+    "menuItem": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "icon": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": true
+            },
+            "trailingText": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "enabled": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["divider"]
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
     "dialogButton": {
       "kind": "object",
       "fields": {
@@ -7709,6 +9588,221 @@
           "optional": true
         }
       }
+    },
+    "pagerDp": {
+      "kind": "number",
+      "integer": false,
+      "min": 0,
+      "max": 10000
+    },
+    "pagerPageSize": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "enum",
+          "values": ["fill"]
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "dp": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1e-6,
+                "max": 10000
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "textSpanStyle": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        },
+        "fontWeight": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 100,
+            "max": 900
+          },
+          "optional": true
+        },
+        "fontStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["normal", "italic"]
+          },
+          "optional": true
+        },
+        "textDecoration": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "underline", "lineThrough", "underlineLineThrough"]
+          },
+          "optional": true
+        },
+        "textSize": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "letterSpacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -1000,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "fontFamily": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "enum",
+                "values": ["default", "sansSerif", "serif", "monospace"]
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": true
+        },
+        "background": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "textSpan": {
+      "kind": "object",
+      "fields": {
+        "text": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "style": {
+          "rule": {
+            "kind": "ref",
+            "name": "textSpanStyle"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": true
+        }
+      }
+    },
+    "check": {
+      "kind": "object",
+      "exactlyOne": ["required", "minLength", "maxLength", "min", "max", "format", "pattern"],
+      "fields": {
+        "message": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "required": {
+          "rule": {
+            "kind": "true"
+          },
+          "optional": true
+        },
+        "minLength": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxLength": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0
+          },
+          "optional": true
+        },
+        "min": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "max": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "format": {
+          "rule": {
+            "kind": "enum",
+            "values": ["email", "phone", "digits", "decimal", "url"]
+          },
+          "optional": true
+        },
+        "pattern": {
+          "rule": {
+            "kind": "string",
+            "empty": true,
+            "max": 128
+          },
+          "optional": true
+        }
+      }
     }
-  }
+  },
+  "eventKinds": [
+    "emit",
+    "page_changed",
+    "dismissed",
+    "appearance_changed",
+    "screen_changed",
+    "change",
+    "validation_failed"
+  ]
 }

@@ -1,3 +1,4 @@
+import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
   PrototypePatchRequest,
@@ -114,6 +115,63 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return { success: true, totalTimeMs: duration };
   }
 
+  readonly saveRequests: { spec: PrototypeSpec; label: string; icon?: string }[] = [];
+  readonly pinRequests: { id: string; icon?: string }[] = [];
+  private pinResult: PrototypeResult = { success: true };
+  setPinResult(result: PrototypeResult): void {
+    this.pinResult = result;
+  }
+  async requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.pinRequests.push({ id, ...(icon === undefined ? {} : { icon }) });
+    this.checkFailure("requestPinSavedPrototype");
+    return this.pinResult;
+  }
+  readonly deleteRequests: string[] = [];
+  listCalls = 0;
+  private saveResult: PrototypeResult = { success: true };
+  private listSavedResult: PrototypeResult = { success: true };
+  private deleteResult: PrototypeResult = { success: true };
+  setSaveResult(result: PrototypeResult): void {
+    this.saveResult = result;
+  }
+  setListSavedResult(result: PrototypeResult): void {
+    this.listSavedResult = result;
+  }
+  setDeleteResult(result: PrototypeResult): void {
+    this.deleteResult = result;
+  }
+  async requestSavePrototype(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.saveRequests.push(structuredClone(save));
+    this.checkFailure("requestSavePrototype");
+    return this.saveResult;
+  }
+  async requestListSavedPrototypes(
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.listCalls++;
+    this.checkFailure("requestListSavedPrototypes");
+    return this.listSavedResult;
+  }
+  async requestDeleteSavedPrototype(
+    id: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.deleteRequests.push(id);
+    this.checkFailure("requestDeleteSavedPrototype");
+    return this.deleteResult;
+  }
+
   readonly patchRequests: PrototypePatchRequest[] = [];
   private patchResult: PrototypePatchReply = { success: true, delivery: "answered" };
   private patchHold?: Promise<PrototypeResult>;
@@ -150,6 +208,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         perf?: PerformanceTracker;
         displayId?: number;
         reset?: boolean;
+        replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
@@ -181,9 +240,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
+    const overrides = typeof appearance === "string" ? { appearance } : appearance;
     this.prototypeHistory.push({
       method: "show",
       spec,
@@ -191,7 +251,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
-      ...(appearance === undefined ? {} : { appearance }),
+      ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
+      ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
     });
     const hold = this.showHold;
     this.showHold = undefined;

@@ -21,6 +21,7 @@ class CommandAdvertisementTest {
     subtypeDescriptor.elementDescriptors.map { it.serialName }.toSet()
   private val knownFlags =
     setOf(
+      "prototype_saved_v1",
       "node_selector_actions",
       "ime_key_events_v1",
       "ime_clear_field_v1",
@@ -32,16 +33,28 @@ class CommandAdvertisementTest {
       "sdk_capabilities_user_id_v1",
       "gesture_display_id_v1",
       "prototype_display_id_v1",
+      "prototype_multi_surface_v1",
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
       "prototype_theme_modes_v1",
+      "prototype_flow_grid_v1",
+      "prototype_pager_options_v1",
       "prototype_data_model_v1",
+      "prototype_text_field_options_v1",
+      "prototype_gestures_v1",
+      "prototype_search_bar_v1",
+      "prototype_rich_text_v1",
+      "prototype_emit_context_v1",
+      "prototype_checks_v1",
       "prototype_appearance_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
+      "prototype_patch_v1",
+      "prototype_stack_v1",
       "prototype_anchor_v1",
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",
+      "prototype_menus_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -65,19 +78,31 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("ime_inserted_text_v1"))
       assertTrue(commands.contains("ime_commit_trace_v1"))
       assertTrue(commands.contains("tap_double_v1"))
+      assertTrue(commands.contains("prototype_multi_surface_v1"))
       assertTrue(commands.contains("prototype_window_options_v1"))
       assertTrue(commands.contains("prototype_window_chrome_v1"))
       assertTrue(commands.contains("prototype_theme_modes_v1"))
+      assertTrue(commands.contains("prototype_flow_grid_v1"))
+      assertTrue(commands.contains("prototype_pager_options_v1"))
       assertTrue(commands.contains("prototype_data_model_v1"))
+      assertTrue(commands.contains("prototype_text_field_options_v1"))
+      assertTrue(commands.contains("prototype_gestures_v1"))
+      assertTrue(commands.contains("prototype_search_bar_v1"))
+      assertTrue(commands.contains("prototype_rich_text_v1"))
+      assertTrue(commands.contains("prototype_emit_context_v1"))
+      assertTrue(commands.contains("prototype_checks_v1"))
       assertTrue(commands.contains("prototype_appearance_v1"))
       assertTrue(commands.contains("prototype_persistence_replay_v1"))
+      assertTrue(commands.contains("prototype_saved_v1"))
       assertTrue(commands.contains("prototype_show_in_place_v1"))
+      assertTrue(commands.contains("prototype_stack_v1"))
       assertTrue(commands.contains("prototype_anchor_v1"))
       assertTrue(commands.contains("inspect_prototypes"))
       assertTrue(commands.contains("patch_prototype"))
-      assertFalse(commands.contains("prototype_patch_v1"))
+      assertTrue(commands.contains("prototype_patch_v1"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("prototype_window_metadata_v1"))
+      assertTrue(commands.contains("prototype_menus_v1"))
       assertTrue(commands.contains("screenshot_hide_prototype_v1"))
       assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
       assertEquals(commands.size, commands.toSet().size)

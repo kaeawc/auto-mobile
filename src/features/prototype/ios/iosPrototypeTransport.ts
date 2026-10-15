@@ -1,3 +1,6 @@
+import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
+import { PROTOTYPE_STACK_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import { prototypeStacksSchema } from "../../observe/android/CtrlProxyPrototypes";
 import {
   prototypePatchReplyFields,
   prototypePatchUnsupportedMessage,
@@ -81,6 +84,10 @@ export { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY };
  */
 export const IOS_PROTOTYPE_INSPECT_CAPABILITY = "prototype_inspect_v1";
 
+// ORCHESTRATOR-CHOSEN: iOS multi-window parity is a follow-up.
+export const IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE =
+  "iOS shows one prototype at a time; replaceOthers:false is Android only (prototype_multi_surface_v1)";
+
 /** The agent restores the prototype by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
 
@@ -121,6 +128,9 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...(prototypeStacksSchema.parse(result.stacks)
+      ? { stacks: prototypeStacksSchema.parse(result.stacks) }
+      : {}),
     success: result.success,
     requestId: result.requestId,
     ...(typeof result.error === "string" ? { error: result.error } : {}),
@@ -217,6 +227,12 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
+      throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
+    }
+    if (options.replaceOthers === false) {
+      throw new ActionableError(IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE);
+    }
     if (options.reset === true && !this.supportsCapability(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY)) {
       throw new ActionableError(
         `Prototype agent ${this.agent.handshake.agentVersion} does not support reset; relaunch ` +

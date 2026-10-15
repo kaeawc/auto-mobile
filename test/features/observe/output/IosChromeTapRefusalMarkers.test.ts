@@ -80,6 +80,7 @@ const androidElements = new DefaultObserveElementCollector().collect(
 
 // Same harness as test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts.
 async function tapOn(text: string) {
+  const observation = { ...capture, screenSize: { ...capture.screenSize! } };
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const tap = new TapOnElement(
@@ -94,8 +95,8 @@ async function tapOn(text: string) {
   );
   const points: Array<{ x: number; y: number }> = [];
   tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(capture))),
-    observation: capture,
+    ...(await action(recordObservationRead(observation))),
+    observation,
   });
   tap.refreshViewHierarchy = async () => capture.viewHierarchy!;
   tap.executeiOSTap = async (_action, x, y) => {

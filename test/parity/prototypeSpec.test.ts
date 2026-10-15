@@ -104,6 +104,9 @@ describe("shared prototype contract", () => {
       if (result.success) {
         throw new Error(`Accepted ${name}`);
       }
+      if (name.endsWith("-over-max.json") || name.endsWith("-below-min.json")) {
+        expect(prototypeSpecSchema.safeParse(data.spec).success).toBe(false);
+      }
       expect(result.error.path).toBe(data.expectedPath);
       if (data.expectedMessage !== undefined) {
         expect(result.error.message).toBe(data.expectedMessage);
@@ -226,4 +229,24 @@ test("non JSON numeric tokens and literal string controls are rejected", () => {
       expect(result.error.path).toBe("$");
     }
   }
+});
+
+test("menu/select fixtures cover the new capability's two nodes", () => {
+  expect(valid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(["menu-overflow.json", "select-dropdown.json"]),
+  );
+  expect(invalid.map(({ name }) => name)).toEqual(
+    expect.arrayContaining([
+      "menu-no-items.json",
+      "menu-too-many-items.json",
+      "menu-item-unknown-field.json",
+      "menu-divider-with-label.json",
+      "menu-open-state-type.json",
+      "menu-empty-label.json",
+      "select-one-option.json",
+      "select-33-options.json",
+      "select-duplicate-values.json",
+      "select-state-type.json",
+    ]),
+  );
 });

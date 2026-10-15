@@ -20,6 +20,10 @@ import { registerDeepLinkTools } from "../server/deepLinkTools";
 import { registerFormTools } from "../server/formTools";
 import { registerPrototypeTools } from "../server/prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
+import {
+  CompositePrototypeAgentConnections,
+  prototypeViewerConnections,
+} from "../features/prototype/ios/prototypeViewerAttach";
 import { registerHighlightTools } from "../server/highlightTools";
 import { registerNavigationTools } from "../server/navigationTools";
 import { registerNetworkTools } from "../server/networkTools";
@@ -54,7 +58,12 @@ export function initializeCliTools(): void {
   registerDeepLinkTools();
   registerFormTools();
   registerHighlightTools();
-  registerPrototypeTools({ agentConnections: prototypeAgentRegistry });
+  registerPrototypeTools({
+    agentConnections: new CompositePrototypeAgentConnections(
+      prototypeViewerConnections,
+      prototypeAgentRegistry,
+    ),
+  });
   registerNavigationTools();
   registerNetworkTools();
   registerPreferenceTools();

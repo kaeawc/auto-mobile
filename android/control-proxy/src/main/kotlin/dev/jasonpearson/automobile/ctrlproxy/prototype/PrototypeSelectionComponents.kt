@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -40,7 +41,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
  * Selection component nodes (#10439, final slice): `radioGroup` and `listItem`. Both own their
  * taps, so [prototypeNodeModifier] must not add a second click handler for these roles.
  */
-internal val PROTOTYPE_SELECTION_ROLES = setOf("radioGroup", "listItem")
+internal val PROTOTYPE_SELECTION_ROLES = setOf("radioGroup", "listItem", "select")
 
 /** The boolean state key of a `listItem`'s trailing switch or checkbox; null otherwise. */
 internal fun prototypeListItemToggleKey(node: PrototypeNode): String? =
@@ -75,7 +76,7 @@ internal fun RenderPrototypeRadioGroup(
       Row(
         Modifier.fillMaxWidth()
           .minimumInteractiveComponentSize()
-          .selectable(selected, role = Role.RadioButton) {
+          .selectable(selected, enabled = node.enabled, role = Role.RadioButton) {
             interact(PrototypeInteraction.Choose(source.stateKey, option.value, actions))
           }
           .semantics {
@@ -86,7 +87,7 @@ internal fun RenderPrototypeRadioGroup(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        RadioButton(selected, onClick = null)
+        RadioButton(selected, onClick = null, enabled = node.enabled)
         Text(option.label, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
       }
     }
@@ -113,12 +114,15 @@ internal fun RenderPrototypeListItem(
       toggleKey != null ->
         Modifier.toggleable(
           node.checked,
+          enabled = node.enabled,
           role = if (source.trailing is PrototypeListItemSwitch) Role.Switch else Role.Checkbox,
         ) {
           interact(PrototypeInteraction.Toggle(toggleKey, actions))
         }
       actions.isNotEmpty() ->
-        Modifier.clickable(role = Role.Button) { interact(PrototypeInteraction.Tap(actions)) }
+        Modifier.clickable(enabled = node.enabled, role = Role.Button) {
+          interact(PrototypeInteraction.Tap(actions))
+        }
       else -> Modifier
     }
   val foreground = prototypeAuthoredForeground(node) ?: Color.Unspecified
@@ -129,7 +133,7 @@ internal fun RenderPrototypeListItem(
     leadingContent = prototypeIcon(source.leadingIcon)?.let { icon -> { Icon(icon, null) } },
     trailingContent =
       source.trailing?.let { trailing ->
-        { PrototypeListItemTrailingContent(trailing, node.checked) }
+        { PrototypeListItemTrailingContent(trailing, node.checked, node.enabled) }
       },
     colors =
       ListItemDefaults.colors(
@@ -148,11 +152,43 @@ internal fun RenderPrototypeListItem(
 private fun PrototypeListItemTrailingContent(
   trailing: PrototypeListItemTrailing,
   checked: Boolean,
+  enabled: Boolean,
 ) {
   when (trailing) {
-    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null)
-    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null)
+    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null, enabled = enabled)
+    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null, enabled = enabled)
     is PrototypeListItemIcon ->
       prototypeIcon(trailing.name)?.let { Icon(it, contentDescription = null) }
+  }
+}
+
+/** Field and option list share the normal window hierarchy, without a platform popup. */
+@Composable
+internal fun RenderPrototypeSelect(node: PrototypeRenderNode, modifier: Modifier) {
+  val source = node.source as? dev.jasonpearson.automobile.protocol.PrototypeSelectNode ?: return
+  val layers = LocalPrototypeMenuLayers.current
+  val current = source.options.firstOrNull { it.value == node.selectedValue }?.label.orEmpty()
+  androidx.compose.material3.Surface(
+    Modifier.prototypeMenuBounds(node.identity, layers).then(modifier).clickable(
+      role = Role.Button,
+    ) {
+      layers.expandedSelect = if (layers.expandedSelect == node.identity) null else node.identity
+    },
+    shape = androidx.compose.material3.MaterialTheme.shapes.extraSmall,
+    tonalElevation = 1.dp,
+  ) {
+    Row(
+      Modifier.fillMaxWidth().minimumInteractiveComponentSize().padding(16.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Column(Modifier.weight(1f)) {
+        source.label?.let {
+          Text(it, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
+        }
+        Text(current)
+      }
+      prototypeIcon("expand_more")?.let { Icon(it, contentDescription = null) }
+    }
   }
 }

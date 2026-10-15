@@ -71,7 +71,7 @@ export class PrototypeEventCoordinator {
     // reject the new showing's events. Pushes carry only id/sequence/timestamp (no show
     // generation), so a late event from the PREVIOUS showing cannot be told apart from the
     // new showing's events and is accepted if it arrives after this reset.
-    this.store.startShow(scope);
+    this.store.startShow(scope, id);
     entry.buffer.startEpoch();
     entry.shown = true;
     entry.terminal = false;
@@ -134,8 +134,8 @@ export class PrototypeEventCoordinator {
   }
 
   /**
-   * A successful show of `keepId` replaced whatever the device showed before: the device holds
-   * one prototype, so every other shown prototype ends. Waiters settle as dismissed.
+   * A successful show with replaceOthers true replaced every other shown id on this device.
+   * Waiters for those siblings settle as dismissed.
    */
   replaceShown(deviceId: string, keepId: string): void {
     for (const entry of this.entries.values()) {
@@ -259,9 +259,14 @@ export class PrototypeEventCoordinator {
       kind: event.kind,
       name: event.name,
       payload: event.payload,
+      ...(event.context === undefined ? {} : { context: event.context }),
+      ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
       state: event.state,
       pages: event.pages,
+      ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
       timestamp: event.timestamp,
+      ...(event.validity === undefined ? {} : { validity: event.validity }),
+      ...(event.keys === undefined ? {} : { keys: event.keys }),
     };
     return { event: delivered, ...entry.buffer.status() };
   }

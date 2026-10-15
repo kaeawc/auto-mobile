@@ -3,12 +3,16 @@ export type ShownSpecRead =
   | { kind: "known"; spec: ShownSpecJson; version: number }
   | { kind: "busy" }
   | { kind: "unknown" };
+interface PendingShow {
+  id?: string;
+  replaceOthers: boolean;
+  superseded: boolean;
+}
 interface DeviceSpecs {
-  entry?: { id: string; spec: ShownSpecJson };
+  entries: Map<string, ShownSpecJson>;
   epoch: number;
   issued: number;
-  lastTicket: number;
-  open: Set<number>;
+  open: Map<number, PendingShow>;
   poisonedThrough: number;
 }
 /** Tracks acknowledged device specs, forgetting outcomes whose wire order is indeterminate. */
@@ -16,34 +20,57 @@ export class PrototypeShownSpecs {
   private sequence = 0;
   private readonly devices = new Map<string, DeviceSpecs>();
 
-  beginShow(deviceId: string): number {
+  beginShow(deviceId: string, id?: string, replaceOthers = true): number {
     const state = this.devices.get(deviceId) ?? {
+      entries: new Map<string, ShownSpecJson>(),
       epoch: 0,
       issued: 0,
-      lastTicket: 0,
-      open: new Set<number>(),
+      open: new Map<number, PendingShow>(),
       poisonedThrough: 0,
     };
     const ticket = ++this.sequence;
     state.issued = ticket;
-    state.lastTicket = ticket;
-    state.open.add(ticket);
+    for (const pending of state.open.values()) {
+      // Keep default-show ordering conservative; additive shows of separate ids are independent.
+      if (replaceOthers || pending.replaceOthers || pending.id === id) {
+        pending.superseded = true;
+      }
+    }
+    state.open.set(ticket, { id, replaceOthers, superseded: false });
     state.epoch = ++this.sequence;
     this.devices.set(deviceId, state);
     return ticket;
   }
 
-  endShow(deviceId: string, ticket: number, shown?: { id: string; spec: ShownSpecJson }): void {
+  endShow(
+    deviceId: string,
+    ticket: number,
+    shown?: { id: string; spec: ShownSpecJson; replaceOthers?: boolean },
+    refused = false,
+  ): void {
     const state = this.devices.get(deviceId);
-    if (!state?.open.delete(ticket)) {
+    const pending = state?.open.get(ticket);
+    if (!state || !pending) {
       return;
     }
+    state.open.delete(ticket);
     state.epoch = ++this.sequence;
-    if (ticket === state.lastTicket) {
-      state.entry =
-        shown && ticket > state.poisonedThrough
-          ? { id: shown.id, spec: structuredClone(shown.spec) }
-          : undefined;
+    if (pending.superseded) {
+      return;
+    }
+    if (refused) {
+      if (pending.id !== undefined) {
+        state.entries.delete(pending.id);
+      }
+      return;
+    }
+    if (shown && ticket > state.poisonedThrough) {
+      if (shown.replaceOthers !== false) {
+        state.entries.clear();
+      }
+      state.entries.set(shown.id, structuredClone(shown.spec));
+    } else {
+      state.entries.clear();
     }
   }
 
@@ -52,9 +79,8 @@ export class PrototypeShownSpecs {
     if (state && state.open.size > 0) {
       return { kind: "busy" };
     }
-    return state?.entry?.id === id
-      ? { kind: "known", spec: state.entry.spec, version: state.epoch }
-      : { kind: "unknown" };
+    const spec = state?.entries.get(id);
+    return spec && state ? { kind: "known", spec, version: state.epoch } : { kind: "unknown" };
   }
 
   commitPatch(deviceId: string, id: string, version: number, spec: ShownSpecJson): boolean {
@@ -62,9 +88,9 @@ export class PrototypeShownSpecs {
     if (!state) {
       return false;
     }
-    const committed = state.open.size === 0 && state.epoch === version && state.entry?.id === id;
+    const committed = state.open.size === 0 && state.epoch === version && state.entries.has(id);
     if (committed) {
-      state.entry = { id, spec: structuredClone(spec) };
+      state.entries.set(id, structuredClone(spec));
       state.epoch = ++this.sequence;
     } else {
       this.abandon(deviceId);
@@ -72,29 +98,35 @@ export class PrototypeShownSpecs {
     return committed;
   }
 
-  /** A patch for this device has an unknown outcome: forget the entry and distrust every show dispatched so far. */
+  /** A patch for this device has an unknown outcome: forget the entries and distrust every show dispatched so far. */
   abandon(deviceId: string): void {
     const state = this.devices.get(deviceId);
     if (!state) {
       return;
     }
-    state.entry = undefined;
+    state.entries.clear();
     state.poisonedThrough = state.issued;
     state.epoch = ++this.sequence;
   }
 
   forget(deviceId: string, id?: string): void {
     const state = this.devices.get(deviceId);
-    if (state?.entry && (id === undefined || state.entry.id === id)) {
-      state.entry = undefined;
+    if (state && (id === undefined || state.entries.has(id))) {
+      if (id === undefined) {
+        state.entries.clear();
+      } else {
+        state.entries.delete(id);
+      }
       state.epoch = ++this.sequence;
     }
   }
 
   retainOnly(deviceId: string, id: string): void {
-    const entry = this.devices.get(deviceId)?.entry;
-    if (entry && entry.id !== id) {
-      this.forget(deviceId);
+    const state = this.devices.get(deviceId);
+    for (const knownId of state?.entries.keys() ?? []) {
+      if (knownId !== id) {
+        this.forget(deviceId, knownId);
+      }
     }
   }
 

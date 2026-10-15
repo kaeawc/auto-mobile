@@ -5,22 +5,57 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+
+/** Bounded window/resource budget for concurrently shown prototypes. */
+const val MAX_CONCURRENT_PROTOTYPES = 4
 
 /** The CtrlProxy application id, named in errors that tell the host which package to grant. */
 const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 
+/** Whether our prototype window is among accessibility windows on [displayId]; null is unknown. */
+fun interface PrototypeWindowOnScreen {
+  fun isOnScreen(displayId: Int): Boolean?
+}
+
 fun interface PrototypeResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
+
+  suspend fun sendPinned(
+    requestId: String?,
+    pin: dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo,
+  ) = send(requestId, true, null)
+
+  suspend fun sendSaved(
+    requestId: String?,
+    saved: dev.jasonpearson.automobile.protocol.SavedPrototypeInfo,
+  ) = send(requestId, true, null)
+
+  suspend fun sendSavedList(
+    requestId: String?,
+    entries: List<dev.jasonpearson.automobile.protocol.SavedPrototypeEntry>,
+  ) = send(requestId, true, null)
+
+  suspend fun sendRefusal(
+    requestId: String?,
+    code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
+    error: String,
+  ) = send(requestId, false, error)
 
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
@@ -42,9 +77,28 @@ fun interface PrototypeResultSink {
     requestId: String?,
     missingAssets: List<String>,
     appearance: PrototypeAppearance,
+    hiddenReason: PrototypeHiddenReason? = null,
   ) =
     if (missingAssets.isEmpty()) send(requestId, true, null)
     else sendWithMissingAssets(requestId, true, null, missingAssets)
+
+  suspend fun sendPatched(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    revision: Long?,
+    conflict: PrototypePatchConflict?,
+  ) = send(requestId, success, error)
+
+  /** Show navigation context; the default preserves existing sink implementations. */
+  suspend fun sendShownNavigation(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason? = null,
+  ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -55,10 +109,10 @@ fun interface PrototypeResultSink {
 }
 
 /**
- * One active ID/spec, serialized with host mutations. Validation/mapping happen before replacement;
- * rejected requests retain the previous spec/window. Every show carries a full spec whose state is
- * authoritative; the canonical validator supplies key rules and JSON paths. There is no
- * opacity-only wire field.
+ * Surfaces keyed by ID, serialized with host mutations. Validation/mapping happen before
+ * replacement; rejected requests retain the previous spec/window. Every show carries a full spec
+ * whose state is authoritative; the canonical validator supplies key rules and JSON paths. There is
+ * no opacity-only wire field.
  */
 class PrototypeController(
   private val host: PrototypeHost,
@@ -71,10 +125,10 @@ class PrototypeController(
   /** Decides whether a non-default display can host the prototype; the default always can. */
   private val displays: PrototypeDisplayProvider = PrototypeDisplayProvider { true },
   /**
-   * Drops every uploaded asset when the prototype session ends: any dismissal or abandonment,
-   * unbind, destroy, a dismiss-all with nothing showing, and the last client disconnecting (even
-   * with nothing showing, since assets are uploaded before the prototype that uses them). Not
-   * called for a show replacement or a temporary lock-screen hide.
+   * Drops every uploaded asset when the last surface ends: dismissal or abandonment, unbind,
+   * destroy, a dismiss-all with nothing showing, and the last client disconnecting (even with
+   * nothing showing, since assets are uploaded before the prototype that uses them). Not called for
+   * a show replacement or a temporary lock-screen hide.
    */
   private val clearAssets: () -> Unit = {},
   /** Whether the asset store holds [id]; `show` reports referenced ids that fail. */
@@ -99,34 +153,42 @@ class PrototypeController(
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
+  private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
+  private val settle: suspend (Long) -> Unit = { delay(it) },
+  /** The supplied host handles the first surface; additional surfaces need independent hosts. */
+  private val hostFactory: () -> PrototypeHost = { host },
 ) {
   val isShowing: Boolean
-    get() = host.isShowing
+    get() = surfaces.values.any { it.host.isShowing }
 
   /**
    * Whether the prototype on screen is in the application-overlay layer, whose windows the system
    * reports to accessibility as `TYPE_SYSTEM` rather than as an accessibility overlay.
    */
   val isAppLayerShowing: Boolean
-    get() = host.isShowing && activeRequest?.layer == PrototypeWindowLayer.APP
+    get() =
+      surfaces.values.any { it.host.isShowing && it.request.layer == PrototypeWindowLayer.APP }
 
   /**
    * Placement and opacity of the prototype currently drawn, for the hierarchy capture
    * (`prototype_window_metadata_v1`). Null when nothing is showing or the render model cannot be
    * derived, so the host falls back to bounds. A snapshot read off the controller mutex.
    */
-  fun windowMetadata(): PrototypeWindowMetadata? {
-    val runtime = activeRuntime ?: return null
-    if (!host.isShowing) return null
+  fun windowMetadata(surfaceId: String? = null): PrototypeWindowMetadata? {
+    // Titled windows identify their surface; legacy windows use the most recently shown one.
+    val surface =
+      (if (surfaceId != null) surfaces[surfaceId]?.takeIf { it.host.isShowing }
+      else surfaces.values.lastOrNull { it.host.isShowing }) ?: return null
+    val runtime = surface.runtime
     return try {
       val current = runtime.current
       // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
-      val shown = activeTheme?.value
+      val shown = surface.theme.value
       prototypeWindowMetadata(
         runtime.renderModel(current),
-        dismissBarDrawn = activeRequest?.let { prototypeHostChrome(it).dismissVisible } ?: true,
-        palettes = shown?.let { listOf(prototypeShownPalette(it)) },
-        appearance = shown?.appearance,
+        dismissBarDrawn = prototypeHostChrome(surface.request).dismissVisible,
+        palettes = listOf(prototypeShownPalette(shown)),
+        appearance = shown.appearance,
       )
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
@@ -136,7 +198,7 @@ class PrototypeController(
 
   /** True while a prototype exists but is hidden because its app left the foreground. */
   val isSuspendedByForeground: Boolean
-    get() = activeRuntime != null && foreground.suspended
+    get() = surfaces.values.any { it.foreground.suspended }
 
   /**
    * Captures with the prototype hidden (#9305). Deliberately outside the controller mutex: a
@@ -145,26 +207,78 @@ class PrototypeController(
    * not showing and never touches the host, so it cannot re-show it. The host's restore also goes
    * through isBlocked, covering a suspension or lock that lands mid-capture.
    */
-  suspend fun <T> withHiddenForCapture(block: suspend () -> T): PrototypeHiddenCapture<T> =
-    if (isSuspendedByForeground) PrototypeHiddenCapture(block(), prototypeExcluded = true)
-    else host.withHiddenForCapture(block = block)
+  suspend fun <T> withHiddenForCapture(block: suspend () -> T): PrototypeHiddenCapture<T> {
+    // Copy-on-write snapshots never wait behind show. Only an entirely suspended set can skip
+    // the hosts: a device-persistent surface may still be visible beside a suspended session.
+    val snapshot = surfaces.values.toList()
+    val hosts =
+      if (snapshot.isEmpty()) listOf(host)
+      else snapshot.filterNot { it.foreground.suspended }.map { it.host }
+    suspend fun capture(index: Int): PrototypeHiddenCapture<T> {
+      if (index == hosts.size) return PrototypeHiddenCapture(block(), true)
+      val outer = hosts[index].withHiddenForCapture { capture(index + 1) }
+      return PrototypeHiddenCapture(
+        outer.value.value,
+        outer.prototypeExcluded && outer.value.prototypeExcluded,
+      )
+    }
+    return capture(0)
+  }
 
   private val mutex = Mutex()
-  @Volatile
-  internal var activeRuntime: PrototypeRuntime? = null
-    private set
+
+  private class Surface(
+    val runtime: PrototypeRuntime,
+    @Volatile var request: PrototypeRequest,
+    val theme: MutableStateFlow<PrototypeShownTheme>,
+    val appearanceOverride: PrototypeAppearanceOverride?,
+    val observerSession: Int,
+    val host: PrototypeHost,
+    val idle: PrototypeLifecycle,
+    val foreground: PrototypeForegroundScope,
+    var disconnectPending: Boolean = false,
+    var appearanceSyncKey: AppearanceSyncKey? = null,
+  )
+
+  // Mutations run under mutex; readers and capture use an immutable ordered snapshot.
+  @Volatile private var surfaces: Map<String, Surface> = emptyMap()
+  // Retained for existing single-surface callers/tests, now a view of the most recent surface.
+  internal val activeRuntime: PrototypeRuntime?
+    get() = surfaces.values.lastOrNull { it.runtime.current.active }?.runtime
+
+  private fun surfaceOf(runtime: PrototypeRuntime): Surface? =
+    surfaces[runtime.current.spec.id]?.takeIf { it.runtime === runtime }
 
   // Controller lifetime ledger: same-id show/dismiss/re-show and reconnect never rewind sequences.
   private val sequences = mutableMapOf<String, Long>()
+  private val revisions = mutableMapOf<String, Long>()
+
+  private fun nextRevision(id: String): Long =
+    ((revisions[id] ?: 0L) + 1L).also { revisions[id] = it }
+
   private var destroyed = false
-  private var activeObserverSession = 0
-  // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
-  private var disconnectPending = false
-  @Volatile private var activeRequest: PrototypeRequest? = null
-  // The one theme of the active show: the host's chrome and content collect it, the controller
-  // re-resolves it. Its override is what the show asked the system setting to be.
-  @Volatile private var activeTheme: MutableStateFlow<PrototypeShownTheme>? = null
-  private var activeOverride: PrototypeAppearanceOverride? = null
+
+  private class AppearanceSyncKey(
+    val snapshot: PrototypeRuntimeSnapshot,
+    val dark: Boolean,
+    val paletteKey: Int,
+    val override: PrototypeAppearanceOverride?,
+  ) {
+    fun matches(other: AppearanceSyncKey): Boolean =
+      snapshot === other.snapshot &&
+        dark == other.dark &&
+        paletteKey == other.paletteKey &&
+        override == other.override
+  }
+
+  private fun appearanceKey(runtime: PrototypeRuntime) =
+    AppearanceSyncKey(
+      runtime.current,
+      deviceAppearance.dark,
+      deviceAppearance.paletteKey,
+      surfaceOf(runtime)?.appearanceOverride,
+    )
+
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false
@@ -176,12 +290,14 @@ class PrototypeController(
    * Always renders the full [spec]. When [spec]'s id is the prototype on screen and [reset] is
    * false, it replaces that prototype in place: it stays on the display it was shown on
    * ([displayId] is ignored) and each pager keeps its page, matched by pager id and clamped to the
-   * new page count. The new spec's state is authoritative; values the user changed are not carried
-   * over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on [displayId],
-   * where null means the default display, exactly as before display targeting.
+   * new page count. Each stack keeps its path with removed screen names dropped (or its start
+   * screen when none remain). The new spec's state is authoritative; values the user changed are
+   * not carried over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on
+   * [displayId], where null means the default display, exactly as before display targeting.
    *
    * [appearance] stands in for the device's light or dark setting for this show; null follows the
    * device. It belongs to the show, so an in-place show without it follows the device again.
+   * [replaceOthers] preserves the legacy replacement policy by default; false retains siblings.
    */
   suspend fun show(
     requestId: String?,
@@ -189,31 +305,81 @@ class PrototypeController(
     displayId: Int? = null,
     reset: Boolean = false,
     appearance: PrototypeAppearanceOverride? = null,
+    replaceOthers: Boolean = true,
   ) =
     execute(requestId) {
-      val inPlace = !reset && activeRuntime?.current?.spec?.id == spec.id
-      display(
-        spec,
-        replace = activeRuntime != null,
-        preservePages = inPlace,
-        displayId = if (inPlace) shownDisplayId() else displayId ?: Display.DEFAULT_DISPLAY,
-        appearance = appearance,
-      )
-      Outcome(missingAssets(), activeTheme?.value?.appearance)
+      val previous = surfaces[spec.id]
+      require(replaceOthers || previous != null || surfaces.size < MAX_CONCURRENT_PROTOTYPES) {
+        "Too many prototypes on screen (max $MAX_CONCURRENT_PROTOTYPES): " +
+          surfaces.keys.joinToString(", ")
+      }
+      val inPlace = !reset && previous != null
+      val shown =
+        display(
+          spec,
+          replaceOthers = replaceOthers,
+          preservePages = inPlace,
+          displayId =
+            if (inPlace) previous.request.displayId else displayId ?: Display.DEFAULT_DISPLAY,
+          appearance = appearance,
+        )
+      if (surfaceOf(shown.runtime) == null) Outcome()
+      else
+        Outcome(
+          prototypeAssetReferences(shown.runtime.current.spec.root).filterNot(hasAsset),
+          shown.theme.value.appearance,
+          hiddenReason = shownHiddenReason(shown),
+          pages = shown.runtime.current.pages,
+          stacks = shown.runtime.current.stacks,
+        )
+    }
+
+  suspend fun patch(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
+    execute(requestId, patchId = id) {
+      val runtime = surfaces[id]?.runtime?.takeIf { it.current.active }
+      if (runtime == null) Outcome(error = "Unknown prototype id: $id")
+      else {
+        when (val result = runtime.patch(baseRevision, ops, json, ::validate)) {
+          is PrototypeRuntime.PatchResult.Rejected ->
+            Outcome(error = result.message, revision = result.revision)
+          is PrototypeRuntime.PatchResult.Conflict ->
+            Outcome(
+              error = "conflict: state changed after baseRevision $baseRevision",
+              revision = result.revision,
+              conflict = PrototypePatchConflict(result.revision, result.state),
+            )
+          is PrototypeRuntime.PatchResult.Applied -> {
+            try {
+              armIdle(runtime)
+              val model = runtime.renderModel()
+              syncAppearance(runtime, model)
+              syncTextFieldFocus(runtime, model)
+            } catch (error: CancellationException) {
+              throw error
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype interaction failed", error)
+            }
+            Outcome(revision = result.revision)
+          }
+        }
+      }
     }
 
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
     execute(requestId) {
-      require(all == true || (id != null && activeRuntime?.current?.spec?.id == id)) {
+      require(all == true || (id != null && surfaces.containsKey(id))) {
         "Unknown prototype id: $id"
       }
-      val runtime = activeRuntime
-      if (runtime != null) runtime.dismiss(PrototypeDismissReason.AGENT)
-      else {
+      val selected =
+        if (all == true) surfaces.values.toList() else listOf(surfaces.getValue(checkNotNull(id)))
+      if (selected.isEmpty()) {
         check(host.dismiss()) { "Prototype host failed to dismiss window" }
-        notifyDetached()
         releaseAssets()
-      }
+      } else
+        forEachSurface(selected) {
+          if (it.runtime.current.active) it.runtime.dismiss(PrototypeDismissReason.AGENT)
+          else retire(it, notifyDismissed = true)
+        }
       Outcome()
     }
 
@@ -221,13 +387,20 @@ class PrototypeController(
   private data class Outcome(
     val missingAssets: List<String> = emptyList(),
     val appearance: PrototypeAppearance? = null,
+    val error: String? = null,
+    val revision: Long? = null,
+    val conflict: PrototypePatchConflict? = null,
+    val hiddenReason: PrototypeHiddenReason? = null,
+    val pages: Map<String, Int>? = null,
+    val stacks: Map<String, PrototypeStackSnapshot>? = null,
   )
 
-  /** Referenced assets the store lacks, for the active spec. Never fails the request. */
-  private fun missingAssets(): List<String> {
-    val spec = activeRuntime?.current?.spec ?: return emptyList()
-    return prototypeAssetReferences(spec.root).filterNot(hasAsset)
-  }
+  private fun validate(spec: JsonObject): PrototypeSpec =
+    when (val validation = PrototypeSpecValidator.validate(spec.toString())) {
+      is PrototypeSpecValidation.Failure ->
+        error("${validation.error.path}: ${validation.error.message}")
+      is PrototypeSpecValidation.Success -> validate(validation.spec)
+    }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
     guardPrototypeTree(spec.root)
@@ -244,7 +417,48 @@ class PrototypeController(
     return validated
   }
 
-  private fun shownDisplayId(): Int = activeRequest?.displayId ?: Display.DEFAULT_DISPLAY
+  /** Snapshot decision, like windowMetadata: no controller mutex is acquired. */
+  fun hiddenReason(displayId: Int, ownWindowCaptured: Boolean?): PrototypeHiddenReason? =
+    surfaces.values
+      .lastOrNull {
+        it.runtime.current.active &&
+          !it.foreground.suspended &&
+          (lifecycle.isBlocked() || it.request.displayId == displayId)
+      }
+      ?.let { hiddenReason(it, ownWindowCaptured) }
+
+  private fun hiddenReason(
+    surface: Surface,
+    ownWindowCaptured: Boolean?,
+  ): PrototypeHiddenReason? =
+    when {
+      !surface.runtime.current.active || surface.foreground.suspended -> null
+      lifecycle.isBlocked() -> PrototypeHiddenReason.DEVICE_BLOCKED
+      surface.host.isHiddenForCapture -> null
+      surface.host.isShowing &&
+        surface.request.layer == PrototypeWindowLayer.APP &&
+        ownWindowCaptured == false -> PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN
+      else -> null
+    }
+
+  private suspend fun shownHiddenReason(surface: Surface): PrototypeHiddenReason? {
+    hiddenReason(surface, null)?.let {
+      return it
+    }
+    if (
+      !surface.host.isShowing ||
+        surface.request.layer != PrototypeWindowLayer.APP ||
+        surface.foreground.suspended ||
+        surface.host.isHiddenForCapture
+    )
+      return null
+    repeat(5) { probe ->
+      val captured = windowOnScreen.isOnScreen(surface.request.displayId)
+      if (captured != false) return hiddenReason(surface, captured)
+      if (probe < 4) settle(100L)
+    }
+    return hiddenReason(surface, false)
+  }
 
   /** The default display is always present; any other must be connected, or nothing is replaced. */
   private fun requireDisplayAvailable(displayId: Int) =
@@ -254,19 +468,33 @@ class PrototypeController(
 
   private suspend fun display(
     spec: PrototypeSpec,
-    replace: Boolean,
+    replaceOthers: Boolean,
     preservePages: Boolean = false,
     displayId: Int = Display.DEFAULT_DISPLAY,
     appearance: PrototypeAppearanceOverride? = null,
-  ) {
+  ): Surface {
     val validated = validate(spec)
     val request =
-      render(validated).copy(displayId = displayId, chrome = prototypeWindowChrome(validated))
+      render(validated)
+        .copy(
+          displayId = displayId,
+          chrome = prototypeWindowChrome(validated),
+          surfaceId = validated.id,
+        )
     requireDisplayAvailable(displayId)
     requireLayerPermitted(request.layer)
-    val previous = activeRuntime
+    val previous = surfaces[spec.id]
+    val reused = previous ?: if (replaceOthers) surfaces.values.lastOrNull() else null
+    val surfaceHost =
+      reused?.host ?: if (surfaces.values.none { it.host === host }) host else hostFactory()
+    require(reused != null || surfaces.values.none { it.host === surfaceHost }) {
+      "Prototype host factory must create an independent host"
+    }
+    val scope = reused?.foreground ?: if (surfaceHost === host) foreground else foreground.fork()
+    val idle = reused?.idle ?: lifecycle.fork()
     val observerSession = lifecycle.observerSession()
-    val runtime =
+    lateinit var runtime: PrototypeRuntime
+    runtime =
       PrototypeRuntime(
         validated,
         if (isDevicePersistent(validated)) offlineAwareSink else eventSink,
@@ -276,16 +504,26 @@ class PrototypeController(
           sequences[validated.id] = next
           next
         },
-        requestDismiss = { removeActive() },
-        previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
+        requestDismiss = { removeSurface(runtime) },
+        previousPages =
+          if (preservePages) previous?.runtime?.current?.pages.orEmpty() else emptyMap(),
+        initialRevision = nextRevision(validated.id),
+        nextRevision = { nextRevision(validated.id) },
+        previousStacks =
+          if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
       request.copy(
         hasTextField = mappedSpec.hasTextField,
+        hasStackBack = runtime.hasPoppableStack(mappedSpec),
+        // Each window keeps its own focus flags; cross-window focus coordination is a follow-up.
+        isSuspended = { scope.suspended },
+        bringToFront = reused != null && surfaces.values.lastOrNull() !== reused,
         theme = theme,
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
+        onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
           PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
             interact(runtime, interaction)
@@ -293,33 +531,78 @@ class PrototypeController(
         },
       )
     // A device-persistent prototype is a standalone mock with no app to follow.
-    val scopeBefore = foreground.capture()
-    if (isDevicePersistent(validated)) foreground.release() else foreground.anchor()
-    val blocked = lifecycle.isBlocked()
+    val scopeBefore = scope.capture()
+    if (isDevicePersistent(validated)) scope.release() else scope.anchor()
+    val blocked = lifecycle.isBlocked() || scope.suspended
     // A rejected or throwing host leaves the previous window up, so it keeps its own scoping.
     try {
       check(
-        if (blocked) host.dismiss()
-        else if (replace) host.replace(interactive) else host.show(interactive),
+        if (blocked) surfaceHost.dismiss()
+        else if (reused != null) surfaceHost.replace(interactive)
+        else surfaceHost.show(interactive),
       ) {
         "Prototype host failed to render window"
       }
     } catch (error: Throwable) {
-      foreground.restore(scopeBefore)
+      scope.restore(scopeBefore)
       throw error
     }
-    if (blocked) notifyDetached()
-    previous?.close()
-    activeRuntime = runtime
-    activeRequest = interactive
-    activeTheme = theme
-    activeOverride = appearance
-    activeObserverSession = observerSession
-    disconnectPending = false
+    // Render acceptance precedes replacing records. Refused renders keep all old timers/runtime.
+    val retiring = if (replaceOthers) surfaces.values.filter { it !== reused } else emptyList()
+    reused?.runtime?.close()
+    idle.cancel()
+    val retainedRequest =
+      if (interactive.bringToFront) interactive.copy(bringToFront = false) else interactive
+    val surface =
+      Surface(
+        runtime,
+        retainedRequest,
+        theme,
+        appearance,
+        observerSession,
+        surfaceHost,
+        idle,
+        scope,
+        appearanceSyncKey =
+          AppearanceSyncKey(
+            runtime.current,
+            theme.value.appearance.deviceDark,
+            theme.value.paletteKey,
+            appearance,
+          ),
+      )
+    surfaces =
+      LinkedHashMap(surfaces).apply {
+        reused?.let { remove(it.runtime.current.spec.id) }
+        remove(validated.id)
+        put(validated.id, surface)
+      }
     armIdle(runtime)
-    // The session's last client can leave before this queued show runs; nothing would remove it.
-    // A device-persistent prototype is meant to outlive its clients, so it stays.
+    // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
+    // addressable only for host cleanup retries, never as a live inspected surface.
+    forEachSurface(retiring) { retire(it) }
+    if (blocked && !isShowing) notifyDetached()
+    // A queued show can run after the session's last client has left.
     if (lifecycle.clientCount() == 0 && !runtime.persistent) dismissForDisconnect(runtime)
+    return surface
+  }
+
+  /** Replacement closes silently, just as the former single runtime did. */
+  private suspend fun retire(surface: Surface, notifyDismissed: Boolean = false) {
+    surface.runtime.close()
+    surface.idle.cancel()
+    surface.foreground.release()
+    val wasShowing = isShowing
+    try {
+      check(surface.host.dismiss()) { "Prototype host failed to dismiss window" }
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Retired prototype host teardown failed", error)
+    }
+    if (!surface.host.isShowing) surfaces = surfaces.filterValues { it !== surface }
+    if (notifyDismissed && wasShowing && !isShowing) notifyDetached()
+    if (surfaces.isEmpty()) releaseAssets()
   }
 
   private val PrototypeRuntime.persistent: Boolean
@@ -328,12 +611,14 @@ class PrototypeController(
   private fun shownTheme(
     model: PrototypeRenderModel,
     override: PrototypeAppearanceOverride?,
+    dark: Boolean = deviceAppearance.dark,
+    paletteKey: Int = deviceAppearance.paletteKey,
   ): PrototypeShownTheme =
     PrototypeShownTheme(
       model.root,
       model.theme,
-      prototypeResolveAppearance(model.root, model.theme, deviceAppearance.dark, override),
-      deviceAppearance.paletteKey,
+      prototypeResolveAppearance(model.root, model.theme, dark, override),
+      paletteKey,
     )
 
   /**
@@ -344,13 +629,23 @@ class PrototypeController(
    * untouched. A changed mode sends exactly one `appearance_changed` event; an unchanged one sends
    * nothing. Runs under [mutex].
    */
-  private suspend fun syncAppearance(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
-    val theme = activeTheme ?: return
+  private suspend fun syncAppearance(
+    runtime: PrototypeRuntime,
+    model: PrototypeRenderModel,
+    key: AppearanceSyncKey = appearanceKey(runtime),
+  ) {
+    val surface = surfaceOf(runtime) ?: return
+    val theme = surface.theme
+    surface.appearanceSyncKey = null
     val previous = theme.value
-    val next = shownTheme(model, activeOverride)
-    if (next == previous) return
-    theme.value = next
-    if (next.appearance.mode != previous.appearance.mode) runtime.appearanceChanged(next.appearance)
+    val next = shownTheme(model, key.override, key.dark, key.paletteKey)
+    if (next != previous) {
+      theme.value = next
+      if (next.appearance.mode != previous.appearance.mode)
+        runtime.appearanceChanged(next.appearance)
+    }
+    // Record only after both resolution and any event delivery succeeded.
+    surface.appearanceSyncKey = key
   }
 
   /**
@@ -396,16 +691,16 @@ class PrototypeController(
         "allow`, or omit window.layer to use the system layer."
     }
 
-  /** Shared by dismiss_prototype and the dismiss action, under the controller mutex. */
-  private suspend fun removeActive(): Boolean {
-    if (!host.dismiss()) return false
-    activeRuntime = null
-    activeRequest = null
-    activeTheme = null
-    foreground.release()
-    lifecycle.cancel()
-    notifyDetached()
-    releaseAssets()
+  /** Shared by dismiss_prototype and this runtime's own dismiss action, under mutex. */
+  private suspend fun removeSurface(runtime: PrototypeRuntime): Boolean {
+    val surface = surfaceOf(runtime) ?: return true
+    val wasShowing = isShowing
+    if (!surface.host.dismiss()) return false
+    surfaces = surfaces.filterValues { it !== surface }
+    surface.foreground.release()
+    surface.idle.cancel()
+    if (wasShowing && !isShowing) notifyDetached()
+    if (surfaces.isEmpty()) releaseAssets()
     return true
   }
 
@@ -430,7 +725,7 @@ class PrototypeController(
 
   internal suspend fun interact(runtime: PrototypeRuntime, interaction: PrototypeInteraction) =
     mutex.withLock {
-      if (destroyed || runtime !== activeRuntime) return@withLock
+      if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
       PrototypeTrace.asyncSection(PrototypeTrace.INTERACT) {
         try {
           // Compose reports its initial/restored settled page; that is rendering, not idle
@@ -442,11 +737,11 @@ class PrototypeController(
           )
             armIdle(runtime)
           runtime.handle(interaction)
-          if (runtime === activeRuntime && runtime.current.active) {
+          if (surfaceOf(runtime) != null && runtime.current.active) {
             val model = runtime.renderModel()
             PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
               syncAppearance(runtime, model)
-              syncTextFieldFocus(model)
+              syncTextFieldFocus(runtime, model)
             }
           }
         } catch (error: CancellationException) {
@@ -458,13 +753,17 @@ class PrototypeController(
     }
 
   /** [action]'s missing asset ids are reported as a warning, never as a failure. */
-  private suspend fun execute(requestId: String?, action: suspend () -> Outcome) = mutex.withLock {
+  private suspend fun execute(
+    requestId: String?,
+    patchId: String? = null,
+    action: suspend () -> Outcome,
+  ) = mutex.withLock {
     var outcome = Outcome()
     val error =
       try {
         check(!destroyed) { "Prototype host destroyed" }
         outcome = action()
-        null
+        outcome.error
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -473,7 +772,19 @@ class PrototypeController(
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (error == null && appearance != null) sink.sendShown(requestId, missing, appearance)
+    if (patchId != null) {
+      val revision =
+        outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
+      sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
+    } else if (error == null && appearance != null)
+      sink.sendShownNavigation(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        outcome.hiddenReason,
+      )
     else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }
@@ -483,21 +794,23 @@ class PrototypeController(
     delayMillis: Long = lifecycle.ttlMillis,
     retriesLeft: Int = PROTOTYPE_DISMISS_MAX_RETRIES,
   ) {
+    val surface = surfaceOf(runtime) ?: return
+    val idle = surface.idle
     // A device-persistent prototype is a standalone mock with nobody to re-show it: never idle out.
-    if (runtime.persistent) {
-      lifecycle.cancel()
+    if (!runtime.current.active || runtime.persistent) {
+      idle.cancel()
       return
     }
-    lifecycle.arm(delayMillis) { token ->
+    idle.arm(delayMillis) { token ->
       signal {
-        if (runtime === activeRuntime && lifecycle.isCurrent(token)) {
+        if (surfaceOf(runtime) === surface && idle.isCurrent(token)) {
           try {
             runtime.dismiss(PrototypeDismissReason.TTL)
           } catch (error: CancellationException) {
             throw error
           } catch (error: Exception) {
             // The one-shot expiry is spent; re-arm (bounded) so a failed removal is not final.
-            if (retriesLeft > 0 && runtime === activeRuntime)
+            if (retriesLeft > 0 && surfaceOf(runtime) === surface)
               armIdle(runtime, PROTOTYPE_DISMISS_RETRY_MILLIS, retriesLeft - 1)
             throw error
           }
@@ -510,17 +823,17 @@ class PrototypeController(
   private suspend fun dismissForDisconnect(runtime: PrototypeRuntime) {
     try {
       runtime.dismiss(PrototypeDismissReason.DISCONNECT)
-      disconnectPending = false
+      surfaceOf(runtime)?.disconnectPending = false
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
-      disconnectPending = runtime === activeRuntime
+      surfaceOf(runtime)?.disconnectPending = true
       Log.w("PrototypeController", "Prototype disconnect dismissal failed", error)
     }
   }
 
   /**
-   * Answers `inspect_prototypes`: delivers any buffered events first, then reports the prototype
+   * Answers `inspect_prototypes`: delivers any buffered events first, then reports every prototype
    * the device is showing, so a host that lost its status (a released session, a new daemon) can
    * adopt it again. The wire order is the events, then the single `prototype_result`.
    */
@@ -532,7 +845,7 @@ class PrototypeController(
       check(replayOfflineEvents()) {
         "Buffered prototype events could not be delivered; the device kept them, retry inspect"
       }
-      val prototypes = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
+      val prototypes = surfaces.values.filter { it.runtime.current.active }.map { statusOf(it) }
       sink.sendPrototypeStatus(requestId, prototypes, offlineEvents.dropped)
     } catch (error: CancellationException) {
       throw error
@@ -542,7 +855,8 @@ class PrototypeController(
     }
   }
 
-  private fun statusOf(runtime: PrototypeRuntime): PrototypeStatusEntry {
+  private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {
+    val runtime = surface.runtime
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
       id = id,
@@ -550,9 +864,11 @@ class PrototypeController(
       state = runtime.current.state.toMap(),
       data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
+      stacks = runtime.current.stacks.toMap(),
       lastSequence = sequences[id] ?: 0L,
-      suspended = foreground.suspended,
-      appearance = activeTheme?.value?.appearance,
+      suspended = surface.foreground.suspended,
+      hiddenReason = shownHiddenReason(surface),
+      appearance = surface.theme.value.appearance,
     )
   }
 
@@ -567,20 +883,29 @@ class PrototypeController(
   /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
   suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {
     lifecycle.ttlMillis = millis
-    activeRuntime?.let { armIdle(it) }
+    forEachSurface(surfaces.values.toList()) {
+      it.idle.ttlMillis = millis
+      armIdle(it.runtime)
+    }
   }
 
   suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) =
     signal(retryDisconnect = false) {
       require(count >= 0) { "Client count must be nonnegative" }
-      // A device-persistent prototype keeps running offline, and keeps the assets it draws.
-      if (activeRuntime?.persistent == true) return@signal
-      // A delayed disconnect from a previous observer session cannot dismiss a newly shown
-      // prototype.
-      if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
-        activeRuntime?.let { dismissForDisconnect(it) }
-      // Assets outlive no client, shown or not; a stale disconnect must not drop a new session's.
-      if (count == 0 && (observerSession == null || observerSession == lifecycle.observerSession()))
+      forEachSurface(surfaces.values.toList()) { surface ->
+        if (
+          !surface.runtime.persistent &&
+            count == 0 &&
+            (observerSession == null || observerSession == surface.observerSession)
+        )
+          dismissForDisconnect(surface.runtime)
+      }
+      // Persistent surfaces and remaining observers keep their shared assets.
+      if (
+        count == 0 &&
+          surfaces.isEmpty() &&
+          (observerSession == null || observerSession == lifecycle.observerSession())
+      )
         releaseAssets()
     }
 
@@ -590,15 +915,18 @@ class PrototypeController(
    * night-mode or palette change re-themes the same tree, hidden or not (#11221).
    */
   suspend fun onConfigurationChanged(displayAvailable: Boolean = true) = signal {
-    val runtime = activeRuntime ?: return@signal
-    resyncAppearance(runtime)
-    applyWindowDecision(runtime, displayAvailable && ownDisplayAvailable())
+    forEachSurface(surfaces.values.toList()) { surface ->
+      resyncAppearance(surface.runtime)
+      applyWindowDecision(surface.runtime, displayAvailable && ownDisplayAvailable(surface))
+    }
   }
 
   /** A failed re-theme keeps the mode already drawn and must not skip the window decision. */
   private suspend fun resyncAppearance(runtime: PrototypeRuntime) {
     try {
-      syncAppearance(runtime, runtime.renderModel())
+      val key = appearanceKey(runtime)
+      if (surfaceOf(runtime)?.appearanceSyncKey?.matches(key) == true) return
+      syncAppearance(runtime, runtime.renderModel(), key)
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -612,20 +940,29 @@ class PrototypeController(
    * displays' transitions are not this prototype's business.
    */
   suspend fun onDisplayTransition(displayId: Int, removed: Boolean) = signal {
-    val runtime = activeRuntime ?: return@signal
-    if (displayId == shownDisplayId())
-      applyWindowDecision(runtime, !removed && ownDisplayAvailable())
+    forEachSurface(surfaces.values.filter { it.request.displayId == displayId }) { surface ->
+      applyWindowDecision(surface.runtime, !removed && ownDisplayAvailable(surface))
+    }
   }
 
-  private fun ownDisplayAvailable(): Boolean =
-    shownDisplayId() == Display.DEFAULT_DISPLAY || displays.isAvailable(shownDisplayId())
+  private fun ownDisplayAvailable(surface: Surface): Boolean =
+    surface.request.displayId == Display.DEFAULT_DISPLAY ||
+      displays.isAvailable(surface.request.displayId)
 
   private suspend fun applyWindowDecision(runtime: PrototypeRuntime, displayAvailable: Boolean) {
-    when (prototypeWindowDecision(displayAvailable, lifecycle.isBlocked())) {
+    if (!runtime.current.active) return
+    val surface = surfaceOf(runtime) ?: return
+    when (
+      prototypeWindowDecision(
+        displayAvailable,
+        lifecycle.isBlocked() || surface.foreground.suspended,
+      )
+    ) {
       PrototypeWindowDecision.DISMISS -> runtime.dismiss(PrototypeDismissReason.TEARDOWN)
       PrototypeWindowDecision.HIDE -> {
-        check(host.dismiss()) { "Prototype host failed to hide window" }
-        notifyDetached()
+        val wasShowing = isShowing
+        check(surface.host.dismiss()) { "Prototype host failed to hide window" }
+        if (wasShowing && !isShowing) notifyDetached()
       }
       PrototypeWindowDecision.RELAYOUT -> relayoutOrRestore(runtime)
     }
@@ -638,18 +975,21 @@ class PrototypeController(
    * windowless.
    */
   private suspend fun relayoutOrRestore(runtime: PrototypeRuntime) {
-    val request = checkNotNull(activeRequest)
+    val surface = surfaceOf(runtime) ?: return
+    val host = surface.host
+    val request = surface.request
     if (host.isShowing) {
       if (host.relayout()) {
-        if (!host.isShowing) notifyDetached() // The host hid it: a lock arrived mid-signal.
+        if (!host.isShowing && !isShowing) notifyDetached()
         return
       }
       // Still attached: a retryable platform failure, so keep the window and runtime as they are.
       check(!host.isShowing) { "Prototype host failed to re-layout window" }
     }
-    if (restoreWindow(request)) return
-    if (lifecycle.isBlocked()) notifyDetached() // Locked meanwhile: hidden, restored on unlock.
-    else abandon(runtime)
+    if (restoreWindow(surface.host, request)) return
+    if (lifecycle.isBlocked() || surface.foreground.suspended) {
+      if (!isShowing) notifyDetached()
+    } else abandon(runtime)
   }
 
   /**
@@ -657,7 +997,7 @@ class PrototypeController(
    * makes the host throw instead of returning false. That is the same "cannot come back" outcome:
    * report it as false so the caller abandons rather than leaving the runtime windowless.
    */
-  private suspend fun restoreWindow(request: PrototypeRequest): Boolean =
+  private suspend fun restoreWindow(host: PrototypeHost, request: PrototypeRequest): Boolean =
     try {
       host.show(request)
     } catch (error: CancellationException) {
@@ -668,30 +1008,42 @@ class PrototypeController(
     }
 
   /**
-   * The window may hold input focus only while a text field is visible in the CURRENT tree, so a
-   * page swipe, tab change or sheet open/close can flip it; otherwise Back and key input to the app
-   * behind would be swallowed. A failed flip keeps the old request and is retried on the next
-   * change.
+   * A visible text field in the CURRENT tree may hold input focus, so a page swipe, tab change or
+   * sheet open/close can flip it. Stack navigation also takes focus while a visible eligible stack
+   * can pop; otherwise Back and key input to the app behind would be swallowed. A failed flip keeps
+   * the old request and is retried on the next change.
    */
-  private suspend fun syncTextFieldFocus(model: PrototypeRenderModel) {
-    val request = activeRequest ?: return
+  private suspend fun syncTextFieldFocus(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val surface = surfaceOf(runtime) ?: return
+    val host = surface.host
+    val request = surface.request
+    val stackBack = runtime.hasPoppableStack(model)
+    var updated = request
+    if (stackBack != request.hasStackBack) {
+      if (host.setStackBackEnabled(stackBack) || !host.isShowing) {
+        updated = request.copy(hasStackBack = stackBack)
+        surface.request = updated
+      } else Log.w("PrototypeController", "Prototype host failed to update stack Back focusability")
+    }
     val visible = model.hasTextField
-    if (visible == request.hasTextField) return
-    // A window cleared as detached is restored from activeRequest, so record the change for it.
+    if (visible == updated.hasTextField) return
+    // A window cleared as detached is restored from the surface request, so record the change for
+    // it.
     if (host.setTextFieldVisible(visible) || !host.isShowing)
-      activeRequest = request.copy(hasTextField = visible)
+      surface.request = updated.copy(hasTextField = visible)
     else Log.w("PrototypeController", "Prototype host failed to update window focusability")
   }
 
   /** Terminal teardown for a window that cannot be shown again: exactly one `dismissed` event. */
   private suspend fun abandon(runtime: PrototypeRuntime) {
-    activeRuntime = null
-    activeRequest = null
-    activeTheme = null
-    foreground.release()
-    lifecycle.cancel()
-    notifyDetached()
-    releaseAssets()
+    val surface = surfaceOf(runtime) ?: return
+    surfaces = surfaces.filterValues { it !== surface }
+    surface.foreground.release()
+    surface.idle.cancel()
+    if (surfaces.isEmpty()) {
+      notifyDetached()
+      releaseAssets()
+    }
     runtime.finishDismissal(PrototypeDismissReason.TEARDOWN)
   }
 
@@ -701,20 +1053,44 @@ class PrototypeController(
    * retryable.
    */
   suspend fun dismissForUnbind() = signal {
-    releaseAssets()
-    val runtime = activeRuntime
-    if (runtime != null) runtime.dismiss(PrototypeDismissReason.TEARDOWN)
-    else if (host.isShowing) {
+    if (surfaces.isEmpty()) {
       check(host.dismiss()) { "Prototype host failed to dismiss window" }
-      notifyDetached()
+      releaseAssets()
+    } else
+      forEachSurface(surfaces.values.toList()) {
+        it.runtime.dismiss(PrototypeDismissReason.TEARDOWN)
+      }
+  }
+
+  /**
+   * Complete the batch before surfacing its first failure, so other surfaces are never stranded.
+   */
+  private suspend fun forEachSurface(selected: List<Surface>, action: suspend (Surface) -> Unit) {
+    var failure: Exception? = null
+    for (surface in selected) {
+      try {
+        action(surface)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("PrototypeController", "Prototype surface operation failed", error)
+        if (failure == null) failure = error
+      }
     }
+    failure?.let { throw it }
   }
 
   private suspend fun signal(retryDisconnect: Boolean = true, action: suspend () -> Unit) =
     mutex.withLock {
       if (destroyed) return@withLock
       try {
-        if (retryDisconnect && disconnectPending) activeRuntime?.let { dismissForDisconnect(it) }
+        for (surface in surfaces.values.toList()) {
+          if (!surface.runtime.current.active) retire(surface, notifyDismissed = true)
+        }
+        if (retryDisconnect)
+          for (surface in surfaces.values.toList()) {
+            if (surface.disconnectPending) dismissForDisconnect(surface.runtime)
+          }
         action()
       } catch (error: CancellationException) {
         throw error
@@ -726,28 +1102,38 @@ class PrototypeController(
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {
     destroyed = true
+    val selected = surfaces.values.toList()
+    val remaining = linkedMapOf<String, Surface>()
     lifecycle.cancel()
-    try {
-      if (host.destroy()) notifyDetached()
-      else Log.w("PrototypeController", "Prototype host failed to destroy window")
-    } catch (error: CancellationException) {
-      throw error
-    } catch (error: Exception) {
-      Log.w("PrototypeController", "Prototype teardown failed", error)
-    } finally {
-      val runtime = activeRuntime
-      activeRuntime = null
-      activeRequest = null
-      activeTheme = null
-      foreground.release()
-      releaseAssets()
-      // Allocate the terminal sequence even when the last socket or service sink is gone.
+    for (surface in selected) {
+      surface.idle.cancel()
+      surface.foreground.release()
       try {
-        runtime?.finishDismissal(PrototypeDismissReason.TEARDOWN)
+        check(surface.host.destroy()) { "Prototype host failed to destroy window" }
       } catch (error: Exception) {
-        // Teardown is best effort once the sink has shut down; the runtime is already terminal.
-        Log.w("PrototypeController", "Prototype teardown event delivery failed", error)
+        Log.w("PrototypeController", "Prototype teardown failed", error)
+        // Keep a failed, still attached host addressable for a later destroy retry. Its runtime
+        // still becomes terminal below, so it cannot emit or accept another interaction.
+        if (surface.host.isShowing) remaining[surface.runtime.current.spec.id] = surface
+      } finally {
+        try {
+          surface.runtime.finishDismissal(PrototypeDismissReason.TEARDOWN)
+        } catch (error: Exception) {
+          // Teardown is best effort once the sink has shut down; the runtime is already terminal.
+          Log.w("PrototypeController", "Prototype teardown event delivery failed", error)
+        }
       }
     }
+    if (selected.none { it.host === host }) {
+      try {
+        check(host.destroy()) { "Prototype host failed to destroy window" }
+      } catch (error: Exception) {
+        Log.w("PrototypeController", "Prototype unused host teardown failed", error)
+      }
+    }
+    surfaces = remaining
+    foreground.release()
+    if (selected.isNotEmpty() && remaining.isEmpty()) notifyDetached()
+    releaseAssets()
   }
 }

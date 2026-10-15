@@ -84,7 +84,11 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}, emptyIos
     expect(deleter.calls).toEqual([]);
     expect(provisioner.calls).toEqual([]);
     expect(journal).not.toHaveBeenCalled();
-    expect(await registry.getAssignment(key)).toEqual(before);
+    if (emptyIos) {
+      expect(await registry.getAssignment(key)).toBeNull();
+    } else {
+      expect(await registry.getAssignment(key)).toEqual(before);
+    }
     expect(inventory.has(OLD)).toBe(!emptyIos);
   };
   return {
@@ -120,19 +124,19 @@ async function emptyIosSlot(registry: FakeSlotRegistry) {
 describe("Android creation profile is validated before managed-slot mutation", () => {
   afterEach(() => mock.restore());
 
-  test("absent default profile leaves an empty iOS slot unchanged", async () => {
+  test("absent default profile removes the never-bound empty iOS slot", async () => {
     const h = await harness({}, true);
     h.profiles.ids = ["pixel_9"];
     expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
       outcome: "failed",
       failure: { code: "spec_unsupported", retryable: false },
-      assignment: h.before,
+      assignment: null,
     });
     expect(h.profiles.calls).toHaveLength(1);
     await h.expectIntact();
   });
 
-  test("unreadable catalog leaves an empty iOS slot unchanged", async () => {
+  test("unreadable catalog removes the never-bound empty iOS slot", async () => {
     const h = await harness({}, true);
     h.profiles.read = async () => {
       throw new Error("catalog read failed");
@@ -140,13 +144,13 @@ describe("Android creation profile is validated before managed-slot mutation", (
     expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
       outcome: "failed",
       failure: { code: "discovery_incomplete", retryable: true },
-      assignment: h.before,
+      assignment: null,
     });
     expect(h.profiles.calls).toHaveLength(1);
     await h.expectIntact();
   });
 
-  test("incomplete Android discovery leaves an empty iOS slot unchanged before catalog lookup", async () => {
+  test("incomplete Android discovery removes the never-bound empty iOS slot before catalog lookup", async () => {
     const h = await harness({}, true);
     h.inventory.complete = false;
     const listed = spyOn(h.inventory, "list");
@@ -154,7 +158,7 @@ describe("Android creation profile is validated before managed-slot mutation", (
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "discovery_incomplete", retryable: true },
-      assignment: h.before,
+      assignment: null,
       evidence: { inventoryComplete: false },
     });
     expect(listed).toHaveBeenCalledWith("android", { signal: undefined });

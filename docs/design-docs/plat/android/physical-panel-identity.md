@@ -9,7 +9,7 @@ ruled out, and what still has to be confirmed on a device (#12233, #12208).
 ## Finding: the reflection never worked on API 29 and newer
 
 CtrlProxy reflected the hidden `Display.getUniqueId()`. The published hidden-API lists
-(`https://dl.google.com/developers/android/<release>/non-sdk/hiddenapi-flags.csv`) show the
+(`dl.google.com/developers/android/<release>/non-sdk/hiddenapi-flags.csv`) show the
 method was never reachable by an ordinary app once enforcement existed:
 
 | Release | API | Flag for `Landroid/view/Display;->getUniqueId()` |
@@ -24,7 +24,7 @@ method was never reachable by an ordinary app once enforcement existed:
 
 It has always been `@hide`, and has also been `@TestApi` since Android 14
 (`frameworks/base/core/java/android/view/Display.java`), and it never carried
-`@UnsupportedAppUsage` or a `max-target-*` flag. CtrlProxy's `targetSdk` (36) therefore does not
+`@UnsupportedAppUsage` or a `max-target-*` flag. CtrlProxy's `targetSdk` (37) therefore does not
 decide anything: lowering it would not unblock the call. The API 36 denial reported in #12208 is
 the same denial every API 29+ device produces; only API 24-28 can ever have returned a value
 (API 28 was not checked). On every modern device the host fallback has been the only source of

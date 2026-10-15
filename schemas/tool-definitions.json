@@ -80,6 +80,13 @@
       },
       "required": ["service"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "absentArguments": ["talkback", "voiceover"]
+        }
+      ]
     }
   },
   {
@@ -837,6 +844,14 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {
@@ -1214,11 +1229,12 @@
           ]
         },
         "density": {
-          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Android only; best-effort on physical devices. Omit to leave unchanged.",
+          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Numeric values must be 72-1280 dpi. Android only; best-effort on physical devices. Omit to leave unchanged.",
           "anyOf": [
             {
               "type": "number",
-              "minimum": 72
+              "minimum": 72,
+              "maximum": 1280
             },
             {
               "type": "string",
@@ -1252,6 +1268,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "absentArguments": ["reset", "fontScale", "density", "theme"]
+        }
+      ]
     }
   },
   {
@@ -3912,6 +3935,14 @@
         }
       },
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["detect", "listImes", "listProfiles"]
+        }
+      ]
     }
   },
   {
@@ -18541,6 +18572,12 @@
         },
         "keyCode": {
           "type": "number"
+        },
+        "code": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
         }
       },
       "required": ["message"],
@@ -18632,17 +18669,27 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Per-mode {light, dark} forms need prototype_theme_modes_v1. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.",
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. Pinning is not available yet; iOS installs an app icon on the home screen. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["show", "patch", "dismiss", "status", "inspect", "awaitEvent"]
+          "enum": [
+            "show",
+            "patch",
+            "dismiss",
+            "status",
+            "inspect",
+            "awaitEvent",
+            "save",
+            "listSaved",
+            "deleteSaved"
+          ]
         },
         "spec": {
-          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1.",
+          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
           "type": "object",
           "properties": {
             "id": {
@@ -18785,7 +18832,8 @@
                         },
                         "height": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         }
                       },
                       "required": ["type", "edge", "height"],
@@ -18816,10 +18864,14 @@
                           "type": "object",
                           "properties": {
                             "x": {
-                              "type": "number"
+                              "type": "number",
+                              "minimum": -10000,
+                              "maximum": 10000
                             },
                             "y": {
-                              "type": "number"
+                              "type": "number",
+                              "minimum": -10000,
+                              "maximum": 10000
                             }
                           },
                           "required": ["x", "y"],
@@ -19142,6 +19194,10 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1
@@ -19169,7 +19225,96 @@
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "payload": {}
+                              "payload": {},
+                              "context": {
+                                "allOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "state": {
+                                              "type": "string",
+                                              "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                            }
+                                          },
+                                          "required": ["state"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "item": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                            }
+                                          },
+                                          "required": ["item"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "index": {
+                                              "type": "boolean",
+                                              "const": true
+                                            }
+                                          },
+                                          "required": ["index"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "page": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": ["page"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "data": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                            }
+                                          },
+                                          "required": ["data"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "value": {
+                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/payload"
+                                            }
+                                          },
+                                          "required": ["value"],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "propertyNames": {
+                                      "minLength": 1
+                                    }
+                                  }
+                                ]
+                              },
+                              "requireValid": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                },
+                                "minItems": 1,
+                                "maxItems": 8
+                              }
                             },
                             "required": ["type", "name"],
                             "additionalProperties": false
@@ -19210,8 +19355,7 @@
                                 "enum": ["setState"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "value": {
                                 "anyOf": [
@@ -19238,7 +19382,7 @@
                                 "enum": ["toggle"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               }
                             },
                             "required": ["type", "key"],
@@ -19252,7 +19396,7 @@
                                 "enum": ["increment"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "by": {
                                 "type": "number"
@@ -19269,7 +19413,7 @@
                                 "enum": ["decrement"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "by": {
                                 "type": "number"
@@ -19287,6 +19431,74 @@
                               }
                             },
                             "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["push"]
+                              },
+                              "stack": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "screen": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "stack", "screen"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["pop"]
+                              },
+                              "stack": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "stack"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["popToRoot"]
+                              },
+                              "stack": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "stack"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["replace"]
+                              },
+                              "stack": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "screen": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "stack", "screen"],
                             "additionalProperties": false
                           }
                         ]
@@ -19308,7 +19520,8 @@
                               "properties": {
                                 "dp": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "required": ["dp"],
@@ -19321,42 +19534,51 @@
                         },
                         "weight": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         },
                         "minWidth": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "maxWidth": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "minHeight": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "maxHeight": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "padding": {
                           "type": "object",
                           "properties": {
                             "top": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "bottom": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "start": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "end": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             }
                           },
                           "additionalProperties": false
@@ -19368,7 +19590,8 @@
                           "anyOf": [
                             {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             {
                               "type": "string",
@@ -19387,19 +19610,23 @@
                               "properties": {
                                 "topStart": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "topEnd": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "bottomEnd": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "bottomStart": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "additionalProperties": false
@@ -19411,7 +19638,8 @@
                           "properties": {
                             "width": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "color": {
                               "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
@@ -19422,7 +19650,8 @@
                         },
                         "elevation": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 1000
                         },
                         "shadowColor": {
                           "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
@@ -19486,7 +19715,8 @@
                         },
                         "aspectRatio": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         },
                         "offset": {
                           "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
@@ -19528,11 +19758,18 @@
                         },
                         "spacing": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
+                        },
+                        "runSpacing": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "textSize": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 1000
                         },
                         "fontWeight": {
                           "type": "integer",
@@ -19553,10 +19790,13 @@
                         },
                         "lineHeight": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 1000
                         },
                         "letterSpacing": {
-                          "type": "number"
+                          "type": "number",
+                          "minimum": -1000,
+                          "maximum": 1000
                         },
                         "textDecoration": {
                           "type": "string",
@@ -19622,11 +19862,30 @@
                               {
                                 "type": "object",
                                 "properties": {
+                                  "valid": {
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 8
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["valid"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
                                   "data": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 256,
-                                    "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -19649,10 +19908,10 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "notEquals": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
                                   }
                                 },
                                 "required": ["data", "notEquals"],
@@ -19662,7 +19921,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19675,7 +19934,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -19688,10 +19947,10 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "equals": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
                                   }
                                 },
                                 "required": ["key", "equals"],
@@ -19701,10 +19960,10 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "notEquals": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
                                   }
                                 },
                                 "required": ["key", "notEquals"],
@@ -19714,7 +19973,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19727,7 +19986,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -19808,18 +20067,24 @@
                               "type": "object",
                               "properties": {
                                 "x": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "y": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "width": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "height": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "required": ["x", "y", "width", "height"],
@@ -19923,6 +20188,22 @@
                       "required": ["edges", "types"],
                       "additionalProperties": false
                     },
+                    "onLongPress": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
+                    "onDoubleTap": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
                     "repeat": {
                       "type": "object",
                       "properties": {
@@ -19956,7 +20237,7 @@
                               "type": "object",
                               "properties": {
                                 "path": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                 }
                               },
                               "required": ["path"],
@@ -19965,11 +20246,10 @@
                           ]
                         },
                         "as": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         },
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat/properties/as"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         }
                       },
                       "required": ["items", "as"],
@@ -19993,6 +20273,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20022,6 +20305,12 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
                     },
                     "repeat": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
@@ -20044,6 +20333,69 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
+                    },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["column"]
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": ["type", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20079,7 +20431,11 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["column"]
+                      "enum": ["flow"]
+                    },
+                    "maxLines": {
+                      "type": "integer",
+                      "minimum": 1
                     },
                     "children": {
                       "type": "array",
@@ -20095,6 +20451,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20124,6 +20483,86 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["grid"]
+                    },
+                    "columns": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 12
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "minWidth": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["minWidth"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": ["type", "columns", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
                     },
                     "type": {
                       "type": "string",
@@ -20131,14 +20570,66 @@
                     },
                     "text": {
                       "type": "string"
+                    },
+                    "spans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "color": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/color"
+                              },
+                              "fontWeight": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/fontWeight"
+                              },
+                              "fontStyle": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/fontStyle"
+                              },
+                              "textDecoration": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/textDecoration"
+                              },
+                              "textSize": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/textSize"
+                              },
+                              "letterSpacing": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/letterSpacing"
+                              },
+                              "fontFamily": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/fontFamily"
+                              },
+                              "background": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "onTap": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                          }
+                        },
+                        "required": ["text"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 64
                     }
                   },
-                  "required": ["type", "text"],
+                  "required": ["type"],
                   "additionalProperties": false
                 },
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20168,6 +20659,12 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
                     },
                     "type": {
                       "type": "string",
@@ -20207,6 +20704,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20237,6 +20737,12 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["icon"]
@@ -20255,6 +20761,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20296,6 +20805,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20325,16 +20837,172 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "required": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": ["message", "required"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "minLength": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["message", "minLength"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "maxLength": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["message", "maxLength"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "min": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["message", "min"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "max": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["message", "max"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "format": {
+                                "type": "string",
+                                "enum": ["email", "phone", "digits", "decimal", "url"]
+                              }
+                            },
+                            "required": ["message", "format"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "message": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "pattern": {
+                                "type": "string",
+                                "maxLength": 128
+                              }
+                            },
+                            "required": ["message", "pattern"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
+                    "validateOn": {
+                      "type": "string",
+                      "enum": ["change", "blur", "submit"]
                     },
                     "type": {
                       "type": "string",
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "type": "string"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["filled", "outlined"]
+                    },
+                    "supportingText": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "keyboardType": {
+                      "type": "string",
+                      "enum": ["text", "number", "decimal", "email", "phone", "url", "password"]
+                    },
+                    "secure": {
+                      "type": "boolean"
+                    },
+                    "multiline": {
+                      "type": "boolean"
+                    },
+                    "minLines": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 20
+                    },
+                    "maxLines": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 20
+                    },
+                    "maxLength": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -20343,6 +21011,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20372,13 +21043,115 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["searchBar"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "placeholder": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/placeholder"
+                    },
+                    "leadingIcon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                    },
+                    "trailingActions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "icon": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "onTap": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                            },
+                            "minItems": 1,
+                            "maxItems": 32
+                          }
+                        },
+                        "required": ["icon", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 2
+                    },
+                    "activeKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["bar", "docked"]
+                    },
+                    "onSubmit": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items/properties/onTap"
+                    },
+                    "child": {
+                      "$ref": "#/properties/spec/properties/root"
+                    }
+                  },
+                  "required": ["type", "stateKey"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -20391,6 +21164,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20420,13 +21196,22 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -20439,6 +21224,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20468,6 +21256,9 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
@@ -20482,7 +21273,7 @@
                       "enum": ["filled", "tonal", "elevated", "outlined", "text"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                     }
                   },
                   "required": ["type", "label"],
@@ -20491,6 +21282,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20521,12 +21315,21 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -20555,6 +21358,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20584,6 +21390,80 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["select"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 32
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
@@ -20598,7 +21478,7 @@
                       "minLength": 1
                     },
                     "leadingIcon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                     },
                     "trailing": {
                       "anyOf": [
@@ -20610,7 +21490,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -20624,7 +21504,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -20638,7 +21518,7 @@
                               "enum": ["icon"]
                             },
                             "name": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                              "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                             }
                           },
                           "required": ["type", "name"],
@@ -20653,6 +21533,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20683,12 +21566,21 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -20710,6 +21602,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20739,6 +21634,9 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
@@ -20753,7 +21651,7 @@
                       "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "label"],
@@ -20762,6 +21660,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20791,6 +21692,12 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "onLongPress": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
+                    },
+                    "onDoubleTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
                     },
                     "type": {
                       "type": "string",
@@ -20814,6 +21721,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20844,12 +21754,15 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["iconButton"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                     },
                     "variant": {
                       "type": "string",
@@ -20862,6 +21775,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20892,12 +21808,15 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["fab"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                     },
                     "label": {
                       "type": "string",
@@ -20914,6 +21833,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -20949,7 +21871,7 @@
                       "enum": ["segmentedButton"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -20978,6 +21900,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21021,31 +21946,12 @@
                       "enum": ["small", "centerAligned", "medium", "large"]
                     },
                     "navigationIcon": {
-                      "type": "object",
-                      "properties": {
-                        "icon": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
-                        },
-                        "label": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "onTap": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
-                          },
-                          "minItems": 1,
-                          "maxItems": 32
-                        }
-                      },
-                      "required": ["icon", "label"],
-                      "additionalProperties": false
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items"
                     },
                     "actions": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/19/properties/navigationIcon"
+                        "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items"
                       },
                       "minItems": 1,
                       "maxItems": 3
@@ -21057,6 +21963,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21102,6 +22011,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21147,6 +22059,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21186,7 +22101,7 @@
                       "enum": ["linear", "circular"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "max": {
                       "type": "number"
@@ -21198,6 +22113,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21236,7 +22154,7 @@
                       "type": "object",
                       "properties": {
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "equals": {
                           "type": "boolean"
@@ -21254,7 +22172,7 @@
                       "minLength": 1
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                     },
                     "confirm": {
                       "type": "object",
@@ -21264,14 +22182,14 @@
                           "minLength": 1
                         },
                         "onTap": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/19/properties/navigationIcon/properties/onTap"
+                          "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items/properties/onTap"
                         }
                       },
                       "required": ["label"],
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -21283,6 +22201,99 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["menu"]
+                    },
+                    "openWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/label"
+                              },
+                              "onTap": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/onTap"
+                              },
+                              "icon": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                              },
+                              "trailingText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["label"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "divider"
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    }
+                  },
+                  "required": ["type", "openWhen", "items"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21318,14 +22329,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -21339,6 +22350,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21369,15 +22383,24 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["timePicker"]
                     },
                     "hourKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "minuteKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "is24Hour": {
                       "type": "boolean"
@@ -21389,6 +22412,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21419,12 +22445,21 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "enabledWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                    },
+                    "checks": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                    },
+                    "validateOn": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["datePicker"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -21433,6 +22468,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21482,6 +22520,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1
@@ -21517,6 +22558,47 @@
                       "type": "string",
                       "enum": ["pager"]
                     },
+                    "axis": {
+                      "type": "string",
+                      "enum": ["horizontal", "vertical"]
+                    },
+                    "pageSpacing": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "peek": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
+                        },
+                        "end": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "pageSize": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["fill"]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "dp": {
+                              "type": "number",
+                              "minimum": 0.000001,
+                              "maximum": 10000
+                            }
+                          },
+                          "required": ["dp"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
                     "children": {
                       "type": "array",
                       "items": {
@@ -21531,6 +22613,59 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["stack"]
+                    },
+                    "start": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "screens": {}
+                  },
+                  "required": ["id", "type", "start", "screens"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21575,10 +22710,10 @@
                             "minLength": 1
                           },
                           "icon": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                            "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
                           },
                           "image": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/4/properties/asset"
+                            "$ref": "#/properties/spec/properties/root/anyOf/6/properties/asset"
                           }
                         },
                         "required": ["label"],
@@ -21592,7 +22727,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -21604,6 +22739,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21641,7 +22779,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/29/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/35/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -21651,7 +22789,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "items"],
@@ -21660,6 +22798,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
                     "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
@@ -21695,7 +22836,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -21710,7 +22851,8 @@
                             "properties": {
                               "dp": {
                                 "type": "number",
-                                "minimum": 0.000001
+                                "minimum": 0.000001,
+                                "maximum": 10000
                               }
                             },
                             "required": ["dp"],
@@ -21822,6 +22964,10 @@
           "description": "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
           "type": "string"
         },
+        "replaceOthers": {
+          "description": "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
+          "type": "boolean"
+        },
         "reset": {
           "description": "show only: when the prototype with spec.id is already shown, start it fresh (pager pages from the spec, display re-resolved) instead of replacing it in place",
           "type": "boolean"
@@ -21832,12 +22978,12 @@
           "enum": ["device", "light", "dark"]
         },
         "id": {
-          "description": "Prototype id required for dismiss (unless all: true) and awaitEvent",
+          "description": "Prototype id required for dismiss (unless all: true), awaitEvent and deleteSaved",
           "type": "string",
           "minLength": 1
         },
         "assets": {
-          "description": "show only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "description": "show or save only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
           "minItems": 1,
           "maxItems": 32,
           "type": "array",
@@ -21865,6 +23011,32 @@
             "additionalProperties": false
           }
         },
+        "label": {
+          "description": "save only: label, defaults to spec.id",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "icon": {
+          "description": "save only: icon asset id uploaded in assets in this call",
+          "type": "string",
+          "minLength": 1
+        },
+        "pin": {
+          "description": "save only: requests pinning, currently unsupported",
+          "type": "boolean",
+          "const": true
+        },
+        "autoConfirm": {
+          "description": "save only: requires pin; pinning is currently unsupported",
+          "type": "boolean",
+          "const": true
+        },
+        "removeIcon": {
+          "description": "deleteSaved only: requests icon removal, currently unsupported",
+          "type": "boolean",
+          "const": true
+        },
         "all": {
           "description": "Dismiss all prototypes on the targeted device",
           "type": "boolean",
@@ -21876,9 +23048,17 @@
           "minLength": 1
         },
         "kind": {
-          "description": "awaitEvent only: filter event kind. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several",
+          "description": "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth}) is sent only when the top screen or depth changes. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several",
           "type": "string",
-          "enum": ["emit", "page_changed", "dismissed", "appearance_changed"]
+          "enum": [
+            "emit",
+            "page_changed",
+            "screen_changed",
+            "dismissed",
+            "appearance_changed",
+            "change",
+            "validation_failed"
+          ]
         },
         "afterSequence": {
           "description": "awaitEvent only: return a sequence strictly above this cursor",
@@ -21915,6 +23095,81 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "saved": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "slug": {
+              "type": "string"
+            },
+            "replaced": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "slug", "replaced"],
+          "additionalProperties": false
+        },
+        "savedPrototypes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Authored prototype id on Android; bundle id on iOS simulators, accepted by deleteSaved.",
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "savedAt": {
+                "description": "Absent where the platform cannot report save time (iOS simulators).",
+                "type": "number"
+              },
+              "pinned": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "label", "slug", "pinned"],
+            "additionalProperties": false
+          }
+        },
+        "pinned": {
+          "type": "string",
+          "enum": ["pinned", "pending", "unsupported"]
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "pin_unsupported",
+            "device_locked",
+            "pin_failed",
+            "invalid_id",
+            "invalid_label",
+            "spec_too_large",
+            "invalid_spec",
+            "invalid_asset_id",
+            "duplicate_asset_id",
+            "unsupported_mime_type",
+            "empty_asset",
+            "asset_too_large",
+            "count_limit",
+            "total_limit",
+            "missing_asset",
+            "saved_count_limit",
+            "storage_failure",
+            "unsupported_existing",
+            "not_found",
+            "unsupported_format",
+            "internal_error",
+            "unsupported_capability",
+            "unsupported_platform"
+          ]
+        },
         "revision": {
           "description": "patch only: current device revision after applying or refusing a patch",
           "type": "integer",
@@ -21983,6 +23238,11 @@
               "persistent": {
                 "description": "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
                 "type": "boolean"
+              },
+              "hiddenReason": {
+                "description": "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+                "type": "string",
+                "enum": ["app_layer_window_hidden", "device_blocked"]
               },
               "suspended": {
                 "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
@@ -22069,6 +23329,34 @@
                   "maximum": 9007199254740991
                 }
               },
+              "stacks": {
+                "description": "Last reported stack paths and depths; absent when the device reports none",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "minItems": 1,
+                      "maxItems": 32,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "depth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 32
+                    }
+                  },
+                  "required": ["path", "depth"],
+                  "additionalProperties": false
+                }
+              },
               "state": {
                 "type": "object",
                 "propertyNames": {
@@ -22097,8 +23385,26 @@
                   "$ref": "#/$defs/__schema0"
                 }
               },
+              "context": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  {}
+                ]
+              },
+              "contextTruncated": {
+                "type": "boolean",
+                "const": true
+              },
               "lastKnown": {
-                "description": "Pages and state are the last accepted prototype_event snapshot, not a live device query",
+                "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
                 "type": "boolean",
                 "const": true
               }
@@ -22129,6 +23435,11 @@
             "persistent": {
               "description": "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
               "type": "boolean"
+            },
+            "hiddenReason": {
+              "description": "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+              "type": "string",
+              "enum": ["app_layer_window_hidden", "device_blocked"]
             },
             "suspended": {
               "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
@@ -22197,11 +23508,20 @@
               "construct": {
                 "type": "string",
                 "enum": [
+                  "stack",
                   "node.id",
                   "bottomSheet.dismissOnSwipe",
                   "bottomSheet.detents",
                   "icon.name",
-                  "icon.variant"
+                  "icon.variant",
+                  "textField.variant",
+                  "textField.label",
+                  "node.gestures",
+                  "searchBar",
+                  "searchBar.icons",
+                  "rich-text-links",
+                  "menu",
+                  "select"
                 ]
               },
               "effect": {
@@ -22247,7 +23567,15 @@
             },
             "kind": {
               "type": "string",
-              "enum": ["emit", "page_changed", "dismissed", "appearance_changed"]
+              "enum": [
+                "emit",
+                "page_changed",
+                "screen_changed",
+                "dismissed",
+                "appearance_changed",
+                "change",
+                "validation_failed"
+              ]
             },
             "name": {
               "anyOf": [
@@ -22260,7 +23588,25 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema1"
+              "$ref": "#/$defs/__schema2"
+            },
+            "context": {
+              "allOf": [
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema1"
+                  }
+                },
+                {}
+              ]
+            },
+            "contextTruncated": {
+              "type": "boolean",
+              "const": true
             },
             "state": {
               "type": "object",
@@ -22292,6 +23638,50 @@
                 "maximum": 9007199254740991
               }
             },
+            "stacks": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 32
+                  }
+                },
+                "required": ["path", "depth"],
+                "additionalProperties": false
+              }
+            },
+            "validity": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "keys": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "timestamp": {
               "type": "number"
             }
@@ -22310,7 +23700,7 @@
           "const": "dismissed"
         },
         "uploadedAssets": {
-          "description": "show with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
+          "description": "show or save with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
           "type": "array",
           "items": {
             "type": "object",
@@ -22339,14 +23729,14 @@
           }
         },
         "visible": {
-          "description": "show with window.layer \"app\" on Android: no prototype window was on screen after the show; absent when visible or not checked",
+          "description": "Android show: no prototype window was on screen after an app-layer show, or the device reports device_blocked for any layer; absent when visible or not checked",
           "type": "boolean",
           "const": false
         },
         "notVisibleReason": {
-          "description": "show with window.layer \"app\" on Android: why visible is false. no_prototype_window_on_screen: the window was created but the screen does not show it, usually because the app in front hides app-layer windows; absent when visible or not checked",
+          "description": "Android show: why visible is false. app_layer_window_hidden: the app in front hides app-layer windows; device_blocked: the device is locked or its screen is off. no_prototype_window_on_screen: older-device app-layer confirmation found no window on screen; absent when visible or not checked",
           "type": "string",
-          "enum": ["no_prototype_window_on_screen"]
+          "enum": ["no_prototype_window_on_screen", "app_layer_window_hidden", "device_blocked"]
         },
         "warning": {
           "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
@@ -22531,8 +23921,47 @@
               }
             }
           ]
+        },
+        "__schema2": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema2"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema2"
+              }
+            }
+          ]
         }
       }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["status", "inspect", "listSaved"]
+        }
+      ]
     }
   },
   {

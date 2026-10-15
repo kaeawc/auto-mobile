@@ -14,6 +14,7 @@ export const FAKE_PROTOTYPE_AGENT_CAPABILITIES = [
   "get_prototype_status",
   "prototype_show_in_place_v1",
   "prototype_inspect_v1",
+  "prototype_text_field_options_v1",
 ];
 
 type Reply = Partial<Omit<PrototypeAgentResult, "type" | "requestId">> | Error;
@@ -33,6 +34,7 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
   closed = false;
   private readonly replies: Reply[] = [];
   private readonly eventListeners = new Set<(event: PrototypeAgentMessage) => void>();
+  private readonly closedListeners = new Set<(error: Error) => void>();
   private nextRequestId = 1;
 
   constructor(
@@ -89,11 +91,17 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
     this.eventListeners.forEach((listener) => listener(event));
   }
 
-  onClosed(_listener: (error: Error) => void): () => void {
-    return () => {};
+  onClosed(listener: (error: Error) => void): () => void {
+    this.closedListeners.add(listener);
+    return () => this.closedListeners.delete(listener);
   }
 
   close(): void {
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
+    this.closedListeners.forEach((listener) => listener(new Error("closed by host")));
+    this.closedListeners.clear();
   }
 }

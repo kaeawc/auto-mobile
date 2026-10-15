@@ -279,6 +279,13 @@ jobs:
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
+      # Advisory #12259: skips until saved actions and the viewer template exist; never fails the job.
+      - name: "Run saved prototype smoke (advisory)"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 12
+        run: ./scripts/ios/saved-prototype-smoke-advisory.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
+
       - name: "Stop AutoMobile daemon before odd-width boot"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
         run: |

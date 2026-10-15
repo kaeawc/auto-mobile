@@ -1,4 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { anyDeviceReadOnlyArgShapeMatches } from "../../src/server/deviceReadOnlyArgShapes";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { registerInteractionTools } from "../../src/server/interactionTools";
+import { registerPrototypeTools } from "../../src/server/prototypeTools";
+import { registerAccessibilityTools } from "../../src/server/accessibilityTools";
+import { registerUtilityTools } from "../../src/server/utilityTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
@@ -10,7 +17,15 @@ import committedDefinitions from "../../schemas/tool-definitions.json";
 // (name, description, inputSchema, _meta) and deliberately omits outputSchema,
 // which depends on daemon flag state the proxy cannot read cold.
 
+isolateToolRegistry();
+
 describe("getStaticToolDefinitions", () => {
+  beforeAll(() => {
+    registerInteractionTools();
+    registerPrototypeTools();
+    registerAccessibilityTools();
+    registerUtilityTools();
+  });
   const originalAlwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
 
   afterEach(() => {
@@ -79,8 +94,8 @@ describe("getStaticToolDefinitions", () => {
     const tools = getStaticToolDefinitions();
     expect(tools.some((tool) => tool._meta?.["anthropic/alwaysLoad"] !== undefined)).toBe(false);
     // A tool with no other _meta carries none at all.
-    const accessibility = tools.find((tool) => tool.name === "accessibility");
-    expect(accessibility!._meta).toBeUndefined();
+    const tapOn = tools.find((tool) => tool.name === "tapOn");
+    expect(tapOn!._meta).toBeUndefined();
   });
 
   test("#10971: device-read tools carry the read classification; control and mixed tools do not", () => {
@@ -100,9 +115,13 @@ describe("getStaticToolDefinitions", () => {
       "getDeepLinks",
     ]) {
       expect(readOnly(name)).toBe(true);
+      expect(
+        getStaticToolDefinitions().find((tool) => tool.name === name)?._meta?.[
+          "automobile/deviceReadOnlyArgs"
+        ],
+      ).toBeUndefined();
     }
-    // Control tools, and per-args tools (a read only for some arguments), keep the session
-    // fence: a per-args read cannot be marked statically (#10965).
+    // Control and mixed tools never advertise the wholly read-only boolean.
     for (const name of [
       "tapOn",
       "pressButton",
@@ -114,6 +133,55 @@ describe("getStaticToolDefinitions", () => {
       "prototype",
     ]) {
       expect(readOnly(name)).toBe(false);
+    }
+  });
+
+  test("mixed tools advertise only their declarative read argument shapes", () => {
+    const shapes = {
+      clipboard: [{ argument: "action", values: ["get"] }],
+      keyboard: [{ argument: "action", values: ["detect", "listImes", "listProfiles"] }],
+      prototype: [{ argument: "action", values: ["status", "inspect", "listSaved"] }],
+      accessibility: [{ absentArguments: ["talkback", "voiceover"] }],
+      displayConfig: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
+    };
+    for (const [name, expected] of Object.entries(shapes)) {
+      const meta = getStaticToolDefinitions().find((tool) => tool.name === name)?._meta;
+      expect(meta?.["automobile/deviceReadOnlyArgs"]).toEqual(expected);
+      expect(meta?.["automobile/deviceReadOnly"]).toBeUndefined();
+    }
+    expect(
+      getStaticToolDefinitions().find((tool) => tool.name === "sqlQuery")?._meta?.[
+        "automobile/deviceReadOnlyArgs"
+      ],
+    ).toBeUndefined();
+  });
+
+  test("every advertised shape is a subset of the registered per-call classifier", () => {
+    const registered = ToolRegistry.getAllTools({ includeUnavailable: true });
+    let advertised = 0;
+    for (const tool of registered) {
+      for (const shape of tool.deviceReadOnlyArgs ?? []) {
+        advertised++;
+        const representatives =
+          "argument" in shape ? shape.values.map((value) => ({ [shape.argument]: value })) : [{}];
+        expect(representatives.length).toBeGreaterThan(0);
+        for (const args of representatives) {
+          expect(anyDeviceReadOnlyArgShapeMatches([shape], args)).toBe(true);
+          expect(tool.isDeviceReadOnlyCall?.(args)).toBe(true);
+        }
+      }
+    }
+    expect(advertised).toBe(5);
+    for (const [name, args] of [
+      ["clipboard", { action: "set" }],
+      ["keyboard", { action: "open" }],
+      ["prototype", { action: "show" }],
+      ["accessibility", { talkback: true }],
+      ["displayConfig", { fontScale: 1.2 }],
+    ] as const) {
+      const tool = registered.find((candidate) => candidate.name === name)!;
+      expect(anyDeviceReadOnlyArgShapeMatches(tool.deviceReadOnlyArgs, args)).toBe(false);
+      expect(tool.isDeviceReadOnlyCall?.(args)).toBe(false);
     }
   });
 

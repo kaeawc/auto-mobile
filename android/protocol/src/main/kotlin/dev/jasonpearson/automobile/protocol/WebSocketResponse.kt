@@ -250,7 +250,14 @@ data class StorageChangedEvent(
   override val timestamp: Long,
   val packageName: String,
   val fileName: String,
-  val data: String, // JSON string of preferences
+  val data: String? = null, // Legacy JSON string of preferences
+  val key: String? = null,
+  val value: JsonElement? = null,
+  val valueType: String? = null,
+  val previousValue: JsonElement? = null,
+  val changeType: String? = null,
+  val eventTimestamp: Long? = null,
+  val sequenceNumber: Long? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -757,7 +764,93 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,
+  /** Only patch replies report revisions, including refusals for a matching shown prototype. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
+  /** Navigation state after a successful show; absent from other results. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pages: Map<String, Int>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot>? = null,
+  /** Only a successful show reply: why the existing prototype is hidden. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
 ) : WebSocketResponse()
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypeInfo(
+  val id: String,
+  val slug: String,
+  val replaced: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypePinInfo(
+  val id: String,
+  val status: SavedPrototypePinStatus,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@Serializable
+enum class SavedPrototypePinStatus {
+  @SerialName("requested") REQUESTED,
+  @SerialName("already_pinned") ALREADY_PINNED,
+}
+
+@Serializable
+enum class SavedPrototypeShortcutUpdate {
+  @SerialName("updated") UPDATED,
+  @SerialName("rate_limited") RATE_LIMITED,
+}
+
+@Serializable
+data class SavedPrototypeEntry(
+  val id: String,
+  val label: String,
+  val slug: String,
+  val savedAt: Long,
+  val pinned: Boolean,
+)
+
+@Serializable
+enum class SavedPrototypeErrorCode {
+  @SerialName("pin_unsupported") PIN_UNSUPPORTED,
+  @SerialName("device_locked") DEVICE_LOCKED,
+  @SerialName("pin_failed") PIN_FAILED,
+  @SerialName("invalid_id") INVALID_ID,
+  @SerialName("invalid_label") INVALID_LABEL,
+  @SerialName("spec_too_large") SPEC_TOO_LARGE,
+  @SerialName("invalid_spec") INVALID_SPEC,
+  @SerialName("invalid_asset_id") INVALID_ASSET_ID,
+  @SerialName("duplicate_asset_id") DUPLICATE_ASSET_ID,
+  @SerialName("unsupported_mime_type") UNSUPPORTED_MIME_TYPE,
+  @SerialName("empty_asset") EMPTY_ASSET,
+  @SerialName("asset_too_large") ASSET_TOO_LARGE,
+  @SerialName("count_limit") COUNT_LIMIT,
+  @SerialName("total_limit") TOTAL_LIMIT,
+  @SerialName("missing_asset") MISSING_ASSET,
+  @SerialName("saved_count_limit") SAVED_COUNT_LIMIT,
+  @SerialName("storage_failure") STORAGE_FAILURE,
+  @SerialName("unsupported_existing") UNSUPPORTED_EXISTING,
+  @SerialName("not_found") NOT_FOUND,
+  @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
+  @SerialName("internal_error") INTERNAL_ERROR,
+}
+
+@Serializable
+data class PrototypePatchConflict(val revision: Long, val state: Map<String, PrototypeScalar>)
+
+@Serializable
+enum class PrototypeHiddenReason {
+  /** An attached app-layer window is absent from the accessibility windows on screen. */
+  @SerialName("app_layer_window_hidden") APP_LAYER_WINDOW_HIDDEN,
+  /** Locked, noninteractive, or unable to establish a safe device lock state. */
+  @SerialName("device_blocked") DEVICE_BLOCKED,
+}
 
 @Serializable
 enum class PrototypeAppearanceMode {
@@ -791,6 +884,14 @@ data class PrototypeAppearance(
   val deviceDark: Boolean,
 )
 
+/** Wire navigation snapshot; depth always equals the number of path entries. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeStackSnapshot(
+  val path: List<String>,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val depth: Int = path.size,
+)
+
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
  * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
@@ -808,17 +909,27 @@ data class PrototypeStatusEntry(
    * kept, and it returns with the app. Omitted when false and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
   /** The mode it is drawn in right now (`prototype_appearance_v1`). Omitted by older APKs. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
   /** The shown spec's read-only data; absent when the spec has none. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 )
+
+/** Input validation vocabulary understood by this protocol version. */
+const val PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1"
 
 @Serializable
 enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
+  @SerialName("change") CHANGE,
+  @SerialName("validation_failed") VALIDATION_FAILED,
   /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
+  /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
+  @SerialName("screen_changed") SCREEN_CHANGED,
   @SerialName("dismissed") DISMISSED,
   /**
    * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The
@@ -830,6 +941,7 @@ enum class PrototypeEventKind {
 /** Unsolicited frame. Pager selection is separate from authored scalar state. */
 @Serializable
 @SerialName("prototype_event")
+@OptIn(ExperimentalSerializationApi::class)
 data class PrototypeEvent(
   override val timestamp: Long,
   val id: String,
@@ -843,7 +955,17 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
-) : WebSocketResponse()
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val context: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val contextTruncated: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val validity: Map<String, Boolean>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val keys: List<String>? = null,
+) : WebSocketResponse() {
+  init {
+    require(contextTruncated != false) { "contextTruncated must be true or absent" }
+  }
+}
 
 // =============================================================================
 // Storage Results

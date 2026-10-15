@@ -1,10 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.app.Activity
+import android.graphics.PixelFormat
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager.LayoutParams
+import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
@@ -33,6 +37,7 @@ import org.junit.Before
 import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -73,6 +78,10 @@ class PrototypeHostTest {
   private var blocked = false
   private var lost = 0
   private lateinit var escapeScheduler: FakePrototypeEscapeScheduler
+  private lateinit var accessibilityScheduler: FakePrototypeEscapeScheduler
+  private lateinit var accessibilityView: PrototypeComposeView
+  private lateinit var accessibilityChild: View
+  private var accessibilityNow = 0L
   private val contentTouches = mutableListOf<Int>()
   private var contentHandlesTouch = true
 
@@ -85,6 +94,18 @@ class PrototypeHostTest {
     blocked = false
     lost = 0
     escapeScheduler = FakePrototypeEscapeScheduler()
+    accessibilityScheduler = FakePrototypeEscapeScheduler()
+    accessibilityNow = 0L
+    accessibilityView =
+      PrototypeComposeView(
+        RuntimeEnvironment.getApplication(),
+        decide = { PrototypeBackDecision.PASS },
+        onBack = {},
+        escapeSchedulerFactory = { escapeScheduler },
+        accessibilitySchedulerFactory = { accessibilityScheduler },
+        nowMs = { accessibilityNow },
+      )
+    accessibilityChild = View(RuntimeEnvironment.getApplication())
     main = FakePrototypeMainThread()
     timer = FakePrototypeSettleTimer(history)
     manager = RecordingPrototypeWindowManager(main, history)
@@ -92,6 +113,7 @@ class PrototypeHostTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = timer,
@@ -114,6 +136,75 @@ class PrototypeHostTest {
 
   private fun chromelessRequest() =
     PrototypeRequest(PrototypePlacement.Fullscreen(), chrome = PrototypeWindowChrome.NONE)
+
+  private fun requestContentChanged(changeTypes: Int): Boolean {
+    val event =
+      AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED).apply {
+        contentChangeTypes = changeTypes
+      }
+    return try {
+      accessibilityView.onRequestSendAccessibilityEvent(accessibilityChild, event)
+    } finally {
+      event.recycle()
+    }
+  }
+
+  @Test
+  fun `subtree accessibility changes are swallowed and schedule one trailing callback`() {
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertTrue(accessibilityScheduler.tasks.isEmpty())
+    accessibilityNow = 10L
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertEquals(240L, accessibilityScheduler.tasks.single().due)
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertEquals(1, accessibilityScheduler.tasks.size)
+  }
+
+  @Test
+  fun `text and pane accessibility changes delegate without touching the coalescer`() {
+    for (changeTypes in
+      listOf(
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_TITLE,
+      )) {
+      assertTrue(requestContentChanged(changeTypes))
+      accessibilityNow += 10L
+      assertTrue(requestContentChanged(changeTypes))
+      assertTrue(accessibilityScheduler.tasks.isEmpty())
+    }
+    assertEquals(0, accessibilityScheduler.cancelled)
+    // Pass-through events must not consume the leading coalescer emission either.
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertTrue(accessibilityScheduler.tasks.isEmpty())
+  }
+
+  @Test
+  fun `detaching cancels the pending accessibility trailing callback and resets coalescing`() {
+    val controller = Robolectric.buildActivity(Activity::class.java).setup()
+    try {
+      val activity = controller.get()
+      val container = FrameLayout(activity)
+      activity.setContentView(container)
+      controller.visible()
+      container.addView(accessibilityView)
+      assertTrue(accessibilityView.isAttachedToWindow)
+
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      accessibilityNow = 10L
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      val pending = accessibilityScheduler.tasks.single()
+      container.removeView(accessibilityView)
+      assertFalse(accessibilityView.isAttachedToWindow)
+      assertTrue(pending.cancelled)
+      assertEquals(1, accessibilityScheduler.cancelled)
+      accessibilityScheduler.advanceBy(250L)
+      assertFalse(pending.fired)
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      assertEquals(1, accessibilityScheduler.tasks.size)
+    } finally {
+      controller.pause().stop().destroy()
+    }
+  }
 
   @Test
   fun `show traces one balanced host section including a blocked early return`() = runTest {
@@ -423,6 +514,21 @@ class PrototypeHostTest {
   }
 
   @Test
+  fun `idle relayout skips window updates and a density change updates once`() = runTest {
+    assertTrue(
+      host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f))),
+    )
+    repeat(100) { assertTrue(host.relayout()) }
+    assertTrue(manager.updated.isEmpty())
+    density = 3f
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+    assertEquals(60, manager.updated.single().height)
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+  }
+
+  @Test
   fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
     runTest {
       host.show(
@@ -500,6 +606,48 @@ class PrototypeHostTest {
     assertTrue(host.replace(PrototypeRequest()))
     assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
     assertEquals(1, history.count { it == "hook" })
+  }
+
+  @Test
+  fun `raising a surface adds above siblings before retiring its prior window`() = runTest {
+    host.show()
+    val oldView = checkNotNull(manager.view)
+    val oldOwner = checkNotNull(oldView.findViewTreeLifecycleOwner())
+    history.clear()
+    assertTrue(host.replace(PrototypeRequest(bringToFront = true)))
+    assertEquals(listOf("add", "remove", "hook"), history)
+    assertNotSame(oldView, manager.view)
+    assertEquals(Lifecycle.State.DESTROYED, oldOwner.lifecycle.currentState)
+    assertEquals(2, manager.added.size)
+    assertTrue(host.isShowing)
+  }
+
+  @Test
+  fun `a rejected raise leaves the previous window available`() = runTest {
+    host.show()
+    val owner = checkNotNull(manager.view?.findViewTreeLifecycleOwner())
+    manager.failAdd = true
+    assertFalse(host.replace(PrototypeRequest(bringToFront = true)))
+    assertTrue(host.isShowing)
+    assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
+    assertEquals(0, manager.removals)
+    assertEquals(1, manager.added.size)
+  }
+
+  @Test
+  fun `request-local foreground blocking hides only that surface`() = runTest {
+    var suspended = false
+    val request = PrototypeRequest(isSuspended = { suspended })
+    assertTrue(host.show(request))
+    suspended = true
+    assertTrue(host.relayout())
+    assertFalse(host.isShowing)
+    assertFalse(host.show(request))
+    suspended = false
+    assertTrue(host.show(request))
+    suspended = true
+    assertTrue(host.relayout())
+    assertFalse(host.isShowing)
   }
 
   @Test
@@ -680,7 +828,8 @@ class PrototypeHostTest {
 
   @Test
   fun `retryable update failure and normal dismiss do not report a lost window`() = runTest {
-    host.show()
+    host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f)))
+    density = 3f
     manager.failUpdate = true
     assertFalse(host.relayout())
     assertTrue(host.isShowing)
@@ -718,6 +867,41 @@ class PrototypeHostTest {
     assertEquals(0, manager.updated.size)
     assertEquals(0, manager.removals)
   }
+
+  @Test
+  fun `opaque fullscreen opacity changes update the window format only when opacity crosses full`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true)))
+      assertEquals(PixelFormat.OPAQUE, manager.added.single().format)
+      assertEquals(0, manager.updated.size)
+
+      host.setOpacity(90)
+      assertEquals(1, manager.updated.size)
+      assertEquals(PixelFormat.TRANSLUCENT, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(PixelFormat.OPAQUE, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
+
+  @Test
+  fun `translucent fullscreen opacity changes apply content without updating the window`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true, opacityPercent = 90)))
+      assertEquals(PixelFormat.TRANSLUCENT, manager.added.single().format)
+
+      host.setOpacity(80)
+      host.setOpacity(0)
+      host.setOpacity(90)
+      assertEquals(0, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
 
   @Test
   fun `opacity rejects invalid requests and setter values`() = runTest {
@@ -1054,6 +1238,27 @@ class PrototypeHostTest {
     )
 
   @Test
+  fun `stack Back takes key focus without IME focus and releases it at root`() = runTest {
+    var backs = 0
+    var dismissals = 0
+    host.show(PrototypeRequest(onHostDismiss = { dismissals++ }, onHostBack = { backs++ }))
+    val view = manager.view!!
+    assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertTrue(host.setStackBackEnabled(true))
+    assertSame(view, manager.view)
+    assertEquals(0, manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE)
+    assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+    assertTrue(manager.updated.last().flags and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+    assertEquals(0, backs)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(1, backs)
+    assertEquals(0, dismissals)
+    assertTrue(host.setStackBackEnabled(false))
+    assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+  }
+
+  @Test
   fun `back on a focusable prototype dismisses once on key up and swallows the key`() = runTest {
     var dismissals = 0
     host.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
@@ -1139,6 +1344,7 @@ class PrototypeHostTest {
     DefaultPrototypeHost(
       RuntimeEnvironment.getApplication(),
       manager,
+      isViewAttached = manager::isViewAttached,
       sdkInt = sdk,
       mainThread = main,
       settleTimer = timer,
@@ -1147,6 +1353,24 @@ class PrototypeHostTest {
       backScope = CoroutineScope(Dispatchers.Unconfined),
       backRegistrarFactory = { registrar },
     )
+
+  @Test
+  fun `on API 33 stack Back alone registers the callback and text focus remains independent`() =
+    runTest {
+      val api33 = hostOnApi(33)
+      var backs = 0
+      assertTrue(api33.show(PrototypeRequest(onHostBack = { backs++ })))
+      assertTrue(registrar.calls.isEmpty())
+      assertTrue(api33.setStackBackEnabled(true))
+      assertEquals(listOf("register"), registrar.calls)
+      registrar.callback!!()
+      assertEquals(1, backs)
+      assertTrue(api33.setTextFieldVisible(true))
+      assertTrue(api33.setStackBackEnabled(false))
+      assertEquals(listOf("register"), registrar.calls)
+      assertTrue(api33.setTextFieldVisible(false))
+      assertEquals(listOf("register", "unregister"), registrar.calls)
+    }
 
   @Test
   fun `on API 33 the back callback follows focusability and both back routes dismiss once`() =

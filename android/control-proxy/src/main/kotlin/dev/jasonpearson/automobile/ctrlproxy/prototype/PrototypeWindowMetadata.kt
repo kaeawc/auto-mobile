@@ -14,6 +14,18 @@ import dev.jasonpearson.automobile.protocol.PrototypeStyle
  */
 const val PROTOTYPE_WINDOW_TITLE = "AutoMobile Prototype"
 
+/** Surface-specific title; direct host callers retain the legacy title. */
+fun prototypeWindowTitle(surfaceId: String?): String =
+  if (surfaceId == null) PROTOTYPE_WINDOW_TITLE else "$PROTOTYPE_WINDOW_TITLE:$surfaceId"
+
+/** The complete nonempty surface id after the title prefix, including any additional colons. */
+fun prototypeIdOfTitle(title: CharSequence?): String? {
+  val text = title?.toString() ?: return null
+  val prefix = "$PROTOTYPE_WINDOW_TITLE:"
+  return if (text.startsWith(prefix)) text.substring(prefix.length).takeIf { it.isNotEmpty() }
+  else null
+}
+
 /**
  * What the hierarchy capture says about how much of the app the active prototype hides
  * (`prototype_window_metadata_v1`). [placement] is `fullscreen`, `sheet` or `floating`. [opaque] is
@@ -132,7 +144,8 @@ fun isPrototypeWindowType(windowType: Int): Boolean =
  * and package) and from SystemUI's type-3 windows (shade, status bar).
  */
 fun hasPrototypeTitle(windowType: Int, title: CharSequence?): Boolean =
-  isPrototypeWindowType(windowType) && title?.toString() == PROTOTYPE_WINDOW_TITLE
+  isPrototypeWindowType(windowType) &&
+    (title?.toString() == PROTOTYPE_WINDOW_TITLE || prototypeIdOfTitle(title) != null)
 
 /**
  * Whether a captured accessibility window is the prototype: a window of either prototype layer that
@@ -146,3 +159,21 @@ fun isPrototypeWindow(
   ownPackage: String?,
 ): Boolean =
   hasPrototypeTitle(windowType, title) && ownPackage != null && windowPackage == ownPackage
+
+/** Reads roots only for titled candidates; any unreadable candidate prevents an absence claim. */
+internal fun <W> prototypeWindowOnScreen(
+  windows: List<W>?,
+  hasTitle: (W) -> Boolean,
+  rootPackage: (W) -> String?,
+  ownPackage: String,
+): Boolean? {
+  if (windows == null) return null
+  var unreadable = false
+  for (window in windows) {
+    if (!hasTitle(window)) continue
+    val packageName = rootPackage(window)
+    if (packageName == ownPackage) return true
+    if (packageName == null) unreadable = true
+  }
+  return if (unreadable) null else false
+}

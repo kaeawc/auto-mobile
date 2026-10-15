@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../features/prototype/prototypeHidden";
 import type { PanelFingerprint } from "./DisplayPanel";
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
@@ -156,6 +157,7 @@ export interface ViewHierarchyResult {
    * is not in front (Android, #10261). Absent otherwise and from older APKs.
    */
   prototypeSuspended?: boolean;
+  prototypeHiddenReason?: PrototypeHiddenReason;
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }
@@ -237,6 +239,8 @@ export interface ViewHierarchyWindowInfo {
    * bounds whatever it paints (#10715).
    */
   prototypePlacement?: PrototypePlacement;
+  /** Identifies which prototype the window draws when several are showing. */
+  prototypeId?: string;
   /**
    * Whether that prototype's rendered surface is fully opaque (window opacity 100 and an opaque
    * root or scrim). Absent when unknown or from an older APK.

@@ -5,6 +5,7 @@ import {
   type MultiDeviceAllocationTicket,
   type MultiDeviceAllocationOutcome,
 } from "./multiDeviceAllocation";
+import { ForeignClaims } from "./foreignClaims";
 import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
@@ -1022,6 +1023,7 @@ export class DevicePool {
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
   private readonly multiDeviceAllocations = this.createMultiDeviceAllocationQueue();
+  private readonly foreignClaims = this.createForeignClaims();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -1235,15 +1237,8 @@ export class DevicePool {
   }>();
   private rehydrationReservationsStopped = false;
   private readonly intentionallyCancelledRecoverySessions = new WeakSet<Session>();
-  /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
-  private readonly loggedForeignDeviceOwners = new Map<string, number>();
   /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
   private readonly claimedDeviceIds = new Map<string, ForeignDeviceOwnership>();
-  /** `${platform}:${deviceId}` -> the latest foreign-claim read, shared within its max age. */
-  private readonly foreignClaimSnapshots = new Map<
-    string,
-    { readAt: number; verdict: Promise<{ ownerPid: number | undefined; unreadable: boolean }> }
-  >();
 
   constructor({
     env,
@@ -1480,6 +1475,24 @@ export class DevicePool {
       criteriaMatcher: {
         formatCriteriaSummary: (criteria) => this.criteriaMatcher.formatCriteriaSummary(criteria),
       },
+    });
+  }
+
+  private createForeignClaims(): ForeignClaims {
+    // Field initialization precedes dependency setup; defer reads until claims use.
+    const pool = this;
+    return new ForeignClaims({
+      get foreignDeviceOwnership() {
+        return pool.foreignDeviceOwnership;
+      },
+      get iosForeignDeviceOwnership() {
+        return pool.iosForeignDeviceOwnership;
+      },
+      get timer() {
+        return pool.timer;
+      },
+      getDevice: (deviceId) => this.devices.get(deviceId),
+      getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
     });
   }
 
@@ -5967,17 +5980,12 @@ export class DevicePool {
 
   /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
   private foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {
-    if (platform === "android") {
-      return this.foreignDeviceOwnership;
-    }
-    return platform === "ios" ? this.iosForeignDeviceOwnership : undefined;
+    return this.foreignClaims.foreignOwnershipFor(platform);
   }
 
   /** Whether allocation for `platform` (either, when unset) must honour other daemons' claims. */
   private tracksForeignOwnership(platform?: Platform): boolean {
-    return platform === undefined
-      ? this.foreignDeviceOwnership !== undefined || this.iosForeignDeviceOwnership !== undefined
-      : this.foreignOwnershipFor(platform) !== undefined;
+    return this.foreignClaims.tracksForeignOwnership(platform);
   }
 
   /**
@@ -5996,33 +6004,7 @@ export class DevicePool {
     remedy?: string,
     maxAgeMs = 0,
   ): Promise<void> {
-    const ownership = this.foreignOwnershipFor(platform);
-    if (!ownership || this.devices.get(deviceId)?.sessionId) {
-      return;
-    }
-    const key = `${platform}:${deviceId}`;
-    const cached = this.foreignClaimSnapshots.get(key);
-    const snapshot =
-      cached && this.timer.now() - cached.readAt < maxAgeMs
-        ? cached
-        : { readAt: this.timer.now(), verdict: this.readForeignClaim(ownership, deviceId) };
-    if (snapshot !== cached) {
-      this.foreignClaimSnapshots.set(key, snapshot);
-      // A failed read is not a verdict: the next call reads again.
-      void snapshot.verdict.catch((error: unknown) => {
-        // The awaiting caller surfaces the error; here it only drops the unusable snapshot.
-        logger.debug(
-          `[DevicePool] foreign-claim read of ${deviceId} failed: ${errorMessage(error)}`,
-        );
-        if (this.foreignClaimSnapshots.get(key) === snapshot) {
-          this.foreignClaimSnapshots.delete(key);
-        }
-      });
-    }
-    const { ownerPid, unreadable } = await snapshot.verdict;
-    if (ownerPid !== undefined || unreadable) {
-      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
-    }
+    return this.foreignClaims.assertNotClaimedByForeignDaemon(deviceId, platform, remedy, maxAgeMs);
   }
 
   /** Who else holds `deviceId` right now, after asking an idle lease-only peer to let go. */
@@ -6030,16 +6012,7 @@ export class DevicePool {
     ownership: ForeignDeviceOwnership,
     deviceId: string,
   ): Promise<{ ownerPid: number | undefined; unreadable: boolean }> {
-    await ownership.refresh([deviceId]);
-    if (ownership.foreignOwnerPid(deviceId) !== undefined) {
-      // A peer that only holds an idle CtrlProxy forwarding lease is asked to give it up before
-      // the device is refused; it stays the owner when it declines (#11349).
-      await ownership.relinquishIdleLease?.(deviceId);
-    }
-    return {
-      ownerPid: ownership.foreignOwnerPid(deviceId),
-      unreadable: ownership.foreignClaimUnreadable?.(deviceId) === true,
-    };
+    return this.foreignClaims.readForeignClaim(ownership, deviceId);
   }
 
   /**
@@ -6189,9 +6162,7 @@ export class DevicePool {
   }
 
   private countForeignDrivenDevices(platform?: Platform): number {
-    return this.getDevicesByPlatform(platform).filter((device) =>
-      this.isDrivenByForeignDaemon(device),
-    ).length;
+    return this.foreignClaims.countForeignDrivenDevices(platform);
   }
 
   private recordCriteriaAssignment(
@@ -10470,23 +10441,7 @@ export class DevicePool {
    * holds no session on it, so multi-device allocation must not hand it to a plan.
    */
   private isDrivenByForeignDaemon(device: PooledDevice): boolean {
-    if (device.sessionId !== null) {
-      return false;
-    }
-    const ownership = this.foreignOwnershipFor(device.platform);
-    const ownerPid = ownership?.foreignOwnerPid(device.id);
-    if (ownerPid === undefined) {
-      this.loggedForeignDeviceOwners.delete(device.id);
-      // An unreadable claim names no owner but is not free either.
-      return ownership?.foreignClaimUnreadable?.(device.id) === true;
-    }
-    if (this.loggedForeignDeviceOwners.get(device.id) !== ownerPid) {
-      this.loggedForeignDeviceOwners.set(device.id, ownerPid);
-      logger.info(
-        `[DevicePool] Not allocating ${device.id}: another AutoMobile process (PID ${ownerPid}) drives it`,
-      );
-    }
-    return true;
+    return this.foreignClaims.isDrivenByForeignDaemon(device);
   }
 
   /**

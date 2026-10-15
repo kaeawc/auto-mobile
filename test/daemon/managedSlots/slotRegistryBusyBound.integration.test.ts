@@ -84,6 +84,7 @@ describe("registry busy bound (real SQLite)", () => {
       ).toEqual([
         "2026_10_12_004_free_device_deletion",
         "2026_10_13_005_free_device_deletion_failed_deletes",
+        "2026_10_15_006_session_broker",
       ]);
       peer.exec("COMMIT");
       locked = false;

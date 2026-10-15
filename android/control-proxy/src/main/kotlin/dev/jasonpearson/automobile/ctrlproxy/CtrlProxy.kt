@@ -5066,7 +5066,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             override fun onCompleted(gestureDescription: GestureDescription?) {
               // Keep extraction, perf closure and result in callback order on the gesture thread;
               // quiescence polling yields that thread instead of blocking its continuation queue.
-              serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+              serviceScope.launch(
+                gestureHandler.asCoroutineDispatcher().immediate +
+                  RequestIdContext(requestId) +
+                  PerfRequestContext(requestId),
+              ) {
                 gestureCompletionMutex.withLock {
                   lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)
                 }
@@ -5074,7 +5078,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
-              serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+              serviceScope.launch(
+                gestureHandler.asCoroutineDispatcher().immediate +
+                  RequestIdContext(requestId) +
+                  PerfRequestContext(requestId),
+              ) {
                 gestureCompletionMutex.withLock { lifecycle.cancelled(onResult) }
               }
             }
@@ -5284,7 +5292,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
                 onFinished = { success, error ->
                   if (success) {
-                    serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+                    serviceScope.launch(
+                      gestureHandler.asCoroutineDispatcher().immediate +
+                        RequestIdContext(requestId) +
+                        PerfRequestContext(requestId),
+                    ) {
                       gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
                     }
                   } else {

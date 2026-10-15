@@ -31,9 +31,22 @@ class TapGestureCompletionWiringTest {
   @Test
   fun `tap settles off main and queues hierarchy before tap result`() {
     val dispatchBody = functionBody("private fun dispatchGestureWithResult(")
+    val compactBody = dispatchBody.filterNot { it.isWhitespace() }
+    val correlatedLaunch =
+      Regex(
+        Regex.escape(
+          "serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate+" +
+            "RequestIdContext(requestId)+PerfRequestContext(requestId)",
+        ) + ",?\\)",
+      )
     assertTrue(
-      "completion must remain on the gesture handler while polling suspends",
-      "serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate)" in dispatchBody,
+      "completion must remain on the gesture handler and carry request correlation",
+      correlatedLaunch.containsMatchIn(compactBody),
+    )
+    assertEquals(
+      "onCompleted and onCancelled must both stay on the gesture handler and carry request correlation",
+      2,
+      correlatedLaunch.findAll(compactBody).count(),
     )
     assertEquals(
       "completed and cancelled callbacks must share FIFO serialization while settling suspends",

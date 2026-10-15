@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import {
+  DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,
   TerminalSessionError,
   UnissuedSessionError,
@@ -573,6 +574,204 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     await seedRow(`device-restart:${DEVICE}`, 300_000);
     timer.setCurrentTime(180_000);
     expect(await refusal(restartedDaemon())).toBeUndefined();
+  });
+
+  for (const decision of ["initial claim", "lost claim retry"] as const) {
+    for (const offset of [-1, 0, 1]) {
+      test(`${decision} checks the restart window at end ${offset >= 0 ? "+" : ""}${offset} ms`, async () => {
+        await seedRow(`device-restart:${DEVICE}`, 300_000);
+        const windowEnd = 1_000 + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+        timer.setCurrentTime(windowEnd - 2);
+        const manager = restartedDaemon();
+        let activityAt: number | undefined;
+        let claims = 0;
+        const recordActivity = repo.recordRestartRecoveryActivity.bind(repo);
+        repo.recordRestartRecoveryActivity = async (...args) => {
+          activityAt = timer.now();
+          if (decision === "initial claim") {
+            timer.setCurrentTime(windowEnd + offset);
+          }
+          await recordActivity(...args);
+        };
+        const claim = repo.claimRecoverableSession.bind(repo);
+        repo.claimRecoverableSession = async (...args) => {
+          claims++;
+          if (decision === "lost claim retry" && claims === 1) {
+            timer.setCurrentTime(windowEnd + offset);
+            return undefined;
+          }
+          return await claim(...args);
+        };
+        const targets: Array<SessionRecoveryTarget | undefined> = [];
+        const pool: SessionDeviceAssigner = {
+          async assignDeviceToSession(id, platform, target) {
+            targets.push(target);
+            await manager.createSession(
+              id,
+              DEVICE,
+              platform ?? "android",
+              undefined,
+              undefined,
+              target?.stableDeviceId,
+              target?.liveness,
+            );
+            return DEVICE;
+          },
+        };
+        const result = manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+        if (offset < 0) {
+          await expect(result).resolves.toMatchObject({ assignedDevice: DEVICE });
+          expect(targets).toHaveLength(1);
+          expect(targets[0]).toMatchObject({
+            deviceId: DEVICE,
+            stableDeviceId: "Pixel_8_API_35",
+            restartRecoveryDeadlineMs: windowEnd,
+          });
+        } else {
+          await expect(result).rejects.toMatchObject({
+            release: { releaseReason: "restart-recovery-timeout", terminal: true },
+          });
+          expect(targets).toEqual([]);
+          expect(await repo.getSession(SESSION)).toMatchObject({
+            status: "expired",
+            release_reason: "restart-recovery-timeout",
+          });
+        }
+        expect(activityAt).toBe(windowEnd - 2);
+        expect(claims).toBe((decision === "lost claim retry" ? 1 : 0) + (offset < 0 ? 1 : 0));
+        manager.stopCleanupTimer();
+      });
+    }
+  }
+
+  for (const offset of [-1, 0, 1]) {
+    test(`startup lost claim retry checks the restart window at end ${offset >= 0 ? "+" : ""}${offset} ms`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, 300_000);
+      const windowEnd = 1_000 + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+      timer.setCurrentTime(windowEnd - 2);
+      const manager = restartedDaemon();
+      let claims = 0;
+      const claim = repo.claimRecoverableSession.bind(repo);
+      repo.claimRecoverableSession = async (...args) => {
+        claims++;
+        if (claims === 1) {
+          timer.setCurrentTime(windowEnd + offset);
+          return undefined;
+        }
+        return await claim(...args);
+      };
+      const targets: Array<SessionRecoveryTarget | undefined> = [];
+      const result = await manager.rehydratePersistedSessions({
+        async assignDeviceToSession(id, platform, target) {
+          targets.push(target);
+          await manager.createSession(
+            id,
+            DEVICE,
+            platform ?? "android",
+            undefined,
+            undefined,
+            target?.stableDeviceId,
+            target?.liveness,
+            target?.initialOwnership,
+          );
+          return DEVICE;
+        },
+      });
+      if (offset < 0) {
+        expect(result.rehydrated).toEqual([SESSION]);
+        expect(targets).toHaveLength(1);
+        expect(targets[0]).toMatchObject({ deviceId: DEVICE, initialOwnership: "awaiting-owner" });
+      } else {
+        expect(result.rehydrated).toEqual([]);
+        expect(result.terminalized).toEqual([
+          { sessionUuid: SESSION, reason: "restart-recovery-timeout" },
+        ]);
+        expect(targets).toEqual([]);
+        expect(await repo.getSession(SESSION)).toMatchObject({
+          status: "expired",
+          release_reason: "restart-recovery-timeout",
+        });
+      }
+      expect(claims).toBe(offset < 0 ? 2 : 1);
+      manager.stopCleanupTimer();
+    });
+  }
+
+  test("a recovery claimed before the window end keeps its target when the claim returns late", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    const windowEnd = 1_000 + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+    timer.setCurrentTime(windowEnd - 1);
+    const manager = restartedDaemon();
+    const claim = repo.claimRecoverableSession.bind(repo);
+    repo.claimRecoverableSession = async (...args) => {
+      const generation = await claim(...args);
+      expect(generation).toBeDefined();
+      timer.setCurrentTime(windowEnd);
+      return generation;
+    };
+    const targets: Array<SessionRecoveryTarget | undefined> = [];
+    const pool: SessionDeviceAssigner = {
+      async assignDeviceToSession(id, platform, target) {
+        targets.push(target);
+        await manager.createSession(
+          id,
+          DEVICE,
+          platform ?? "android",
+          undefined,
+          undefined,
+          target?.stableDeviceId,
+          target?.liveness,
+        );
+        return DEVICE;
+      },
+    };
+    await expect(
+      manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+    ).resolves.toMatchObject({ assignedDevice: DEVICE });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      deviceId: DEVICE,
+      stableDeviceId: "Pixel_8_API_35",
+      restartRecoveryDeadlineMs: windowEnd,
+    });
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    manager.stopCleanupTimer();
+  });
+
+  test("a live peer's row stays exempt when the window lapses between admission and claim", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    const windowEnd = 1_000 + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+    timer.setCurrentTime(windowEnd - 1);
+    const manager = restartedDaemon();
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    manager.onRestartRecoveryActivity(() => timer.setCurrentTime(windowEnd));
+    let assigned = false;
+    await expect(
+      manager.getOrCreateSession(
+        SESSION,
+        {
+          async assignDeviceToSession() {
+            assigned = true;
+            return DEVICE;
+          },
+        },
+        "android",
+        undefined,
+        true,
+      ),
+    ).rejects.toMatchObject({ code: "device_owned_by_other_daemon" });
+    expect(assigned).toBe(false);
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${DEVICE}`,
+      daemon_session_id: "dead-daemon",
+      stable_identity_generation: 0,
+    });
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    manager.stopCleanupTimer();
   });
 
   test("a live peer's lapsed recovery row is neither refused for lapse nor written", async () => {

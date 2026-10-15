@@ -10,7 +10,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
   comments, commit messages, and assistant chat responses — where a clickable
   link genuinely aids navigation for the reader. Do NOT require links in
   checked-in repository content: neither source code comments (bare `#NNNN` is
-  the established convention — 625 references in `src/`, zero linked) nor Markdown
+  the established convention — `src/` references are bare, never linked) nor Markdown
   documentation files (under `docs/` and elsewhere), where bare `#NNNN` is
   likewise fine. Forcing explicit links into committed files renders as noise in
   an editor and makes the touched file the only inconsistent one. Automated
@@ -81,10 +81,12 @@ gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 diffing warnings does not satisfy the gate. Before asking for a merge, fetch
 `origin/main`, confirm the branch contains it, and re-run local gates.
 
-Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
-runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
-not treat repeated cross-platform failures as a flake; refresh against main and
-identify the shared failure first.
+A 100ms unit timing overage on a loaded Linux runner may be rerun rather than
+“fixed” when its isolated recheck is clean. Whether a given failure is a known
+flake is decided by `scripts/ci/known-flakes.txt` (via
+`bash scripts/ci/classify-failure.sh <run-id>`), not by this file. Do not treat
+repeated cross-platform failures as a flake; refresh against main and identify
+the shared failure first.
 
 `turbo` is a local dependency and may not be on the shell `PATH`. Do not run
 bare `turbo ...`; use the `package.json` scripts such as `bun run
@@ -102,24 +104,12 @@ shellcheck scripts/**/*.sh  # Lint shell scripts
 
 # MCP Tools Reference
 
-This is a high-level summary of core MCP tools exposed by the server.
-
-## Observation
-
-- `observe` - Capture screen state and view hierarchy
-
-## Interaction
-
-- `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
-- `inputText`, `clearText`, `pressButton`, `pressKey`
-
-## App Management
-
-- `launchApp`, `terminateApp`, `installApp`
-
-## Device Management
-
-- `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
+The tool list is generated, not hand-copied: `schemas/tool-definitions.json` is the
+authoritative set of MCP tool names and schemas (regenerate it with
+`bash scripts/update-tool-definitions.sh`). Tool families: observation (`observe`),
+interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
+(launch/terminate/install/uninstall), and device management (list/provision/kill
+devices, set the active device).
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 
@@ -181,7 +171,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).
-- The `green-main` ruleset requires 22 status checks (list them with
+- The `green-main` ruleset requires many more status checks than the roll-ups (list them with
   `gh api repos/kaeawc/auto-mobile/rulesets` and `rulesets/<id>`); the roll-up
   gates (`IDE Plugin`, `iOS Build`, `Shell Tests`) are only stable names over
   matrix or skipped jobs, and a red advisory (non-ruleset) job does not by itself
@@ -228,14 +218,14 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ## iOS/Swift CI
 
 - Run `scripts/prepush-ios.sh` before pushing any Swift change. It enforces the
-  pinned SwiftFormat 0.54.6, SwiftLint's error-severity rules, and the
+  SwiftFormat at the version pinned in
+  `scripts/swiftformat/swiftformat_version.sh`, SwiftLint's error-severity rules, and the
   simulator-free XCTestRunner package subset.
 - `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
   on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Classify it from
-  the exact job log before rerunning or changing code. The 2026-09-07–13
-  signatures were: CtrlProxy UI-test action timed out after five minutes;
-  CtrlProxy still running after forced teardown; video recording's `simctl list`
-  state probe timed out at 250ms; and the hierarchy UI test exceeded 90 seconds.
+  the exact job log before rerunning or changing code
+  (`bash scripts/ci/classify-failure.sh <run-id>`); known simulator-lane flake
+  signatures live only in `scripts/ci/known-flakes.txt`.
 - A simulator instance is owned by one CI job. Keep its explicit UDID serially
   within that job; never share it between parallel runners or jobs.
 - Before merging, refresh CI after updating to the current main head. A stale

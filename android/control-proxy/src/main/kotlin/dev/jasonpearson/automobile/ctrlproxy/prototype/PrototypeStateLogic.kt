@@ -15,7 +15,10 @@ import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
  * for state-changing actions. The validator guarantees exactly one form per condition; a state key
  * of the wrong type simply fails numeric comparisons instead of throwing.
  */
-internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Boolean {
+internal fun PrototypeCondition.holds(
+  state: Map<String, PrototypeScalar>,
+  validity: Map<String, Boolean> = emptyMap(),
+): Boolean {
   val stored = key?.let { state[it] }
   val number = (stored as? PrototypeScalar.Numeric)?.value
   val all = all
@@ -23,14 +26,16 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
   val not = not
   val gt = gt
   val lt = lt
+  val valid = valid
   return when {
+    valid != null -> valid.keys().all { validity[it] == true }
     key != null && equals != null -> stored.sameValue(equals)
     key != null && notEquals != null -> !stored.sameValue(notEquals)
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
-    all != null -> all.all { it.holds(state) }
-    any != null -> any.any { it.holds(state) }
-    not != null -> !not.holds(state)
+    all != null -> all.all { it.holds(state, validity) }
+    any != null -> any.any { it.holds(state, validity) }
+    not != null -> !not.holds(state, validity)
     else -> false
   }
 }
@@ -92,10 +97,11 @@ internal fun resolvePrototypeStyle(
   base: PrototypeStyle?,
   styleWhen: List<PrototypeStyleWhen>?,
   state: Map<String, PrototypeScalar>,
+  validity: Map<String, Boolean> = emptyMap(),
 ): PrototypeStyle {
   var resolved = base ?: PrototypeStyle()
   for (entry in styleWhen.orEmpty()) {
-    if (entry.`when`.holds(state)) resolved = resolved.mergedOver(entry.style)
+    if (entry.`when`.holds(state, validity)) resolved = resolved.mergedOver(entry.style)
   }
   return resolved
 }
@@ -124,6 +130,7 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     alignment = prototype.alignment ?: alignment,
     arrangement = prototype.arrangement ?: arrangement,
     spacing = prototype.spacing ?: spacing,
+    runSpacing = prototype.runSpacing ?: runSpacing,
     textSize = prototype.textSize ?: textSize,
     fontWeight = prototype.fontWeight ?: fontWeight,
     color = prototype.color ?: color,

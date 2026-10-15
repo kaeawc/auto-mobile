@@ -246,7 +246,7 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
     if [[ "${detekt_config_changed}" == "false" ]]; then
       detekt_tasks+=("${module_path}:detekt")
     fi
-    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
+    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-library"\)' "${module_dir}/build.gradle.kts"; then
       compile_tasks+=("${module_path}:compileDebugKotlin")
     else
       compile_tasks+=("${module_path}:compileKotlin")

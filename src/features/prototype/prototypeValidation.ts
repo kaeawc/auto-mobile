@@ -1,3 +1,4 @@
+import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
@@ -30,8 +31,9 @@ interface Rule {
   atLeastOne?: boolean;
   item?: Rule;
   options?: Rule[];
-  values?: string[];
-  fields?: Record<string, { rule: Rule; optional: boolean }>;
+  values?: (string | boolean)[];
+  maxEntries?: number;
+  fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }
 export interface PrototypeValidationError {
@@ -187,6 +189,40 @@ function visitTagged(
   }
   return walk(data, variant, path, context, depth);
 }
+/** Text's two content forms and its span count are pinned by the shared contract. */
+function textNodeConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (rule === definitions.node.variants?.text) {
+    const text = Object.hasOwn(data, "text");
+    const spans = Object.hasOwn(data, "spans");
+    if (text === spans) {
+      return fail(
+        keyPath(path, spans ? "spans" : "text"),
+        spans ? "text and spans cannot both be set" : "text node needs text or spans",
+      );
+    }
+    if (Array.isArray(data.spans) && data.spans.length > contract.limits.MAX_PROTOTYPE_TEXT_SPANS) {
+      return fail(keyPath(path, "spans"), "Text span limit exceeded");
+    }
+  }
+  return undefined;
+}
+function searchBarConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (
+    data.type === "searchBar" &&
+    Object.hasOwn(data, "child") &&
+    !Object.hasOwn(data, "activeKey")
+  ) {
+    return fail(keyPath(path, "child"), "Search bar child requires activeKey");
+  }
+  return undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -198,7 +234,15 @@ function visitObject(
   if (!data) {
     return fail(path, "Expected object");
   }
+  const textError = textNodeConstraint(data, rule, path);
+  if (textError) {
+    return textError;
+  }
   const fields = rule.fields ?? {};
+  const searchBarError = searchBarConstraint(data, path);
+  if (searchBarError) {
+    return searchBarError;
+  }
   const keys = [...new Set([...Object.keys(data), ...Object.keys(fields)])].sort();
   for (const key of keys) {
     const field = Object.hasOwn(fields, key) ? fields[key] : undefined;
@@ -315,6 +359,59 @@ function visitMap(
   }
   return undefined;
 }
+function visitScreenMap(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const screens = object(value);
+  if (!screens) {
+    return fail(path, "Expected object");
+  }
+  const names = Object.keys(screens).sort();
+  if (names.length < 1 || names.length > contract.limits.MAX_PROTOTYPE_STACK_SCREENS) {
+    return fail(path, "Screen count out of range");
+  }
+  for (const name of names) {
+    const at = `${path}[${JSON.stringify(name)}]`;
+    if (!name.length) {
+      return fail(at, "Empty screen name");
+    }
+    const error = walk(screens[name], rule.item!, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+function visitRecord(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const data = object(value);
+  if (!data) {
+    return fail(path, "Expected object");
+  }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Record entry limit exceeded");
+  }
+  for (const [key, child] of Object.entries(data)) {
+    const at = keyPath(path, key);
+    if (key.length === 0) {
+      return fail(at, "Invalid context name");
+    }
+    const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
 function numberValid(value: unknown, rule: Rule): boolean {
   return (
     typeof value === "number" &&
@@ -328,19 +425,26 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
   string: (value, rule) =>
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
-    (!rule.nonblank || value.trim().length > 0),
+    (!rule.nonblank || value.trim().length > 0) &&
+    value.length <= (rule.max ?? Infinity),
   pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
   color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
   number: numberValid,
+  true: (value) => value === true,
   boolean: (value) => typeof value === "boolean",
   scalar: (value) =>
     typeof value === "string" ||
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value)),
-  enum: (value, rule) => typeof value === "string" && (rule.values ?? []).includes(value),
-  json: (value, rule) => jsonCost(value) <= (rule.maxBytes ?? Infinity),
+  enum: (value, rule) =>
+    (typeof value === "string" || typeof value === "boolean") &&
+    (rule.values ?? []).includes(value),
+  json: (value, rule) => {
+    const cost = jsonCost(value);
+    return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
+  },
 };
 // Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
 // change payload acceptance between JavaScript and JVM JSON decoders.
@@ -470,6 +574,8 @@ function walk(
     object: visitObject,
     array: visitArray,
     map: visitMap,
+    screenMap: visitScreenMap,
+    record: visitRecord,
     choice: visitChoice,
   };
   const handler = handlers[rule.kind];
@@ -479,6 +585,54 @@ function walk(
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
     : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
+}
+function stackErrors(context: Context): PrototypeValidationError | undefined {
+  const stacks = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.type !== "stack" || typeof value.id !== "string") {
+      continue;
+    }
+    if (stacks.has(value.id)) {
+      return fail(`${path}.id`, "Duplicate stack id");
+    }
+    const screens = object(value.screens) ?? {};
+    if (typeof value.start !== "string" || !Object.hasOwn(screens, value.start)) {
+      return fail(`${path}.start`, "Unknown start screen");
+    }
+    stacks.set(value.id, screens);
+  }
+  return stackActionErrors(context.actions, stacks);
+}
+function stackActionErrors(
+  actions: Located[],
+  stacks: Map<string, Record<string, unknown>>,
+): PrototypeValidationError | undefined {
+  for (const { value, path } of actions) {
+    if (typeof value.stack !== "string") {
+      continue;
+    }
+    const screens = stacks.get(value.stack);
+    if (!screens) {
+      return fail(`${path}.stack`, "Unknown stack id");
+    }
+    if (typeof value.screen === "string" && !Object.hasOwn(screens, value.screen)) {
+      return fail(`${path}.screen`, "Unknown stack screen");
+    }
+  }
+  return undefined;
+}
+/** Context uses the same pager-id set as setPage; only structurally valid emits carry context. */
+function emitContextPagerError(
+  { value, path }: Located,
+  pagers: ReadonlySet<string>,
+): PrototypeValidationError | undefined {
+  for (const [name, binding] of Object.entries(object(value.context) ?? {})) {
+    const page = object(binding)?.page;
+    if (typeof page === "string" && !pagers.has(page)) {
+      return fail(keyPath(`${path}.context`, name), "Unknown pager id");
+    }
+  }
+  return undefined;
 }
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
@@ -490,10 +644,27 @@ function pagerErrors(context: Context): PrototypeValidationError | undefined {
       return fail(`${path}.id`, "Duplicate pager id");
     }
     pagers.add(value.id);
+    if (
+      value.axis === "vertical" &&
+      context.nodes.some(
+        ({ value: ancestor, path: ancestorPath }) =>
+          ancestor.type === "scroll" &&
+          ancestor.axis !== "horizontal" &&
+          path.startsWith(`${ancestorPath}.`),
+      )
+    ) {
+      return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
+    }
   }
   for (const { value, path } of [...context.nodes, ...context.actions]) {
     if (typeof value.pager === "string" && !pagers.has(value.pager)) {
       return fail(`${path}.pager`, "Unknown pager id");
+    }
+  }
+  for (const action of context.actions) {
+    const error = emitContextPagerError(action, pagers);
+    if (error) {
+      return error;
     }
   }
   return undefined;
@@ -504,7 +675,12 @@ function radioGroupErrors(
   path: string,
   stored: unknown,
 ): PrototypeValidationError | undefined {
-  const name = value.type === "segmentedButton" ? "Segmented button" : "Radio group";
+  const name =
+    value.type === "select"
+      ? "Select"
+      : value.type === "segmentedButton"
+        ? "Segmented button"
+        : "Radio group";
   if (typeof stored !== "string") {
     return fail(`${path}.stateKey`, `${name} requires a string state key`);
   }
@@ -512,7 +688,10 @@ function radioGroupErrors(
   for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
     const optionValue = object(option)?.value;
     if (values.has(optionValue)) {
-      return fail(`${path}.options[${index}].value`, "Duplicate radio option value");
+      return fail(
+        `${path}.options[${index}].value`,
+        value.type === "select" ? "Duplicate select option value" : "Duplicate radio option value",
+      );
     }
     values.add(optionValue);
   }
@@ -647,14 +826,43 @@ function chipErrors(
   }
   return undefined;
 }
+/** Text field option relationships and the initial bound value; individual fields are contract-typed. */
+function textFieldErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): PrototypeValidationError | undefined {
+  const { minLines, maxLines, maxLength } = value;
+  const lineField = ["minLines", "maxLines"].find((field) => value[field] !== undefined);
+  if (value.multiline !== true && lineField !== undefined) {
+    return fail(`${path}.${lineField}`, "Requires multiline: true");
+  }
+  if (value.multiline === true && (value.secure === true || value.keyboardType === "password")) {
+    return fail(`${path}.multiline`, "Multiline text cannot be secure");
+  }
+  if (typeof minLines === "number" && typeof maxLines === "number" && minLines > maxLines) {
+    return fail(`${path}.minLines`, "minLines cannot exceed maxLines");
+  }
+  if (typeof stored === "string" && typeof maxLength === "number" && stored.length > maxLength) {
+    return fail(`${path}.stateKey`, "Text field value exceeds maxLength");
+  }
+  return undefined;
+}
 function componentBindingErrors(
   value: Record<string, unknown>,
   path: string,
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const stored = typeof value.stateKey === "string" ? state[value.stateKey] : undefined;
-  if (value.type === "textField" && typeof stored !== "string") {
+  if ((value.type === "textField" || value.type === "searchBar") && typeof stored !== "string") {
     return fail(`${path}.stateKey`, "Text field requires a string state key");
+  }
+  if (
+    value.type === "searchBar" &&
+    typeof value.activeKey === "string" &&
+    typeof state[value.activeKey] !== "boolean"
+  ) {
+    return fail(`${path}.activeKey`, "Search bar requires a boolean active key");
   }
   if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
     return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
@@ -671,6 +879,9 @@ function componentFormErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   switch (value.type) {
+    case "textField":
+      return textFieldErrors(value, path, stored);
+    case "select":
     case "radioGroup":
     case "segmentedButton":
       return radioGroupErrors(value, path, stored);
@@ -723,6 +934,7 @@ function bindingErrors(
 const MODAL_NAMES: Record<string, string | undefined> = {
   bottomSheet: "Sheet",
   dialog: "Dialog",
+  menu: "Menu",
   snackbar: "Snackbar",
 };
 function openWhenErrors(
@@ -766,7 +978,13 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
 };
 /** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
 function boundKeys(value: Record<string, unknown>): string[] {
-  const keys = [value.stateKey, value.hourKey, value.minuteKey, object(value.trailing)?.stateKey];
+  const keys = [
+    value.stateKey,
+    value.activeKey,
+    value.hourKey,
+    value.minuteKey,
+    object(value.trailing)?.stateKey,
+  ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
     ? object(value.openWhen)
     : undefined;
@@ -878,9 +1096,36 @@ function stateTypeErrors(
     bindingErrors(checked, data) ??
     listItemBindingErrors(checked, data) ??
     sheetBindingErrors(checked, data) ??
-    stateActionErrors(checked, data)
+    stateActionErrors(checked, data) ??
+    prototypeCheckErrors(checked.nodes, checked.actions, object(data.state) ?? {})
   );
 }
+/** Span belongs to the immediate grid parent, including repeat templates. */
+function gridSpanErrors(context: Context): PrototypeValidationError | undefined {
+  const parents = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.span !== undefined) {
+      const parent = parents.get(path);
+      if (parent?.type !== "grid") {
+        return fail(`${path}.span`, "span requires a direct grid parent");
+      }
+      if (
+        typeof parent.columns === "number" &&
+        typeof value.span === "number" &&
+        value.span > parent.columns
+      ) {
+        return fail(`${path}.span`, "span exceeds grid columns");
+      }
+    }
+    if (Array.isArray(value.children)) {
+      for (const index of value.children.keys()) {
+        parents.set(`${path}.children[${index}]`, value);
+      }
+    }
+  }
+  return undefined;
+}
+
 function validateValue(value: unknown): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
@@ -893,8 +1138,10 @@ function validateValue(value: unknown): PrototypeValidationResult {
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
+    gridSpanErrors(context) ??
     repeatErrors(value, repeats) ??
     pagerErrors(context) ??
+    stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };

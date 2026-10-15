@@ -1,0 +1,41 @@
+{
+  "id": "flow-grid",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "scroll",
+    "child": {
+      "type": "grid",
+      "columns": 3,
+      "style": {
+        "spacing": 8,
+        "runSpacing": 16
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "span": 2
+        },
+        {
+          "type": "text",
+          "text": "Hello",
+          "span": 2
+        },
+        {
+          "type": "column",
+          "span": 3,
+          "children": [
+            {
+              "type": "text",
+              "text": "Hello"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

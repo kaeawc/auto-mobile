@@ -1,0 +1,153 @@
+{
+  "spec": {
+    "id": "gestures",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "picked": "",
+      "liked": false
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onDoubleTap": [
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        },
+        {
+          "type": "emit",
+          "name": "gesture"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onDoubleTap"
+}

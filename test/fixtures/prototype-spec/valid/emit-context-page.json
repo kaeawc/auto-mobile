@@ -1,0 +1,29 @@
+{
+  "id": "emit-context",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "pager",
+    "id": "pages",
+    "children": [
+      {
+        "type": "text",
+        "text": "Emit",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "pick",
+            "context": {
+              "page": {
+                "page": "pages"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

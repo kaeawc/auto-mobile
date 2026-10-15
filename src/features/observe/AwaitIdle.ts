@@ -16,6 +16,8 @@ import { shellQuote } from "../../utils/shellQuote";
 
 /** Consecutive missing-frame polls allowed before ending the stability wait. */
 export const NO_FRAME_STATS_GRACE_POLLS = 10;
+/** Minimum duration of a consecutive missing-frame streak before ending the wait. */
+export const NO_FRAME_STATS_GRACE_MS = 1000;
 
 export class AwaitIdle implements AwaitIdleInterface {
   private adb: AdbExecutor;
@@ -234,9 +236,22 @@ export class AwaitIdle implements AwaitIdleInterface {
     let state = initState;
     let pollCount = 0;
     let consecutiveNoFrameData = 0;
-    const countNoFrameDataPoll = (noFrameData: boolean | undefined): number => {
-      consecutiveNoFrameData = noFrameData ? consecutiveNoFrameData + 1 : 0;
-      return consecutiveNoFrameData;
+    let noFrameDataStreakStart: number | null = null;
+    const hasExhaustedNoFrameGrace = (noFrameData: boolean | undefined): boolean => {
+      if (!noFrameData) {
+        consecutiveNoFrameData = 0;
+        noFrameDataStreakStart = null;
+        return false;
+      }
+      if (consecutiveNoFrameData === 0) {
+        noFrameDataStreakStart = this.timer.now();
+      }
+      consecutiveNoFrameData++;
+      return (
+        consecutiveNoFrameData >= NO_FRAME_STATS_GRACE_POLLS &&
+        noFrameDataStreakStart !== null &&
+        this.timer.now() - noFrameDataStreakStart >= NO_FRAME_STATS_GRACE_MS
+      );
     };
     let isStable = false;
     const deadlineMs = initState.startTime + timeoutMs;
@@ -283,7 +298,7 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.slowUiThreadCount = state.prevSlowUiThread;
         finalMetrics.frameDeadlineMissedCount = state.prevFrameDeadlineMissed;
 
-        if (countNoFrameDataPoll(checkResult.noFrameData) >= NO_FRAME_STATS_GRACE_POLLS) {
+        if (hasExhaustedNoFrameGrace(checkResult.noFrameData)) {
           logger.info(
             `[AwaitIdle] Ending UI stability wait after ${consecutiveNoFrameData} consecutive polls without valid frame stats for ${packageName}`,
           );

@@ -30,6 +30,7 @@ detekt = "2.0.0-alpha.6"
 
 # AndroidX versions
 androidx-core = "1.19.1"
+androidx-window = "1.5.0"
 androidx-activity-compose = "1.13.0"
 androidx-compose-bom = "2026.09.00"
 androidx-lifecycle = "2.11.0"
@@ -130,6 +131,7 @@ snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
+androidx-window = { module = "androidx.window:window", version.ref = "androidx-window" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "androidx-lifecycle" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }

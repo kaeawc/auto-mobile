@@ -1,3 +1,6 @@
+// The biometric prompt needs a brief settle before verification.
+export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
+
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -615,7 +618,7 @@ export class BiometricAuth extends BaseVisualChange {
         };
       }
 
-      await this.timer.sleep(100);
+      await this.timer.sleep(BIOMETRIC_PROMPT_SETTLE_MS);
 
       const removeResult = await this.adb.executeCommand(`emu finger remove ${fingerprintId}`);
 

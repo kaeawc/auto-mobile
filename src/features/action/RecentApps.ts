@@ -1,3 +1,6 @@
+// Two reads preserve the existing recent-app verification bound.
+export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
+
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -98,7 +101,7 @@ export class RecentApps extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<ObserveResult> {
     let observation: ObserveResult | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < RECENT_APPS_VERIFY_ATTEMPTS; attempt++) {
       const minTimestamp = await awaitWhileRequestIsLive(this.adb.getDeviceTimestampMs(), signal);
       observation = await awaitWhileRequestIsLive(
         this.observeScreen.execute({

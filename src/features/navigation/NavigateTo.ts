@@ -1,3 +1,6 @@
+// Back presses need time to update the screen before the next press.
+const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
+
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -978,7 +981,7 @@ export class NavigateTo {
 
       // Small delay between presses to allow screen transitions
       throwIfAborted(signal);
-      await awaitWhileRequestIsLive(this.timer.sleep(300), signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(NAVIGATION_BACK_PRESS_SETTLE_MS), signal);
     }
 
     // Wait for target screen

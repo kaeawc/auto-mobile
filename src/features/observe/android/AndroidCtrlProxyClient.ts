@@ -1,3 +1,6 @@
+// Three attempts preserve the existing connection retry bound.
+export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
+
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
@@ -5394,7 +5397,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     let currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
     if (currentAllocation === this.localPort) {
       const backoff = fixedBackoff(50);
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= CTRL_PROXY_CONNECT_ATTEMPTS; attempt++) {
         if (currentPortIsAvailable) {
           return;
         }

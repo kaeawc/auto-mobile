@@ -1,3 +1,6 @@
+// Validation waits for the explored screen to settle.
+const EXPLORE_VALIDATION_SETTLE_MS = 500;
+
 import { createHash } from "crypto";
 import type { Element } from "../../models";
 import type { NavigationEdge, NavigationGraphService } from "./NavigationGraphManager";
@@ -479,7 +482,7 @@ export async function validateNavigation(
   setStopReason: (reason: string) => void,
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
-  await timer.sleep(500);
+  await timer.sleep(EXPLORE_VALIDATION_SETTLE_MS);
 
   const actualScreen = navigationManager.getCurrentScreen() ?? "unknown";
   const success = actualScreen === expectedEdge.to;

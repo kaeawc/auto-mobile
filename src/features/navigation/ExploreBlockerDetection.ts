@@ -1,3 +1,6 @@
+// Blocker checks wait for the UI to settle after interaction.
+const BLOCKER_DETECTION_SETTLE_MS = 1000;
+
 import type {
   BaseActionResult,
   BootedDevice,
@@ -438,7 +441,7 @@ export async function handlePermissionDialog(
       );
       return false;
     }
-    await timer.sleep(1000);
+    await timer.sleep(BLOCKER_DETECTION_SETTLE_MS);
     return true;
   }
 
@@ -486,7 +489,7 @@ async function dismissDialog(
       );
       return false;
     }
-    await timer.sleep(1000);
+    await timer.sleep(BLOCKER_DETECTION_SETTLE_MS);
     return true;
   }
 

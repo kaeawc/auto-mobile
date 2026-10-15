@@ -1,3 +1,6 @@
+// Restore polling uses a fixed half-second interval.
+const SAVED_PROTOTYPE_POLL_INTERVAL_MS = 500;
+
 import type { BootedDevice } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -169,7 +172,7 @@ export class AndroidSavedPrototypeRestoreDevice implements SavedPrototypeRestore
                 ? { client }
                 : { failure: this.unsupported() };
             }
-            await this.timer.sleep(500);
+            await this.timer.sleep(SAVED_PROTOTYPE_POLL_INTERVAL_MS);
           }
           return { failure: this.unavailable() };
         },

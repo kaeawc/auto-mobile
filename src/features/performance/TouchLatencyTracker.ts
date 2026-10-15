@@ -1,3 +1,6 @@
+// Samples are spaced to avoid overlapping touch measurements.
+const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
+
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -508,7 +511,7 @@ export class TouchLatencyTracker {
 
         // Wait between samples to avoid interference
         if (i < sampleCount - 1) {
-          await this.timer.sleep(100);
+          await this.timer.sleep(TOUCH_LATENCY_SAMPLE_INTERVAL_MS);
         }
       }
 

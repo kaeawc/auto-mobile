@@ -1,3 +1,8 @@
+// Two reads preserve the existing physical install verification bound.
+export const IOS_INSTALL_VERIFY_ATTEMPTS = 2;
+// Three attempts preserve the existing physical install verification bound.
+export const IOS_PHYSICAL_VERIFY_ATTEMPTS = 3;
+
 import {
   outputLooksLikeShellFailure,
   packageListingContains,
@@ -1214,7 +1219,7 @@ export class InstallApp {
 
     let beforeApps: any[] | undefined;
     let beforeError: unknown;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= IOS_INSTALL_VERIFY_ATTEMPTS; attempt += 1) {
       try {
         beforeApps = await perf.track("listAppsBefore", () => backend.listApps());
         break;
@@ -1465,7 +1470,7 @@ export class InstallApp {
       bundlePresent = await perf.track("verifyPhysicalInstall", () =>
         raceWithDeadline(
           async () => {
-            for (let attempt = 0; attempt < 3; attempt += 1) {
+            for (let attempt = 0; attempt < IOS_PHYSICAL_VERIFY_ATTEMPTS; attempt += 1) {
               if (signal?.aborted) {
                 throw new Error(OPERATION_CANCELLED_MESSAGE);
               }
@@ -1473,7 +1478,7 @@ export class InstallApp {
               if (apps.some((app) => getIosInstalledAppBundleId(app) === bundleId)) {
                 return true;
               }
-              if (attempt < 2) {
+              if (attempt < IOS_PHYSICAL_VERIFY_ATTEMPTS - 1) {
                 await timer.sleep(IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS);
               }
             }

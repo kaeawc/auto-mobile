@@ -1,3 +1,6 @@
+// The UI needs a brief settle after a key event.
+export const KEY_EVENT_SETTLE_MS = 100;
+
 import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -1134,7 +1137,7 @@ export class InputText extends BaseVisualChange {
     if (keyCode) {
       // Small delay to ensure text input is processed
       assertInputNotAborted(signal);
-      await this.timer.sleep(100);
+      await this.timer.sleep(KEY_EVENT_SETTLE_MS);
       assertInputNotAborted(signal);
 
       // Execute the key event(s)

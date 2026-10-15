@@ -1,3 +1,6 @@
+// iOS requires a pause between the two taps.
+export const IOS_DOUBLE_TAP_GAP_MS = 200;
+
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
@@ -5621,7 +5624,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
-      await this.timer.sleep(200);
+      await this.timer.sleep(IOS_DOUBLE_TAP_GAP_MS);
 
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();

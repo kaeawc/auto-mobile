@@ -1,3 +1,16 @@
+// Setup taps need time to update the UI.
+const SETUP_TAP_SETTLE_MS = 100;
+// Modal dismissal needs time to finish.
+const MODAL_DISMISS_SETTLE_MS = 300;
+// Back-button dismissal needs time before verification.
+const BACK_BUTTON_DISMISS_SETTLE_MS = 200;
+// Bottom-sheet dismissal needs time before verification.
+const BOTTOM_SHEET_DISMISS_SETTLE_MS = 200;
+// Scrim taps need time before dismissal verification.
+const SCRIM_TAP_DISMISS_SETTLE_MS = 200;
+// Close-button taps need time before dismissal verification.
+const CLOSE_BUTTON_DISMISS_SETTLE_MS = 200;
+
 import { BootedDevice } from "../../models";
 import { ObserveResult } from "../../models/ObserveResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -367,7 +380,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       throwIfInternalToolFailed(response, "tapOn", platform);
 
       // Small delay for UI to update
-      await this.sleep(100, signal);
+      await this.sleep(SETUP_TAP_SETTLE_MS, signal);
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[UI_STATE_SETUP] Failed to tap on "${identifier}": ${error}`);
@@ -516,7 +529,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         actions.push(`dismissModal(${topModal.type})`);
         currentStack.pop();
         // Small delay for modal to dismiss
-        await this.sleep(300, signal);
+        await this.sleep(MODAL_DISMISS_SETTLE_MS, signal);
       } else {
         logger.warn(
           `[UI_STATE_SETUP] Failed to dismiss ${topModal.type}, stopping modal alignment`,
@@ -567,7 +580,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     try {
       throwIfAborted(signal);
       await this.pressBack(platform, signal);
-      await this.sleep(200, signal);
+      await this.sleep(BACK_BUTTON_DISMISS_SETTLE_MS, signal);
 
       if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button (fallback)`);
@@ -614,7 +627,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     try {
       throwIfAborted(signal);
       await this.pressBack(platform, signal);
-      await this.sleep(200, signal);
+      await this.sleep(BACK_BUTTON_DISMISS_SETTLE_MS, signal);
 
       // Verify dismissal
       if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
@@ -663,7 +676,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
           signal,
         );
         throwIfAborted(signal);
-        await this.sleep(200, signal);
+        await this.sleep(BOTTOM_SHEET_DISMISS_SETTLE_MS, signal);
         if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
           logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with swipe down");
           return true;
@@ -671,7 +684,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       }
 
       await this.pressBack(platform, signal);
-      await this.sleep(200, signal);
+      await this.sleep(BOTTOM_SHEET_DISMISS_SETTLE_MS, signal);
       if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with back button");
         return true;
@@ -722,7 +735,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         signal,
       );
       throwIfAborted(signal);
-      await this.sleep(200, signal);
+      await this.sleep(SCRIM_TAP_DISMISS_SETTLE_MS, signal);
       if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} by tapping outside`);
         return true;
@@ -799,7 +812,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         throwIfAborted(signal);
         throwIfInternalToolFailed(response, "tapOn", platform);
 
-        await this.sleep(200, signal);
+        await this.sleep(CLOSE_BUTTON_DISMISS_SETTLE_MS, signal);
         if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
           logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
           return true;

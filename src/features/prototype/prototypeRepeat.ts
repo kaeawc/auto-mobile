@@ -196,6 +196,22 @@ function fieldError(
   return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
 }
 
+function emitBindingError(value: unknown, path: string, scope?: Scope): RepeatError | undefined {
+  const binding = record(value);
+  if (!binding) {
+    return undefined;
+  }
+  if (!scope) {
+    return Object.hasOwn(binding, "item") || Object.hasOwn(binding, "index")
+      ? fail(path, "Emit item/index binding outside a repeat template")
+      : undefined;
+  }
+  return typeof binding.item === "string" &&
+    !scope.items.every((item) => Object.hasOwn(item, binding.item as string))
+    ? fail(path, `Unknown repeat field ${JSON.stringify(binding.item)}`)
+    : undefined;
+}
+
 /** The first error among a template node's own bindable fields, in visiting order. */
 function checkOwnFields(
   node: Raw,
@@ -205,6 +221,9 @@ function checkOwnFields(
 ): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind, dataCondition) => {
+    if (kind === "emitBinding") {
+      first ??= emitBindingError(value, fieldPath, scope);
+    }
     first ??= fieldError(value, fieldPath, kind, scope, state, dataCondition);
     return value;
   });
@@ -215,6 +234,9 @@ function checkOwnFields(
 function checkLiteralKeys(node: Raw, path: string, state: RepeatState): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "emitBinding") {
+      first ??= emitBindingError(value, fieldPath);
+    }
     if (
       !first &&
       kind === "text" &&
@@ -237,6 +259,12 @@ interface Child {
 }
 
 function childrenOf(node: Raw, path: string): Child[] {
+  if (node.type === "stack") {
+    return Object.entries(record(node.screens) ?? {}).flatMap(([name, value]) => {
+      const child = record(value);
+      return child ? [{ node: child, path: `${path}.screens[${JSON.stringify(name)}]` }] : [];
+    });
+  }
   const single = record(node.child);
   if (single) {
     return [{ node: single, path: `${path}.child` }];
@@ -280,6 +308,9 @@ function templateErrors(
   if (scope) {
     if (node.repeat !== undefined) {
       return fail(`${path}.repeat`, "Nested repeat is not supported");
+    }
+    if (node.type === "stack") {
+      return fail(path, "Stack cannot appear inside a repeat template");
     }
     if (node.type === "pager") {
       return fail(path, "Pager cannot appear inside a repeat template");

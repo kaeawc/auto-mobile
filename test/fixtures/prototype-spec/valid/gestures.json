@@ -1,0 +1,69 @@
+{
+  "id": "gestures",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "picked": "",
+    "liked": false
+  },
+  "root": {
+    "type": "row",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "gesture"
+      }
+    ],
+    "onLongPress": [
+      {
+        "type": "setState",
+        "key": "picked",
+        "value": "row"
+      },
+      {
+        "type": "toggle",
+        "key": "liked"
+      },
+      {
+        "type": "emit",
+        "name": "gesture"
+      }
+    ],
+    "onDoubleTap": [
+      {
+        "type": "emit",
+        "name": "gesture"
+      }
+    ],
+    "children": [
+      {
+        "type": "text",
+        "text": "Press",
+        "onLongPress": [
+          {
+            "type": "emit",
+            "name": "gesture"
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "onDoubleTap": [
+          {
+            "type": "emit",
+            "name": "gesture"
+          }
+        ],
+        "children": [
+          {
+            "type": "text",
+            "text": "Double tap"
+          }
+        ]
+      }
+    ]
+  }
+}

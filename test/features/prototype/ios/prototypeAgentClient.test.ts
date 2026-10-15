@@ -210,10 +210,18 @@ describe("PrototypeAgentClient after the handshake", () => {
     const { socket, client } = await connected();
     const events: unknown[] = [];
     const unsubscribe = client.onEvent((event) => events.push(event));
-    socket.push({ type: "prototype_event", kind: "emit", name: "liked", seq: 1 });
+    const pushed = {
+      type: "prototype_event",
+      kind: "emit",
+      name: "liked",
+      seq: 1,
+      context: { id: 3 },
+      contextTruncated: true,
+    };
+    socket.push(pushed);
     unsubscribe();
     socket.push({ type: "prototype_event", kind: "emit", name: "liked", seq: 2 });
-    expect(events).toEqual([{ type: "prototype_event", kind: "emit", name: "liked", seq: 1 }]);
+    expect(events).toEqual([pushed]);
   });
 
   test("refuses a request type the agent did not advertise", async () => {

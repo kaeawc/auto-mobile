@@ -13,7 +13,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
   comments, commit messages, and assistant chat responses — where a clickable
   link genuinely aids navigation for the reader. Do NOT require links in
   checked-in repository content: neither source code comments (bare `#NNNN` is
-  the established convention — 625 references in `src/`, zero linked) nor Markdown
+  the established convention — `src/` references are bare, never linked) nor Markdown
   documentation files (under `docs/` and elsewhere), where bare `#NNNN` is
   likewise fine. Forcing explicit links into committed files renders as noise in
   an editor and makes the touched file the only inconsistent one. Automated
@@ -139,10 +139,12 @@ Before pushing a contract or fake/interface change, also run
 Classify every new integration test `safe` or `unsafe` in `test/integration-safe-tier.txt`
 in the PR that adds it (a unit test enforces this), and `unsafe` files stay CI-only.
 
-Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
-runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
-not treat repeated cross-platform failures as a flake; refresh against main and
-identify the shared failure first.
+A 100ms unit timing overage on a loaded Linux runner may be rerun rather than
+“fixed” when its isolated recheck is clean. Whether a given failure is a known
+flake is decided by `scripts/ci/known-flakes.txt` (via
+`bash scripts/ci/classify-failure.sh <run-id>`), not by this file. Do not treat
+repeated cross-platform failures as a flake; refresh against main and identify
+the shared failure first.
 
 ## Toolchain: TypeScript 7 (tsgo) + oxlint + oxfmt
 
@@ -163,8 +165,8 @@ oxlint's `--type-aware` rules).
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
 A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, 6
-tolerated errors):
+already in the committed baseline (`scripts/typecheck-baseline.txt`, the
+tolerated errors; count them with `grep -vc '^#' scripts/typecheck-baseline.txt`):
 
 ```bash
 bun run typecheck             # gate: fail on NEW type errors (CI runs this)
@@ -225,11 +227,11 @@ ratchet rule as its own rule (the custom plugin already does) rather than foldin
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
-Rules with a numeric threshold: `complexity` 12, `max-depth` 3, `max-params` 6,
-`max-lines-per-function` 150 (blank lines and comments excluded),
-`max-nested-callbacks` 3 (0 baselined), and
-`auto-mobile/no-accumulator-foreach` (src/ only, 0 baselined). The full set the
-ratchet gates is listed above.
+Numeric thresholds (`complexity`, `max-depth`, `max-params`,
+`max-lines-per-function` with blank lines and comments excluded,
+`max-nested-callbacks`) live in `.oxlintrc.json`; read them there. `max-nested-callbacks`
+and `auto-mobile/no-accumulator-foreach` (src/ only) must stay at zero baselined
+violations. The full set the ratchet gates is listed above.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
@@ -260,24 +262,12 @@ shellcheck scripts/**/*.sh  # Lint shell scripts
 
 # MCP Tools Reference
 
-This is a high-level summary of core MCP tools exposed by the server.
-
-## Observation
-
-- `observe` - Capture screen state and view hierarchy
-
-## Interaction
-
-- `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
-- `sendKeys`, `pressButton`, `selectAllText`, `clipboard`
-
-## App Management
-
-- `launchApp`, `terminateApp`, `installApp`, `uninstallApp`
-
-## Device Management
-
-- `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
+The tool list is generated, not hand-copied: `schemas/tool-definitions.json` is the
+authoritative set of MCP tool names and schemas (regenerate it with
+`bash scripts/update-tool-definitions.sh`). Tool families: observation (`observe`),
+interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
+(launch/terminate/install/uninstall), and device management (list/provision/kill
+devices, set the active device).
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 
@@ -319,7 +309,8 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-The `green-main` ruleset requires 22 status checks to merge, not just the three
+The `green-main` ruleset requires more status checks than the three
+roll-up gates to merge, not just the three
 roll-up gates. The ruleset is the only authoritative list (deliberately not
 copied here, so it cannot rot): `gh api repos/kaeawc/auto-mobile/rulesets`, then
 `.../rulesets/<id>` and its `required_status_checks` rule. The roll-up gates
@@ -368,13 +359,12 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ## iOS/Swift CI
 
 - Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
-  SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
+  SwiftFormat at the version pinned in `scripts/swiftformat/swiftformat_version.sh`, SwiftLint error rules, XCTestRunner build, and pure unit
   tests).
 - `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
   on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Read the exact job
-  log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
-  CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
-  timing out during video recording, and a hierarchy UI test exceeding 90s.
+  log and classify before rerunning (`bash scripts/ci/classify-failure.sh <run-id>`);
+  known simulator-lane flake signatures live only in `scripts/ci/known-flakes.txt`.
 - A simulator UDID belongs to exactly one CI job and is used serially there;
   never share a simulator between parallel runners or jobs.
 - Re-run CI on the latest main base before merge; stale-base runs can mask a

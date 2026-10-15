@@ -1,0 +1,76 @@
+{
+  "name": "data-repeat-row-3",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/rows"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Emit",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "pick",
+              "context": {
+                "id": {
+                  "item": "id"
+                },
+                "row": {
+                  "index": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "rows": [
+        {
+          "id": 1
+        },
+        {
+          "id": 2
+        },
+        {
+          "id": 3
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {},
+  "data": {
+    "rows": [
+      {
+        "id": 1
+      },
+      {
+        "id": 2
+      },
+      {
+        "id": 3
+      }
+    ]
+  },
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "id": 3,
+      "row": 2
+    }
+  },
+  "repeatIndex": 2
+}

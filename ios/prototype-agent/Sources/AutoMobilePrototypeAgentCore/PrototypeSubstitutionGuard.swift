@@ -38,6 +38,13 @@ private struct PrototypeSubstitutionGuard {
         if case .object? = fields["child"], let child = fields["child"] {
             try visit(child, path: "\(path).child", scope: childScope)
         }
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try visit(screen, path: PrototypeStacks.screenPath(path, name: name), scope: childScope)
+                }
+            }
+        }
     }
 
     private mutating func ownScope(_ fields: [String: JSONValue]) -> Scope? {

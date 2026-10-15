@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "x",
+          "style": {
+            "fontWeight": 50
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].style.fontWeight",
+  "expectedMessage": "Invalid number value"
+}

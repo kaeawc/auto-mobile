@@ -345,3 +345,21 @@ describe("iOS patch transport", () => {
 });
 
 const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];
+
+test("iOS refuses stack navigation unsent without its capability", async () => {
+  const calls: string[] = [];
+  const transport = new IosPrototypeTransport(fakeAgent([], calls));
+  await expect(
+    transport.show({
+      id: "panel",
+      window: { placement: { type: "fullscreen" }, opacity: 100 },
+      root: {
+        type: "stack",
+        id: "nav",
+        start: "home",
+        screens: { home: { type: "text", text: "Home" } },
+      },
+    }),
+  ).rejects.toThrow("prototype_stack_v1");
+  expect(calls).toEqual([]);
+});

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "trailingActions": [
+        {
+          "icon": "close",
+          "label": "Clear"
+        },
+        {
+          "icon": "close",
+          "label": "Clear"
+        },
+        {
+          "icon": "close",
+          "label": "Clear"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.trailingActions",
+  "expectedMessage": "Array length out of range"
+}

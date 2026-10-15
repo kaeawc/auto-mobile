@@ -3,8 +3,8 @@
  *
  * The Swift runner locks its own inbound set with `RequestType` (a
  * `String, CaseIterable` enum in
- * `ios/control-proxy/Sources/CtrlProxyRewrite/Models/RequestType.swift`) and the runner's
- * wire-decode parity suite (`Tests/CtrlProxyRewriteTests/WireDecodeParityTests.swift`) fails a
+ * `ios/control-proxy/Sources/CtrlProxy/Models/RequestType.swift`) and the runner's
+ * wire-decode parity suite (`Tests/CtrlProxyTests/WireDecodeParityTests.swift`) fails a
  * test if an enum case is dropped or renamed. But nothing asserted that the set of
  * command `type` strings the **TS client emits** stays a subset of those rawValues,
  * so a new/renamed TS command compiled cleanly and only failed at runtime on-device

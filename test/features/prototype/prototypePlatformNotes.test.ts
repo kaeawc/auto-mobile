@@ -88,13 +88,19 @@ describe("prototype platform notes", () => {
     ).toEqual([]);
   });
   test.each(
-    PROTOTYPE_PLATFORM_DIFFERENCES.map(
+    PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ capability }) => capability !== undefined).map(
       ({ construct, capability }) => [construct, capability] as const,
     ),
   )("%s is lifted by its capability", (construct, capability) => {
     const notes = prototypePlatformNotes(spec, "ios", (name) => name === capability);
     expect(notes.some((note) => note.construct === construct)).toBe(false);
-    expect(notes.length).toBe(capability === "prototype_bottom_sheet_drag_v1" ? 3 : 4);
+    expect(notes.length).toBe(
+      capability === "prototype_bottom_sheet_drag_v1"
+        ? 3
+        : capability === "prototype_text_field_material_style_v1"
+          ? 5
+          : 4,
+    );
   });
   test("testTag, mapped names, disabled swipe and a single detent need no notes", () => {
     const clean = specFor({
@@ -219,7 +225,7 @@ describe("prototype platform notes", () => {
     ]);
     expect(JSON.stringify(nested)).toBe(before);
   });
-  test("guide generates all five platform differences from the table", () => {
+  test("guide generates every platform difference from the table", () => {
     const guide = renderPrototypeGuide();
     expect(guide).toContain("## Platform differences");
     expect(guide).toContain("platformNotes");
@@ -229,12 +235,16 @@ describe("prototype platform notes", () => {
     for (const difference of PROTOTYPE_PLATFORM_DIFFERENCES) {
       expect(guide).toContain(`\`${difference.construct}\``);
       if (!difference.construct.startsWith("icon.")) {
-        expect(difference.detail.startsWith(`An iOS agent without ${difference.capability} `)).toBe(
-          true,
-        );
+        if (difference.capability) {
+          expect(
+            difference.detail.startsWith(`An iOS agent without ${difference.capability} `),
+          ).toBe(true);
+        }
         expect(guide).toContain(difference.detail);
       }
-      expect(guide).toContain(difference.capability);
+      if (difference.capability) {
+        expect(guide).toContain(difference.capability);
+      }
     }
   });
 });
@@ -339,4 +349,52 @@ describe("SF Symbols agent platform notes", () => {
     expect(notes[0]).toMatchObject({ total: 22, values: ["android", "facebook"] });
     expect(notes[0].paths).toHaveLength(20);
   });
+});
+
+describe("text field platform notes", () => {
+  test("outlined and label substitute; maxLength and filled do not", () => {
+    const fields = specFor({
+      type: "textField",
+      stateKey: "name",
+      variant: "outlined",
+      label: "Name",
+      maxLength: 20,
+    });
+    const notes = prototypePlatformNotes(fields, "ios", noCapabilities);
+    expect(notes.map(({ construct, effect, paths }) => ({ construct, effect, paths }))).toEqual([
+      { construct: "textField.variant", effect: "substituted", paths: ["root.variant"] },
+      { construct: "textField.label", effect: "substituted", paths: ["root.label"] },
+    ]);
+    expect(
+      prototypePlatformNotes(
+        fields,
+        "ios",
+        (name) => name === "prototype_text_field_material_style_v1",
+      ),
+    ).toEqual([]);
+    expect(prototypePlatformNotes(fields, "android", noCapabilities)).toEqual([]);
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "textField", stateKey: "name", variant: "filled", maxLength: 20 }),
+        "ios",
+        noCapabilities,
+      ),
+    ).toEqual([]);
+  });
+});
+
+test("stack back gesture remains a platform difference on capable devices", () => {
+  const stackSpec = specFor({
+    type: "stack",
+    id: "nav",
+    start: "home",
+    screens: { home: { type: "text", text: "Home" } },
+  });
+  expect(prototypePlatformNotes(stackSpec, "ios", () => true)).toEqual([
+    expect.objectContaining({
+      construct: "stack",
+      paths: ["root"],
+      detail: expect.stringContaining("left-edge swipe"),
+    }),
+  ]);
 });

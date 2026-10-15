@@ -476,7 +476,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
       skeleton: [],
       added: [
         {
-          key: " 109,837,971,1424  0",
+          key: "\u0000109,837,971,1424\u0000\u00000",
           attributes: { "resource-id": "com.example:id/new", text: "New row" },
         },
       ],
@@ -487,7 +487,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
     expect(parsed.added[0].attributes["resource-id"]).toBe("com.example:id/new");
     // Internal key still validates (it's a plain string) but is documented
     // as non-selector — see the schema's own `.describe()`.
-    expect(parsed.added[0].key).toBe(" 109,837,971,1424  0");
+    expect(parsed.added[0].key).toBe("\u0000109,837,971,1424\u0000\u00000");
   });
 
   test("a diff's `changed` entries carry a real `selector` distinct from the internal `key`", () => {
@@ -499,7 +499,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
       removed: [],
       changed: [
         {
-          key: " 109,837,971,1424  0",
+          key: "\u0000109,837,971,1424\u0000\u00000",
           selector: { elementId: "com.example:id/toggle", label: "Airplane mode" },
           changes: { checked: { from: undefined, to: "true" } },
         },

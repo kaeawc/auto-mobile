@@ -82,6 +82,8 @@ describe("iOS simulator Photos permission honesty", () => {
       expect(result.permissions[0]).toMatchObject({
         state: "unknown",
         verified: false,
+        accessLevel: "readWrite",
+        evidence: "storedTccGrant",
         authValue: row.auth_value ?? row.allowed,
       });
       expect(result.permissions[0]).toHaveProperty(
@@ -99,20 +101,28 @@ describe("iOS simulator Photos permission honesty", () => {
     const { permissions } = fixture([{ ...photosRow, auth_value: authValue }]);
     const result = await permissions.getPermissions(appId, ["photos"]);
     expect(result.permissions[0].state).toBe(state);
+    expect(result.permissions[0].accessLevel).toBe("readWrite");
+    expect(result.permissions[0]).not.toHaveProperty("evidence");
     expect(result.permissions[0]).not.toHaveProperty("verified");
     expect(result.permissions[0]).not.toHaveProperty("reason");
   });
 
-  test.each(["kTCCServicePhotosAdd", "kTCCServiceCamera"])(
-    "%s grants remain unchanged",
-    async (service) => {
-      const { permissions } = fixture([{ ...photosRow, service }]);
-      const result = await permissions.getPermissions(appId);
-      expect(result.permissions[0].state).toBe("granted");
-      expect(result.permissions[0]).not.toHaveProperty("verified");
-      expect(result.permissions[0]).not.toHaveProperty("reason");
-    },
-  );
+  test("photos-add stays granted and identifies add-only access", async () => {
+    const { permissions } = fixture([{ ...photosRow, service: "kTCCServicePhotosAdd" }]);
+    const result = await permissions.getPermissions(appId);
+    expect(result.permissions[0].state).toBe("granted");
+    expect(result.permissions[0].accessLevel).toBe("addOnly");
+    expect(result.permissions[0]).not.toHaveProperty("evidence");
+    expect(result.permissions[0]).not.toHaveProperty("verified");
+    expect(result.permissions[0]).not.toHaveProperty("reason");
+  });
+
+  test("camera has no Photos access metadata", async () => {
+    const { permissions } = fixture([{ ...photosRow, service: "kTCCServiceCamera" }]);
+    const result = await permissions.getPermissions(appId);
+    expect(result.permissions[0]).not.toHaveProperty("accessLevel");
+    expect(result.permissions[0]).not.toHaveProperty("evidence");
+  });
 
   test.each([
     { permission: "photos", error: undefined },

@@ -7,7 +7,7 @@ export const DEFAULT_TEXT_REQUEST_TIMEOUT_MS = 5000;
 export const MAX_TEXT_REQUEST_TIMEOUT_MS = 120_000;
 const TEXT_REPLY_HEADROOM_MS = 2000;
 
-// ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:1347-1360
+// ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:1347-1360
 // calls XCUIApplication.typeText with no
 // per-key cadence or overall typing budget. This conservative allowance needs
 // one simulator measurement; it is not a measured XCUITest rate.
@@ -45,10 +45,27 @@ export class TextIndeterminateError extends ActionableError {
   }
 }
 
-/** Request-local evidence; only iOS text transports mark dispatch here. */
+/** Request-local evidence for dispatched text commands. */
 export class TextRequestState {
   private pending = 0;
   private readonly unconfirmedErrors = new WeakSet<Error>();
+  private readonly settlementWaiters = new Set<() => void>();
+
+  hasPending(): boolean {
+    return this.pending > 0;
+  }
+
+  /**
+   * Resolves the first time pending reaches zero, per dispatched command rather
+   * than per tool. The daemon hold is bounded by the in-flight command plus the
+   * tool's own abort checks.
+   */
+  settled(): Promise<void> {
+    if (!this.hasPending()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.settlementWaiters.add(resolve));
+  }
 
   dispatched(): (confirmed: boolean, error?: unknown) => void {
     this.pending++;
@@ -63,6 +80,12 @@ export class TextRequestState {
       // thrown Error may relabel a failure after this command is no longer pending.
       if (!confirmed && error instanceof Error) {
         this.unconfirmedErrors.add(error);
+      }
+      if (!this.hasPending()) {
+        for (const resolve of this.settlementWaiters) {
+          resolve();
+        }
+        this.settlementWaiters.clear();
       }
     };
   }

@@ -147,6 +147,13 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
 
     expect(params.raw).toBe(true);
   });
+
+  test("coerces displayConfig fontScale numeric union values to numbers", () => {
+    const { params } = parseCliArgs(["displayConfig", "--fontScale", "1.3"]);
+
+    expect(params.fontScale).toBe(1.3);
+    expect(typeof params.fontScale).toBe("number");
+  });
 });
 
 describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => {

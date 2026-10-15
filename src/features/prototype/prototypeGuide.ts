@@ -1,13 +1,22 @@
-import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
+import {
+  PROTOTYPE_PLATFORM_DIFFERENCES,
+  PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
+} from "./prototypePlatformNotes";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_THEME_MODES_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
 import {
   GUIDE_APPEARANCE,
+  GUIDE_CHECKS,
   GUIDE_COMPONENTS,
   GUIDE_COST,
   GUIDE_DATA,
+  GUIDE_EMIT_CONTEXT,
   GUIDE_ERRORS,
+  GUIDE_GESTURES,
   GUIDE_INTRO,
   GUIDE_PATCH,
   GUIDE_REPEAT,
@@ -24,7 +33,7 @@ export const ICON_LOOKUP_LIMIT = 100;
 
 interface Rule {
   kind: string;
-  values?: string[];
+  values?: (string | boolean)[];
   name?: string;
   item?: Rule;
   min?: number;
@@ -57,6 +66,8 @@ function describeRule(rule: Rule): string {
     case "boundKey":
       // A state key; inside a repeat template it may also hold placeholders (see Lists).
       return "key";
+    case "screenMap":
+      return `screen-name → node (${rule.min}..${rule.max} entries)`;
     case "array":
       return describeArray(rule);
     case "choice":
@@ -95,18 +106,22 @@ function variantLines(variants: Record<string, ObjectRule>, shared: Map<string, 
   });
 }
 
-const code = (values: readonly string[]): string => values.map((v) => `\`${v}\``).join(", ");
+const code = (values: readonly (string | boolean)[]): string =>
+  values.map((v) => `\`${v}\``).join(", ");
 
 function fieldRuleValues(definition: string, field: string): string[] {
-  return definitions[definition]?.fields?.[field]?.rule.values ?? [];
+  return (definitions[definition]?.fields?.[field]?.rule.values ?? []).map(String);
 }
 
 /** Markdown limits table; every value comes from the contract's `limits`. */
 export function renderLimitsTable(): string {
   const rows = Object.entries(contract.limits).map(([name, value]) => `| \`${name}\` | ${value} |`);
-  const onTap = (definitions.node.variants?.box.fields?.onTap.rule ?? {}) as Rule;
+  const actionFields = ["onTap", "onLongPress", "onDoubleTap"];
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
-  rows.push(`| actions per \`onTap\` | ${onTap.min}..${onTap.max} |`);
+  for (const field of actionFields) {
+    const rule = (definitions.node.variants?.box.fields?.[field].rule ?? {}) as Rule;
+    rows.push(`| actions per \`${field}\` | ${rule.min}..${rule.max} |`);
+  }
   rows.push(`| \`repeat.items\` | ${items.min}..${items.max} |`);
   rows.push(`| \`use\` nesting (host-expanded components) | ${MAX_PROTOTYPE_COMPONENT_DEPTH} |`);
   return ["| Limit | Value |", "| --- | --- |", ...rows].join("\n");
@@ -124,6 +139,9 @@ function renderNodes(): string {
     common,
     "",
     ...variantLines(variants, shared),
+    "",
+    `Pager options require \`${PROTOTYPE_PAGER_OPTIONS_CAPABILITY}\` whenever any is explicitly present (including default values): \`axis\` is horizontal (default) or vertical; \`pageSpacing\` is the dp gap (default 0); \`peek: {start?, end?}\` leaves neighbouring pages visible along the main axis (default 0 on each side, \`{}\` is a no-op); \`pageSize\` is fill (default) or \`{dp}\` for fixed-size pages. Distances are finite, spacing and peek are 0..${contract.limits.MAX_PROTOTYPE_PAGER_DP}, and fixed page size is 1e-6..${contract.limits.MAX_PROTOTYPE_PAGER_DP} (\`MAX_PROTOTYPE_PAGER_DP\`). Objects are strict. On iOS dp means points. A vertical pager cannot have any vertical scroll ancestor, including a scroll with omitted axis; a horizontal scroll ancestor is allowed. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.`,
+    "The current page is the first fully visible page (fixed-size pages snap at Start; fill uses the usual settled page). page_changed, {page}/{pageCount}, setPage and tabBar/bottomNav pager bindings keep their meaning. Fully off-screen retained neighbours stay outside the semantics tree; stable keys and neighbour retention are unchanged. Indicator and carousel remain deferred.",
   ].join("\n");
 }
 
@@ -132,7 +150,13 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap` lists.",
+    "Used in `onTap`, `onLongPress`, `onDoubleTap` and searchBar `onSubmit` lists.",
+    "",
+    `Gesture fields are available only on ${code(
+      Object.entries(definitions.node.variants ?? {})
+        .filter(([, variant]) => variant.fields?.onLongPress !== undefined)
+        .map(([type]) => type),
+    )}; they require \`prototype_gestures_v1\`.`,
     "",
     ...variantLines(variants, new Map()),
   ].join("\n");
@@ -204,7 +228,10 @@ function renderPlatformDifferences(): string {
     "- `icon.variant`: filled/outlined map where a form exists; rounded/sharp/twoTone and forms absent from the table draw the default symbol. A successful show lists affected paths under `platformNotes`. Material parity remains a future option behind `prototype_icon_variant_v1`.",
     ...PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ construct }) => !construct.startsWith("icon.")).map(
       ({ construct, platform, effect, capability, detail }) =>
-        `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
+        `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`${capability ? `; lifted by \`${capability}\`` : ""}.`,
+    ),
+    ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES.map(
+      ({ construct, detail }) => `- \`${construct}\`: ${detail}`,
     ),
   ].join("\n");
 }
@@ -217,12 +244,16 @@ export function renderPrototypeGuide(): string {
     renderWindow(),
     renderNodes(),
     renderActions(),
+    GUIDE_GESTURES,
     GUIDE_REPEAT,
     GUIDE_DATA,
+    GUIDE_EMIT_CONTEXT,
+    GUIDE_CHECKS,
     GUIDE_PATCH,
     GUIDE_COMPONENTS,
     renderTheme(),
     GUIDE_APPEARANCE,
+    GUIDE_CHECKS,
     renderIcons(),
     renderPlatformDifferences(),
     GUIDE_COST,

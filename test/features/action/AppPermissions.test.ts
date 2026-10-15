@@ -610,6 +610,7 @@ describe("AppPermissions", () => {
         {
           service: "kTCCServicePhotos",
           client: "com.example.app",
+          auth_version: 1,
           auth_value: 2,
           allowed: null,
           prompt_count: null,
@@ -625,7 +626,10 @@ describe("AppPermissions", () => {
       source: "iosTcc",
       authValue: 2,
       verified: false,
+      accessLevel: "readWrite",
+      evidence: "storedTccGrant",
       reason: expect.stringContaining("native PHPhotoLibrary"),
+      raw: expect.objectContaining({ auth_version: 1 }),
     });
     const setResult = await permissions.setPermissions("com.example.app", {
       action: "grant",

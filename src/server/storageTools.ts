@@ -68,19 +68,12 @@ export interface StorageToolsDependencies {
   adbClientFactory: AdbClientFactory;
 }
 
-let storageToolsDependencies: StorageToolsDependencies | null = null;
-
-function getStorageToolsDependencies(): StorageToolsDependencies {
-  if (!storageToolsDependencies) {
-    storageToolsDependencies = {
-      androidClientFactory: (device) =>
-        AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
-      iosClientFactory: (device) => IOSCtrlProxyClient.getInstance(device),
-      adbClientFactory: defaultAdbClientFactory,
-    };
-  }
-  return storageToolsDependencies;
-}
+const defaultStorageToolsDependencies: StorageToolsDependencies = {
+  androidClientFactory: (device) =>
+    AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
+  iosClientFactory: (device) => IOSCtrlProxyClient.getInstance(device),
+  adbClientFactory: defaultAdbClientFactory,
+};
 
 function actionableStorageWriteError(error: unknown, context: string): ActionableError {
   if (errorMessage(error).includes("mutation_not_authorized")) {
@@ -89,17 +82,6 @@ function actionableStorageWriteError(error: unknown, context: string): Actionabl
     });
   }
   return toActionableError(error, context);
-}
-
-/** Test-only seam: inject fakes for the Android/iOS storage clients and adb factory. */
-export function setStorageToolsDependenciesForTesting(
-  overrides: Partial<StorageToolsDependencies>,
-): void {
-  storageToolsDependencies = { ...getStorageToolsDependencies(), ...overrides };
-}
-
-export function resetStorageToolsDependencies(): void {
-  storageToolsDependencies = null;
 }
 
 // Valid types for key-value storage (union of Android and iOS types)
@@ -361,11 +343,12 @@ function withSharedPreferencesInspectionFallback(
   fileName: string,
   viaSdk: () => Promise<void>,
   viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+  deps: StorageToolsDependencies,
 ): Promise<SharedPreferencesInspectionFallbackResult> {
   return withAndroidSharedPreferencesInspectionFallback(
     appId,
     fileName,
-    () => getStorageToolsDependencies().adbClientFactory.create(device),
+    () => deps.adbClientFactory.create(device),
     viaSdk,
     viaDirectFile,
   );
@@ -415,7 +398,11 @@ export function preferenceSetWarning(
 }
 
 // setKeyValue handler
-async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
+async function setKeyValueHandler(
+  device: BootedDevice,
+  args: SetKeyValueArgs,
+  deps: StorageToolsDependencies,
+) {
   try {
     const storageName = resolveStorageName(args);
     assertUserIdSupported(device, args.userId);
@@ -428,7 +415,7 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
     let resolvedStore: string | undefined;
     let effectiveValueDiffers: boolean | undefined;
     if (device.platform === "android") {
-      const client = getStorageToolsDependencies().androidClientFactory(device);
+      const client = deps.androidClientFactory(device);
       ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
         device,
         args.appId,
@@ -457,9 +444,10 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
                 args.type,
                 args.userId,
               ),
+        deps,
       ));
     } else if (device.platform === "ios") {
-      const client = getStorageToolsDependencies().iosClientFactory(device);
+      const client = deps.iosClientFactory(device);
       if (value === null) {
         resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
           ?.resolvedStore;
@@ -508,14 +496,18 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
 }
 
 // removeKeyValue handler
-async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueArgs) {
+async function removeKeyValueHandler(
+  device: BootedDevice,
+  args: RemoveKeyValueArgs,
+  deps: StorageToolsDependencies,
+) {
   try {
     const storageName = resolveStorageName(args);
     assertUserIdSupported(device, args.userId);
     let usedDirectFileFallback = false;
     let resolvedStore: string | undefined;
     if (device.platform === "android") {
-      const client = getStorageToolsDependencies().androidClientFactory(device);
+      const client = deps.androidClientFactory(device);
       ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
         device,
         args.appId,
@@ -530,9 +522,10 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
             args.key,
             args.userId,
           ),
+        deps,
       ));
     } else if (device.platform === "ios") {
-      const client = getStorageToolsDependencies().iosClientFactory(device);
+      const client = deps.iosClientFactory(device);
       resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
         ?.resolvedStore;
     } else {
@@ -564,14 +557,18 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
 }
 
 // clearKeyValueFile handler
-async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValueFileArgs) {
+async function clearKeyValueFileHandler(
+  device: BootedDevice,
+  args: ClearKeyValueFileArgs,
+  deps: StorageToolsDependencies,
+) {
   try {
     const storageName = resolveStorageName(args);
     assertUserIdSupported(device, args.userId);
     let usedDirectFileFallback = false;
     let resolvedStore: string | undefined;
     if (device.platform === "android") {
-      const client = getStorageToolsDependencies().androidClientFactory(device);
+      const client = deps.androidClientFactory(device);
       ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
         device,
         args.appId,
@@ -585,9 +582,10 @@ async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValu
             storageName,
             args.userId,
           ),
+        deps,
       ));
     } else if (device.platform === "ios") {
-      const client = getStorageToolsDependencies().iosClientFactory(device);
+      const client = deps.iosClientFactory(device);
       resolvedStore = (await client.clearPreferenceStore(args.appId, storageName))?.resolvedStore;
     } else {
       throw new ActionableError(`Unsupported platform: ${device.platform}`);
@@ -617,14 +615,18 @@ async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValu
 }
 
 // listDataStores handler — Android-only (Jetpack DataStore has no iOS analog).
-async function listDataStoresHandler(device: BootedDevice, args: ListDataStoresArgs) {
+async function listDataStoresHandler(
+  device: BootedDevice,
+  args: ListDataStoresArgs,
+  deps: StorageToolsDependencies,
+) {
   if (device.platform !== "android") {
     throw new ActionableError(
       `listDataStores is Android-only; DataStore is not available on ${device.platform}.`,
     );
   }
   try {
-    const client = getStorageToolsDependencies().androidClientFactory(device);
+    const client = deps.androidClientFactory(device);
     const stores = await client.listDataStores(args.appId, args.adapterName);
     return createJSONToolResponse({
       success: true,
@@ -644,14 +646,18 @@ async function listDataStoresHandler(device: BootedDevice, args: ListDataStoresA
 }
 
 // getDataStore handler — Android-only.
-async function getDataStoreHandler(device: BootedDevice, args: GetDataStoreArgs) {
+async function getDataStoreHandler(
+  device: BootedDevice,
+  args: GetDataStoreArgs,
+  deps: StorageToolsDependencies,
+) {
   if (device.platform !== "android") {
     throw new ActionableError(
       `getDataStore is Android-only; DataStore is not available on ${device.platform}.`,
     );
   }
   try {
-    const client = getStorageToolsDependencies().androidClientFactory(device);
+    const client = deps.androidClientFactory(device);
     const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
     return createJSONToolResponse({
       success: true,
@@ -677,12 +683,13 @@ async function getDataStoreHandler(device: BootedDevice, args: GetDataStoreArgs)
  * Read-only storage operations (listing files, reading entries) are exposed as
  * MCP resources in storageResources.ts. Only write operations are tools.
  */
-export function registerStorageTools(): void {
+export function registerStorageTools(overrides: Partial<StorageToolsDependencies> = {}): void {
+  const deps = { ...defaultStorageToolsDependencies, ...overrides };
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",
     setKeyValueSchema,
-    setKeyValueHandler,
+    (device, args) => setKeyValueHandler(device, args, deps),
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 
@@ -690,7 +697,7 @@ export function registerStorageTools(): void {
     "listDataStores",
     "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
     listDataStoresSchema,
-    listDataStoresHandler,
+    (device, args) => listDataStoresHandler(device, args, deps),
     {
       defaultEnabled: false,
       embeddedSdkOnly: true,
@@ -703,7 +710,7 @@ export function registerStorageTools(): void {
     "getDataStore",
     "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
     getDataStoreSchema,
-    getDataStoreHandler,
+    (device, args) => getDataStoreHandler(device, args, deps),
     {
       defaultEnabled: false,
       embeddedSdkOnly: true,
@@ -716,7 +723,7 @@ export function registerStorageTools(): void {
     "removeKeyValue",
     "Remove app key-value storage entry.",
     removeKeyValueSchema,
-    removeKeyValueHandler,
+    (device, args) => removeKeyValueHandler(device, args, deps),
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 
@@ -724,7 +731,7 @@ export function registerStorageTools(): void {
     "clearKeyValueFile",
     "Clear app key-value storage file.",
     clearKeyValueFileSchema,
-    clearKeyValueFileHandler,
+    (device, args) => clearKeyValueFileHandler(device, args, deps),
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 }

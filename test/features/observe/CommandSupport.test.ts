@@ -150,6 +150,7 @@ describe("CtrlProxy command support", () => {
         "prototype_window_options_v1",
         "prototype_persistence_replay_v1",
         "prototype_show_in_place_v1",
+        "prototype_stack_v1",
         "prototype_multi_surface_v1",
         "prototype_saved_v1",
         "prototype_anchor_v1",

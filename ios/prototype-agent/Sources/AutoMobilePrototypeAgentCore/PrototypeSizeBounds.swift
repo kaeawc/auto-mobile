@@ -21,11 +21,14 @@ enum PrototypeSizeBounds {
                          "bottomStart": 0 ... maxLength, "bottomEnd": 0 ... maxLength],
         "border": ["width": 0 ... maxLength],
         "sheet": ["height": minPositive ... maxLength],
+        "textSpanStyle": ["textSize": minPositive ... maxTypography,
+                          "letterSpacing": -maxTypography ... maxTypography],
         "style": [
             "weight": minPositive ... maxLength, "aspectRatio": minPositive ... maxLength,
             "minWidth": 0 ... maxLength, "maxWidth": 0 ... maxLength,
             "minHeight": 0 ... maxLength, "maxHeight": 0 ... maxLength,
             "cornerRadius": 0 ... maxLength, "spacing": 0 ... maxLength,
+            "runSpacing": 0 ... maxLength,
             "elevation": 0 ... maxElevation, "textSize": minPositive ... maxTypography,
             "lineHeight": minPositive ... maxTypography, "letterSpacing": -maxTypography ... maxTypography,
         ],
@@ -69,6 +72,8 @@ enum PrototypeSizeBounds {
             }
             return "placement"
         case ("node", "style"), ("styleWhen", "style"): return "style"
+        case ("node", "spans"): return "textSpan"
+        case ("textSpan", "style"): return "textSpanStyle"
         case ("node", "styleWhen"): return "styleWhen"
         case ("node", "anchor"): return "anchor"
         case ("node", "detents"): return "detent"

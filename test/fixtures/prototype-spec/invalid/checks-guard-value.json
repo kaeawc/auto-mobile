@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "save",
+          "requireValid": ["value"]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0]"
+}

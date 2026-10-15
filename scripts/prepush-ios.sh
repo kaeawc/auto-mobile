@@ -26,6 +26,19 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
 
+attestation_head=""
+if [[ -e "${project_root}/.git" ]]; then
+  attestation_head="$(git -C "${project_root}" rev-parse HEAD 2>/dev/null || true)"
+elif [[ -d "${project_root}/.jj" ]]; then
+  attestation_head="$(jj -R "${project_root}" log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+fi
+# Failure to capture initial cleanliness must suppress the attestation.
+attestation_start="$(bun "${project_root}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane ios 2>/dev/null || true)"
+attestation_options=(--expected-head "$attestation_head")
+if [[ "$attestation_start" != clean ]]; then
+  attestation_options+=(--started-dirty)
+fi
+
 repo_root_status=0
 repo_root="$(git -C "${project_root}" rev-parse --show-toplevel 2> /dev/null)" || repo_root_status=$?
 if [[ ${repo_root_status} -ne 0 ]]; then
@@ -89,7 +102,18 @@ for swift_file in ${swift_files[@]+"${swift_files[@]}"}; do
   fi
 done
 
+attestation_scope=full
+attestation_note=""
+attestation_lint=pass
+attestation_runner=skip
+if [[ "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" == 1 ]]; then
+  attestation_scope=partial
+  attestation_note="CtrlProxy runner build disabled"
+fi
 if [[ ${#swift_files[@]} -eq 0 ]]; then
+  attestation_scope=partial
+  attestation_note="no changed Swift files; lint skipped; ${attestation_note}"
+  attestation_lint=skip
   echo "No changed Swift files relative to ${base_ref}; skipping SwiftFormat and SwiftLint."
 else
   swiftformat --lint --config "${repo_root}/.swiftformat" ${swift_files[@]+"${swift_files[@]}"}
@@ -141,7 +165,9 @@ if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
 fi
 
 if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" != 1 ]]; then
+  attestation_runner=pass
   echo "Compiling CtrlProxy iOS UI test runner for changed Sources"
   AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}" \
     "${project_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
 fi
+"${project_root}/scripts/ci/record-attestations.sh" ios "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "SwiftFormat=${attestation_lint}:0" "SwiftLint=${attestation_lint}:0" "CtrlProxy runner build=${attestation_runner}:0" 'XCTestRunner build/tests and API baseline=pass:0' || true

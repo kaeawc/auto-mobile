@@ -3,6 +3,12 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.graphics.RectF
 import android.view.Display
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.runTest
@@ -54,7 +60,16 @@ class CtrlProxyDisplayRoutingDispatchTest {
   @Test
   fun `tap dispatches to explicit displays and defaults when absent`() {
     assertAtomicRouting(strokeCount = 1, duration = 10L) { displayId ->
-      fixture.actions.requestTapCoordinates("tap", 100.0, 100.0, 10L, null, displayId)
+      fixture.actions.requestTapCoordinates(
+        RequestTapCoordinates(
+          requestId = "tap",
+          x = 100.0,
+          y = 100.0,
+          duration = 10L,
+          frameContext = null,
+          displayId = displayId,
+        ),
+      )
     }
   }
 
@@ -82,7 +97,16 @@ class CtrlProxyDisplayRoutingDispatchTest {
     )
     for (displayId in listOf(2, null)) {
       reads = 0
-      fixture.actions.requestTapCoordinates("tap", 100.0, 100.0, 10L, null, displayId)
+      fixture.actions.requestTapCoordinates(
+        RequestTapCoordinates(
+          requestId = "tap",
+          x = 100.0,
+          y = 100.0,
+          duration = 10L,
+          frameContext = null,
+          displayId = displayId,
+        ),
+      )
       fixture.completeLastStroke()
       assertEquals(displayId, optionsSeen.last().displayId)
     }
@@ -92,14 +116,34 @@ class CtrlProxyDisplayRoutingDispatchTest {
   @Test
   fun `long press dispatches to explicit displays and defaults when absent`() {
     assertAtomicRouting(strokeCount = 1, duration = 1000L) { displayId ->
-      fixture.actions.requestTapCoordinates("long-press", 100.0, 100.0, 1000L, null, displayId)
+      fixture.actions.requestTapCoordinates(
+        RequestTapCoordinates(
+          requestId = "long-press",
+          x = 100.0,
+          y = 100.0,
+          duration = 1000L,
+          frameContext = null,
+          displayId = displayId,
+        ),
+      )
     }
   }
 
   @Test
   fun `swipe dispatches to explicit displays and defaults when absent`() {
     assertAtomicRouting(strokeCount = 1) { displayId ->
-      fixture.actions.requestSwipe("swipe", 100.0, 100.0, 200.0, 200.0, 50L, null, displayId)
+      fixture.actions.requestSwipe(
+        RequestSwipe(
+          requestId = "swipe",
+          x1 = 100.0,
+          y1 = 100.0,
+          x2 = 200.0,
+          y2 = 200.0,
+          duration = 50L,
+          frameContext = null,
+          displayId = displayId,
+        ),
+      )
     }
   }
 
@@ -107,14 +151,16 @@ class CtrlProxyDisplayRoutingDispatchTest {
   fun `two finger swipe dispatches to explicit displays and defaults when absent`() {
     assertAtomicRouting(strokeCount = 2) { displayId ->
       fixture.actions.requestTwoFingerSwipe(
-        "two-finger",
-        100.0,
-        100.0,
-        200.0,
-        200.0,
-        50L,
-        20,
-        displayId,
+        RequestTwoFingerSwipe(
+          requestId = "two-finger",
+          x1 = 100.0,
+          y1 = 100.0,
+          x2 = 200.0,
+          y2 = 200.0,
+          duration = 50L,
+          offset = 20,
+          displayId = displayId,
+        ),
       )
     }
   }
@@ -123,16 +169,18 @@ class CtrlProxyDisplayRoutingDispatchTest {
   fun `drag dispatches to explicit displays and defaults when absent`() {
     assertChainedRouting(segmentCount = 3) { displayId ->
       fixture.actions.requestDrag(
-        "drag",
-        100.0,
-        100.0,
-        200.0,
-        200.0,
-        10L,
-        50L,
-        10L,
-        null,
-        displayId,
+        RequestDrag(
+          requestId = "drag",
+          x1 = 100.0,
+          y1 = 100.0,
+          x2 = 200.0,
+          y2 = 200.0,
+          pressDurationMs = 10L,
+          dragDurationMs = 50L,
+          holdDurationMs = 10L,
+          frameContext = null,
+          displayId = displayId,
+        ),
       )
     }
   }
@@ -140,7 +188,18 @@ class CtrlProxyDisplayRoutingDispatchTest {
   @Test
   fun `pinch dispatches to explicit displays and defaults when absent`() {
     assertAtomicRouting(strokeCount = 2) { displayId ->
-      fixture.actions.requestPinch("pinch", 100.0, 100.0, 20.0, 40.0, 30f, 50L, displayId)
+      fixture.actions.requestPinch(
+        RequestPinch(
+          requestId = "pinch",
+          centerX = 100.0,
+          centerY = 100.0,
+          distanceStart = 20.0,
+          distanceEnd = 40.0,
+          rotationDegrees = 30f,
+          duration = 50L,
+          displayId = displayId,
+        ),
+      )
     }
   }
 
@@ -162,7 +221,18 @@ class CtrlProxyDisplayRoutingDispatchTest {
   @Test
   @Config(sdk = [29])
   fun `API 29 rejects secondary display but accepts zero and absent display`() {
-    fixture.actions.requestSwipe("unsupported", 100.0, 100.0, 200.0, 200.0, 50L, null, 2)
+    fixture.actions.requestSwipe(
+      RequestSwipe(
+        requestId = "unsupported",
+        x1 = 100.0,
+        y1 = 100.0,
+        x2 = 200.0,
+        y2 = 200.0,
+        duration = 50L,
+        frameContext = null,
+        displayId = 2,
+      ),
+    )
     assertTrue(fixture.shadow.gesturesDispatched.isEmpty())
     assertTrue(
       ShadowLog.getLogs().any {
@@ -173,7 +243,18 @@ class CtrlProxyDisplayRoutingDispatchTest {
     )
     for (displayId in listOf(Display.DEFAULT_DISPLAY, null)) {
       val before = fixture.shadow.gesturesDispatched.size
-      fixture.actions.requestSwipe("supported", 100.0, 100.0, 200.0, 200.0, 50L, null, displayId)
+      fixture.actions.requestSwipe(
+        RequestSwipe(
+          requestId = "supported",
+          x1 = 100.0,
+          y1 = 100.0,
+          x2 = 200.0,
+          y2 = 200.0,
+          duration = 50L,
+          frameContext = null,
+          displayId = displayId,
+        ),
+      )
       assertEquals(before + 1, fixture.shadow.gesturesDispatched.size)
       // API 29 has no getDisplayId. A successfully built and dispatched stroke proves the fallback.
       assertEquals(1, fixture.shadow.gesturesDispatched.last().description().strokeCount)
@@ -217,7 +298,15 @@ class CtrlProxyDisplayRoutingDispatchTest {
 
   private fun assertStreamingRouting(displayId: Int?) {
     val actions = fixture.actions
-    actions.requestGestureStart("start", "stream", 100.0, 100.0, displayId)
+    actions.requestGestureStart(
+      RequestGestureStart(
+        requestId = "start",
+        gestureId = "stream",
+        x = 100.0,
+        y = 100.0,
+        displayId = displayId,
+      ),
+    )
     assertEquals(1, fixture.shadow.gesturesDispatched.size)
     actions.requestGestureMove("move", "stream", 150.0, 150.0)
     assertEquals(1, fixture.shadow.gesturesDispatched.size)

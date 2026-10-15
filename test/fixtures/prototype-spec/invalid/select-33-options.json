@@ -1,0 +1,156 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "select",
+      "testTag": "choice",
+      "stateKey": "choice",
+      "label": "Choice",
+      "options": [
+        {
+          "value": "0",
+          "label": "x"
+        },
+        {
+          "value": "1",
+          "label": "x"
+        },
+        {
+          "value": "2",
+          "label": "x"
+        },
+        {
+          "value": "3",
+          "label": "x"
+        },
+        {
+          "value": "4",
+          "label": "x"
+        },
+        {
+          "value": "5",
+          "label": "x"
+        },
+        {
+          "value": "6",
+          "label": "x"
+        },
+        {
+          "value": "7",
+          "label": "x"
+        },
+        {
+          "value": "8",
+          "label": "x"
+        },
+        {
+          "value": "9",
+          "label": "x"
+        },
+        {
+          "value": "10",
+          "label": "x"
+        },
+        {
+          "value": "11",
+          "label": "x"
+        },
+        {
+          "value": "12",
+          "label": "x"
+        },
+        {
+          "value": "13",
+          "label": "x"
+        },
+        {
+          "value": "14",
+          "label": "x"
+        },
+        {
+          "value": "15",
+          "label": "x"
+        },
+        {
+          "value": "16",
+          "label": "x"
+        },
+        {
+          "value": "17",
+          "label": "x"
+        },
+        {
+          "value": "18",
+          "label": "x"
+        },
+        {
+          "value": "19",
+          "label": "x"
+        },
+        {
+          "value": "20",
+          "label": "x"
+        },
+        {
+          "value": "21",
+          "label": "x"
+        },
+        {
+          "value": "22",
+          "label": "x"
+        },
+        {
+          "value": "23",
+          "label": "x"
+        },
+        {
+          "value": "24",
+          "label": "x"
+        },
+        {
+          "value": "25",
+          "label": "x"
+        },
+        {
+          "value": "26",
+          "label": "x"
+        },
+        {
+          "value": "27",
+          "label": "x"
+        },
+        {
+          "value": "28",
+          "label": "x"
+        },
+        {
+          "value": "29",
+          "label": "x"
+        },
+        {
+          "value": "30",
+          "label": "x"
+        },
+        {
+          "value": "31",
+          "label": "x"
+        },
+        {
+          "value": "32",
+          "label": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.options",
+  "expectedMessage": "Array length out of range"
+}

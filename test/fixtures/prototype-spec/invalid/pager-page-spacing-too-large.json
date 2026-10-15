@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "pager-options",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "pages",
+      "children": [
+        {
+          "type": "text",
+          "text": "One"
+        },
+        {
+          "type": "text",
+          "text": "Two"
+        }
+      ],
+      "pageSpacing": 10001
+    }
+  },
+  "expectedPath": "root.pageSpacing",
+  "expectedMessage": "Invalid number value"
+}

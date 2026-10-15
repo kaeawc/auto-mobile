@@ -18,7 +18,9 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   newer shape is rejected rather than migrated.
 - Every object is strict: unknown properties, unknown node/action types, explicit
   null for optional fields, and wrong types reject the entire spec with a path.
-- Scroll supports both axes. Pager is horizontal, full-page only, with no axis.
+- Scroll supports both axes. Amended for #12071: pager defaults to horizontal full-page
+  paging and optionally accepts `axis`, `pageSpacing`, `peek` and `pageSize` on a device
+  advertising `prototype_pager_options_v1`. Indicator and carousel remain deferred.
 - Navigation includes `tabBar` and author-positioned `bottomNav`, bound to a pager
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
@@ -49,13 +51,14 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Prototype IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                           | Value           | Counting rule                                                                                      |
-| ---------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_PROTOTYPE_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_PROTOTYPE_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_PROTOTYPE_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_PROTOTYPE_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                             | Value           | Counting rule                                                                                      |
+| ------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
+| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                        |
+| `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
+| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
+| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                           |
+| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
 Navigation item `image` uses also count toward `MAX_PROTOTYPE_IMAGES`. Assets have
 separate transport and decoded-memory limits in #9301. These spec limits keep
@@ -475,7 +478,7 @@ layout room.
 | `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
 | `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
 | `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                         |
-| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
+| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options).                                                                                                                                 |
 | `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
 | `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
 | `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
@@ -496,7 +499,7 @@ layout room.
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
 | `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
 | `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
-| `pager`           | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
+| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                                                                                                       |
 | `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
 | `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
 | `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
@@ -640,6 +643,24 @@ description, which switches to an exponent earlier and pads it (`0.00001` shows 
 `1e-05`). Integral numbers agree on all three. Prefer integral state for numbers a
 prototype shows, or keep display text in a string key.
 
+## Text field options
+
+`textField` binds an initialized string state key. Optional `label` is a nonempty floating
+label; `variant` is `filled` (default) or `outlined`; nonempty `supportingText` appears below
+the field. `keyboardType` is `text` (default), `number`, `decimal`, `email`, `phone`, `url`,
+or `password`. `secure` masks text; `multiline` enables multiple lines. `minLines` and
+`maxLines` are integers in 1..20, permitted only with `multiline: true`; `minLines` cannot
+exceed `maxLines`. Multiline text cannot use `secure: true` or `keyboardType: "password"`.
+`maxLength` is an integer in 1..10000 and shows a character counter; the initial bound
+value cannot exceed it (UTF-16 length).
+
+All these options require `prototype_text_field_options_v1`. A device without the capability
+is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
+app with `launchApp prototype: true`, or drop the textField options.
+
+Open question: a `secure` field's value still lives in state and in `change` events/`inspect`;
+this slice does not redact it.
+
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
@@ -701,6 +722,31 @@ properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
 Start/end use layout direction, including RTL.
 
+### Pager options
+
+Any explicit `axis`, `pageSpacing`, `peek` or `pageSize` requires
+`prototype_pager_options_v1`; an older device is refused before anything is shown,
+even for explicit default values. Omission keeps existing behaviour.
+
+- `axis`: `"horizontal"` (default) or `"vertical"`.
+- `pageSpacing`: finite dp gap, 0..10000 (default 0).
+- `peek`: strict `{start?: number, end?: number}`, each finite dp in 0..10000,
+  exposing neighbouring pages along the main axis. Missing sides default to 0;
+  `{}` is accepted as a no-op.
+- `pageSize`: `"fill"` (default) or strict `{dp: number}`, finite 1e-6..10000,
+  allowing several pages per viewport. The shared limit is `MAX_PROTOTYPE_PAGER_DP`.
+
+A vertical pager cannot have any vertical scroll ancestor (omitted scroll axis is
+vertical), even through intervening containers or horizontal scrolls. A vertical
+pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
+The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
+
+Current page means the first fully visible page: fixed sizes snap at Start; fill
+uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
+navigation pager bindings keep their meaning. Stable keys and neighbour retention
+stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
+
+
 ## Icons and images
 
 Built-in Material names are the 2,075 icons of `material-icons-extended`, written
@@ -719,6 +765,7 @@ shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
 use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
+
 
 ### Asset transport (#9301, first slice)
 
@@ -835,13 +882,45 @@ scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
 | Action `type` | Properties                                                                                                                                                 |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
+| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
 | `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
 | `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
 | `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
 | `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
 | `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                 |
 | `dismiss`     | No additional properties.                                                                                                                                  |
+
+### Emit context
+
+Use a stable `emit.name` such as `pick` and `context: {id: {item: "id"}}` to report a
+repeat item's id, instead of encoding the id into the event name. `emit.payload` stays literal
+and uninterpolated; context is resolved on the device when the emit action runs, after earlier
+actions in the same atomic `onTap` list. For example, setState then emit reads the new state.
+
+Each nonempty context name has a strict binding object with exactly one key:
+
+- `{state: key}` reads state; repeat placeholders such as `liked_{item.id}` bind to concrete keys.
+- `{item: field}` reads a typed repeat field; `{index: true}` reads its zero-based numeric index.
+  Both require a repeat template. The field must exist in every item; data-path repeats use the
+  same scalar projection as text placeholders. Expansion replaces these bindings with `{value: ...}`.
+- `{page: pagerId}` reads an existing pager's current numeric page.
+- `{data: pointer}` reads any JSON value via the existing data pointer syntax and
+  `MAX_PROTOTYPE_DATA_POINTER_LENGTH`; it also requires `prototype_data_model_v1`.
+- `{value: json}` is literal JSON, subject to the emit payload depth limit.
+
+Missing state keys and data paths resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
+number of entries. The resolved object's compact JSON UTF-8 bytes
+are bounded by `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; this runtime count includes multibyte strings
+and compact JSON numbers, rather than the payload validator's conservative numeric cost.
+If over budget, sort entries by ascending name (byte-wise UTF-8 order), keep the longest prefix
+that fits and omit all remaining entries. An oversized first entry produces `{}`. The tap succeeds.
+
+A show or patch replacement using `emit.context` requires `prototype_emit_context_v1`; older
+devices are refused before upload, display or patch dispatch. The `prototype_event` wire has `context` next to the unchanged
+`payload` only if the emit declared context (including an empty object). It has
+`contextTruncated: true` only when truncated; otherwise the field is omitted, never false.
+`awaitEvent` and host status preserve these fields.
+
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
@@ -1574,6 +1653,160 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+## Flow and grid contract (not device-verified)
+
+`prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support
+children and repeat, with normal node/depth budgets. Flow's optional integer
+`maxLines >= 1` clips overflow visually without removing hierarchy children.
+`style.spacing` is the item gap; finite nonnegative `style.runSpacing` is the
+line/row gap and has the same bounds as spacing (meaningful only on flow/grid).
+Grid requires integer `columns` in 1..12 or `{minWidth: dp}` (finite, > 0).
+Spacing applies to both axes unless runSpacing overrides the row gap. Grid is
+always non-lazy, preserves every child in the hierarchy, and never scrolls
+itself; authors wrap it in `scroll`. Row-major placement starts a new row when
+a child's span does not fit. Optional integer `span >= 1` is valid only on a
+direct grid child and cannot exceed fixed columns; the renderer clamps spans
+to the resolved runtime count. Shared fixtures define host validation behavior.
+
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. A node with only `onLongPress` and/or `onDoubleTap` does not
+consume single taps: the nearest ancestor's `onTap` runs. All three lists may coexist. The
+single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
+fires immediately. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.
+
+## Search bar contract (#12069)
+
+`searchBar` requires `stateKey` naming an initialized string query. Optional
+`placeholder` follows `textField` rules; optional `leadingIcon` uses the same
+catalog as `button.icon`. Optional `trailingActions` has one or two
+`{icon, label, onTap?}` items, with a required catalog icon and nonempty accessible
+label. `onSubmit` is an optional ordinary action list for the keyboard search action.
+Typing reuses the text-field state-write and `change` event path. A visible search
+bar is a text target and makes the prototype window focusable for the IME.
+
+Optional `activeKey` names an initialized boolean. While true, the optional single
+`child` results subtree is shown. A child without activeKey is invalid; activeKey
+without a child is valid. `variant` is `bar` (default, expands to fill its parent
+while active) or `docked` (stays in place, results directly under the field).
+The child, submit actions and trailing actions participate in ordinary validation,
+limits, unique ids, state checks, emit-name collection, template binding, anchors
+and text-target walks. Repeat placeholders bind in the placeholder and trailing labels.
+
+Show and patch results containing the node require `prototype_search_bar_v1`;
+the host refuses them before any device request if it is absent. This pass adds
+the shared contract and host only. The later Compose implementation must use
+material3 `SearchBarDefaults.InputField` inside an in-tree `Surface`/`Column`,
+pinned to the material3 supplied by `androidx-compose-bom` in
+`android/gradle/libs.versions.toml`. Results are ordinary rows inside the prototype
+window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
+sees every result row.
+
+## Rich text
+
+A text node has exactly one of `text` or `spans`; plain `text: ""` remains valid.
+Spans are strict `{text, style?, onTap?}` objects with nonempty, untrimmed text; whitespace is valid.
+Span style accepts only color, fontWeight, fontStyle, textDecoration, textSize, letterSpacing,
+fontFamily and background, with the same ranges as node style; background is a colour, never a gradient.
+There are no span ids, testTags, visibility conditions, nested spans or URLs.
+Each span uses the same state `{key}`, data `{data:/pointer}`, repeat `{item.field}` / `{index}`
+and component `{props.x}` binding as node text; span actions bind like node onTap actions.
+The resolved texts concatenate in order without separators: observe and accessibility show the
+full plain text (an explicit node contentDescription still overrides its accessible label).
+Spans do not count as nodes and require `prototype_rich_text_v1`; older devices are refused before show.
+A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
+On Android, activate it with `tapOn {accessibilityLink:"<span text>"}` or
+`tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}` without `layer`:
+these selectors act across windows because tapOn refuses layer with accessibilityLink/subtext (#9305).
+Use `tapAt` on the span bounds as the fallback.
+On iOS, links are drawn as links and tap-through is by `tapAt` only; show reports the
+`rich-text-links` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
+Owed device checks (later platform passes): advertise the capability only after renderer support;
+verify mixed span styles, resolved concatenated observe text, per-span actions without URL navigation,
+Android semanticLinks and both selectors across windows, and iOS tapAt-only links plus platformNotes.
+The shared contract caps spans at 64 per text node. Host tests do not verify device rendering.
+
+## Menu and select
+
+`menu` and `select` require `prototype_menus_v1`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
+
+A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
+
+While a menu is open, the page behind it is removed from the accessibility tree, like a dialog; the menu items and outside-dismiss layer remain exposed. Closing restores the page. An expanded select leaves the page in the accessibility tree.
+
+A `select` requires a string `stateKey` and 2–32 `{value,label}` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same `change` payload as `radioGroup`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable `use` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
+
+Rendering stays inside the prototype window on both platforms so `observe` and `tapOn` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in `platformNotes`. Menu icons use the existing SF Symbols mapping on iOS.
+
+The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
+
+## Checks
+
+Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
+show and patch results using this feature on older devices. Inputs `textField`, `slider`,
+`checkbox`, `switch`, `radioGroup`, `datePicker` and `timePicker` accept `checks` (1–8 entries)
+and `validateOn: "change" | "blur" | "submit"` (omitted means blur). Each check contains a
+nonempty `message` and exactly one rule. `validateOn` controls error display, never validity.
+The first failing message is displayed.
+
+- `required: true`: trimmed nonempty text, true for checkbox/switch, nonempty selection for
+  radioGroup/datePicker, present number for slider/timePicker.
+- `minLength` / `maxLength`: nonnegative integer UTF-16 lengths, textField only.
+- `min` / `max`: finite numeric inclusive bounds, slider and pickers only. Text fields hold
+  strings and have no numeric subtype. Date state remains YYYY-MM-DD; bounds are UTC epoch
+  milliseconds. Time pickers retain hourKey/minuteKey; checks apply independently to both keys.
+- `format`: textField only, one of email, phone, digits, decimal, url.
+- `pattern`: textField only, the restricted grammar below, at most 128 UTF-16 units.
+
+Empty string, null or missing value passes all rules except required. Whitespace is only empty
+for required. Pattern and format matching use at most 4096 UTF-16 units. Required and length checks inspect the complete value.
+Every validity reference must name declared state with at least one check. Multiple checked
+controls sharing a key must all pass. Numeric/length lower bounds must not exceed upper bounds.
+
+Formats use these exact whole-value expressions (ASCII digits):
+
+- email: `[^\s@]+@[^\s@]+\.[^\s@]+` (Unicode names allowed).
+- phone: optional leading +, then 7–15 characters from ASCII digits, space, hyphen and parentheses;
+  at least seven digits. The leading + is outside the character count. Punctuation need not balance.
+- digits: `[0-9]+`.
+- decimal: `-?[0-9]+(\.[0-9]+)?` (no exponent or leading +).
+- url: `https?://[^\s/?#]+([/?#]\S*)?` (lowercase scheme, Unicode hosts allowed).
+
+Format whitespace follows JavaScript whitespace (including NBSP); no format trims its value.
+Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
+`[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
+CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
+escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
+`? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
+properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
+`\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
+Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
+These exact rules and error substrings are pinned in the language-neutral checks fixtures.
+
+Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
+are valid, including fields whose errors are not yet shown. They compose with all/any/not in
+visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
+`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+whole action list atomically, shows errors on every listed field, and sends
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.
 
 ## Saved prototype activity
 

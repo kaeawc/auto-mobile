@@ -72,9 +72,22 @@ extension PrototypePalette {
 }
 
 extension PrototypeNode {
-    /// Whether a `textField` is anywhere in this subtree, so focusing it is what the author meant.
+    /// Whether a `textField` or `searchBar` is anywhere in this subtree, so focusing it is what the author meant.
     var containsTextField: Bool {
-        type == "textField" || ((children ?? []) + [child].compactMap(\.self)).contains { $0.containsTextField }
+        ["textField", "searchBar"].contains(type) || childEntries(path: "root").map(\.node)
+            .contains { $0.containsTextField }
+    }
+
+    func containsVisibleTextField(
+        state: [String: JSONValue], pages: [String: Int], stacks: [String: PrototypeStackSnapshot]
+    )
+        -> Bool
+    {
+        if let visibleWhen, !visibleWhen.holds(state) { return false }
+        return ["textField", "searchBar"].contains(type) ||
+            currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state).contains {
+                $0.node.containsVisibleTextField(state: state, pages: pages, stacks: stacks)
+            }
     }
 }
 
@@ -82,16 +95,21 @@ extension PrototypeNode {
 /// or closed, and the topmost open dialog (if any) has no text field. A focused picker wheel (a tap
 /// on a wheel's selected row opens a number pad) or a field behind the dialog would otherwise keep
 /// the keyboard up over the dialog's buttons; a dialog that holds a text field keeps focus so the
-/// user can type into it. Snackbars never take focus, so only dialogs count.
-func prototypeModalChangeEndsEditing(from dialogsBefore: [ObjectIdentifier], to modalsAfter: [PrototypeNode]) -> Bool {
-    let dialogsAfter = modalsAfter.filter { $0.type == "dialog" }
+/// user can type into it. Snackbars never take focus; menus dismiss keyboard focus like dialogs.
+func prototypeModalChangeEndsEditing(
+    from dialogsBefore: [ObjectIdentifier], to modalsAfter: [PrototypeNode],
+    state: [String: JSONValue] = [:], pages: [String: Int] = [:], stacks: [String: PrototypeStackSnapshot] = [:]
+)
+    -> Bool
+{
+    let dialogsAfter = modalsAfter.filter { ["dialog", "menu"].contains($0.type) }
     guard dialogsBefore != dialogsAfter.map(ObjectIdentifier.init) else { return false }
-    return !(dialogsAfter.last?.containsTextField ?? false)
+    return !(dialogsAfter.last?.containsVisibleTextField(state: state, pages: pages, stacks: stacks) ?? false)
 }
 
 extension [PrototypeNode] {
-    /// Identities of the open dialogs among these modals, for `prototypeModalChangeEndsEditing`.
+    /// Identities of the open dialogs and menus among these modals, for `prototypeModalChangeEndsEditing`.
     var dialogIdentities: [ObjectIdentifier] {
-        filter { $0.type == "dialog" }.map(ObjectIdentifier.init)
+        filter { ["dialog", "menu"].contains($0.type) }.map(ObjectIdentifier.init)
     }
 }

@@ -24,7 +24,7 @@ Certain (Apple API facts):
 - An app needs `NSPhotoLibraryUsageDescription` (read/write) and `NSPhotoLibraryAddUsageDescription` (add-only) in its
   Info.plist for a request to be legal; the status query does not need them.
 - `XCUIApplication.resetAuthorizationStatus(for:)` can reset a protected resource of the target app, and the runner
-  already uses it (`ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:3163`, `.photos` for both
+  already uses it (`ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:3163`, `.photos` for both
   `photos` and `photos-add`). XCUITest has no public API to read an authorization status for another app.
 
 Repo evidence:

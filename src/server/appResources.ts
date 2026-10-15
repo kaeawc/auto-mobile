@@ -564,23 +564,21 @@ type ListInstalledAppsFactory = (device: BootedDevice) => InstalledAppsLister;
 const defaultListInstalledAppsFactory: ListInstalledAppsFactory = (device) =>
   new ListInstalledApps(device);
 
-let listInstalledAppsFactory: ListInstalledAppsFactory = defaultListInstalledAppsFactory;
-
-/** Test-only seam: inject a fake app lister so a failed listing command can be
- * simulated without real adb/simctl/devicectl I/O (#6155). Pass null to restore
- * the default. */
-export function setListInstalledAppsFactoryForTests(
-  factory: ListInstalledAppsFactory | null,
-): void {
-  listInstalledAppsFactory = factory ?? defaultListInstalledAppsFactory;
+export interface AppResourceDependencies {
+  listInstalledAppsFactory?: ListInstalledAppsFactory;
 }
 
+// Dependency injection preserves this existing algorithm and its control flow.
+// oxlint-disable-next-line complexity
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
+  deps: AppResourceDependencies = {},
 ): Promise<FetchedAppsCacheEntry> {
-  const listInstalledApps = listInstalledAppsFactory(device);
+  const listInstalledApps = (deps.listInstalledAppsFactory ?? defaultListInstalledAppsFactory)(
+    device,
+  );
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
@@ -705,6 +703,7 @@ async function ensureAppsCacheEntry(
   deviceOrId: BootedDevice | string,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
+  deps: AppResourceDependencies = {},
 ): Promise<AppsCacheEntry | null> {
   const deviceId = typeof deviceOrId === "string" ? deviceOrId : deviceOrId.deviceId;
   const cached = appCacheByDeviceId.get(deviceId);
@@ -728,7 +727,7 @@ async function ensureAppsCacheEntry(
 
       flightSignal?.throwIfAborted();
       const cacheGeneration = coordinator.beginRebuild(deviceId, incarnation);
-      const result = await fetchAppsForDevice(device, timer, flightSignal);
+      const result = await fetchAppsForDevice(device, timer, flightSignal, deps);
       if (
         result.cacheable &&
         cacheGeneration === generation &&
@@ -955,9 +954,10 @@ async function getAppsQueryDevice(
 export async function queryInstalledApps(
   options: AppsQueryOptions,
   signal?: AbortSignal,
+  deps: AppResourceDependencies = {},
 ): Promise<AppsQueryResourceContent> {
   const device = await getAppsQueryDevice(options, signal);
-  const cacheEntry = await ensureAppsCacheEntry(device, defaultTimer, signal);
+  const cacheEntry = await ensureAppsCacheEntry(device, defaultTimer, signal, deps);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);
   }
@@ -1125,9 +1125,10 @@ function isLaunchabilityUnknownForQuery(
 async function getAppsQueryResource(
   options: AppsQueryOptions,
   uri: string,
+  deps: AppResourceDependencies = {},
 ): Promise<ResourceContent> {
   try {
-    const content = await queryInstalledApps(options);
+    const content = await queryInstalledApps(options, undefined, deps);
 
     if (options.deviceId) {
       recordAppsQueryUri(options.deviceId, uri);
@@ -1154,8 +1155,11 @@ async function getAppsQueryResource(
   }
 }
 
-async function getAppsResource(deviceId: string): Promise<ResourceContent> {
-  const cacheEntry = await ensureAppsCacheEntry(deviceId);
+async function getAppsResource(
+  deviceId: string,
+  deps: AppResourceDependencies = {},
+): Promise<ResourceContent> {
+  const cacheEntry = await ensureAppsCacheEntry(deviceId, undefined, undefined, deps);
   if (!cacheEntry) {
     return {
       uri: getDeviceAppsUri(deviceId),
@@ -1177,8 +1181,12 @@ async function getAppsResource(deviceId: string): Promise<ResourceContent> {
   };
 }
 
-async function getAppResource(deviceId: string, packageName: string): Promise<ResourceContent> {
-  const cacheEntry = await ensureAppsCacheEntry(deviceId);
+async function getAppResource(
+  deviceId: string,
+  packageName: string,
+  deps: AppResourceDependencies = {},
+): Promise<ResourceContent> {
+  const cacheEntry = await ensureAppsCacheEntry(deviceId, undefined, undefined, deps);
   const uri = `${getDeviceAppsUri(deviceId)}/${packageName}`;
 
   if (!cacheEntry) {
@@ -1209,7 +1217,7 @@ async function getAppResource(deviceId: string, packageName: string): Promise<Re
   };
 }
 
-function registerDeviceAppResource(device: BootedDevice): void {
+function registerDeviceAppResource(device: BootedDevice, deps: AppResourceDependencies = {}): void {
   const uri = getDeviceAppsUri(device.deviceId);
 
   ResourceRegistry.register(
@@ -1218,7 +1226,7 @@ function registerDeviceAppResource(device: BootedDevice): void {
     `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
       `System apps: use automobile:apps?deviceId=${device.deviceId}&type=system.`,
     "application/json",
-    () => getAppsResource(device.deviceId),
+    () => getAppsResource(device.deviceId, deps),
   );
 
   registeredDeviceResources.set(device.deviceId, uri);
@@ -1239,7 +1247,11 @@ function unregisterDeviceAppResource(deviceId: string): void {
   invalidateMetadataCacheForDevice(deviceId);
 }
 
-export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
+// Dependency injection preserves this existing algorithm and its control flow.
+// oxlint-disable-next-line complexity
+export async function syncInstalledAppResourceRegistry(
+  deps: AppResourceDependencies = {},
+): Promise<boolean> {
   const generation = ++installedAppResourceRegistryGeneration;
   let devices: BootedDevice[] = [];
   try {
@@ -1260,7 +1272,7 @@ export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
 
   for (const device of devices) {
     if (!registeredDeviceResources.has(device.deviceId)) {
-      registerDeviceAppResource(device);
+      registerDeviceAppResource(device, deps);
       changed = true;
     }
   }
@@ -1317,8 +1329,8 @@ export async function notifyInstalledAppResourceListChanged(): Promise<void> {
   await ResourceRegistry.notifyResourceUpdated(APPS_RESOURCE_URIS.BASE);
 }
 
-export async function syncInstalledAppResources(): Promise<void> {
-  if (await syncInstalledAppResourceRegistry()) {
+export async function syncInstalledAppResources(deps: AppResourceDependencies = {}): Promise<void> {
+  if (await syncInstalledAppResourceRegistry(deps)) {
     await notifyInstalledAppResourceListChanged();
   }
 }
@@ -1491,13 +1503,13 @@ async function getAppMetadataResource(
   }
 }
 
-export function registerAppResources(): void {
+export function registerAppResources(deps: AppResourceDependencies = {}): void {
   ResourceRegistry.register(
     APPS_RESOURCE_URIS.BASE,
     "Installed Apps",
     "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
     "application/json",
-    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE),
+    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
   );
 
   ResourceRegistry.registerTemplate(
@@ -1509,7 +1521,7 @@ export function registerAppResources(): void {
       try {
         const options = parseAppsQueryParams(params);
         const uri = getRequestedResourceUri(params) || buildAppsUri(options);
-        return getAppsQueryResource(options, uri);
+        return getAppsQueryResource(options, uri, deps);
       } catch (error) {
         logger.error(`[AppResources] Failed to parse apps query params: ${error}`);
         return {
@@ -1533,7 +1545,7 @@ export function registerAppResources(): void {
     "List of installed user apps for a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system.",
     "application/json",
-    async (params) => getAppsResource(params.deviceId),
+    async (params) => getAppsResource(params.deviceId, deps),
   );
 
   ResourceRegistry.registerTemplate(
@@ -1542,7 +1554,7 @@ export function registerAppResources(): void {
     "Details for a specific user app installed on a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system&search=PACKAGE_NAME.",
     "application/json",
-    async (params) => getAppResource(params.deviceId, params.packageName),
+    async (params) => getAppResource(params.deviceId, params.packageName, deps),
   );
 
   ResourceRegistry.registerTemplate(
@@ -1554,7 +1566,7 @@ export function registerAppResources(): void {
     async (params) => getAppMetadataResource(params.deviceId, params.appId),
   );
 
-  void syncInstalledAppResources();
+  void syncInstalledAppResources(deps);
 
   logger.info("[AppResources] Registered app resources");
 }

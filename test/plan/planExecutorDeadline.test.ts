@@ -4,11 +4,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
-import {
-  resetSetUIStateFactory,
-  setSetUIStateFactory,
-  setUIStateHandler,
-} from "../../src/server/formTools";
+import { createSetUIStateHandler } from "../../src/server/formTools";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import {
   getLiveDeadlineMs,
@@ -25,7 +21,7 @@ import {
 describe("plan internal request inheritance", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetSetUIStateFactory();
+
     unregisterLiveDeadline("plan-deadline");
   });
 
@@ -78,12 +74,14 @@ describe("plan internal request inheritance", () => {
   test("setUIState inside a plan sees the enclosing deadline through its existing handler", async () => {
     const snapshots: unknown[] = [];
     const progress = async () => {};
-    setSetUIStateFactory(() => ({
-      execute: async (_options, inheritedProgress, _signal, deadlineMs, liveDeadline) => {
-        snapshots.push(deadlineMs, liveDeadline?.(), inheritedProgress);
-        return { success: true, fields: [], totalAttempts: 0 };
-      },
-    }));
+    const setUIStateHandler = createSetUIStateHandler({
+      setUIStateFactory: () => ({
+        execute: async (_options, inheritedProgress, _signal, deadlineMs, liveDeadline) => {
+          snapshots.push(deadlineMs, liveDeadline?.(), inheritedProgress);
+          return { success: true, fields: [], totalAttempts: 0 };
+        },
+      }),
+    });
     registerLiveDeadline("plan-deadline", new ProgressExtendableDeadline(0, 80_000));
     ToolRegistry.register(
       "deadlineForm",

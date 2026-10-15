@@ -4,6 +4,7 @@
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
+import { markToolFailure } from "./toolFailureSignal";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -57,7 +58,7 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
       text: string;
     }>;
   } {
-    return {
+    const response: ReturnType<ToolResponseFormatter["createJSONToolResponse"]> = {
       content: [
         {
           type: "text",
@@ -65,6 +66,9 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
         },
       ],
     };
+    return content !== null && typeof content === "object" && content.success === false
+      ? markToolFailure(response)
+      : response;
   }
 
   /**

@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { z } from "zod/v4";
 import type { Kysely } from "kysely";
 import * as databaseModule from "../../src/db/database";
 import {
   KeyedJsonConfigRepository,
+  appearanceConfigSchema,
+  deviceSnapshotConfigSchema,
+  videoRecordingConfigSchema,
   createAppearanceConfigRepository,
   createDeviceSnapshotConfigRepository,
   createVideoRecordingConfigRepository,
@@ -42,6 +46,7 @@ describe("KeyedJsonConfigRepository", () => {
   test("a named key addresses its own row and leaves the global row alone (#10976)", async () => {
     const repo = new KeyedJsonConfigRepository<{ theme: string }>({
       tableName: "appearance_configs",
+      schema: z.object({ theme: z.string() }),
       db,
     });
 
@@ -60,7 +65,8 @@ describe("KeyedJsonConfigRepository", () => {
 
   for (const { tableName, firstConfig, secondConfig } of tableCases) {
     test(`stores, updates, and clears the singleton config in ${tableName}`, async () => {
-      const repo = new KeyedJsonConfigRepository<typeof firstConfig>({
+      const repo = new KeyedJsonConfigRepository({
+        schema: z.record(z.string(), z.union([z.string(), z.boolean()])),
         tableName,
         db,
       });
@@ -78,7 +84,8 @@ describe("KeyedJsonConfigRepository", () => {
     });
 
     test(`updates concurrent first writes with one row for the singleton key in ${tableName}`, async () => {
-      const repo = new KeyedJsonConfigRepository<typeof firstConfig>({
+      const repo = new KeyedJsonConfigRepository({
+        schema: z.record(z.string(), z.union([z.string(), z.boolean()])),
         tableName,
         db,
       });
@@ -98,6 +105,7 @@ describe("KeyedJsonConfigRepository", () => {
   test("stores the singleton config in the configured table only", async () => {
     const repo = new KeyedJsonConfigRepository<{ theme: string }>({
       tableName: "appearance_configs",
+      schema: z.object({ theme: z.string() }),
       db,
     });
 
@@ -126,6 +134,7 @@ describe("KeyedJsonConfigRepository", () => {
       strictBackupMode: true,
       vmSnapshotTimeoutMs: 34000,
       maxArchiveSizeMb: 12,
+      maxVmSnapshotsPerAvd: 3,
     });
     await videoRecording.setConfig({
       qualityPreset: "high",
@@ -136,6 +145,28 @@ describe("KeyedJsonConfigRepository", () => {
       format: "mp4",
     });
 
+    expect(await appearance.getConfig()).toEqual({
+      syncWithHost: false,
+      defaultMode: "dark",
+      applyOnConnect: false,
+    });
+    expect(await deviceSnapshot.getConfig()).toEqual({
+      includeAppData: false,
+      includeSettings: true,
+      useVmSnapshot: false,
+      strictBackupMode: true,
+      vmSnapshotTimeoutMs: 34000,
+      maxArchiveSizeMb: 12,
+      maxVmSnapshotsPerAvd: 3,
+    });
+    expect(await videoRecording.getConfig()).toEqual({
+      qualityPreset: "high",
+      targetBitrateKbps: 2000,
+      maxThroughputMbps: 8,
+      fps: 30,
+      maxArchiveSizeMb: 45,
+      format: "mp4",
+    });
     expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
     expect(await db.selectFrom("device_snapshot_configs").selectAll().execute()).toHaveLength(1);
     expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(1);
@@ -147,6 +178,7 @@ describe("KeyedJsonConfigRepository", () => {
 
     try {
       const repo = new KeyedJsonConfigRepository<{ theme: string }>({
+        schema: z.object({ theme: z.string() }),
         tableName: "appearance_configs",
       });
 
@@ -178,6 +210,7 @@ describe("KeyedJsonConfigRepository", () => {
       // that executor directly and never touches the global singleton or migration
       // gating — the other side of the one contract the singleton test pins.
       const repo = new KeyedJsonConfigRepository<{ theme: string }>({
+        schema: z.object({ theme: z.string() }),
         tableName: "appearance_configs",
         db,
       });
@@ -193,9 +226,62 @@ describe("KeyedJsonConfigRepository", () => {
     }
   });
 
+  const validationCases = [
+    { tableName: "appearance_configs", schema: appearanceConfigSchema },
+    { tableName: "device_snapshot_configs", schema: deviceSnapshotConfigSchema },
+    { tableName: "video_recording_configs", schema: videoRecordingConfigSchema },
+  ] as const;
+
+  for (const { tableName, schema } of validationCases) {
+    for (const json of ['{"defaultMode":42}', "42", "[]", "null", '"string"']) {
+      test(`${tableName} rejects invalid config ${json}`, async () => {
+        const log = new FakeLogger();
+        const repo = new KeyedJsonConfigRepository<unknown>({ tableName, schema, db, logger: log });
+        await db
+          .insertInto(tableName)
+          .values({
+            key: "global",
+            config_json: json,
+            updated_at: new Date().toISOString(),
+          })
+          .execute();
+        expect(await repo.getConfig()).toBeNull();
+        expect(log.at("warn")).toContainEqual(
+          expect.objectContaining({
+            message: expect.stringContaining("Config JSON failed validation:"),
+          }),
+        );
+      });
+    }
+  }
+
+  test("reads a legacy snapshot config without VM retention fields", async () => {
+    const legacy = {
+      includeAppData: true,
+      includeSettings: true,
+      useVmSnapshot: true,
+      strictBackupMode: false,
+      vmSnapshotTimeoutMs: 30000,
+      maxArchiveSizeMb: 100,
+    };
+    await db
+      .insertInto("device_snapshot_configs")
+      .values({
+        key: "global",
+        config_json: JSON.stringify(legacy),
+        updated_at: new Date().toISOString(),
+      })
+      .execute();
+    expect(await createDeviceSnapshotConfigRepository(db).getConfig()).toEqual({
+      ...legacy,
+      maxVmSnapshotsPerAvd: 3,
+    });
+  });
+
   test("returns null and logs a warning for malformed config JSON", async () => {
     const log = new FakeLogger();
     const repo = new KeyedJsonConfigRepository<{ autoCapture: boolean }>({
+      schema: z.object({ autoCapture: z.boolean() }),
       tableName: "device_snapshot_configs",
       loggerTag: "DeviceSnapshotConfigRepository",
       db,

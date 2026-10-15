@@ -301,6 +301,24 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell wm density 560");
   });
 
+  test("rejects an explicit density above the ceiling before dispatch", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory);
+
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      density: 100000,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("1280 dpi maximum");
+    expect(
+      adbFactory
+        .getFakeClient()
+        .getCommandCalls()
+        .map((call) => call.command),
+    ).not.toContain("shell wm density 100000");
+  });
+
   test("fails closed when Android accepts a density command but retains the old value", async () => {
     const adbFactory = new FakeAdbClientFactory();
     // The OEM shell accepts the write but clamps or ignores it. Both snapshots
@@ -351,6 +369,24 @@ describe("DisplayConfig setConfig", () => {
       .getCommandCalls()
       .map((c) => c.command);
     expect(commands).not.toContain("shell wm density 68");
+  });
+
+  test("rejects a relative density bucket above the ceiling before dispatch", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { density: "Physical density: 1200\n" });
+
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      density: "larger",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("1380 dpi exceeds Android's 1280 dpi maximum");
+    expect(
+      adbFactory
+        .getFakeClient()
+        .getCommandCalls()
+        .map((call) => call.command),
+    ).not.toContain("shell wm density 1380");
   });
 
   test("resolves a relative density bucket against physical density, not a prior override", async () => {

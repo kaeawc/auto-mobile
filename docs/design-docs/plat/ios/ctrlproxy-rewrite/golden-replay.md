@@ -6,10 +6,10 @@ alters no merged output.
 
 Unit tests can replay real runner traffic at two layers:
 
-| Layer                | What is recorded                                                              | Switch                                                          | Replayed by                                                                            |
-| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Host WebSocket       | Every request the TS `IOSCtrlProxyClient` sends and every runner reply        | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR` on the host process       | `test/fakes/ReplayCtrlProxyWebSocket.ts`                                               |
-| Runner merger inputs | Each `(xcuitest, sdk)` pair `HierarchyMerger` receives on `request_hierarchy` | `CTRL_PROXY_IOS_HIERARCHY_PAIR_DIR` in the runner's environment | `ios/control-proxy/Tests/CtrlProxyRewriteTests/HierarchyMergerGoldenReplayTests.swift` |
+| Layer                | What is recorded                                                              | Switch                                                          | Replayed by                                                                     |
+| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Host WebSocket       | Every request the TS `IOSCtrlProxyClient` sends and every runner reply        | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR` on the host process       | `test/fakes/ReplayCtrlProxyWebSocket.ts`                                        |
+| Runner merger inputs | Each `(xcuitest, sdk)` pair `HierarchyMerger` receives on `request_hierarchy` | `CTRL_PROXY_IOS_HIERARCHY_PAIR_DIR` in the runner's environment | `ios/control-proxy/Tests/CtrlProxyTests/HierarchyMergerGoldenReplayTests.swift` |
 
 ## Recording format
 

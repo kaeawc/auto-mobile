@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import {
-  registerFormTools,
-  resetSetUIStateFactory,
-  setSetUIStateFactory,
-  setUIStateHandler,
-} from "../../src/server/formTools";
+import { registerFormTools, createSetUIStateHandler } from "../../src/server/formTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import type { SetUIStateResult } from "../../src/features/action/SetUIState";
@@ -21,14 +16,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetSetUIStateFactory();
   ToolRegistry.clearTools();
 });
 
 test("setUIState forwards warnings into its structured and text output schema", async () => {
-  setSetUIStateFactory(() => ({
-    execute: async () => ({ success: true, fields, totalAttempts: 1, warnings }),
-  }));
+  const setUIStateHandler = createSetUIStateHandler({
+    setUIStateFactory: () => ({
+      execute: async () => ({ success: true, fields, totalAttempts: 1, warnings }),
+    }),
+  });
   const response = await setUIStateHandler(device, args);
   const structured = response.structuredContent;
   const schema = ToolRegistry.getRegisteredTool("setUIState")?.outputSchema;
@@ -44,14 +40,16 @@ test.each([
   { name: "absent", value: undefined },
   { name: "empty", value: [] },
 ])("setUIState omits $name warnings", async ({ value }) => {
-  setSetUIStateFactory(() => ({
-    execute: async () => ({
-      success: true,
-      fields,
-      totalAttempts: 1,
-      ...(value === undefined ? {} : { warnings: value }),
+  const setUIStateHandler = createSetUIStateHandler({
+    setUIStateFactory: () => ({
+      execute: async () => ({
+        success: true,
+        fields,
+        totalAttempts: 1,
+        ...(value === undefined ? {} : { warnings: value }),
+      }),
     }),
-  }));
+  });
   const response = await setUIStateHandler(device, args);
   const structured = response.structuredContent;
   expect("warnings" in structured).toBe(false);

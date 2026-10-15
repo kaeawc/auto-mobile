@@ -56,7 +56,9 @@ interface PreferenceEntriesResult {
   source: PreferenceEntrySource;
 }
 
-let adbClientFactory: AdbClientFactory = defaultAdbClientFactory;
+export interface StorageResourceDependencies {
+  adbClientFactory?: AdbClientFactory;
+}
 
 interface StorageCache {
   files: Map<string, StorageFilesCacheEntry>; // key: `${deviceId}:${packageName}`
@@ -113,6 +115,7 @@ async function getPreferenceEntriesForDevice(
   device: BootedDevice,
   packageName: string,
   fileName: string,
+  deps: StorageResourceDependencies = {},
 ): Promise<PreferenceEntriesResult> {
   if (device.platform === "android") {
     const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
@@ -126,7 +129,7 @@ async function getPreferenceEntriesForDevice(
         throw ctrlProxyError;
       }
       try {
-        const adb = adbClientFactory.create(device);
+        const adb = (deps.adbClientFactory ?? defaultAdbClientFactory).create(device);
         // A resource URI carries no user, so resolve it as the preference tools do: user 0 unless the
         // app is only on one other user. A URI could name a user later through a `?userId=` query
         // parameter (templates can declare `queryParamNames`) without changing the path shape; the
@@ -287,7 +290,10 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
 /**
  * Get storage entries resource content
  */
-async function getStorageEntriesResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getStorageEntriesResource(
+  params: Record<string, string>,
+  deps: StorageResourceDependencies = {},
+): Promise<ResourceContent> {
   const { deviceId, packageName, fileName } = params;
   const decodedPackage = safeDecodeSegment(packageName);
   const decodedFileName = safeDecodeSegment(fileName);
@@ -310,6 +316,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
       device,
       decodedPackage,
       decodedFileName,
+      deps,
     );
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(entries);
@@ -372,17 +379,10 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
   }
 }
 
-/** Test seam for exercising Android run-as fallback without a device. */
-export function setStorageResourcesAdbClientFactoryForTesting(
-  factory: AdbClientFactory | null,
-): void {
-  adbClientFactory = factory ?? defaultAdbClientFactory;
-}
-
 /**
  * Register storage resources
  */
-export function registerStorageResources(): void {
+export function registerStorageResources(deps: StorageResourceDependencies = {}): void {
   // Register template for listing storage files
   ResourceRegistry.registerTemplate(
     STORAGE_RESOURCE_TEMPLATES.FILES,
@@ -398,7 +398,7 @@ export function registerStorageResources(): void {
     "Storage File Entries",
     "Get all key-value entries from a storage file (Android SharedPreferences or iOS UserDefaults suite).",
     "application/json",
-    getStorageEntriesResource,
+    (params: Record<string, string>) => getStorageEntriesResource(params, deps),
   );
 
   logger.info("[StorageResources] Registered storage resources");

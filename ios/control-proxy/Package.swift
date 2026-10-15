@@ -11,8 +11,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "CtrlProxyRewrite",
-            targets: ["CtrlProxyRewrite"]
+            name: "CtrlProxy",
+            targets: ["CtrlProxy"]
         ),
     ],
     targets: [
@@ -22,34 +22,27 @@ let package = Package(
             publicHeadersPath: "include"
         ),
 
-        // MARK: Swift-6 concurrency-clean rewrite (shipping)
-        //
-        // The reference `CtrlProxy` target (a Swift-5-language-mode behavioral oracle) and its
-        // `CtrlProxyTests` were retired in Phase 7E once the rewrite reached parity and passed
-        // on-device; the differential-parity harness (which linked both modules) was re-anchored
-        // to reference-free golden/invariant tests or dropped. `CtrlProxyRewrite` is now the sole
-        // implementation.
+        // MARK: CtrlProxy
 
         .target(
-            name: "CtrlProxyRewrite",
+            name: "CtrlProxy",
             dependencies: ["ObjCExceptionCatcher"],
-            path: "Sources/CtrlProxyRewrite",
+            path: "Sources/CtrlProxy",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
-        // Shared test doubles + fixtures for the rewrite. NOT a dependency of the
+        // Shared test doubles + fixtures for the implementation. NOT a dependency of the
         // shipped `.library`, so the product stays fake-free and Sendable-clean.
         .target(
             name: "CtrlProxyTestSupport",
             path: "Sources/CtrlProxyTestSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
-        // Rewrite unit tests + reference-free wire-contract golden/invariant tests (the
-        // differential-parity harness that once linked the reference module was retired in
-        // Phase 7E — see the shared wire fixture `ios-ctrlproxy-request-snapshots.json`).
+        // Unit tests and wire-contract golden/invariant tests using the shared
+        // fixture `ios-ctrlproxy-request-snapshots.json`.
         .testTarget(
-            name: "CtrlProxyRewriteTests",
-            dependencies: ["CtrlProxyRewrite", "CtrlProxyTestSupport"],
-            path: "Tests/CtrlProxyRewriteTests",
+            name: "CtrlProxyTests",
+            dependencies: ["CtrlProxy", "CtrlProxyTestSupport"],
+            path: "Tests/CtrlProxyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

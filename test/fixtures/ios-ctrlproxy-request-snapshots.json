@@ -5,7 +5,7 @@
     "Guarded from BOTH sides:",
     "  - test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts captures each snapshot LIVE from the",
     "    real TS builder and asserts deep equality with this file (requestId normalized to a placeholder).",
-    "  - ios/control-proxy/Tests/CtrlProxyRewriteTests/WireDecodeParityTests.swift decodes each snapshot",
+    "  - ios/control-proxy/Tests/CtrlProxyTests/WireDecodeParityTests.swift decodes each snapshot",
     "    through the real WebSocketRequest wire path and asserts every field lands on a same-named property",
     "    of the typed Swift payload struct with the same value.",
     "Do not edit by hand. Regenerate with:",
@@ -13,6 +13,83 @@
     "then re-run the Swift suite (cd ios/control-proxy && swift test)."
   ],
   "snapshots": [
+    {
+      "name": "get_sdk_capabilities",
+      "builder": "IOSCtrlProxyClient.requestSdkCapabilities",
+      "wire": {
+        "type": "get_sdk_capabilities",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_activate_accessibility_link",
+      "builder": "CtrlProxyVoiceOver.requestActivateAccessibilityLink",
+      "wire": {
+        "type": "request_activate_accessibility_link",
+        "requestId": "fixture-request-id",
+        "text": "Details",
+        "occurrence": 2,
+        "ownerResourceId": "owner-42"
+      }
+    },
+    {
+      "name": "request_magic_tap",
+      "builder": "CtrlProxyVoiceOver.requestMagicTap",
+      "wire": {
+        "type": "request_magic_tap",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_sdk_trigger",
+      "builder": "requestSdkTrigger",
+      "wire": {
+        "type": "request_sdk_trigger",
+        "requestId": "fixture-request-id",
+        "module": "callkit",
+        "trigger": "incoming",
+        "payloadJson": "{\"caller\":\"fixture\"}"
+      }
+    },
+    {
+      "name": "set_hierarchy_poll_interval",
+      "builder": "IOSCtrlProxyClient.refreshObservationStreamHierarchyCadence",
+      "wire": {
+        "type": "set_hierarchy_poll_interval",
+        "intervalMs": 275
+      }
+    },
+    {
+      "name": "set_network_error_simulation",
+      "builder": "IOSCtrlProxyClient.setNetworkErrorSimulation",
+      "wire": {
+        "type": "set_network_error_simulation",
+        "requestId": "fixture-request-id",
+        "enabled": true,
+        "errorType": "timeout",
+        "limit": 3,
+        "expiresAtEpochMs": 1700000000000,
+        "remainingMs": 2500
+      }
+    },
+    {
+      "name": "set_voiceover_state",
+      "builder": "CtrlProxyVoiceOver.requestSetVoiceOverEnabled",
+      "wire": {
+        "type": "set_voiceover_state",
+        "requestId": "fixture-request-id",
+        "enabled": true
+      }
+    },
+    {
+      "name": "storage_capabilities",
+      "builder": "CtrlProxyDatabase.storageCapabilities",
+      "wire": {
+        "type": "storage_capabilities",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app"
+      }
+    },
     {
       "name": "request_hierarchy",
       "builder": "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=true)",

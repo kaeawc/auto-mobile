@@ -480,7 +480,7 @@ private fun semanticDigest(node: UIElementInfo, keyMode: DiffKeyMode): String {
  * side-independent total order for the transposition-invariant tie-break in [alignWindowSlots].
  */
 private fun canonicalSignature(signature: Set<String>): String =
-  signature.sorted().joinToString(" ")
+  signature.sorted().joinToString("\u0000")
 
 /** Jaccard overlap |a ∩ b| / |a ∪ b| of two structural key sets; 0 when both are empty. */
 private fun jaccard(a: Set<String>, b: Set<String>): Double {

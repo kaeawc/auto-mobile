@@ -238,6 +238,12 @@ describe("resolveDeclaredType", () => {
     ["missing literal value", withDef({ type: "literal" }), "undefined", false],
     ["string number union", z.union([z.string(), z.number()]), "string", false],
     [
+      "number and string literal union",
+      z.union([z.number(), z.literal("default")]),
+      "union",
+      false,
+    ],
+    [
       "all scalar string union",
       z.union([z.string(), z.number(), z.boolean(), z.bigint()]),
       "string",
@@ -272,6 +278,11 @@ describe("resolveDeclaredType", () => {
       expect(resolveDeclaredType(schema)).toEqual({ type, nullable });
     });
   }
+  test("number and string literal union coercion preserves numeric and literal values", () => {
+    const declared = resolveDeclaredType(z.union([z.number(), z.literal("default")]));
+    expect(coerceCliValue("1.3", declared)).toBe(1.3);
+    expect(coerceCliValue("default", declared)).toBe("default");
+  });
   for (const count of [9, 10, 11]) {
     test(`${count} wrapper layers pin the ten-iteration depth cap`, () => {
       let schema: unknown = z.string();

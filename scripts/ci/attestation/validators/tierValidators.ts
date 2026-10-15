@@ -1,5 +1,9 @@
-import { parseEnvelope, TREE_INPUT_HASH_ALGORITHM } from "../attestationSchema";
-import type { AttestationTier } from "../attestationSchema";
+import {
+  parseEnvelope,
+  SUPPORTED_SIGNATURE_ALGORITHMS,
+  TREE_INPUT_HASH_ALGORITHM,
+} from "../attestationSchema";
+import type { AttestationSignature, AttestationTier } from "../attestationSchema";
 import { policyEnvironment, type ValidationEvidence } from "./envelopeAdapter";
 import { timingSafeEqual } from "node:crypto";
 import type {
@@ -153,11 +157,15 @@ export function readEnvelope<T>(raw: T): T {
   return snapshotValue(raw, new WeakMap()) as T;
 }
 function checkVerification(
-  signatureKey: string | undefined,
+  signature: AttestationSignature | null,
   verification: VerificationResult,
 ): IgnoreReason[] {
-  const boundIdentity = nonemptyString(verification.keyId) && nonemptyString(verification.identity);
   const reasons: IgnoreReason[] = [];
+  if (signature !== null && !SUPPORTED_SIGNATURE_ALGORITHMS.includes(signature.algorithm)) {
+    reasons.push("signature-algorithm-unsupported");
+  }
+  const signatureKey = signature?.keyId;
+  const boundIdentity = nonemptyString(verification.keyId) && nonemptyString(verification.identity);
   if (signatureKey === undefined || verification.verified !== true || !boundIdentity) {
     reasons.push("signature-unverified");
   }
@@ -169,7 +177,7 @@ function checkVerification(
 function fieldFailures(evidence: ValidationEvidence): IgnoreReason[] {
   const claims = evidence.verification;
   const values = [claims.keyId, claims.identity, claims.baseSha, claims.task];
-  const reasons = checkVerification(evidence.envelope.signature?.keyId, claims);
+  const reasons = checkVerification(evidence.envelope.signature, claims);
   if (values.some((value) => value === undefined)) {
     reasons.push("missing-field");
   } else if (!values.every(nonemptyString)) {

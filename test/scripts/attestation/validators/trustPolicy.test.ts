@@ -36,8 +36,12 @@ test.each([
   const { policy, errors } = resolvePolicy({ [tier]: { ceiling } });
   const result = decideAttestation(f.envelope, f.ctx, policy);
   expect(errors).toEqual({});
-  expect(result.decision).toBe(decision);
-  expect(result.reasons).toEqual(decision === "ignore" ? ["tier-disabled"] : []);
+  expect(result.decision).toBe("ignore");
+  expect(result.reasons).toEqual(
+    decision === "ignore"
+      ? ["signature-algorithm-unsupported", "tier-disabled"]
+      : ["signature-algorithm-unsupported"],
+  );
 });
 
 test.each(
@@ -64,7 +68,7 @@ test.each(
   expect(policy[2]).toEqual(defaultPolicy()[2]);
   expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
     decision: "ignore",
-    reasons: ["policy-invalid"],
+    reasons: ["signature-algorithm-unsupported", "policy-invalid"],
   });
 });
 
@@ -94,19 +98,26 @@ test.each([1, 2, 3] as const)("tier %s promotion cannot bypass a failing check",
   const { policy } = resolvePolicy({ [tier]: { ceiling: "skip" } });
   expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
     decision: "ignore",
-    reasons: ["hash-mismatch"],
+    reasons: ["signature-algorithm-unsupported", "hash-mismatch"],
   });
 });
 
-test.each(["ignore", "advisory", "skip"] as const)("external maxDecision cap %s", (maxDecision) => {
-  const f = fixture(3);
-  const { policy } = resolvePolicy({ "3": { ceiling: "skip", maxDecision } });
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe(maxDecision);
-  policy[3].ceiling = "advisory";
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe(
-    maxDecision === "ignore" ? "ignore" : "advisory",
-  );
-});
+test.each(["ignore", "advisory", "skip"] as const)(
+  "external maxDecision cap %s cannot bypass the signature allowlist",
+  (maxDecision) => {
+    const f = fixture(3);
+    const { policy } = resolvePolicy({ "3": { ceiling: "skip", maxDecision } });
+    expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
+      decision: "ignore",
+      reasons:
+        maxDecision === "ignore"
+          ? ["signature-algorithm-unsupported", "tier-disabled"]
+          : ["signature-algorithm-unsupported"],
+    });
+    policy[3].ceiling = "advisory";
+    expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe("ignore");
+  },
+);
 
 test("all independent failures are collected without duplicate codes", () => {
   const f = fixture(2);
@@ -126,6 +137,7 @@ test("all independent failures are collected without duplicate codes", () => {
   expect(result.decision).toBe("ignore");
   expect([...result.reasons].sort()).toEqual(
     [
+      "signature-algorithm-unsupported",
       "signature-unverified",
       "identity-mismatch",
       "hash-mismatch",
@@ -257,8 +269,8 @@ test("a getter-free proxy is copied before validation and verification", () => {
     },
   };
   expect(decideAttestation(raw, f.ctx, defaultPolicy())).toMatchObject({
-    decision: "skip",
-    reasons: [],
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
   });
   f.envelope.payload.environment.os = "changed after evaluation";
   expect(received).toEqual({ ...before, signature: before.signature });
@@ -295,7 +307,7 @@ test.each(
     const f = fixture(2);
     expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
       decision: "ignore",
-      reasons: ["policy-invalid"],
+      reasons: ["signature-algorithm-unsupported", "policy-invalid"],
     });
   },
 );
@@ -312,7 +324,10 @@ test("omitted tier 2 advisory tokens inherit defaults", () => {
   ]);
   const f = fixture(2);
   f.verifier.result.task = "connectedDebugAndroidTest";
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe("advisory");
+  expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
 });
 
 test.each(["age", "future", "key-start"])("inclusive allowed boundary: %s", (boundary) => {
@@ -326,7 +341,10 @@ test.each(["age", "future", "key-start"])("inclusive allowed boundary: %s", (bou
   if (boundary === "key-start" && f.keys.key) {
     f.keys.key.notBeforeMs = Date.parse(f.envelope.payload.producedAt);
   }
-  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).decision).toBe("skip");
+  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy())).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
 });
 
 test("own-property checking rejects inherited data", () => {
@@ -342,7 +360,10 @@ test("null-prototype data records are supported", () => {
     ...f.envelope.payload,
     environment: Object.assign(Object.create(null), f.envelope.payload.environment),
   };
-  expect(decideAttestation(raw, f.ctx, defaultPolicy()).decision).toBe("skip");
+  expect(decideAttestation(raw, f.ctx, defaultPolicy())).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
 });
 
 test("invalid direct policy input is ignored", () => {
@@ -368,14 +389,20 @@ test("policy schema and environment overrides are validated and applied", () => 
   f.envelope.payload.environment.toolVersions.extra = "same";
   f.ctx.ciEnvironment = { ...f.ctx.ciEnvironment, extra: "same" };
   f.verifier.result.task = ":app:deviceTest";
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe("advisory");
+  expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
 });
 
 test.each([1, 2, 3] as const)("tier %s cannot remove baseline environment checks", (tier) => {
   const { policy, errors } = resolvePolicy({ [tier]: { requiredEnvKeys: [] } });
   expect(errors[tier]).toEqual(["policy-invalid"]);
   const f = fixture(tier);
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe("ignore");
+  expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported", "policy-invalid"],
+  });
 });
 
 test.each(["requiredEnvKeys", "allowedSchemaVersions", "advisoryOnlyTasks"])(
@@ -392,6 +419,7 @@ test("key must be valid at production as well as evaluation", () => {
     f.keys.key.notBeforeMs = NOW - 500;
   }
   expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual([
+    "signature-algorithm-unsupported",
     "key-not-valid-yet",
   ]);
 });
@@ -401,7 +429,10 @@ test("future-dated revocations are conservatively rejected", () => {
   if (f.keys.key) {
     f.keys.key.revokedAtMs = NOW + 1;
   }
-  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual(["key-revoked"]);
+  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual([
+    "signature-algorithm-unsupported",
+    "key-revoked",
+  ]);
 });
 
 test("accessors are malformed without evaluating the getter", () => {
@@ -445,6 +476,7 @@ test.each(["identity", "notBeforeMs", "notAfterMs", "revokedAtMs"])(
       Reflect.deleteProperty(f.keys.key, field);
     }
     expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual([
+      "signature-algorithm-unsupported",
       "malformed-field",
     ]);
   },
@@ -454,6 +486,7 @@ test.each([NaN, Infinity, -1, 0.5])("invalid CI clock %s fails closed", (nowMs) 
   const f = fixture();
   f.ctx.nowMs = nowMs;
   expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual([
+    "signature-algorithm-unsupported",
     "malformed-field",
   ]);
 });
@@ -462,6 +495,7 @@ test("invalid CI environment fails closed", () => {
   const f = fixture();
   Object.defineProperty(f.ctx.ciEnvironment, "__proto__", { value: {} });
   expect(decideAttestation(f.envelope, f.ctx, defaultPolicy()).reasons).toEqual([
+    "signature-algorithm-unsupported",
     "malformed-field",
   ]);
 });
@@ -469,7 +503,10 @@ test("invalid CI environment fails closed", () => {
 test("a cache cap cannot promote the starting iOS policy", () => {
   const f = fixture(3);
   const { policy } = resolvePolicy({ "3": { maxDecision: "skip" } });
-  expect(decideAttestation(f.envelope, f.ctx, policy).decision).toBe("advisory");
+  expect(decideAttestation(f.envelope, f.ctx, policy)).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
 });
 
 test("non-enumerable config values cannot silently inherit a permissive default", () => {

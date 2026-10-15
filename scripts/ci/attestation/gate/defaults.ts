@@ -145,7 +145,6 @@ export function configuredValidators(
   );
 }
 
-export const failClosedValidators = configuredValidators();
 const execFileAsync = promisify(execFile);
 type Exec = (cmd: string, args: string[]) => Promise<{ stdout: string }>;
 /** Reuse the producer's exact lane inputs and hash algorithm over the checked-out commit. */

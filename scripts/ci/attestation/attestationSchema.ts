@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 export const ATTESTATION_ENVELOPE_VERSION = 1 as const;
 export const TREE_INPUT_HASH_ALGORITHM = "tree-entries-sha256-v0-placeholder";
+// No envelope signing algorithm is specified yet; reject all until one is explicitly approved.
+export const SUPPORTED_SIGNATURE_ALGORITHMS: readonly string[] = Object.freeze([]);
 export type AttestationVerdict = "skip" | "advisory" | "ignore";
 /** Epoch milliseconds, adapted from the shared Timer at composition boundaries. */
 export interface Clock {
@@ -33,6 +35,7 @@ export type IgnoreReason =
   | "malformed-field"
   | "unsupported-schema-version"
   | "signature-unverified"
+  | "signature-algorithm-unsupported"
   | "identity-mismatch"
   | "key-unknown"
   | "key-revoked"

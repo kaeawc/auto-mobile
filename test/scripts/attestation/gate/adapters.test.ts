@@ -10,7 +10,6 @@ import {
 import {
   configuredTransport,
   configuredValidators,
-  failClosedValidators,
   gitTreeInputHasher,
   jsonlFileRecorder,
   serviceTransport,
@@ -181,7 +180,7 @@ test("configured environment uses GitHub App and service adapters with injected 
 test.each([1, 2, 3] as const)(
   "tier %s defaults use real validators but reject unverified signatures",
   async (tier) => {
-    const result = await failClosedValidators[tier]!.validate(
+    const result = await configuredValidators()[tier]!.validate(
       validationArgs(fixture(tier).envelope),
     );
     expect(result.decision).toBe("ignore");
@@ -190,23 +189,23 @@ test.each([1, 2, 3] as const)(
 );
 
 test.each([1, 2, 3] as const)(
-  "tier %s verified canonical fixture respects its policy ceiling",
+  "tier %s verified canonical fixture still requires an approved signature algorithm",
   async (tier) => {
     const f = fixture(tier);
     const result = await configuredValidators(options(f))[tier]!.validate(
       validationArgs(f.envelope),
     );
-    expect(result.decision).toBe(tier === 3 ? "advisory" : "skip");
-    expect(result.reasons).toEqual([]);
+    expect(result.decision).toBe("ignore");
+    expect(result.reasons).toEqual(["signature-algorithm-unsupported"]);
   },
 );
 
-test("verified Gradle device task stays advisory", async () => {
+test("verified Gradle device task still requires an approved signature algorithm", async () => {
   const f = fixture(2);
   f.verifier.result.task = ":app:connectedDebugAndroidTest";
   expect(
     (await configuredValidators(options(f))[2]!.validate(validationArgs(f.envelope))).decision,
-  ).toBe("advisory");
+  ).toBe("ignore");
 });
 
 test.each(["ignore", "advisory"] as const)(
@@ -220,7 +219,7 @@ test.each(["ignore", "advisory"] as const)(
     };
     expect(
       (await configuredValidators(options(f))[1]!.validate({ ...args, attestation })).decision,
-    ).toBe(kind);
+    ).toBe("ignore");
   },
 );
 
@@ -229,7 +228,10 @@ test("CI commit identity is checked independently of verifier claims", async () 
   f.envelope.payload.commitId = "different";
   expect(
     await configuredValidators(options(f))[1]!.validate(validationArgs(f.envelope)),
-  ).toMatchObject({ decision: "ignore", reasons: ["commit-mismatch"] });
+  ).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported", "commit-mismatch"],
+  });
 });
 
 test.each(["baseSha", "task"])("missing verifier-bound %s fails closed", async (field) => {
@@ -259,7 +261,10 @@ test.each(["partial", "skipped-gate"])(
     }
     expect(
       await configuredValidators(options(f))[1]!.validate(validationArgs(f.envelope)),
-    ).toMatchObject({ decision: "ignore", reasons: ["partial-scope"] });
+    ).toMatchObject({
+      decision: "ignore",
+      reasons: ["signature-algorithm-unsupported", "partial-scope"],
+    });
   },
 );
 
@@ -281,7 +286,7 @@ async function gateEntry(): Promise<ShadowEntry> {
   return runAttestationGate({
     transport: unconfiguredTransport,
     hasher: { recompute: async () => ({ treeHash: "tree", inputHash: HASH }) },
-    validators: failClosedValidators,
+    validators: configuredValidators(),
     recorder: {
       record: async (entry) => {
         entries.push(entry);
@@ -356,7 +361,7 @@ test.each(["jsonl", "store"])(
     const entry = await runAttestationGate({
       transport: unconfiguredTransport,
       hasher: { recompute: async () => ({ treeHash: "tree", inputHash: HASH }) },
-      validators: failClosedValidators,
+      validators: configuredValidators(),
       recorder,
       clock: { nowMs: () => NOW },
       repo: "owner/repo",
@@ -441,13 +446,13 @@ test("produce -> parse -> transport -> validate -> gate -> store remains shadow-
     mode: "shadow",
   });
   expect(entry).toMatchObject({
-    decision: "skip",
-    wouldApply: "skip-tier",
+    decision: "ignore",
+    wouldApply: "run-tier",
     applied: "run-tier",
-    reasons: [],
+    reasons: ["signature-algorithm-unsupported"],
   });
   expect(jsonl).toEqual([entry]);
   expect(
     JSON.parse(fs.getWrittenFiles().get("/fake/shadow/shadow-metrics.json") ?? "{}"),
-  ).toMatchObject({ records: [{ verdict: "skip", outcome: "agree", runId: "ci-run" }] });
+  ).toMatchObject({ records: [{ verdict: "ignore", outcome: "false-miss", runId: "ci-run" }] });
 });

@@ -18,6 +18,7 @@ export function policyEnvironment(
     ...(environment.bunVersion === null ? {} : { bun: environment.bunVersion }),
   };
   if (environment.bunVersion === null) {
+    // The canonical null must also suppress any bun value copied from toolVersions.
     delete projected.bun;
   }
   return projected;

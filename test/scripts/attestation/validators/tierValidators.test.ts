@@ -9,7 +9,12 @@ import {
 import { tierValidators } from "../../../../scripts/ci/attestation/validators/tierValidators";
 import { fixture, HASH, NOW, type Fixture } from "./helpers";
 
-type FailureCase = { name: string; reason: IgnoreReason; change: (f: Fixture) => void };
+type FailureCase = {
+  name: string;
+  reason: IgnoreReason;
+  change: (f: Fixture) => void;
+  signatureChecked?: boolean;
+};
 const failures: FailureCase[] = [
   {
     name: "unverified signature",
@@ -112,6 +117,7 @@ const failures: FailureCase[] = [
   },
   {
     name: "malformed recomputed hash",
+    signatureChecked: true,
     reason: "malformed-field",
     change: (f) => {
       f.ctx.recomputedInputHash = "z".repeat(64);
@@ -156,21 +162,28 @@ const failures: FailureCase[] = [
     },
   },
 ];
-function assertIgnored(f: Fixture, raw: unknown, reason: IgnoreReason) {
+function assertIgnored(
+  f: Fixture,
+  raw: unknown,
+  reason: IgnoreReason,
+  signatureChecked = reason !== "malformed-field",
+) {
   const result = decideAttestation(raw, f.ctx, defaultPolicy());
   expect(result.decision).toBe("ignore");
-  expect(result.reasons).toEqual([reason]);
+  expect(result.reasons).toEqual(
+    signatureChecked ? ["signature-algorithm-unsupported", reason] : [reason],
+  );
   const { policy } = resolvePolicy({ [f.envelope.payload.tier]: { ceiling: "skip" } });
   expect(decideAttestation(raw, f.ctx, policy)).toMatchObject({
     decision: "ignore",
-    reasons: [reason],
+    reasons: signatureChecked ? ["signature-algorithm-unsupported", reason] : [reason],
   });
 }
 function tierFailureTests(tier: 1 | 2 | 3) {
-  test.each(failures)("$name", ({ reason, change }) => {
+  test.each(failures)("$name", ({ reason, change, signatureChecked }) => {
     const f = fixture(tier);
     change(f);
-    assertIgnored(f, f.envelope, reason);
+    assertIgnored(f, f.envelope, reason, signatureChecked);
   });
   test.each(Object.keys(fixture(tier).envelope))("missing %s", (field) => {
     const f = fixture(tier);
@@ -239,15 +252,15 @@ function tierFailureTests(tier: 1 | 2 | 3) {
 }
 for (const tier of [1, 2, 3] as const) {
   describe(`tier ${tier} independent failures`, () => tierFailureTests(tier));
-  test(`tier ${tier} valid default decision`, () => {
+  test(`tier ${tier} unsupported signature blocks default decision`, () => {
     const f = fixture(tier);
     expect(decideAttestation(f.envelope, f.ctx, defaultPolicy())).toMatchObject({
       tier,
-      decision: tier === 3 ? "advisory" : "skip",
-      reasons: [],
+      decision: "ignore",
+      reasons: ["signature-algorithm-unsupported"],
     });
   });
-  test(`tier ${tier} validator eligibility`, () => {
+  test(`tier ${tier} validator rejects unsupported signature`, () => {
     const f = fixture(tier);
     expect(
       tierValidators[tier](
@@ -256,44 +269,43 @@ for (const tier of [1, 2, 3] as const) {
         defaultPolicy()[tier],
       ),
     ).toMatchObject({
-      decision: tier === 3 ? "advisory" : "skip",
-      reasons: [],
+      decision: "ignore",
+      reasons: ["signature-algorithm-unsupported"],
     });
   });
 }
 
-test("tier 2 environment-sensitive task is a documented downgrade", () => {
+test("tier 2 environment-sensitive task cannot bypass the signature allowlist", () => {
   const f = fixture(2);
   f.verifier.result.task = "connectedAndroidTest";
   const result = decideAttestation(f.envelope, f.ctx, defaultPolicy());
-  expect(result.decision).toBe("advisory");
-  expect(result.reasons).toEqual([]);
-  expect(result.detail).toContain("downgraded");
+  expect(result.decision).toBe("ignore");
+  expect(result.reasons).toEqual(["signature-algorithm-unsupported"]);
 });
 
 test.each([
-  { task: "connectedDebugAndroidTest", decision: "advisory" },
-  { task: ":app:connectedAndroidTest", decision: "advisory" },
-  { task: "pixel6api34DebugAndroidTest", decision: "advisory" },
-  { task: ":app:CONNECTEDcheck", decision: "advisory" },
-  { task: ":app:managedDeviceCheck", decision: "advisory" },
-  { task: "runEmulatorTests", decision: "advisory" },
-  { task: "runInstrumentedTests", decision: "advisory" },
-  { task: "assembleDebug", decision: "skip" },
-  { task: ":app:testDebugUnitTest", decision: "skip" },
-  { task: ":emulator:connected:app:assembleDebug", decision: "skip" },
-])("tier 2 task $task is $decision", ({ task, decision }) => {
+  { task: "connectedDebugAndroidTest" },
+  { task: ":app:connectedAndroidTest" },
+  { task: "pixel6api34DebugAndroidTest" },
+  { task: ":app:CONNECTEDcheck" },
+  { task: ":app:managedDeviceCheck" },
+  { task: "runEmulatorTests" },
+  { task: "runInstrumentedTests" },
+  { task: "assembleDebug" },
+  { task: ":app:testDebugUnitTest" },
+  { task: ":emulator:connected:app:assembleDebug" },
+])("tier 2 task $task cannot bypass the signature allowlist", ({ task }) => {
   const f = fixture(2);
   f.verifier.result.task = task;
   expect(decideAttestation(f.envelope, f.ctx, defaultPolicy())).toMatchObject({
-    decision,
-    reasons: [],
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
   });
   expect(
     tierValidators[2](adaptEnvelope(f.envelope, f.verifier.result), f.ctx, defaultPolicy()[2]),
   ).toMatchObject({
-    decision,
-    reasons: [],
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
   });
 });
 
@@ -316,8 +328,8 @@ test("direct tier 2 policy inherits omitted advisory tokens", () => {
   expect(
     tierValidators[2](adaptEnvelope(f.envelope, f.verifier.result), f.ctx, policy),
   ).toMatchObject({
-    decision: "advisory",
-    reasons: [],
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
   });
 });
 
@@ -375,4 +387,44 @@ test.each([1, 2, 3] as const)("tier %s rejects unknown input hashing algorithms"
   const f = fixture(tier);
   f.envelope.payload.inputHashAlgorithm = "unknown";
   assertIgnored(f, f.envelope, "hash-mismatch");
+});
+
+// Exercise both public decision entry points with a verifier that claims success.
+test.each([1, 2, 3] as const)("tier %s rejects unknown signature algorithms", (tier) => {
+  const f = fixture(tier);
+  f.envelope.signature!.algorithm = "unknown";
+  expect(f.verifier.result.verified).toBe(true);
+  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy())).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
+  expect(
+    tierValidators[tier](
+      adaptEnvelope(f.envelope, f.verifier.result),
+      f.ctx,
+      defaultPolicy()[tier],
+    ),
+  ).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-algorithm-unsupported"],
+  });
+});
+test.each([1, 2, 3] as const)("tier %s null signature remains unverified", (tier) => {
+  const f = fixture(tier);
+  f.envelope.signature = null;
+  expect(f.verifier.result.verified).toBe(true);
+  expect(decideAttestation(f.envelope, f.ctx, defaultPolicy())).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-unverified"],
+  });
+  expect(
+    tierValidators[tier](
+      adaptEnvelope(f.envelope, f.verifier.result),
+      f.ctx,
+      defaultPolicy()[tier],
+    ),
+  ).toMatchObject({
+    decision: "ignore",
+    reasons: ["signature-unverified"],
+  });
 });

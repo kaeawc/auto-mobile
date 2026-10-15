@@ -1,3 +1,4 @@
+import { SUPPORTED_SIGNATURE_ALGORITHMS } from "../../../scripts/ci/attestation/attestationSchema";
 import { describe, expect, test } from "bun:test";
 import {
   attestationId,
@@ -96,4 +97,9 @@ test("canonical keys use code unit order for case and punctuation", () => {
     },
   });
   expect(canonical).toContain('"toolVersions":{"!":"1","A":"2","Z":"3","a":"4"}');
+});
+
+test("signature algorithms are disabled until explicitly specified", () => {
+  expect(SUPPORTED_SIGNATURE_ALGORITHMS).toEqual([]);
+  expect(Object.isFrozen(SUPPORTED_SIGNATURE_ALGORITHMS)).toBe(true);
 });

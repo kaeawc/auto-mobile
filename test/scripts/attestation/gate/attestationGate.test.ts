@@ -12,7 +12,7 @@ import {
   type TransportResult,
 } from "../../../../scripts/ci/attestation/gate/ports";
 import {
-  failClosedValidators,
+  configuredValidators,
   gitTreeInputHasher,
   jsonlFileRecorder,
   unconfiguredTransport,
@@ -242,7 +242,7 @@ test("defaults fail closed without verifier and transport configuration", async 
       inputHash: "h",
     }),
   ).toEqual({ kind: "unavailable", reason: "attestation transport not configured" });
-  expect(Object.keys(failClosedValidators)).toEqual(["1", "2", "3"]);
+  expect(Object.keys(configuredValidators())).toEqual(["1", "2", "3"]);
 });
 test("git tree adapter uses injected exec and repository root", async () => {
   const exec = mock(async (_cmd: string, args: string[]) => ({

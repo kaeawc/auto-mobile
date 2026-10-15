@@ -1661,7 +1661,10 @@ read/write authorization. `getAppPermissions` reports it as `unknown` with
 success with `applied: true`, `verified: false`, and a warning. Verification is
 unavailable from the host without app instrumentation: launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
-insufficient. Physical-device permission limits are unchanged.
+insufficient. Results include `accessLevel` (`readWrite` for Photos and
+`addOnly` for photos-add); an unverified stored Photos grant includes
+`evidence: "storedTccGrant"`. Effective native status still requires app
+instrumentation. Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.

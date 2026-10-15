@@ -616,6 +616,16 @@ describe("launch output handoff", () => {
     return source;
   }
 
+  test("tail decodes split UTF-8 bytes from child stdout", () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    process.stderr = new EventEmitter() as ChildProcess["stderr"];
+    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+    process.stdout!.emit("data", Buffer.from([0xe2]));
+    process.stdout!.emit("data", Buffer.from([0x82, 0xac]));
+    expect(tail.snapshot()).toContain("€");
+  });
+
   for (const [launch, later] of [
     ["auth token=abc", "defSECRET rest\n"],
     ["auth tok", "en=SECRETVALUE rest\n"],

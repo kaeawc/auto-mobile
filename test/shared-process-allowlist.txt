@@ -554,6 +554,7 @@ test/features/observe/Window.test.ts
 test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
 test/features/observe/android/AndroidCtrlProxyClientRecoveryRaces.test.ts
 test/features/observe/android/AndroidScreenIdentity.test.ts
+test/features/observe/android/AndroidWireContract.contract.test.ts
 test/features/observe/android/CtrlProxyFocus.Conversion.test.ts
 test/features/observe/android/CtrlProxyForwardClientProbe.test.ts
 test/features/observe/android/CtrlProxyForwardLease.test.ts
@@ -935,7 +936,6 @@ test/scripts/ciTimeToGreenReport.test.ts
 test/scripts/circleciMacosJobs.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
 test/scripts/clockSemanticsReport.test.ts
-test/scripts/copyDbRuntimeFiles.test.ts
 test/scripts/daemonLogWorkflow.test.ts
 test/scripts/dbMigrationsSelfContained.test.ts
 test/scripts/dependabotRuntimePinsWorkflow.test.ts
@@ -1428,6 +1428,7 @@ test/utils/stableStringify.property.test.ts
 test/utils/stableStringify.test.ts
 test/utils/startupMaintenance.test.ts
 test/utils/throwIfAborted.test.ts
+test/utils/toolFailureSignal.test.ts
 test/utils/toolUtils.compactJson.test.ts
 test/utils/toolUtils.property.test.ts
 test/utils/toolUtilsStructuredField.test.ts

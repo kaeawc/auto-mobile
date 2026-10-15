@@ -197,13 +197,13 @@ test("benchmark pack enables trim while preserving caller environment", () => {
   expect(env.AUTOMOBILE_TRIM_BUNDLED_DEPS).toBe("false");
 });
 
-test("trimmed cap follows measured bytes plus 3 MiB rounded up and rejects lost trimming", () => {
-  const measuredTrimmed = 18_345_761;
+test("trimmed cap keeps over 1 MiB of headroom on the measured size and rejects lost trimming", () => {
+  // #12457: measured after the migrations folder stopped being packed beside the static bundle.
+  const measuredTrimmed = 22_369_648;
   const measuredUntrimmed = 23_838_787;
   const mib = 1024 * 1024;
-  expect(thresholds.thresholds.unpackedBytes).toBe(
-    Math.ceil((measuredTrimmed + 3 * mib) / mib) * mib,
-  );
+  expect(thresholds.thresholds.unpackedBytes).toBe(22.5 * mib);
+  expect(thresholds.thresholds.unpackedBytes - measuredTrimmed).toBeGreaterThan(mib);
   expect(
     evaluateUnpackedSize({
       unpackedBytes: measuredTrimmed,

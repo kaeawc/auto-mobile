@@ -7,7 +7,6 @@
 
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { copyDatabaseRuntimeFiles } from "./scripts/build/copy-db-runtime-files";
 import {
   optimizeSourceMap,
   selectSourceMaps,
@@ -91,9 +90,6 @@ for (const { path: sourcemapPath, options } of selectSourceMaps(
     console.warn("Failed to optimize sourcemap:", error);
   }
 }
-
-// Copy raw DB runtime files for FileMigrationProvider usage.
-copyDatabaseRuntimeFiles({ projectRoot: import.meta.dir });
 
 // Copy bundled native tools for runtime lookup from the published dist package.
 const vendorSource = join(import.meta.dir, "vendor");

@@ -1,3 +1,4 @@
+import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import type {
   SessionBrokerDevicePort,
   SessionDevicePreparationOptions,
@@ -54,7 +55,7 @@ export class FakeNativePort implements SessionBrokerDevicePort {
     if (!assignment.stableDeviceId) {
       const bound = await this.registry.commitBinding(key, assignment, {
         stableDeviceId: `device-${resource.resourceId}`,
-        deviceName: `device-${resource.resourceId}`,
+        deviceName: exampleSessionBrokerDeviceName(resource.resourceId),
         resolvedSpec: profile,
         specFingerprint: "fake-native",
         state: "ready",

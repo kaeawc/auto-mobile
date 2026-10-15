@@ -1,3 +1,4 @@
+import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import "../../scripts/manual-test/harnessLogSink";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -131,7 +132,7 @@ export async function createFakeBrokerDaemon(
       return {
         sessionId,
         nativeDevice: {
-          name: `device-${resource.resourceId}`,
+          name: exampleSessionBrokerDeviceName(resource.resourceId),
           deviceId: `device-${resource.resourceId}`,
           platform: (await broker.status(resource.requestId!))!.profile!.platform,
         },

@@ -101,7 +101,11 @@ const optionsSchema = z
   })
   .strict();
 const brokerManifestSchema = z
-  .object({ daemon: z.literal(1), hostConfig: z.literal("broker/host-config.json") })
+  .object({
+    daemon: z.literal(1),
+    hostConfig: z.literal("broker/host-config.json"),
+    allowReuse: z.boolean().optional(),
+  })
   .strict();
 type BrokerManifest = z.infer<typeof brokerManifestSchema>;
 interface PrivateBatch {
@@ -882,7 +886,13 @@ export async function runPrivateDaemonCommand(
             options: command.options,
             specs: derivePrivateDaemonBatch(command.options),
             ...(command.brokerBatch
-              ? { broker: { daemon: 1, hostConfig: "broker/host-config.json" } as const }
+              ? {
+                  broker: {
+                    daemon: 1,
+                    hostConfig: "broker/host-config.json",
+                    allowReuse: command.allowReuse ?? false,
+                  } as const,
+                }
               : {}),
           }
         : readPrivateBatch(command.batchDir, deps);

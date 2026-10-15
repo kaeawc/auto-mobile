@@ -220,7 +220,14 @@ if [[ "${scenario}" == broker ]]; then
   [[ "${dry_run}" != true ]] || broker_args+=(--dry-run)
   # The batch already binds its built server. Do not rebuild, source env.sh, or touch resident state.
   cd "${REPO_ROOT}"
-  exec bun "${broker_args[@]}"
+  require_positive_integer "--total-timeout-seconds" "${total_timeout_seconds}"
+  broker_budget=$((total_timeout_seconds - termination_grace_seconds))
+  if [[ "${broker_budget}" -le 0 ]]; then
+    echo "error: --total-timeout-seconds must exceed the ${termination_grace_seconds}s termination grace." >&2
+    exit 2
+  fi
+  run_with_timeout "${broker_budget}" bun "${broker_args[@]}"
+  exit $?
 fi
 
 require_positive_integer "--total-timeout-seconds" "${total_timeout_seconds}"

@@ -1,3 +1,4 @@
+import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/deviceNaming";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
@@ -81,6 +82,12 @@ describe("session-only broker lifecycle", () => {
     if (!result.sessionUuid) {
       throw new Error(JSON.stringify(result));
     }
+    const resource = devices.sessions.get(result.sessionUuid)!;
+    const assignment = await registry.getAssignment({
+      scopeKey: resource.scopeKey,
+      slotIndex: resource.allocationIndex,
+    });
+    expect(isSessionBrokerDeviceName(assignment!.deviceName!)).toBe(true);
     return result.sessionUuid;
   }
 

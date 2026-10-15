@@ -50,7 +50,10 @@ acquisitions by host load and boot permits; it finishes planned ready clients
 before capacity-refusal clients. `--clients a,b` or `--all`, `--stagger-ms N`
 (default 0), and `--max-devices N` are `up` options. `status` reports all clients;
 `down` closes them in reverse start order and verifies released receipts plus
-native absence (240 s); `report` writes `evidence/broker-report.json`.
+native absence (240 s); info-less grants with settled release receipts instead
+record `released` with `absence: not-verifiable`, allowing subsequent runs without
+claiming absence. `up` captures info best-effort with a 5-second bound. `report`
+writes `evidence/broker-report.json`.
 
 Use `proxy1 up --client NAME` for a fresh attempt, `--resume` for identical
 request/token replay, and `--expect ready` or `--expect failed:<code>` for an
@@ -160,10 +163,12 @@ sequentially after the first answers in send mode. Params string placeholders
 `{{ownLivenessOwnerToken}}` use `--broker-binding <client-or-request.json>`;
 unresolved values refuse before connecting. Client bindings keep existing ready
 grants on exit; standalone request bindings acquire/heartbeat/release on this
-connection and can boot a device. Gate any standalone acquisition.
+connection and can boot a device. Standalone request paths are refused inside
+broker batches; use `--broker-binding <client>`. Gate any standalone acquisition.
 `--token-of OTHER` changes only status/release isolation frames to that batch
-client's stored token. `--expect-refused` (send only) requires error responses and
-can exercise the product gate for otherwise-guarded lifecycle tools. Inventory
+client's stored token. `--expect-refused` (send only) requires errors with product
+refusal codes/messages. Lifecycle probes permit only `{}` or only the client's
+own `sessionUuid`; any device name or selector refuses before sending. Inventory
 resources and `--allow-selector` remain refused. Every frame uses host-mutation
 guards; owner tokens are redacted.
 

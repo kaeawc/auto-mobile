@@ -35,6 +35,7 @@ import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGener
 import { createFrameBrokerDaemonClient, type BrokerDaemonClient } from "./brokerDaemonClient";
 import { BrokerDeviceLedger } from "./brokerDeviceLedger";
 import {
+  brokerClient,
   brokerSocketPath,
   closeBrokerSession,
   liveBrokerStatus,
@@ -53,6 +54,7 @@ import {
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { isProcessRunning } from "../../src/utils/processLiveness";
+import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { deviceStartGuardRefusal } from "./deviceStartGuard";
@@ -257,7 +259,7 @@ export interface ProxySessionDeps {
   readFile(path: string): string;
   writeFile(path: string, text: string, options?: { mode: number; flag: "wx" }): void;
   rename(from: string, to: string): void;
-  spawnOwner(): number;
+  spawnOwner(lifetimeSeconds: number): number;
   ownerStartIdentity(pid: number): string | undefined;
   brokerDaemonClient?: BrokerDaemonClient;
   createBrokerDaemonClient?(socketPath: string): BrokerDaemonClient;
@@ -529,12 +531,27 @@ function prepareBrokerClient(
   archiveBrokerAttempt(context, false, deps);
   deps.mkdir(context.dir);
   if (command.owner === "disposable") {
-    const pid = deps.spawnOwner();
+    const pid = deps.spawnOwner(DISPOSABLE_OWNER_LIFETIME_SECONDS);
     // Record ownership immediately, even if generation capture subsequently fails.
     deps.writeFile(join(context.dir, "owner.pid"), `${pid}\n`);
-    const identity = deps.ownerStartIdentity(pid);
-    if (!identity) {
-      throw new Error("Cannot capture disposable owner's process start identity; see owner.pid.");
+    let identity: string | undefined;
+    try {
+      identity = deps.ownerStartIdentity(pid);
+      if (!identity) {
+        throw new Error("Cannot capture disposable owner's process start identity.");
+      }
+    } catch (error) {
+      // Only this call's just-spawned child may be signalled without a captured identity.
+      try {
+        if (!deps.signalPid) {
+          throw new Error("Child cleanup signal is unavailable.");
+        }
+        deps.signalPid(pid, "SIGTERM");
+      } catch (cleanupError) {
+        deps.log(`Disposable child cleanup failed: ${errorMessage(cleanupError)}`);
+      }
+      deps.writeFile(join(context.dir, "owner.pid"), "");
+      throw error;
     }
     deps.writeFile(join(context.dir, "owner-identity"), identity);
     config = parseSessionConfig({
@@ -544,6 +561,34 @@ function prepareBrokerClient(
     });
   }
   persistBrokerAttempt(context, config, deps);
+}
+const DISPOSABLE_OWNER_LIFETIME_SECONDS = 2 * 60 * 60;
+async function recordReadyBrokerInfo(
+  context: BrokerClientFiles,
+  init: unknown,
+  deps: ProxySessionDeps,
+): Promise<void> {
+  const ledger = new BrokerDeviceLedger({ batchDir: context.batch, fs: deps, timer: deps.timer });
+  const grant = ledger.acquired(context.name, init);
+  if (ledger.devices().some((row) => row.sessionUuid === grant.sessionUuid)) {
+    return;
+  }
+  try {
+    const client = brokerClient(deps);
+    if (!client) {
+      throw new Error("Broker daemon client unavailable.");
+    }
+    const info = await raceWithDeadline(() => client.info(grant.sessionUuid), {
+      timer: deps.timer,
+      timeoutMs: 5000,
+      label: "Native device info",
+    });
+    ledger.info(context.name, init, info);
+    deps.writeJson(join(context.dir, "info.json"), info);
+  } catch (error) {
+    // Ready grants remain usable; the ledger explicitly marks unverifiable absence on release.
+    deps.log(`Native device info unavailable: ${errorMessage(error)}`);
+  }
 }
 export function renderResponse(response: Record<string, unknown>, full: boolean): string {
   if (full) {
@@ -698,12 +743,7 @@ async function servePrepared(
       record(record(capabilities?.experimental)?.[SESSION_EXPERIMENTAL_CAPABILITY])?.outcome ===
         "ready"
     ) {
-      const ledger = new BrokerDeviceLedger({
-        batchDir: context.batch,
-        fs: deps,
-        timer: deps.timer,
-      });
-      ledger.acquired(context.name, readJson(join(dir, "init.json"), deps));
+      await recordReadyBrokerInfo(context, readJson(join(dir, "init.json"), deps), deps);
     }
     event("initialized");
     const handle = async (request: Request): Promise<unknown> => {
@@ -978,6 +1018,9 @@ export async function runProxySessionCommand(
           await deps.flush(`${JSON.stringify({ dir, ...init }, null, 2)}\n`);
           if (context) {
             const session = record(init.session);
+            if (session?.outcome === "ready") {
+              await recordReadyBrokerInfo(context, init, deps);
+            }
             if (session?.outcome !== "ready") {
               deps.log(
                 String(
@@ -1158,8 +1201,11 @@ export function createProxySessionDeps(): ProxySessionDeps {
       process.kill(pid, signal);
     },
     createBrokerDaemonClient: (socketPath) => createFrameBrokerDaemonClient({ socketPath }),
-    spawnOwner: () => {
-      const child = spawn("sleep", ["86400"], { detached: true, stdio: "ignore" });
+    spawnOwner: (lifetimeSeconds) => {
+      const child = spawn("sleep", [String(lifetimeSeconds)], {
+        detached: true,
+        stdio: "ignore",
+      });
       child.on("error", (error) =>
         console.error(`Disposable owner failed: ${errorMessage(error)}`),
       );

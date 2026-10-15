@@ -468,3 +468,56 @@ test("malformed client metadata returns a usage error without leaking parser inp
   expect(await f.run(["report"])).toBe(2);
   expect(f.logs.join("\n")).not.toContain("secret-credential");
 });
+
+test("down recovers an info-less grant only with a settled release receipt", async () => {
+  const f = fixture(1);
+  f.broker.infoResults = [new Error("identity unavailable")];
+  expect(await f.run(["up"])).toBe(2);
+  f.broker.statusResults = [
+    { ...f.sessions.get("a-phone")!, outcome: "released", cleanupPending: false },
+  ];
+  expect(await f.run(["down"])).toBe(0);
+  const rows = f.files
+    .get(join(f.batchDir, "evidence/ledger.jsonl"))!
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  expect(rows).toContainEqual(
+    expect.objectContaining({ kind: "released", absence: "not-verifiable" }),
+  );
+  expect(rows.some((row) => row.kind === "absent")).toBe(false);
+});
+test.each([false, true])("up rechecks pooling using recorded allowReuse=%s", async (allowReuse) => {
+  const f = fixture(1);
+  f.files.set(join(f.batchDir, "batch.json"), JSON.stringify({ broker: { allowReuse } }));
+  const path = join(f.batchDir, "broker/host-config.json");
+  const config = JSON.parse(f.files.get(path)!);
+  config.reuseCleanDevices = true;
+  config.limits.idlePoolCap = 1;
+  f.files.set(path, JSON.stringify(config));
+  expect(await f.run(["up"])).toBe(allowReuse ? 0 : 2);
+  expect(f.preflights()).toBe(allowReuse ? 1 : 0);
+});
+
+test.each(["pending", "wrong-session", "wrong-request"])(
+  "info-less recovery rejects %s release evidence",
+  async (kind) => {
+    const f = fixture(1);
+    f.broker.infoResults = [new Error("identity unavailable")];
+    expect(await f.run(["up"])).toBe(2);
+    const session = f.sessions.get("a-phone")!;
+    f.broker.statusResults = [
+      {
+        ...session,
+        outcome: "released",
+        cleanupPending: kind === "pending",
+        ...(kind === "wrong-session" ? { sessionUuid: "foreign" } : {}),
+        ...(kind === "wrong-request" ? { requestId: "foreign" } : {}),
+      },
+    ];
+    expect(await f.run(["down"])).toBe(2);
+    expect(f.files.get(join(f.batchDir, "evidence/ledger.jsonl"))).not.toContain(
+      '"kind":"released"',
+    );
+  },
+);

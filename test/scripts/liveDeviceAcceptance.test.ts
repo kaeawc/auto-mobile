@@ -1,3 +1,4 @@
+import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -3520,6 +3521,63 @@ describe("private broker acceptance lane", () => {
               f.context.ledger.hasEvent(d, "released") && f.context.ledger.hasEvent(d, "absent"),
           ),
       ).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+  test("signed ownership includes ledger rows appended by another writer during cleanup", async () => {
+    const f = await laneFixture();
+    const fs = {
+      exists: (path: string) => f.files.has(path),
+      readFile: (path: string) => f.files.get(path)!,
+      mkdir: () => {},
+      appendFile: (path: string, text: string) => {
+        f.files.set(path, (f.files.get(path) ?? "") + text);
+      },
+    };
+    const options = {
+      batchDir: brokerBatchDir,
+      fs,
+      timer: f.context.timer,
+      tokenFor: (name: string) => f.context.clients.find((c) => c.name === name)!.token,
+    };
+    f.context.ledger = new BrokerDeviceLedger(options);
+    const writer = new BrokerDeviceLedger(options);
+    const args = brokerArgs([
+      "--confirm-live",
+      "--test-owned-devices",
+      "--only",
+      "parallel-acquire",
+    ]);
+    try {
+      await runBrokerAcceptance(args, {
+        ...f.dependencies,
+        createContext: async () => ({
+          context: f.context,
+          close: async () => {
+            const grant = writer.acquired("cleanup-client", {
+              session: {
+                outcome: "ready",
+                requestId: "cleanup-request",
+                sessionUuid: "cleanup-session",
+              },
+            });
+            writer.record("released", grant);
+          },
+        }),
+      });
+      const evidence = JSON.parse(f.files.get(args.evidencePath)!);
+      const cleanup = evidence.ownership.ledger.at(-1);
+      expect(cleanup.client).toBe(
+        `hmac-sha256:${createHmac("sha256", f.key).update("cleanup-client").digest("hex").slice(0, 20)}`,
+      );
+      expect(cleanup).toHaveProperty("absence");
+      const { mac, ...authentication } = evidence.authentication;
+      expect(mac).toBe(
+        createHmac("sha256", f.key)
+          .update(stableStringify({ ...evidence, authentication }))
+          .digest("hex"),
+      );
     } finally {
       await f.close();
     }

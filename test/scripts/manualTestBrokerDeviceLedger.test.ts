@@ -309,3 +309,15 @@ test("release evidence persists even when native info was never collected", () =
   expect(loaded.devices()).toEqual([]);
   expect(classifyDevice(device, loaded, [])).toBe("foreign");
 });
+
+test("existing ledger instances see external appends and dedupe ready grants", () => {
+  const f = fixture();
+  const writer = new BrokerDeviceLedger(f.options);
+  writer.acquired("phone", f.init);
+  expect(f.ledger.entries).toHaveLength(1);
+  f.bind();
+  expect(writer.devices()).toHaveLength(1);
+  expect(writer.entries.filter((row) => row.kind === "acquired")).toHaveLength(1);
+  writer.record("released", writer.devices()[0]);
+  expect(f.ledger.hasEvent(f.ledger.devices()[0], "released")).toBe(true);
+});

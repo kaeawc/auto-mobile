@@ -26,7 +26,13 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
 } from "../../src/daemon/sessionBrokerProxyAcquisition";
 import { BROKER_CLEANUP_TIMEOUT_MS } from "./brokerDaemonClient";
-import { readBrokerClients, readBrokerIdentity, resolveBrokerClient } from "./brokerClientFiles";
+import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
+import {
+  isBrokerBatch,
+  readBrokerClients,
+  readBrokerIdentity,
+  resolveBrokerClient,
+} from "./brokerClientFiles";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
@@ -546,6 +552,7 @@ function frameGuard(
   method: string,
   params: unknown,
   command: DaemonFrameCommand,
+  ownSessionId?: string,
 ): string | undefined {
   if (
     command.brokerBinding &&
@@ -557,18 +564,30 @@ function frameGuard(
   }
   if (method === "tools/call") {
     const tool = params as { name?: string; arguments?: unknown } | null;
+    let refusalProbe = false;
     if (
       command.brokerBinding &&
       ["startDevice", "provisionDevice", "getAndroid", "getApple", "killDevice"].includes(
         tool?.name ?? "",
       )
     ) {
-      return command.expectRefused
-        ? undefined
-        : `${tool?.name} is refused with --broker-binding; use --expect-refused to assert the product gate.`;
+      if (!command.expectRefused) {
+        return `${tool?.name} is refused with --broker-binding; use --expect-refused to assert the product gate.`;
+      }
+      const args = tool?.arguments;
+      if (
+        !args ||
+        typeof args !== "object" ||
+        Array.isArray(args) ||
+        Object.entries(args).some(([key, value]) => key !== "sessionUuid" || value !== ownSessionId)
+      ) {
+        return "Expected lifecycle refusal requires {} or only this client's own sessionUuid; device names and selectors are forbidden.";
+      }
+      refusalProbe = true;
     }
     const refusal = deviceStartGuardRefusal(tool?.name ?? "", tool?.arguments, {
-      allowSelector: command.allowSelector,
+      // The strict probe shape above contains no native target or selector.
+      allowSelector: command.allowSelector || refusalProbe,
     });
     if (refusal) {
       return refusal;
@@ -716,9 +735,13 @@ interface UserFrame {
   params: unknown;
 }
 
-function userFramesRefusal(frames: UserFrame[], command: DaemonFrameCommand): string | undefined {
+function userFramesRefusal(
+  frames: UserFrame[],
+  command: DaemonFrameCommand,
+  ownSessionId?: string,
+): string | undefined {
   for (const frame of frames) {
-    const refusal = frameGuard(frame.method, frame.params, command);
+    const refusal = frameGuard(frame.method, frame.params, command, ownSessionId);
     if (refusal) {
       return refusal;
     }
@@ -735,7 +758,7 @@ function readFrameBinding(
   }
   const source = command.brokerBinding;
   const batch = deps.env.MT_BATCH;
-  const names = batch ? readBrokerClients(batch, deps) : [];
+  const names = batch && isBrokerBatch(batch, deps) ? readBrokerClients(batch, deps) : [];
   const clients = new Map<string, string>();
   // Tokens from every initialized client are redacted even if a refusal echoes foreign input.
   for (const name of names) {
@@ -775,7 +798,12 @@ function readFrameBinding(
     if (!source.endsWith("request.json")) {
       throw new Error("--broker-binding requires a batch client name or path to request.json.");
     }
-    // A batch request is always an existing-client binding, even when supplied as a path.
+    if (batch && isBrokerBatch(batch, deps)) {
+      throw new Error(
+        "Untracked broker batch acquisition refused; use --broker-binding <client> for a recorded batch client.",
+      );
+    }
+    // Standalone acquisitions are permitted only outside broker batches.
     const token = deps.ids.next();
     secrets.add(token);
     binding = { config: parseSessionConfig(JSON.parse(deps.readFile(source))), token, clients };
@@ -825,7 +853,11 @@ function prepareUserFrames(
       };
     }
     const planned = binding
-      ? { sessionId: "planned-session", token: binding.token, clients: binding.clients }
+      ? {
+          sessionId: binding.existingSessionId ?? "{{ownSessionId}}",
+          token: binding.token,
+          clients: binding.clients,
+        }
       : undefined;
     if (
       command.tokenOf &&
@@ -840,10 +872,11 @@ function prepareUserFrames(
         "--token-of is only for sessionRequestStatus/releaseBrokerSession isolation frames.",
       );
     }
-    for (const frame of frames) {
-      substituteFramePlaceholders(frame.params, planned);
-    }
-    const error = userFramesRefusal(frames, command);
+    const guardedFrames = frames.map((frame) => ({
+      ...frame,
+      params: substituteFramePlaceholders(frame.params, planned),
+    }));
+    const error = userFramesRefusal(guardedFrames, command, planned?.sessionId);
     return error ? { error } : { frames, binding };
   } catch (error) {
     deps.err(`Invalid JSON/config/placeholders: ${errorMessage(error)}`);
@@ -866,6 +899,41 @@ function resolveUserFrames(
     return { error: errorMessage(error) };
   }
 }
+function isProductRefusal(response: DaemonResponse): boolean {
+  const envelope = response.result as
+    | { isError?: boolean; content?: Array<{ type?: string; text?: string }> }
+    | undefined;
+  if (response.success !== false && envelope?.isError !== true) {
+    return false;
+  }
+  const payload = readToolEnvelopePayload(response.result)?.payload;
+  const code = response.code ?? payload?.code;
+  if (
+    typeof code === "string" &&
+    ["device_outside_managed_slots", "session_ownership_lost"].includes(code)
+  ) {
+    return true;
+  }
+  const messages = [
+    response.error,
+    payload?.error,
+    payload?.message,
+    ...(Array.isArray(envelope?.content) ? envelope.content : [])
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text),
+  ];
+  return messages.some(
+    (message) =>
+      typeof message === "string" &&
+      (message.includes("Session request belongs to another liveness owner") ||
+        /Session broker owns device lifecycle; \w+ cannot allocate or retire a device/.test(
+          message,
+        ) ||
+        /Tool \w+ requires a live session granted by the session broker; prepare a session before using device tools/.test(
+          message,
+        )),
+  );
+}
 async function sendUserFrames(
   command: DaemonFrameCommand,
   frames: UserFrame[],
@@ -885,13 +953,7 @@ async function sendUserFrames(
   }
   rpc.assertOpen();
   if (command.expectRefused) {
-    return responses.every(
-      (response) =>
-        response.success === false ||
-        (response.result as { isError?: boolean } | undefined)?.isError === true,
-    )
-      ? 0
-      : 2;
+    return responses.every(isProductRefusal) ? 0 : 2;
   }
   return responses.every((response) => response.success === true) ? 0 : 1;
 }
@@ -983,6 +1045,7 @@ export async function runDaemonFrame(
   let release: ((sendRelease?: boolean) => Promise<void>) | undefined;
   let abrupt = false;
   let cancellationSummary: string | undefined;
+  let ownSessionId: string | undefined;
   try {
     const connection = await connectWithDeadline(
       deps.connect,
@@ -994,6 +1057,7 @@ export async function runDaemonFrame(
     if (prepared.binding) {
       const keeper = await brokerKeeper(prepared.binding, rpc, deps);
       release = keeper.release;
+      ownSessionId = keeper.identity.sessionId;
       if (!keeper.ready) {
         return 1;
       }
@@ -1014,7 +1078,7 @@ export async function runDaemonFrame(
         }));
       }
     }
-    const refusal = userFramesRefusal(frames, command);
+    const refusal = userFramesRefusal(frames, command, ownSessionId);
     if (refusal) {
       deps.err(refusal);
       return 2;

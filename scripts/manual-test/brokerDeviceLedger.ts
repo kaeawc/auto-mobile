@@ -28,6 +28,7 @@ const entrySchema = z.object({
   at: z.number().finite(),
   kind: z.enum(["acquired", "info", "released", "absent", "leaked"]),
   device: nativeSchema.optional(),
+  absence: z.literal("not-verifiable").optional(),
 });
 export type BrokerLedgerEntry = z.infer<typeof entrySchema>;
 export interface BrokerLedgerFs {
@@ -56,8 +57,14 @@ export class BrokerDeviceLedger {
   ) {
     this.batchDir = resolve(options.batchDir);
     this.path = join(this.batchDir, "evidence/ledger.jsonl");
-    if (options.fs.exists(this.path)) {
-      const bytes = options.fs.readFile(this.path);
+    this.reload();
+  }
+  /** Other proxy processes append independently; every read must use the durable ledger. */
+  private reload(): void {
+    const rows: BrokerLedgerEntry[] = [];
+    const { fs } = this.options;
+    if (fs.exists(this.path)) {
+      const bytes = fs.readFile(this.path);
       if (bytes && !bytes.endsWith("\n")) {
         throw new Error("Incomplete broker ledger record; refusing ownership inference.");
       }
@@ -68,21 +75,34 @@ export class BrokerDeviceLedger {
         }
         if (
           entry.kind !== "acquired" &&
-          ((!entry.device && entry.kind !== "released") || !this.hasGrant(entry))
+          ((!entry.device && entry.kind !== "released") ||
+            !rows.some((row) => row.kind === "acquired" && sameGrant(row, entry)))
         ) {
           throw new Error("Broker ledger device has no ready batch grant.");
         }
-        this.rows.push(entry);
+        if (entry.absence && (entry.kind !== "released" || entry.device)) {
+          throw new Error("Unverifiable absence is only valid for an info-less released grant.");
+        }
+        if (
+          entry.kind !== "acquired" ||
+          !rows.some((row) => row.kind === "acquired" && sameGrant(row, entry))
+        ) {
+          rows.push(entry);
+        }
       }
     }
+    this.rows.splice(0, this.rows.length, ...rows);
   }
   get entries(): readonly BrokerLedgerEntry[] {
-    return this.rows;
+    this.reload();
+    return [...this.rows];
   }
   hasGrant(identity: Pick<BrokerLedgerEntry, "client" | "requestId" | "sessionUuid">): boolean {
+    this.reload();
     return this.rows.some((row) => row.kind === "acquired" && sameGrant(row, identity));
   }
   acquired(client: string, init: unknown): BrokerLedgerEntry {
+    this.reload();
     const { session } = z.object({ session: grantSchema }).parse(init);
     const identity = { client, requestId: session.requestId, sessionUuid: session.sessionUuid };
     if (
@@ -115,9 +135,14 @@ export class BrokerDeviceLedger {
     if (!this.hasGrant(device) || (!device.device && kind !== "released")) {
       throw new Error("Device event requires a ready batch grant and native identity.");
     }
-    return this.append({ ...device, kind });
+    return this.append({
+      ...device,
+      kind,
+      ...(!device.device && kind === "released" ? { absence: "not-verifiable" as const } : {}),
+    });
   }
   devices(): BrokerLedgerEntry[] {
+    this.reload();
     const devices = new Map<string, BrokerLedgerEntry>();
     for (const row of this.rows) {
       if (row.kind === "info" && row.device) {
@@ -127,11 +152,24 @@ export class BrokerDeviceLedger {
     return [...devices.values()];
   }
   hasEvent(device: BrokerLedgerEntry, kind: BrokerLedgerEntry["kind"]): boolean {
+    this.reload();
     return this.rows.some(
       (row) =>
         row.kind === kind &&
         sameGrant(row, device) &&
         (kind === "released" || row.device?.name === device.device?.name),
+    );
+  }
+  releaseComplete(grant: BrokerLedgerEntry): boolean {
+    const device = this.devices().find((row) => sameGrant(row, grant));
+    return (
+      this.hasEvent(grant, "released") &&
+      (device
+        ? this.hasEvent(device, "absent")
+        : this.entries.some(
+            (row) =>
+              sameGrant(row, grant) && row.kind === "released" && row.absence === "not-verifiable",
+          ))
     );
   }
   token(device: BrokerLedgerEntry): string {
@@ -142,6 +180,7 @@ export class BrokerDeviceLedger {
     return token;
   }
   private append(input: Omit<BrokerLedgerEntry, "at" | "batchDir">): BrokerLedgerEntry {
+    this.reload();
     const row = entrySchema.parse({
       ...input,
       batchDir: this.batchDir,

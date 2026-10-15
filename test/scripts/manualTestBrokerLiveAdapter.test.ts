@@ -356,3 +356,71 @@ test("adapter refuses tampered resident socket/data paths and unresolved prior g
     expect(f.launches).toEqual([]);
   }
 });
+
+test("adapter permits settled info-less prior grants with explicit unverifiable absence", async () => {
+  const f = fixture();
+  const { BrokerDeviceLedger } = await import("../../scripts/manual-test/brokerDeviceLedger");
+  const ledger = new BrokerDeviceLedger({
+    batchDir: f.batchDir,
+    fs: f.deps.proxy,
+    timer: f.deps.proxy.timer,
+  });
+  const grant = ledger.acquired("a-phone", {
+    session: { outcome: "ready", requestId: "old-request", sessionUuid: "old-session" },
+  });
+  ledger.record("released", grant);
+  const harness = await createBrokerLiveContext(f.batchDir, f.evidence, {}, f.deps);
+  expect(harness.context.ledger.entries).toContainEqual(
+    expect.objectContaining({ kind: "released", absence: "not-verifiable" }),
+  );
+  await harness.close();
+});
+
+test.each([false, true])(
+  "acquire distinguishes a non-broker name from a protected device (protected=%s)",
+  async (protectedDevice) => {
+    const f = fixture();
+    const name = "a-phone";
+    const config = renderClientRequest({ name, platform: "android" }, "batch-a-phone-1");
+    f.deps.proxyCommand = async () => {
+      const dir = join(f.batchDir, "sessions", name);
+      f.files.set(join(dir, "request.json"), JSON.stringify(config));
+      f.files.set(join(dir, "attempts.json"), JSON.stringify([config.requestId]));
+      f.files.set(join(dir, "owner-token"), "token");
+      f.files.set(
+        join(dir, "init.json"),
+        JSON.stringify({
+          session: {
+            contractVersion: 1,
+            requestId: config.requestId,
+            outcome: "ready",
+            sessionUuid: "session",
+            profile: null,
+            cleanupPending: false,
+          },
+        }),
+      );
+      return { code: 0, output: "" };
+    };
+    const path = join(f.batchDir, "batch.json");
+    const manifest = JSON.parse(f.files.get(path)!);
+    manifest.options.protectedDevices = protectedDevice ? ["native"] : [];
+    f.files.set(path, JSON.stringify(manifest));
+    f.client.infoResults = [
+      { nativeDevice: { name: "ordinary-phone", deviceId: "native", platform: "android" } },
+    ];
+    const harness = await createBrokerLiveContext(
+      f.batchDir,
+      f.evidence,
+      { clients: [name] },
+      f.deps,
+    );
+    await expect(
+      harness.context.deviceOps!.acquire(harness.context.clients[0], {
+        disposableOwner: false,
+        resume: false,
+      }),
+    ).rejects.toThrow(protectedDevice ? "protected device" : "not a broker device");
+    await harness.close();
+  },
+);

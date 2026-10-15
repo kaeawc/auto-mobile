@@ -639,7 +639,11 @@ test("broker init persists product configs, client requests and private modes", 
   const f = brokerFixture();
   expect(await runPrivateDaemonCommand(parsed(brokerInitArgs()), f.deps)).toBe(0);
   const read = (name: string) => JSON.parse(f.files.get(join(options.batchDir, name))!);
-  expect(read("batch.json").broker).toEqual({ daemon: 1, hostConfig: "broker/host-config.json" });
+  expect(read("batch.json").broker).toEqual({
+    daemon: 1,
+    hostConfig: "broker/host-config.json",
+    allowReuse: false,
+  });
   expect(read("broker/host-config.json")).toMatchObject({
     contractVersion: 1,
     limits: { totalDeviceCap: 2 },
@@ -787,4 +791,18 @@ test("broker manifest cannot designate daemon 2", async () => {
     await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
   ).toBe(2);
   expect(f.launches).toEqual([]);
+});
+
+test("broker init records explicit reuse permission in the broker manifest", async () => {
+  const f = brokerFixture();
+  const input = brokerBatchInput();
+  input.reuseCleanDevices = true;
+  input.limits.idlePoolCap = 1;
+  f.files.set("/input/broker-batch.json", JSON.stringify(input));
+  expect(
+    await runPrivateDaemonCommand(parsed([...brokerInitArgs(), "--allow-reuse"]), f.deps),
+  ).toBe(0);
+  expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).broker.allowReuse).toBe(
+    true,
+  );
 });

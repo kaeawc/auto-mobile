@@ -25,6 +25,7 @@ class FakeConnection implements FrameConnection {
   close: (error?: Error) => void = () => {};
   respond: (frame: FakeConnection["writes"][number]) => unknown = () => ({});
   success = true;
+  refusalCode = "typed_refusal";
   silent = false;
   write(data: string): void {
     if (this.destroyed) {
@@ -42,7 +43,7 @@ class FakeConnection implements FrameConnection {
             type: "mcp_response",
             success: this.success,
             result,
-            code: this.success ? undefined : "typed_refusal",
+            code: this.success ? undefined : this.refusalCode,
           }) + "\n",
         ),
       );
@@ -124,6 +125,7 @@ const config = "/standalone/request.json";
  * No database or native lifecycle is needed to exercise connection confinement here. */
 function fakeBrokerBindingFixture(failed = false) {
   const f = fixture();
+  f.connection.refusalCode = "device_outside_managed_slots";
   delete f.deps.env.MT_BATCH;
   const files = new Map([[config, JSON.stringify(request)]]);
   f.deps.readFile = (path) => files.get(path) ?? '{"name":"named"}';
@@ -1199,7 +1201,12 @@ posixTest(
       expect(f.paths).toEqual([]);
       expect(f.err.join(" ")).toContain("--expect-refused");
       const allowed = fakeBrokerBindingFixture();
-      expect(await runDaemonFrame({ ...command, expectRefused: true }, allowed.deps)).toBe(0);
+      expect(
+        await runDaemonFrame(
+          { ...command, json: JSON.stringify({ name, arguments: {} }), expectRefused: true },
+          allowed.deps,
+        ),
+      ).toBe(0);
       expect(allowed.connection.writes.some((frame) => frame.method === "tools/call")).toBe(true);
     }
   },
@@ -1475,4 +1482,166 @@ posixTest("cross-client reconnect cannot expand the connection's one-session gra
   expect(f.connection.writes.some((frame) => frame.method === "daemon/releaseBrokerSession")).toBe(
     false,
   );
+});
+
+posixTest(
+  "expected lifecycle refusals reject every device selector before connecting",
+  async () => {
+    for (const name of ["killDevice", "startDevice", "provisionDevice", "getAndroid", "getApple"]) {
+      for (const args of [
+        { deviceId: "protected" },
+        { device: { name: "protected" } },
+        { platform: "android" },
+        { sessionUuid: "session-b" },
+        null,
+        [],
+        { force: true },
+      ]) {
+        const f = batchFixture();
+        expect(
+          await runDaemonFrame(
+            parsed([
+              "send",
+              "tools/call",
+              JSON.stringify({ name, arguments: args }),
+              "--broker-binding",
+              "a",
+              "--expect-refused",
+            ]),
+            f.deps,
+          ),
+        ).toBe(2);
+        expect(f.paths).toEqual([]);
+      }
+    }
+  },
+);
+posixTest("expected lifecycle refusals allow empty or only own session arguments", async () => {
+  for (const args of [{}, { sessionUuid: "{{ownSessionId}}" }, { sessionUuid: "session-a" }]) {
+    for (const name of ["killDevice", "startDevice", "provisionDevice", "getAndroid", "getApple"]) {
+      const f = batchFixture();
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "tools/call",
+            JSON.stringify({ name, arguments: args }),
+            "--broker-binding",
+            "a",
+            "--expect-refused",
+          ]),
+          f.deps,
+        ),
+      ).toBe(0);
+      expect(f.connection.writes.some((frame) => frame.method === "tools/call")).toBe(true);
+    }
+  }
+});
+posixTest("unrelated errors are not product refusals", async () => {
+  for (const result of [
+    { isError: true, content: [{ type: "text", text: "bad arguments" }] },
+    {},
+  ]) {
+    const f = batchFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) => {
+      if (frame.method === "tools/call") {
+        f.connection.success = !result.isError;
+        f.connection.refusalCode = "internal_error";
+        return result;
+      }
+      return respond(frame);
+    };
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"killDevice","arguments":{}}',
+          "--broker-binding",
+          "a",
+          "--expect-refused",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+  }
+});
+posixTest("broker batches reject untracked request paths before any socket access", async () => {
+  const f = batchFixture();
+  f.files.set("/untracked/request.json", JSON.stringify(request));
+  expect(
+    await runDaemonFrame(
+      parsed(["send", "ide/status", "--broker-binding", "/untracked/request.json"]),
+      f.deps,
+    ),
+  ).toBe(2);
+  expect(f.paths).toEqual([]);
+  expect(f.err.join(" ")).toContain("--broker-binding <client>");
+});
+
+posixTest("expected refusal recognizes product messages and structured refusal codes", async () => {
+  for (const result of [
+    {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "Session broker owns device lifecycle; killDevice cannot allocate or retire a device",
+        },
+      ],
+    },
+    {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ code: "device_outside_managed_slots" }) }],
+    },
+    { isError: true, structuredContent: { code: "device_outside_managed_slots" } },
+  ]) {
+    const f = batchFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) => {
+      if (frame.method === "tools/call") {
+        f.connection.success = true;
+        return result;
+      }
+      return respond(frame);
+    };
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"killDevice","arguments":{}}',
+          "--broker-binding",
+          "a",
+          "--expect-refused",
+        ]),
+        f.deps,
+      ),
+    ).toBe(0);
+  }
+});
+posixTest("an isError envelope with an unrelated message never counts as refused", async () => {
+  const f = batchFixture();
+  const respond = f.connection.respond;
+  f.connection.respond = (frame) => {
+    if (frame.method === "tools/call") {
+      f.connection.success = true;
+      return { isError: true, content: [{ type: "text", text: "Invalid arguments" }] };
+    }
+    return respond(frame);
+  };
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "tools/call",
+        '{"name":"killDevice","arguments":{}}',
+        "--broker-binding",
+        "a",
+        "--expect-refused",
+      ]),
+      f.deps,
+    ),
+  ).toBe(2);
 });

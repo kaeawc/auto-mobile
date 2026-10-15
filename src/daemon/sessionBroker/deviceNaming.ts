@@ -10,3 +10,8 @@ const SESSION_BROKER_DEVICE_NAME_PREFIXES = [
 export function isSessionBrokerDeviceName(name: string): boolean {
   return SESSION_BROKER_DEVICE_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
+
+/** Representative product-owned name for fakes; keep recognized prefixes private. */
+export function exampleSessionBrokerDeviceName(suffix: string): string {
+  return `${SESSION_BROKER_DEVICE_NAME_PREFIXES[0]}${suffix}`;
+}

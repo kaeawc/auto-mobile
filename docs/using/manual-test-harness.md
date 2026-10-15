@@ -408,7 +408,8 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
   to the daemon, with a 240-second RPC budget. Release polls for cleanup;
   abandonment prints its receipt, which may still have `cleanupPending: true`.
   Query status and verify settled cleanup/native absence before continuing.
-  `info` saves the current native descriptor to `info.json` and feeds the ledger.
+  `up` captures native info best-effort within 5 seconds after readiness; `info`
+  saves the current native descriptor to `info.json` and feeds the ledger.
 - `close --client NAME` cleanly closes MCP/stdin and waits up to 240 seconds for
   a released receipt. `status` shows initialize/live outcome, grant/profile,
   typed failure, owner liveness and `daemonSocketAlive`; `--all` prints all clients.
@@ -433,9 +434,17 @@ execution through product lifecycle operations. Under zero pooling the product
 destroys the device; release does not retain an assignment. A receipt alone is
 not native absence proof: batch teardown joins `cleanupPending: false` with a
 healthy native inventory and records `released` and `absent` (or `leaked`) in
-the ledger. A dead daemon or unavailable inventory cannot prove absence.
+the ledger. An info-less grant with a settled released receipt is recorded as
+`released` with `absence: not-verifiable`; teardown can finish and later runs
+can proceed, without claiming native absence. A dead daemon or unavailable
+inventory cannot prove absence.
 Android may reuse a serial for a fresh device; retain native name and session
 identity too. See the [broker lifecycle contract](../design-docs/session-broker-experiment.md).
+
+### Known limits
+
+- The proxy receives its owner token through `--liveness-owner-token` on argv;
+  it is visible in `ps` to other users on a shared host, despite output redaction.
 
 ## Raw daemon frames
 
@@ -450,7 +459,9 @@ ownership. The daemon rejects that heartbeat for a proxy-owned session.
 on the frame connection and keeps its existing ready grant on exit.
 `--broker-binding /absolute/request.json` acquires a standalone session on the
 same connection, heartbeats it, and releases it on graceful exit; it can boot
-real devices and needs the same boot gate. Never use it to bypass batch caps.
+real devices and needs the same boot gate. This standalone acquisition is allowed
+only outside broker batches; untracked paths inside batches refuse with guidance
+to use `--broker-binding <client>`. Existing client request paths reuse that client.
 Use `{{ownSessionId}}`, `{{clientSessionId:<name>}}` for cross-client tests, and
 `{{ownLivenessOwnerToken}}`. Unresolved values refuse before connecting.
 
@@ -465,8 +476,9 @@ Use `{{ownSessionId}}`, `{{clientSessionId:<name>}}` for cross-client tests, and
 ```
 
 `--expect-refused` is send-mode only and requires every response to be an error
-(success exits 2); it deliberately sends otherwise-guarded broker tools to prove
-the product gate. Resources/list, `automobile:devices/*` reads, and
+with a product refusal code or message (success or unrelated errors exit 2).
+Lifecycle probes accept only `{}` or an object containing only the client's own `sessionUuid`; device names and selectors always refuse before sending.
+These constrained probes exercise the product gate. Resources/list, `automobile:devices/*` reads, and
 `--allow-selector` remain forbidden. `--token-of OTHER` changes only the user
 status/release isolation frames to another batch client's stored token; binding
 and heartbeats keep their own token. Tokens are redacted and a notice is printed.

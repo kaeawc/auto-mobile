@@ -141,8 +141,7 @@ export async function createBrokerLiveContext(
     tokenFor: (name) => proxy.readFile(join(batchDir, "sessions", name, "owner-token")),
   });
   for (const grant of ledger.entries.filter((row) => row.kind === "acquired")) {
-    const device = ledger.devices().find((row) => row.sessionUuid === grant.sessionUuid);
-    if (!device || !ledger.hasEvent(device, "released") || !ledger.hasEvent(device, "absent")) {
+    if (!ledger.releaseComplete(grant)) {
       throw new Error(
         "Previous broker grant lacks a verified release receipt/native absence; run broker-batch down first.",
       );
@@ -324,11 +323,11 @@ export async function createBrokerLiveContext(
               }),
             })
             .parse(await daemonClient.info(init.session.sessionUuid!));
-          if (
-            !isSessionBrokerDeviceName(info.nativeDevice.name) ||
-            matchesProtection(info.nativeDevice, batch.options.protectedDevices ?? [])
-          ) {
+          if (matchesProtection(info.nativeDevice, batch.options.protectedDevices ?? [])) {
             throw new Error("Broker granted a protected device.");
+          }
+          if (!isSessionBrokerDeviceName(info.nativeDevice.name)) {
+            throw new Error("Broker granted a device whose name is not a broker device name.");
           }
         }
         return init.session;

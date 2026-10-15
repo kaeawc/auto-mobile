@@ -1393,3 +1393,79 @@ posixTest("broker close joins a terminal refusal without inventing a device rele
   });
   expect(f.files.has("/batch/evidence/ledger.jsonl")).toBe(false);
 });
+
+posixTest.each([false, true])(
+  "new disposable child is signalled once on identity capture failure (throw=%s)",
+  async (throws) => {
+    const f = brokerFixture();
+    const signals: unknown[] = [];
+    f.deps.signalPid = (...args) => {
+      signals.push(args);
+    };
+    f.deps.ownerStartIdentity = () => {
+      if (throws) {
+        throw new Error("identity probe failed");
+      }
+      return undefined;
+    };
+    expect(await f.up(["--owner", "disposable"])).toBe(2);
+    expect(signals).toEqual([[2468, "SIGTERM"]]);
+    expect(f.files.get(join(brokerDir, "owner.pid"))?.trim()).toBe("");
+    expect(f.calls).toEqual(["spawnOwner"]);
+  },
+);
+posixTest("up records native identity before returning a ready grant", async () => {
+  const f = brokerFixture();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.infoResults = [
+    {
+      sessionId: "own-session",
+      nativeDevice: { name: "ambroker-up", deviceId: "native", platform: "android" },
+    },
+  ];
+  expect(await f.up()).toBe(0);
+  expect(f.files.get("/batch/evidence/ledger.jsonl")).toContain('"kind":"info"');
+  expect(broker.calls.map((call) => call.method)).toEqual(["info"]);
+});
+posixTest("up bounds best-effort native info without losing its ready grant", async () => {
+  const f = brokerFixture();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.info = async () => new Promise(() => {});
+  const up = f.up();
+  await drainUntilQuiescent(f.timer);
+  f.timer.advanceTime(5000);
+  expect(await up).toBe(0);
+  expect(f.files.get("/batch/evidence/ledger.jsonl")).toContain('"kind":"acquired"');
+  expect(f.logs.join(" ")).toContain("Native device info unavailable");
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+posixTest("disposable owners have a fixed two-hour maximum lifetime", async () => {
+  const f = brokerFixture();
+  const lifetimes: number[] = [];
+  f.deps.spawnOwner = (lifetimeSeconds) => {
+    lifetimes.push(lifetimeSeconds);
+    return 2468;
+  };
+  expect(await f.up(["--owner", "disposable"])).toBe(0);
+  expect(lifetimes).toEqual([7200]);
+});
+
+posixTest(
+  "identity failure clears the child PID even when its one cleanup signal fails",
+  async () => {
+    const f = brokerFixture();
+    const signals: unknown[] = [];
+    f.deps.ownerStartIdentity = () => undefined;
+    f.deps.signalPid = (...args) => {
+      signals.push(args);
+      throw new Error("child already exited");
+    };
+    expect(await f.up(["--owner", "disposable"])).toBe(2);
+    expect(signals).toEqual([[2468, "SIGTERM"]]);
+    expect(f.files.get(join(brokerDir, "owner.pid"))?.trim()).toBe("");
+    expect(f.logs.join(" ")).toContain("Disposable child cleanup failed: child already exited");
+  },
+);

@@ -161,6 +161,11 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
       os: initial.device.os,
     };
   });
+  const manifest = deps.fs.exists(join(deps.batchDir, "batch.json"))
+    ? z
+        .object({ broker: z.object({ allowReuse: z.boolean().optional() }).optional() })
+        .parse(JSON.parse(deps.fs.readFile(join(deps.batchDir, "batch.json"))))
+    : undefined;
   const batch = parseBrokerBatch(
     {
       schemaVersion: 1,
@@ -169,7 +174,7 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
       reuseCleanDevices: host.reuseCleanDevices,
       clients,
     },
-    { maxDevices: command.maxDevices, allowReuse: true },
+    { maxDevices: command.maxDevices, allowReuse: manifest?.broker?.allowReuse ?? false },
   );
   return { plan: planExpectations(batch), permits: Math.max(1, batch.limits.totalDeviceCap) };
 }
@@ -312,11 +317,35 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
   }
   const ledger = ledgerFor(deps);
   const grants = ledger.entries.filter((row) => row.kind === "acquired");
-  if (
-    grants.some((grant) => !ledger.devices().some((row) => row.sessionUuid === grant.sessionUuid))
-  ) {
-    deps.log("Native device identity missing for a ready grant; absence is unverified.");
-    failed = true;
+  for (const grant of grants.filter(
+    (grant) => !ledger.devices().some((row) => row.sessionUuid === grant.sessionUuid),
+  )) {
+    if (ledger.releaseComplete(grant)) {
+      continue;
+    }
+    try {
+      const status = await raceWithDeadline(
+        () => deps.daemonClient.status(grant.requestId, ledger.token(grant)),
+        {
+          timer: deps.timer,
+          timeoutMs: deps.cleanupTimeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS,
+          label: `Release receipt ${grant.client}`,
+        },
+      );
+      if (
+        status?.requestId !== grant.requestId ||
+        status.sessionUuid !== grant.sessionUuid ||
+        status.outcome !== "released" ||
+        status.cleanupPending
+      ) {
+        throw new Error("Native device identity missing and settled release receipt unavailable.");
+      }
+      ledger.record("released", grant);
+      deps.log(`Released ${grant.client}; native absence: not-verifiable (no device info).`);
+    } catch (error) {
+      deps.log(`Release receipt ${grant.client}: ${errorMessage(error)}`);
+      failed = true;
+    }
   }
   if (ledger.devices().length) {
     try {
@@ -332,15 +361,7 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
       failed = true;
     }
   }
-  const unresolved = grants.filter(
-    (row) =>
-      !ledger.hasEvent(row, "released") ||
-      !ledger
-        .devices()
-        .some(
-          (device) => device.sessionUuid === row.sessionUuid && ledger.hasEvent(device, "absent"),
-        ),
-  );
+  const unresolved = grants.filter((row) => !ledger.releaseComplete(row));
   deps.log(
     `Leak report: ${unresolved.length} unverified grant(s) of ${grants.length}; ` +
       JSON.stringify(unresolved.map(({ client, sessionUuid }) => ({ client, sessionUuid }))),

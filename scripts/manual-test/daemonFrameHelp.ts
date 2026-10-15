@@ -8,11 +8,11 @@ export const DAEMON_FRAME_FLAGS: Record<string, string> = {
     "send, cancel, cancel-after:<ms>, cancel-keep-open[:<ms>] (default: send; read window: 5000).",
   "--cancel-after-ms": "Delay before same-connection cancellation in keep-open mode (default: 0).",
   "--broker-binding":
-    "Bind a batch client name or acquire a standalone request.json on this connection.",
+    "Bind a batch client name; standalone request.json acquisition is allowed only outside broker batches.",
   "--token-of":
     "Use another batch client's token for status/release isolation frames only (never printed).",
   "--expect-refused":
-    "Send guarded broker tools and require every response to be an error (send mode only).",
+    "Probe broker lifecycle tools with {} or only own sessionUuid; require product refusal errors (send mode only).",
   "--hold-ms": "Keep the broker session alive after frames in send mode (default: 0).",
   "--then":
     "Repeatable '<method> <params json|@file>' sent sequentially after first answers (default: none; send mode only).",
@@ -35,11 +35,13 @@ ${Object.entries(DAEMON_FRAME_FLAGS)
 A client name resolves through MT_BATCH to its unchanged request.json and owner-token;
 its existing ready grant is kept on exit. A standalone request.json acquires a new grant,
 keeps it alive with heartbeats and releases it on graceful exit (it can create/boot devices).
+Inside broker batches untracked request paths are refused; use --broker-binding <client>.
 Params strings support {{ownSessionId}}, {{clientSessionId:<name>}} and
 {{ownLivenessOwnerToken}}; unresolved values refuse before connecting. Indexed ownSessionId
 placeholders were removed; use {{clientSessionId:<name>}} for cross-client isolation.
 Broker bindings refuse startDevice/provisionDevice/getAndroid/getApple/killDevice locally;
---expect-refused sends them to prove the product gate rejects them (success exits 2).
+--expect-refused sends only {} or own sessionUuid arguments to prove the product gate rejects them.
+Device names/selectors are always refused; unrelated errors and successful responses exit 2.
 Broker bindings always refuse resources/list and read automobile:devices/* and --allow-selector.
 --token-of must name another client of the same batch and only applies to user
 sessionRequestStatus/releaseBrokerSession frames; binding/heartbeats keep the binding owner's token.

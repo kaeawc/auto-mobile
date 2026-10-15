@@ -89,7 +89,7 @@ export function isSafeEmulatorProcessPid(pid: number, ownPid = process.pid): boo
   return Number.isInteger(pid) && pid > 1 && pid !== ownPid;
 }
 
-function serialPort(serial: string): number | undefined {
+export function serialPort(serial: string): number | undefined {
   return isAndroidEmulatorSerial(serial) ? Number(serial.slice("emulator-".length)) : undefined;
 }
 

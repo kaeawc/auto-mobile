@@ -2,6 +2,7 @@ import { isUnresolvedAndroidEmulatorName } from "../../../devices/deviceIdentity
 import {
   emulatorProcessArguments,
   isEmulatorQemuProcess,
+  serialPort,
   type EmulatorProcessTableSource,
 } from "../../../utils/android-cmdline-tools/EmulatorProcessStop";
 import type { AdbDeviceState } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -9,6 +10,7 @@ import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
 import type { PlatformDeviceManager } from "../../../devices/deviceUtils";
 import { ActionableError } from "../../../models/ActionableError";
 import type { BootedDevice, DeviceInfo } from "../../../models/DeviceInfo";
+import { isProductBrokerDevice } from "../persistedIdentity";
 import type { LegacySlotDeviceStopper, LegacySlotDeviceTarget } from "./legacySlotDeviceRetirement";
 
 /** Same platform shutdown port used by killDevice; no image-destruction API is exposed here. */
@@ -109,20 +111,34 @@ export class PlatformLegacySlotDeviceStopper implements LegacySlotDeviceStopper 
     target: LegacySlotDeviceTarget,
     signal: AbortSignal,
   ): Promise<void> {
-    // Online-only discovery omits offline emulators and pre-ADB processes. Neither is stopped.
+    // Read the process table last so port identity evidence is newer than ADB state.
     const states = await this.android.readStates(signal);
-    if (
-      states.some((state) => isAndroidEmulatorSerial(state.deviceId) && state.state !== "device")
-    ) {
-      throw new ActionableError(
-        "Cannot confirm legacy shutdown while an Android emulator is offline or unauthorized",
-      );
-    }
     const processes = await this.android.processes.read({ signal });
     if (!processes.value) {
       throw new ActionableError(
         `Cannot confirm legacy emulator process absence: ${processes.error ?? "process table unavailable"}`,
       );
+    }
+    // Online-only discovery omits offline emulators. Only a unique, explicitly port-matched
+    // non-product AVD proves that an omitted emulator cannot be a legacy product device.
+    for (const state of states) {
+      if (!isAndroidEmulatorSerial(state.deviceId) || state.state === "device") {
+        continue;
+      }
+      const port = serialPort(state.deviceId);
+      const matches = processes.value
+        .filter(isEmulatorQemuProcess)
+        .map((row) => emulatorProcessArguments(row.command))
+        .filter((args) => args.port === port);
+      if (
+        matches.length !== 1 ||
+        !matches[0].avdName ||
+        isProductBrokerDevice(matches[0].avdName)
+      ) {
+        throw new ActionableError(
+          "Cannot confirm legacy shutdown while an Android emulator is offline or unauthorized",
+        );
+      }
     }
     if (processes.value.some((row) => this.mayBeTargetProcess(row, target))) {
       throw new ActionableError(

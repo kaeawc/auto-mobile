@@ -1916,8 +1916,9 @@ export class Daemon {
     }
     logger.info("Unix socket server started");
     if (!this.sessionBrokerConfigPath && bindingRegistryFileExists()) {
-      this.backgroundRegistryUpgrade ??= new BackgroundBindingRegistryUpgrade((signal) =>
-        this.openBindingRegistry(signal),
+      this.backgroundRegistryUpgrade ??= new BackgroundBindingRegistryUpgrade(
+        (signal) => this.openBindingRegistry(signal),
+        { timer: this.timer },
       );
       this.backgroundRegistryUpgrade.start();
     }

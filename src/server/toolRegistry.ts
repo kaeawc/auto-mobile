@@ -669,53 +669,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-interface JsonTextFailureFallbackState {
-  count: number;
-  warned: boolean;
-}
-
-const jsonTextFailureFallbackState: JsonTextFailureFallbackState = { count: 0, warned: false };
-
-export function getJsonTextFailureFallbackCount(): number {
-  return jsonTextFailureFallbackState.count;
-}
-
-function isJSONTextFailureContent(
-  content: unknown,
-  fallback: JsonTextFailureFallbackState,
-): boolean {
-  if (
-    !Array.isArray(content) ||
-    content.length !== 1 ||
-    !isRecord(content[0]) ||
-    content[0].type !== "text" ||
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
-    typeof content[0].text !== "string"
-  ) {
-    return false;
-  }
-  try {
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
-    const payload: unknown = JSON.parse(content[0].text);
-    if (!isRecord(payload) || payload.success !== false) {
-      return false;
-    }
-    fallback.count++;
-    if (!fallback.warned) {
-      fallback.warned = true;
-      logger.warn(
-        "[ToolRegistry] JSON-text failure fallback: unmarked response with one text content block",
-      );
-    }
-    return true;
-  } catch (error) {
-    // Plain text is a valid response, so an invalid JSON envelope remains a non-failure.
-    logger.debug(`[ToolRegistry] Response text is not JSON: ${error}`);
-    return false;
-  }
-}
-
-function isToolResponseFailure(response: unknown, fallback: JsonTextFailureFallbackState): boolean {
+function isToolResponseFailure(response: unknown): boolean {
   if (!isRecord(response)) {
     return false;
   }
@@ -730,11 +684,7 @@ function isToolResponseFailure(response: unknown, fallback: JsonTextFailureFallb
   if (response.success === true) {
     return false;
   }
-  if (isMarkedToolFailure(response)) {
-    return true;
-  }
-  // #11830: Delete this counted fallback once every producer marks its failures.
-  return isJSONTextFailureContent(response.content, fallback);
+  return isMarkedToolFailure(response);
 }
 
 function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
@@ -816,7 +766,6 @@ interface PlanLifecycleManager {
 }
 
 interface ToolRegistryPipelineOverrides {
-  jsonTextFailureFallback?: JsonTextFailureFallbackState;
   env?: Environment;
   executionTargetResolver?: ExecutionTargetResolver;
   displayInventory?: DisplayInventoryProvider;
@@ -2410,9 +2359,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       toolStartMs,
     } = input;
 
-    // Unwrap MCP response envelope to get the inner result for success/error checks.
-    // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
-    // instead of a plain { success, error } object.
+    // Unwrap the payload for result logging and finalization metadata.
+    // Pipeline failure classification uses explicit status and the out-of-band mark.
     const unwrapped = unwrapToolResponse(response, name);
 
     const toolSuccess =
@@ -3572,9 +3520,8 @@ export class ToolRegistryClass {
   private navigationToolCallRecorder: NavigationToolCallRecorder;
   private afterToolCall: AfterToolCallHandler;
   private planLifecycleManager: PlanLifecycleManager;
-  private jsonTextFailureFallback = jsonTextFailureFallbackState;
   private readonly isResponseFailure = (response: unknown): boolean =>
-    isToolResponseFailure(response, this.jsonTextFailureFallback);
+    isToolResponseFailure(response);
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
@@ -4424,12 +4371,9 @@ export class ToolRegistryClass {
       auditRunner: this.auditRunner,
       afterToolCall: this.afterToolCall,
       planLifecycleManager: this.planLifecycleManager,
-      jsonTextFailureFallback: this.jsonTextFailureFallback,
     };
 
     this.env = overrides.env ?? this.env;
-    this.jsonTextFailureFallback =
-      overrides.jsonTextFailureFallback ?? this.jsonTextFailureFallback;
     if (overrides.executionTargetResolver) {
       this.executionTargetResolver = overrides.executionTargetResolver;
     } else if (overrides.displayInventory || overrides.deviceReadAccess) {
@@ -4455,7 +4399,6 @@ export class ToolRegistryClass {
       this.auditRunner = previous.auditRunner;
       this.afterToolCall = previous.afterToolCall;
       this.planLifecycleManager = previous.planLifecycleManager;
-      this.jsonTextFailureFallback = previous.jsonTextFailureFallback;
     };
   }
 

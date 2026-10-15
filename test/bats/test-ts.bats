@@ -888,7 +888,7 @@ EOF
 # Shard retry on infra exits (#10583). One worker keeps invocations sequential.
 run_retry_lane() {
   # Isolated chunking is off so each attempt is one `bun test` invocation per group.
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+  run env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 "$@" bash "$SCRIPT" unit
 }
 

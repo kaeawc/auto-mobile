@@ -943,6 +943,7 @@ test/server/downloadsFixtureContract.test.ts
 test/server/earlyStartTransport.test.ts
 test/server/elementSelectorSchemas.property.test.ts
 test/server/embeddedObservationSettle.pressButtonBack.test.ts
+test/server/emulatorLossIncidentResources.test.ts
 test/server/executePlanCleanupToolResults.test.ts
 test/server/executionTracker.test.ts
 test/server/failuresResources.test.ts
@@ -990,6 +991,7 @@ test/server/planHealthSummary.test.ts
 test/server/planLabelNeverTakesSessionOfItsOwn.test.ts
 test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
+test/server/preferenceTools.test.ts
 test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts

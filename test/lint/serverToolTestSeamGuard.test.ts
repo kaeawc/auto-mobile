@@ -4,20 +4,11 @@ import { join } from "node:path";
 
 // Existing hooks are a ratchet: remove allowances as callers migrate to injection.
 const ALLOWLIST: Record<string, number> = {
-  "appFileService.ts": 2,
-  "appResources.ts": 1,
   "appTools.ts": 18,
-  "bootedDeviceResources.ts": 2,
   "deviceReadinessProxyProvider.ts": 1,
   "deviceSnapshotManager.ts": 1,
   "deviceTools.ts": 2,
-  "emulatorLossIncidentResources.ts": 2,
   "interactionTools.ts": 40,
-  "observationResources.ts": 2,
-  "preferenceTools.ts": 1,
-  "storageResources.ts": 1,
-  "storageTools.ts": 2,
-  "toolOutputResources.ts": 2,
   "videoRecordingManager.ts": 1,
   "videoRecordingTools.ts": 3,
   "webrtcStreamManager.ts": 1,

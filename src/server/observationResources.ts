@@ -34,17 +34,7 @@ import {
 } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
-let screenshotFileSystem: ScreenshotFileSystem = realFs;
-
-export function setScreenshotFileSystem(fs: ScreenshotFileSystem): void {
-  screenshotFileSystem = fs;
-}
-
-export function resetScreenshotFileSystem(): void {
-  screenshotFileSystem = realFs;
-}
-
-interface SessionScreenshotResourceDependencies {
+export interface SessionScreenshotResourceDependencies {
   resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
   createScreenshotService(device: BootedDevice): TrackedScreenshotService;
 }
@@ -54,16 +44,9 @@ const defaultSessionScreenshotResourceDependencies: SessionScreenshotResourceDep
   createScreenshotService: (device) => new TakeScreenshot(device),
 };
 
-let sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
-
-export function setSessionScreenshotResourceDependencies(
-  dependencies: SessionScreenshotResourceDependencies,
-): void {
-  sessionScreenshotResourceDependencies = dependencies;
-}
-
-export function resetSessionScreenshotResourceDependencies(): void {
-  sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
+export interface ObservationResourceDependencies {
+  screenshotFileSystem?: ScreenshotFileSystem;
+  sessionScreenshotResourceDependencies?: SessionScreenshotResourceDependencies;
 }
 
 // Resource URIs
@@ -184,8 +167,9 @@ async function screenshotNotFileError(
   uri: string,
   path: string,
   identity: ObservationResourceIdentity,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ResourceContent | undefined> {
-  const fileStat = await screenshotFileSystem.stat(path);
+  const fileStat = await screenshotFiles(deps).stat(path);
   if (!fileStat.isFile()) {
     return observationResourceError(
       uri,
@@ -200,6 +184,7 @@ async function screenshotNotFileError(
 // Resolve the selected device's path, preserving stat/protection failure evidence.
 async function getLatestScreenshotPath(
   deviceId: string,
+  deps: ObservationResourceDependencies = {},
 ): Promise<string | ResourceContent | undefined> {
   try {
     const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
@@ -211,6 +196,7 @@ async function getLatestScreenshotPath(
       RESOURCE_URIS.LATEST_SCREENSHOT,
       screenshotPath,
       { deviceId },
+      deps,
     );
     if (unavailable) {
       return unavailable;
@@ -261,7 +247,9 @@ async function getLatestObservation(): Promise<ResourceContent> {
 }
 
 // Handler for latest screenshot resource (image blob)
-async function getLatestScreenshot(): Promise<ResourceContent> {
+async function getLatestScreenshot(
+  deps: ObservationResourceDependencies = {},
+): Promise<ResourceContent> {
   let deviceId: string | undefined;
   try {
     deviceId = resolveLatestScreenshotDeviceId();
@@ -272,10 +260,10 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
         "No observation available. Call the 'observe' tool first to capture a screenshot.",
       );
     }
-    let screenshotPath = await getLatestScreenshotPath(deviceId);
+    let screenshotPath = await getLatestScreenshotPath(deviceId, deps);
     if (typeof screenshotPath !== "string" && ScreenshotJobTracker.isPending(deviceId)) {
       await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
-      screenshotPath = await getLatestScreenshotPath(deviceId);
+      screenshotPath = await getLatestScreenshotPath(deviceId, deps);
     }
     if (typeof screenshotPath !== "string" && isCachedScreenshotPending(deviceId)) {
       return observationResourceError(
@@ -301,7 +289,7 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       );
     }
     await screenshotPathProtection.protect(screenshotPath);
-    const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
+    const imageBuffer = await screenshotFiles(deps).readFile(screenshotPath);
     return {
       uri: RESOURCE_URIS.LATEST_SCREENSHOT,
       mimeType: screenshotMimeType(screenshotPath, imageBuffer),
@@ -405,7 +393,10 @@ async function resolveObservationScreenshotPath(
 }
 
 // Handler for the screenshot captured alongside one immutable device observation.
-async function getObservationScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+async function getObservationScreenshot(
+  params: Record<string, string>,
+  deps: ObservationResourceDependencies,
+): Promise<ResourceContent> {
   const uri =
     getRequestedResourceUri(params) ??
     `automobile:observation/${params.deviceId}/${params.observationId}/screenshot`;
@@ -445,16 +436,21 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       });
     }
 
-    const unavailable = await screenshotNotFileError(uri, screenshotPath, {
-      deviceId,
-      observationId,
-    });
+    const unavailable = await screenshotNotFileError(
+      uri,
+      screenshotPath,
+      {
+        deviceId,
+        observationId,
+      },
+      deps,
+    );
     if (unavailable) {
       return unavailable;
     }
     const image = await readRetainedScreenshot({
       path: screenshotPath,
-      fileSystem: screenshotFileSystem,
+      fileSystem: deps.screenshotFileSystem ?? realFs,
     });
     if (!matchesObservationId(deviceId, observationId)) {
       return observationScreenshotUnknownError(uri, deviceId, observationId);
@@ -523,6 +519,7 @@ function resourceErrorText(content: ResourceContent): {
  */
 export async function readObservationScreenshotBytes(
   uri: string,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ObservationScreenshotBytes> {
   const match = OBSERVATION_SCREENSHOT_URI_PATTERN.exec(uri);
   if (!match) {
@@ -530,7 +527,10 @@ export async function readObservationScreenshotBytes(
       error: `'${uri}' is not an observation screenshot URI; expected ${OBSERVATION_SCREENSHOT_URI_TEMPLATE}.`,
     };
   }
-  const content = await getObservationScreenshot({ deviceId: match[1], observationId: match[2] });
+  const content = await getObservationScreenshot(
+    { deviceId: match[1], observationId: match[2] },
+    deps,
+  );
   if (content.blob === undefined) {
     return resourceErrorText(content);
   }
@@ -620,10 +620,11 @@ function releasedSessionNotActiveError(
   uri: string,
   context: ResourceReadContext,
   sessionUuid: string,
+  deps: ObservationResourceDependencies = {},
 ): ResourceContent | undefined {
   if (
     context.releasedSessionUuid === sessionUuid &&
-    !sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid)
+    !sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid)
   ) {
     return freshSessionScreenshotError(
       uri,
@@ -641,10 +642,11 @@ async function readFreshScreenshot(
   activeSession: ActiveSessionDevice,
   context: ResourceReadContext,
   path: string,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ResourceContent> {
   try {
     await screenshotPathProtection.protect(path);
-    const imageBuffer = await screenshotFileSystem.readFile(path);
+    const imageBuffer = await screenshotFiles(deps).readFile(path);
     if (context.signal?.aborted) {
       return freshSessionScreenshotError(
         uri,
@@ -653,7 +655,7 @@ async function readFreshScreenshot(
         OPERATION_CANCELLED_MESSAGE,
       );
     }
-    const finalSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    const finalSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
     if (sessionOwnershipChanged(finalSession, activeSession)) {
       return freshSessionScreenshotError(
         uri,
@@ -675,8 +677,7 @@ async function readFreshScreenshot(
     if (context.signal?.aborted || reason.includes(OPERATION_CANCELLED_MESSAGE)) {
       return freshSessionScreenshotError(uri, "SCREENSHOT_CAPTURE_CANCELLED", false, reason);
     }
-    const failedReadSession =
-      sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    const failedReadSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
     if (sessionOwnershipChanged(failedReadSession, activeSession)) {
       return freshSessionScreenshotError(
         uri,
@@ -698,13 +699,14 @@ async function readFreshScreenshot(
 async function getSessionObservation(
   params: Record<string, string>,
   context: ResourceReadContext,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
     return unauthorizedSessionResourceError(uri, sessionUuid);
   }
-  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  const activeSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return sessionResourceError(uri, sessionUuid);
   }
@@ -749,13 +751,14 @@ async function getSessionObservation(
 async function getSessionScreenshot(
   params: Record<string, string>,
   context: ResourceReadContext,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
     return unauthorizedSessionResourceError(uri, sessionUuid);
   }
-  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  const activeSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return sessionResourceError(uri, sessionUuid);
   }
@@ -792,15 +795,20 @@ async function getSessionScreenshot(
       });
     }
 
-    const unavailable = await screenshotNotFileError(uri, screenshotPath, {
-      deviceId,
-      sessionUuid,
-    });
+    const unavailable = await screenshotNotFileError(
+      uri,
+      screenshotPath,
+      {
+        deviceId,
+        sessionUuid,
+      },
+      deps,
+    );
     if (unavailable) {
       return unavailable;
     }
     await screenshotPathProtection.protect(screenshotPath);
-    const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
+    const imageBuffer = await screenshotFiles(deps).readFile(screenshotPath);
     const base64Image = imageBuffer.toString("base64");
     const mimeType = screenshotMimeType(screenshotPath, imageBuffer);
 
@@ -824,16 +832,17 @@ async function getSessionScreenshot(
 async function getFreshSessionScreenshot(
   params: Record<string, string>,
   context: ResourceReadContext,
+  deps: ObservationResourceDependencies = {},
 ): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:device-session/${sessionUuid}/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
     return (
-      releasedSessionNotActiveError(uri, context, sessionUuid) ??
+      releasedSessionNotActiveError(uri, context, sessionUuid, deps) ??
       unauthorizedFreshScreenshotError(uri)
     );
   }
-  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  const activeSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return freshSessionScreenshotError(
       uri,
@@ -844,7 +853,7 @@ async function getFreshSessionScreenshot(
   }
 
   try {
-    const screenshotService = sessionScreenshotResourceDependencies.createScreenshotService(
+    const screenshotService = sessionScreenshotDependencies(deps).createScreenshotService(
       activeSession.device,
     );
     const { promise } = screenshotService.startTrackedCapture(
@@ -856,7 +865,7 @@ async function getFreshSessionScreenshot(
     );
     const result = await promise;
 
-    const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    const currentSession = sessionScreenshotDependencies(deps).resolveActiveSession(sessionUuid);
     if (sessionOwnershipChanged(currentSession, activeSession)) {
       return freshSessionScreenshotError(
         uri,
@@ -873,7 +882,7 @@ async function getFreshSessionScreenshot(
       );
     }
 
-    return readFreshScreenshot(uri, sessionUuid, activeSession, context, result.path);
+    return readFreshScreenshot(uri, sessionUuid, activeSession, context, result.path, deps);
   } catch (error) {
     const reason = errorMessage(error);
     logger.error(
@@ -888,7 +897,7 @@ async function getFreshSessionScreenshot(
 }
 
 // Register all observation resources
-export function registerObservationResources(): void {
+export function registerObservationResources(deps: ObservationResourceDependencies = {}): void {
   // Register latest observation as text/json resource (all devices)
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_OBSERVATION,
@@ -904,7 +913,7 @@ export function registerObservationResources(): void {
     "Latest Screenshot",
     "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call. Failures are application/json with code, retryable, error.",
     "image/png",
-    getLatestScreenshot,
+    () => getLatestScreenshot(deps),
   );
 
   // This template has no read context: a known observation identity is readable
@@ -914,7 +923,7 @@ export function registerObservationResources(): void {
     "Observation Screenshot",
     "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED: observe again.",
     "image/png",
-    getObservationScreenshot,
+    (params: Record<string, string>) => getObservationScreenshot(params, deps),
   );
 
   // Register session-scoped observation template
@@ -923,7 +932,8 @@ export function registerObservationResources(): void {
     "Session Observation",
     "Cached screen observation for an active device session. Failures are application/json with code, retryable, error.",
     "application/json",
-    getSessionObservation,
+    (params: Record<string, string>, context: ResourceReadContext) =>
+      getSessionObservation(params, context, deps),
   );
 
   // Register session-scoped cached screenshot template
@@ -932,7 +942,8 @@ export function registerObservationResources(): void {
     "Session Screenshot",
     "Cached screen capture for an active device session. Failures are application/json with code, retryable, error.",
     "image/png",
-    getSessionScreenshot,
+    (params: Record<string, string>, context: ResourceReadContext) =>
+      getSessionScreenshot(params, context, deps),
   );
 
   // Register fresh session screenshot template
@@ -941,8 +952,18 @@ export function registerObservationResources(): void {
     "Fresh Session Screenshot",
     "Fresh PNG screen capture for an active device session. Every read captures the current screen. Failures are application/json with code, retryable, error.",
     "image/png",
-    getFreshSessionScreenshot,
+    (params: Record<string, string>, context: ResourceReadContext) =>
+      getFreshSessionScreenshot(params, context, deps),
   );
 
   logger.info("[ObservationResources] Registered observation resources");
+}
+
+function screenshotFiles(deps: ObservationResourceDependencies): ScreenshotFileSystem {
+  return deps.screenshotFileSystem ?? realFs;
+}
+function sessionScreenshotDependencies(
+  deps: ObservationResourceDependencies,
+): SessionScreenshotResourceDependencies {
+  return deps.sessionScreenshotResourceDependencies ?? defaultSessionScreenshotResourceDependencies;
 }

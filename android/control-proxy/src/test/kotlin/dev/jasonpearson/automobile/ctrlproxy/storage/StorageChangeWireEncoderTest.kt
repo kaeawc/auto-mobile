@@ -49,6 +49,9 @@ class StorageChangeWireEncoderTest {
     assertEquals("dark", obj["value"]!!.jsonPrimitive.content)
     assertEquals("light", obj["previousValue"]!!.jsonPrimitive.content)
     assertEquals("storage_changed", obj["type"]!!.jsonPrimitive.content)
+    assertEquals("modify", obj["changeType"]!!.jsonPrimitive.content)
+    assertEquals("222", obj["eventTimestamp"]!!.jsonPrimitive.content)
+    assertEquals("111", obj["timestamp"]!!.jsonPrimitive.content)
   }
 
   @Test
@@ -58,6 +61,7 @@ class StorageChangeWireEncoderTest {
     val obj = encodeAndParse(baseEvent(null, "UNKNOWN", "was-here", "STRING"))
     assertTrue(obj["value"] is JsonNull)
     assertEquals("was-here", obj["previousValue"]!!.jsonPrimitive.content)
+    assertEquals("remove", obj["changeType"]!!.jsonPrimitive.content)
   }
 
   @Test
@@ -99,6 +103,7 @@ class StorageChangeWireEncoderTest {
     val obj = encodeAndParse(baseEvent("first", "STRING", null, "UNKNOWN"))
     assertEquals("first", obj["value"]!!.jsonPrimitive.content)
     assertTrue(obj["previousValue"] is JsonNull)
+    assertEquals("add", obj["changeType"]!!.jsonPrimitive.content)
   }
 
   @Test
@@ -110,6 +115,7 @@ class StorageChangeWireEncoderTest {
     // lands after an existing row (#3000, Codex review on PR #3170).
     val obj = encodeAndParse(baseEvent("dark", "STRING", null, null))
     assertEquals("dark", obj["value"]!!.jsonPrimitive.content)
+    assertTrue(!obj.containsKey("changeType"))
     assertTrue(
       "previousValue must be absent, not JSON null, for a legacy SDK",
       !obj.containsKey("previousValue"),
@@ -132,6 +138,35 @@ class StorageChangeWireEncoderTest {
     // previousValue parses as an array element, not a string — assert it is not a primitive string.
     assertTrue(
       obj["previousValue"] !is JsonPrimitive || !obj["previousValue"]!!.jsonPrimitive.isString,
+    )
+  }
+
+  @Test
+  fun `legacy removal is identifiable without prior value metadata`() {
+    val obj = encodeAndParse(baseEvent(null, "UNKNOWN", null, null))
+    assertEquals("remove", obj["changeType"]!!.jsonPrimitive.content)
+    assertTrue(!obj.containsKey("previousValue"))
+  }
+
+  @Test
+  fun `file clear is not classified as a key removal`() {
+    val event = baseEvent(null, "UNKNOWN", null, "UNKNOWN").copy(key = null)
+    assertEquals("modify", encodeAndParse(event)["changeType"]!!.jsonPrimitive.content)
+    assertTrue(!encodeAndParse(event.copy(previousValueType = null)).containsKey("changeType"))
+  }
+
+  @Test
+  fun `STRING to INT type change is classified as modify`() {
+    val obj = encodeAndParse(baseEvent("42", "INT", "hello", "STRING"))
+    assertEquals("modify", obj["changeType"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `string modification preserves exact wire field order and bytes`() {
+    val event = baseEvent("dark", "STRING", "light", "STRING")
+    assertEquals(
+      """{"type":"storage_changed","timestamp":111,"packageName":"com.example","fileName":"prefs.xml","key":"theme","value":"dark","valueType":"STRING","changeType":"modify","previousValue":"light","eventTimestamp":222,"sequenceNumber":3}""",
+      buildStorageChangedMessage(event, 111L, json),
     )
   }
 }

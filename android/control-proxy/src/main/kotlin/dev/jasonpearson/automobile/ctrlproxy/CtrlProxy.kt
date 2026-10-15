@@ -4955,10 +4955,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
           )
           if (requestId != null) {
-            append(""","requestId":${jsonCompact.encodeToString(requestId)}""")
+            appendJsonStringField("requestId", requestId, jsonCompact)
           }
           if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
-            append(""","frameContext":"$contextAtExtraction"""")
+            appendJsonStringField("frameContext", contextAtExtraction, jsonCompact)
           }
           if (perfTiming != null) {
             append(""","perfTiming":$perfTiming""")
@@ -8994,7 +8994,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         buildString {
           append("""{"type":"highlight_response","timestamp":${System.currentTimeMillis()}""")
           if (requestId != null) {
-            append(""","requestId":"$requestId"""")
+            appendJsonStringField("requestId", requestId, jsonCompact)
           }
           append(""","success":$success""")
           append(""","error":$errorJson""")
@@ -9027,7 +9027,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         buildString {
           append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
           if (requestId != null) {
-            append(""","requestId":"$requestId"""")
+            appendJsonStringField("requestId", requestId, jsonCompact)
           }
           append(""","totalTimeMs":$totalTimeMs""")
           if (focusedElement != null) {
@@ -9086,7 +9086,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         buildString {
           append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
           if (requestId != null) {
-            append(""","requestId":"$requestId"""")
+            appendJsonStringField("requestId", requestId, jsonCompact)
           }
           append(""","totalTimeMs":$totalTimeMs""")
           val resultJson =
@@ -9314,7 +9314,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"preference_files","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         if (files != null) {
@@ -9347,7 +9347,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"preferences","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9381,7 +9381,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"subscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9419,7 +9419,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"unsubscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9451,7 +9451,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"get_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9495,7 +9495,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"set_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9531,7 +9531,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"remove_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
@@ -9566,7 +9566,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val message = buildString {
         append("""{"type":"clear_preferences_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
-          append(""","requestId":"$requestId"""")
+          appendJsonStringField("requestId", requestId, jsonCompact)
         }
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")

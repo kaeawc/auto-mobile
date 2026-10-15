@@ -396,13 +396,13 @@ export interface DeviceSessionPersistence {
     nowMs?: number,
     options?: UpsertActiveSessionOptions,
   ): Promise<number | void>;
-  getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
+  getSession(sessionUuid: string): Promise<DeviceSession | undefined>;
   /**
    * `nowMs` is on the clock the persisted stamps were written with: wall-clock epoch ms (#11162),
    * converted from the session clock by the session manager's `sessionClockPersistence.ts`.
    * Discover peers only when a window-first row needs terminalizing; ordinary listing stays local.
    */
-  listRecoverableSessions?(
+  listRecoverableSessions(
     nowMs?: number,
     livePeerDaemonSessionIds?: () => readonly string[],
   ): Promise<DeviceSession[]>;
@@ -412,7 +412,7 @@ export interface DeviceSessionPersistence {
    * is later (#10713), so tool activity during a device-restart recovery survives a daemon restart.
    * A row that is no longer device-restart-released (recovered, terminalized) is left untouched.
    */
-  recordRestartRecoveryActivity?(sessionUuid: string, activityAtMs: number): Promise<void>;
+  recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void>;
   /**
    * Take ownership of a recoverable row before recovering it (#11200): stamp `daemonSessionId` as
    * its owner and advance its `stable_identity_generation`, only while the row is still the
@@ -420,7 +420,7 @@ export interface DeviceSessionPersistence {
    * writer (a peer daemon recovering the same row) changed it first; the caller must then leave
    * the row alone. Status and release reason are untouched, so the row stays recoverable.
    */
-  claimRecoverableSession?(
+  claimRecoverableSession(
     sessionUuid: string,
     expected: RecoverableRowIncarnation,
     daemonSessionId: string,
@@ -434,13 +434,13 @@ export interface DeviceSessionPersistence {
    * claim was handed back; false when another writer (the recovery's own upsert, a terminal
    * release, a peer) changed the row first.
    */
-  releaseRecoverableSessionClaim?(
+  releaseRecoverableSessionClaim(
     sessionUuid: string,
     claimed: RecoverableRowIncarnation,
     previousOwner: string | null,
   ): Promise<boolean>;
-  recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
-  replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
@@ -583,7 +583,7 @@ function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDe
   };
 }
 
-export class DeviceSessionRepository {
+export class DeviceSessionRepository implements DeviceSessionPersistence {
   private db: Kysely<Database> | null;
 
   constructor(

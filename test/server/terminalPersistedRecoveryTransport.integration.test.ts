@@ -1,3 +1,4 @@
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
@@ -58,20 +59,26 @@ describe("terminal persisted recovery MCP transport", () => {
       created_at: "2026-09-15T00:00:00.000Z",
       updated_at: "2026-09-15T00:00:00.000Z",
     };
-    const persistence: DeviceSessionPersistence = {
-      async getSession() {
-        return persisted;
-      },
-      async upsertActiveSession() {
-        throw new Error("target-busy recovery must not assign a sibling");
-      },
-      async recordActivity() {},
-      async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
-        persisted.status = status;
-        persisted.released_at_ms = releasedAtMs;
-        persisted.release_reason = releaseReason;
-      },
-    };
+    const persistence: DeviceSessionPersistence = Object.assign(
+      new FakeDeviceSessionPersistence(),
+      {
+        recordLivenessOwnership: async () => {},
+        replaceLivenessOwnership: async () => {},
+        claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("target-busy recovery must not assign a sibling");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+    );
     sessionManager = new SessionManager(timer, persistence);
     let assignments = 0;
     const assigner: SessionDeviceAssigner = {

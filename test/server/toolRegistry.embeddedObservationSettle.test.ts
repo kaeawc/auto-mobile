@@ -1,3 +1,5 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { logger } from "../../src/utils/logger";
 import {
   captureChosenTerminalScreenshot,
@@ -87,13 +89,19 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
     "explicit-display settle retains the rendered session panel (wrong-panel capture: %s)",
     async (wrongPanel) => {
       const timer = new FakeTimer();
-      const sessions = new SessionManager(timer, {
-        getSession: async () => null,
-        upsertActiveSession: async () => {},
-        recordActivity: async () => {},
-        markReleased: async () => {},
-        markStaleActiveSessionsExpired: async () => {},
-      });
+      const sessions = new SessionManager(
+        timer,
+        Object.assign(new FakeDeviceSessionPersistence(), {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          getSession: async () => undefined,
+          upsertActiveSession: async () => {},
+          recordActivity: async () => {},
+          markReleased: async () => {},
+          markStaleActiveSessionsExpired: async () => {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+      );
       sessions.stopCleanupTimer();
       const sessionUuid = "explicit-display-settle";
       await sessions.createSession(sessionUuid, device.deviceId, "android");

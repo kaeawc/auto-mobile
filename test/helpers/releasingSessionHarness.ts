@@ -167,7 +167,7 @@ export function releasingSessionHarness() {
         expect(restores).toEqual([releasingDeviceId]);
         expect(poolReleases).toEqual([[releasingDeviceId, releasingSessionId]]);
         expect(persistence.releaseWrites).toBe(1);
-        expect(await persistence.getSession?.(releasingSessionId)).toMatchObject({
+        expect(await persistence.getSession(releasingSessionId)).toMatchObject({
           status: "released",
           release_reason: "explicit-release",
         });

@@ -1,3 +1,4 @@
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
@@ -16,13 +17,18 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 const NO_SCHEMA_TOOL_NAME = "__daemon_shutdown_wire_no_schema_probe__";
 const SCHEMA_TOOL_NAME = "__daemon_shutdown_wire_schema_probe__";
 
-class DeferredSessionPersistence implements DeviceSessionPersistence {
+class DeferredSessionPersistence extends FakeDeviceSessionPersistence {
+  async recordLivenessOwnership(): Promise<void> {}
+
+  async replaceLivenessOwnership(): Promise<void> {}
+
   private readonly upsertStarted = Promise.withResolvers<void>();
   private readonly allowUpsert = Promise.withResolvers<void>();
 
-  async upsertActiveSession(): Promise<void> {
+  async upsertActiveSession(): Promise<number> {
     this.upsertStarted.resolve();
     await this.allowUpsert.promise;
+    return 0;
   }
 
   async recordActivity(): Promise<void> {}

@@ -1962,7 +1962,7 @@ export class SessionManager {
         break;
       }
       try {
-        const persisted = await this.deviceSessionRepository.getSession?.(intent.sessionId);
+        const persisted = await this.deviceSessionRepository.getSession(intent.sessionId);
         if (
           persisted &&
           !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) &&
@@ -4083,10 +4083,10 @@ export class SessionManager {
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
   private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
-    let stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    let stored = await this.deviceSessionRepository.getSession(sessionId);
     if (stored && (await this.adoptDeadOwnerTerminalReleases(stored))) {
       // The adopted releases were just written; this read predates them.
-      stored = await this.deviceSessionRepository.getSession?.(sessionId);
+      stored = await this.deviceSessionRepository.getSession(sessionId);
     }
     const persisted = stored && this.withRecoveredTerminalRelease(stored);
     const activityAt = this.restartRecoveryActivityAt.get(sessionId);
@@ -4126,7 +4126,7 @@ export class SessionManager {
     }
     void this.getBarrier()
       .track(async () => {
-        await this.deviceSessionRepository.recordRestartRecoveryActivity?.(sessionId, activityAt);
+        await this.deviceSessionRepository.recordRestartRecoveryActivity(sessionId, activityAt);
       })
       .catch((error) => {
         // The in-memory mark still governs this process; only a daemon restart before the next
@@ -5302,10 +5302,10 @@ export class SessionManager {
     listed: DeviceSession,
   ): Promise<ClaimedRecoverableRow | undefined> {
     const daemonSessionId = this.daemonSessionId;
-    const claim = this.deviceSessionRepository.claimRecoverableSession?.bind(
+    const claim = this.deviceSessionRepository.claimRecoverableSession.bind(
       this.deviceSessionRepository,
     );
-    if (!claim || daemonSessionId === undefined) {
+    if (daemonSessionId === undefined) {
       return undefined;
     }
     const claimed = await this.tryClaimRecoverableRow(sessionId, listed, claim, daemonSessionId);
@@ -5338,7 +5338,7 @@ export class SessionManager {
   private async tryClaimRecoverableRow(
     sessionId: string,
     row: DeviceSession,
-    claim: NonNullable<DeviceSessionPersistence["claimRecoverableSession"]>,
+    claim: DeviceSessionPersistence["claimRecoverableSession"],
     daemonSessionId: string,
   ): Promise<ClaimedRecoverableRow | undefined> {
     const owner = row.daemon_session_id ?? null;
@@ -5400,10 +5400,10 @@ export class SessionManager {
     sessionId: string,
     claim: ClaimedRecoverableRow,
   ): Promise<void> {
-    const release = this.deviceSessionRepository.releaseRecoverableSessionClaim?.bind(
+    const release = this.deviceSessionRepository.releaseRecoverableSessionClaim.bind(
       this.deviceSessionRepository,
     );
-    if (!release || this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+    if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
       return;
     }
     try {
@@ -5802,10 +5802,10 @@ export class SessionManager {
     summary: RehydrationSummary,
   ): Promise<DeviceSession[]> {
     const deadlineWon = Symbol("startup-deadline");
-    const recoverableSessions =
-      this.deviceSessionRepository.listRecoverableSessions?.(this.sessionNow(), () =>
-        this.rowWriteLivePeerDaemonSessionIds(),
-      ) ?? Promise.resolve([]);
+    const recoverableSessions = this.deviceSessionRepository.listRecoverableSessions(
+      this.sessionNow(),
+      () => this.rowWriteLivePeerDaemonSessionIds(),
+    );
     let result: typeof deadlineWon | DeviceSession[];
     try {
       result = await raceWithDeadline(recoverableSessions, {
@@ -7988,11 +7988,8 @@ export class SessionManager {
     unlessDaemonShutdown?: boolean,
   ): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const row = await this.deviceSessionRepository.getSession?.(sessionId);
-      if (
-        !this.deviceSessionRepository.getSession ||
-        this.rowWritePermanentlyRefused(row, guard, releaseReason, unlessDaemonShutdown)
-      ) {
+      const row = await this.deviceSessionRepository.getSession(sessionId);
+      if (this.rowWritePermanentlyRefused(row, guard, releaseReason, unlessDaemonShutdown)) {
         throw error;
       }
       if (row?.daemon_session_id && row.daemon_session_id !== this.daemonSessionId) {
@@ -8268,7 +8265,7 @@ export class SessionManager {
     supersededReasons = [
       ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
     ];
-    const row = await this.deviceSessionRepository.getSession?.(session.sessionId);
+    const row = await this.deviceSessionRepository.getSession(session.sessionId);
     if (
       !row?.release_reason ||
       !supersededReasons.includes(row.release_reason) ||
@@ -9245,7 +9242,7 @@ export class SessionManager {
       return false;
     }
     try {
-      const row = await this.deviceSessionRepository.getSession?.(snapshot.sessionId);
+      const row = await this.deviceSessionRepository.getSession(snapshot.sessionId);
       return (
         row !== undefined &&
         row.release_reason !== snapshot.releaseReason &&
@@ -9341,7 +9338,7 @@ export class SessionManager {
     if (captured.expectedRowGeneration === undefined) {
       return captured;
     }
-    const row = await this.deviceSessionRepository.getSession?.(snapshot.sessionId);
+    const row = await this.deviceSessionRepository.getSession(snapshot.sessionId);
     if (
       !row ||
       row.stable_identity_generation === undefined ||
@@ -12263,7 +12260,7 @@ export class SessionManager {
       // Fence an older heartbeat write's failure rollback across the handoff.
       session.activityGeneration++;
       try {
-        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
+        await this.deviceSessionRepository.recordLivenessOwnership(sessionId, null);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
         session.livenessOwnerBoundAt = previousOwnerBoundAt;
@@ -12768,11 +12765,7 @@ export class SessionManager {
   ): Promise<void> {
     const settleClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
     try {
-      if (this.deviceSessionRepository.recordLivenessOwnership) {
-        await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
-      } else {
-        await this.recordSessionActivity(session);
-      }
+      await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
     } catch (error) {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
@@ -12867,9 +12860,6 @@ export class SessionManager {
   }
 
   private persistAdoptedLivenessOwnerToken(session: Session): void {
-    if (!this.deviceSessionRepository.replaceLivenessOwnership) {
-      return;
-    }
     void this.getBarrier()
       .track(() =>
         this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
@@ -12881,7 +12871,7 @@ export class SessionManager {
             return;
           }
           // Read under the claim mutex: a queued adoption must not restore an older owner.
-          await this.deviceSessionRepository.replaceLivenessOwnership?.(
+          await this.deviceSessionRepository.replaceLivenessOwnership(
             session.sessionId,
             session.livenessOwnerToken,
           );
@@ -13508,7 +13498,7 @@ export class SessionManager {
     }
     // Recorded before the ownership write, which can fail after the row already advanced.
     this.recordPersistedRowGeneration(incarnation, rowGeneration);
-    await this.deviceSessionRepository.replaceLivenessOwnership?.(
+    await this.deviceSessionRepository.replaceLivenessOwnership(
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );

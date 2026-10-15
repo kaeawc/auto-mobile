@@ -8,7 +8,7 @@ import {
   type AppResourceDependencies,
   invalidateInstalledAppsCache,
 } from "../../src/server/appResources";
-import { ResourceRegistry } from "../../src/server/ResourceRegistry";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

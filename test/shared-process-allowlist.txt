@@ -220,6 +220,7 @@ test/daemon/poolOwnershipConcurrency.twoDaemon.regressions.test.ts
 test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
+test/daemon/proxy/HeartbeatKeeper.test.ts
 test/daemon/proxy/proxySessionState.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts

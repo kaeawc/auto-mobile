@@ -33,6 +33,12 @@ export {
 } from "./proxy/daemonErrors";
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
 import {
+  ProxySessionState,
+  type OtherHeldSession,
+  type StallHandoverRecord,
+  type TerminalBoundSession,
+} from "./proxy/ProxySessionState";
+import {
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
   decideNotFoundAnswer,
   isRecoverableHandoffOfOwnedSession,
@@ -279,44 +285,12 @@ function isSuspectRefusalRetryable(
   );
 }
 
-/** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
 /** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
 interface DaemonIdleReport {
   /** Epoch-ms idle deadline, or null when the daemon explicitly exempts idle release. */
   releaseAt: number | null;
   /** Proxy-clock time the ack carrying it arrived. */
   reportedAt: number;
-}
-
-interface StallHandoverRecord {
-  handover: LivenessHandover;
-  delivered: boolean;
-  /**
-   * The daemon process the stall probe resumes the session on; undefined once that daemon was
-   * found replaced, or when its identity was never reported (#10989).
-   */
-  probeDaemonInstance?: string;
-  /** First instance-change answer; marks a handed-over session reclaiming without a daemon pin. */
-  managedReclaimSince?: number;
-  /**
-   * First awaitable not-found from an answering daemon process; silence never resets it.
-   * Only an answer naming a different defined daemon instance opens a fresh window.
-   */
-  managedNotFoundWindow?: { since: number; daemonInstance: string | undefined };
-  /**
-   * The daemon process that last acknowledged a heartbeat before the handover, kept even after
-   * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
-   */
-  stalledDaemonInstance?: string;
-  /** How the session was held when it was handed over, so a resume restores it as it was. */
-  restore: {
-    /** It was the latest binding. */
-    bound: boolean;
-    /** Replay-lease start (latest binding) or last use (held session). */
-    lastUsedAt: number;
-    /** The latest binding came from `--initial-session-uuid`. */
-    initialBinding: boolean;
-  };
 }
 
 /** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
@@ -638,6 +612,7 @@ function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): 
 }
 
 export class DaemonMcpProxy {
+  private readonly sessionState = new ProxySessionState();
   private readonly lifecycleReconciler: DaemonLifecycleReconciler;
   private readonly resourceSubscriptionManager: ResourceSubscriptions;
   private client: DaemonClientLike | null = null;
@@ -670,20 +645,12 @@ export class DaemonMcpProxy {
     string,
     { outcome: NotFoundAnswerOutcome; releaseReason: string | undefined }
   >();
-  /**
-   * Each session's latest not-found window (when it opened, by the injected timer) and the
-   * handoffs it has had a window for ({@link decideNotFoundAnswer}). An entry outlives its window,
-   * so no later answer of the same handoff opens another.
-   * Cleared by a heartbeat acknowledgement, by a call the daemon admitted under the session, or by
-   * the session ending here; a call that proves nothing about the session leaves it (#11570).
-   */
-  private readonly notFoundWindows = new Map<string, { since: number; handoffs: Set<string> }>();
-  /**
-   * Sessions the proxy stopped heartbeating on a not-found answer that did not end them (#10702):
-   * the latest binding stays bound, a held session is dropped. A tool call that reaches the
-   * session re-arms its heartbeat, and the daemon may still hand it back (#11400).
-   */
-  private readonly notFoundStopped = new Set<string>();
+  private get notFoundWindows(): Map<string, { since: number; handoffs: Set<string> }> {
+    return this.sessionState.notFoundWindows;
+  }
+  private get notFoundStopped(): Set<string> {
+    return this.sessionState.notFoundStopped;
+  }
   /** Last reported heartbeat answer per tracked session, including a stopped held session. */
   private readonly sessionDaemonInstances = new Map<string, string>();
   /**
@@ -720,28 +687,9 @@ export class DaemonMcpProxy {
    * response is lost; reconnects must then verify the same token, not reclaim.
    */
   private livenessOwnershipClaimSent = false;
-  /**
-   * Device sessions this proxy still holds besides its latest binding, each with
-   * whether its ownership claim has been delivered (#9335). `boundSessionUuid`
-   * only tracks the LATEST binding, so acquiring or naming a second session moves
-   * it off the first, which still depends on this proxy for liveness. Every entry
-   * is heartbeated on the keeper's cadence under the same owner token; an entry
-   * leaves on release, fencing, confirmed loss and close.
-   */
-  private readonly otherHeldSessions = new Map<
-    string,
-    {
-      claimSent: boolean;
-      /**
-       * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
-       * has named for the session idle window (`boundSessionReplayTtlMs`) is abandoned and
-       * evicted, so a conversation that moved to another device stops pinning the old one.
-       */
-      lastUsedAt: number;
-      /** The daemon's refusals of this session's claim as a live-owner conflict (#10050, #10701). */
-      conflict?: OwnerConflictLeash;
-    }
-  >();
+  private get otherHeldSessions(): Map<string, OtherHeldSession> {
+    return this.sessionState.otherHeldSessions;
+  }
   /** Supersession is informational; report it at most once per proxy instance. */
   private livenessSupersessionLogged = false;
   /** Sessions whose live-owner conflict was already reported, so each tick does not repeat it. */
@@ -801,13 +749,9 @@ export class DaemonMcpProxy {
   private readonly sessionDeviceIds = new Map<string, string>();
   /** Platform each acquired session runs on; absent when its result did not describe one. */
   private readonly sessionPlatforms = new Map<string, "android" | "ios">();
-  /**
-   * Handovers per affected session. A tool call that names the session first attempts an
-   * observation-only resume and returns the structured error only when the daemon still does not
-   * answer; one that reaches it implicitly returns the error. The stall probe, an acknowledged
-   * resume or a definitive daemon answer ends the handover (#10989).
-   */
-  private readonly stallHandovers = new Map<string, StallHandoverRecord>();
+  private get stallHandovers(): Map<string, StallHandoverRecord> {
+    return this.sessionState.stallHandovers;
+  }
   /**
    * Sessions resumed after a `daemon_stalled` handover whose next tool call has not run yet: that
    * call carries the warning instead of the handover's failure (#10989).
@@ -862,16 +806,18 @@ export class DaemonMcpProxy {
   private resolveDaemonShutdownDisconnect: (() => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
-  // The daemon clears socket-local state when its RPC connection drops. Keep this
-  // proxy's successful explicit binding so subsequent sessionless calls can seed
-  // a replacement socket without sharing the binding with other proxies.
-  private boundSessionUuid: string | undefined;
-  // When the binding above was last set/refreshed, on the injected clock. Once
-  // the daemon's session idle window elapses with no forwarded call (explicit or
-  // injected sessionUuid) refreshing it, the remembered UUID is treated as
-  // retired so a sessionless call is not rewritten to a released session (issue
-  // #4610). Heartbeat acks never refresh it: they prove liveness, not use (#10656).
-  private boundSessionUuidAt: number | undefined;
+  private get boundSessionUuid(): string | undefined {
+    return this.sessionState.boundSessionUuid;
+  }
+  private set boundSessionUuid(value: string | undefined) {
+    this.sessionState.boundSessionUuid = value;
+  }
+  private get boundSessionUuidAt(): number | undefined {
+    return this.sessionState.boundSessionUuidAt;
+  }
+  private set boundSessionUuidAt(value: number | undefined) {
+    this.sessionState.boundSessionUuidAt = value;
+  }
   // Whether the current binding was minted by a device-acquisition RESULT
   // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
   // client-declared (an explicit `sessionUuid` arg, or a startup
@@ -896,14 +842,9 @@ export class DaemonMcpProxy {
    */
   private readonly finalizedRecordingOwners = new Map<string, string>();
   private readonly ownedDeviceSessions = new Set<string>();
-  /**
-   * Sessions this proxy may claim liveness ownership of and heartbeat (#10664): ones it minted
-   * from an acquisition RESULT, plus the startup `initialSessionUuid`. A session only NAMED in a
-   * tool call's `sessionUuid` arg is forwarded and bound for routing, but never claimed or
-   * heartbeated, so a proxy cannot inherit a session another proxy (or a CLI keeper) owns once
-   * that owner's lease lapses. The other owner keeps it alive or the daemon reaps it.
-   */
-  private readonly claimableSessions = new Set<string>();
+  private get claimableSessions(): Set<string> {
+    return this.sessionState.claimableSessions;
+  }
   /** Sessions held for a managed slot execution; released promptly on close (#11176). */
   private readonly managedExecutionSessions = new Set<string>();
   /** Slot sessions whose acquisition abandoned its hold; never resumed or re-held (#12055). */
@@ -928,20 +869,12 @@ export class DaemonMcpProxy {
    * of this proxy's is left ahead of the managed execution release in the socket's queue.
    */
   private readonly closeAbort = new AbortController();
-  // Once the daemon confirms this transport's bound session is gone, preserve
-  // that terminal identity instead of clearing it and allowing the same UUID to
-  // acquire another device. `fromResultMint` records the binding's provenance at
-  // fence time (see boundSessionFromResultMint).
-  private terminalBoundSession:
-    | {
-        sessionUuid: string;
-        reason: string;
-        fromResultMint: boolean;
-        release?: SessionReleaseSnapshot;
-        /** First reported managed stall loss; lives and clears with this terminal binding. */
-        reportedStallLossReason?: string;
-      }
-    | undefined;
+  private get terminalBoundSession(): TerminalBoundSession | undefined {
+    return this.sessionState.terminalBoundSession;
+  }
+  private set terminalBoundSession(value: TerminalBoundSession | undefined) {
+    this.sessionState.terminalBoundSession = value;
+  }
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
   private recoverableBoundSessionHandoff: string | undefined;
   /** Only a device-restart handoff presents the binding on a fresh acquisition. */

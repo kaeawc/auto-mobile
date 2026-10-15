@@ -3,6 +3,7 @@ import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import {
   RunnerReadinessError,
   RunnerReadinessService,
@@ -533,6 +534,87 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBe(500);
     expect(bypassedCacheReads).toBe(2);
   });
+
+  test.each([1, 3])(
+    "repairs lost CtrlProxy enablement after setup with %i writes",
+    async (requiredWrites) => {
+      const manager = new FakeAndroidManager();
+      manager.enabled = false;
+      manager.setup = async () => {
+        manager.setupCalls++;
+        // Android can clear enablement after setup has reported successful writes.
+        return { success: true, message: "enabled" };
+      };
+      manager.enable = async () => {
+        manager.enableCalls++;
+        manager.enabled = manager.enableCalls >= requiredWrites;
+      };
+      const { service, timer, androidClient } = createService({ androidManager: manager });
+
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      });
+
+      expect(manager.setupCalls).toBe(1);
+      expect(manager.enableCalls).toBe(requiredWrites);
+      expect(androidClient.healthCalls).toBe(1);
+      expect(timer.now()).toBe(requiredWrites * 250);
+    },
+  );
+
+  test.each(["caller", "deadline"])(
+    "aborts and joins CtrlProxy enablement repair on %s cancellation",
+    async (cancellation) => {
+      const controller = new AbortController();
+      const reason = new Error("caller cancelled enablement repair");
+      const manager = new FakeAndroidManager();
+      manager.enabled = false;
+      manager.setup = async () => ({ success: true, message: "enabled" });
+      let repairSignal: AbortSignal | undefined;
+      let settled = false;
+      manager.enable = async () => {
+        repairSignal = getAbortSignal();
+        if (!repairSignal) {
+          throw new Error("enablement repair has no cancellation signal");
+        }
+        try {
+          repairSignal.throwIfAborted();
+          await new Promise<void>((_resolve, reject) => {
+            repairSignal?.addEventListener("abort", () => reject(repairSignal?.reason), {
+              once: true,
+            });
+            if (cancellation === "caller") {
+              controller.abort(reason);
+            }
+          });
+        } finally {
+          settled = true;
+        }
+      };
+      const { service, timer, androidClient } = createService({ androidManager: manager });
+      const readiness = service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      });
+
+      if (cancellation === "caller") {
+        await expect(readiness).rejects.toBe(reason);
+        expect(timer.now()).toBe(250);
+      } else {
+        await expect(readiness).rejects.toThrow(/readiness phase exceeded/);
+        expect(timer.now()).toBe(5_000);
+      }
+      expect(repairSignal?.aborted).toBe(true);
+      expect(settled).toBe(true);
+      expect(androidClient.healthCalls).toBe(0);
+    },
+  );
 
   test("fails bounded verification when CtrlProxy remains disabled", async () => {
     const manager = new FakeAndroidManager();

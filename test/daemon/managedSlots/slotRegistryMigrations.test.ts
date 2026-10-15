@@ -26,7 +26,7 @@ describe("slot registry migrations", () => {
         db,
         provider: slotRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(6);
+      expect(migrations).toHaveLength(7);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateSlotRegistry(db, ":memory:");

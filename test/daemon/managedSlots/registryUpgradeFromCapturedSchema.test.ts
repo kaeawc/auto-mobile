@@ -27,6 +27,7 @@ const previousMigrations = [
 const currentMigrations = [
   ...previousMigrations,
   "2026_10_13_005_free_device_deletion_failed_deletes",
+  "2026_10_15_006_session_broker",
 ];
 const domainTables = ["slot_assignments", "slot_scopes", "slot_journal", "slot_free_devices"];
 const owner = {

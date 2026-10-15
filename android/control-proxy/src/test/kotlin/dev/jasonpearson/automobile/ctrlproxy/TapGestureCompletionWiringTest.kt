@@ -32,6 +32,15 @@ class TapGestureCompletionWiringTest {
   fun `tap settles off main and queues hierarchy before tap result`() {
     val dispatchBody = functionBody("private fun dispatchGestureWithResult(")
     assertTrue(
+      "completion must remain on the gesture handler while polling suspends",
+      "serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate)" in dispatchBody,
+    )
+    assertEquals(
+      "completed and cancelled callbacks must share FIFO serialization while settling suspends",
+      2,
+      Regex("gestureCompletionMutex\\.withLock").findAll(dispatchBody).count(),
+    )
+    assertTrue(
       "completion must run beforeResult before onResult",
       "lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)" in
         dispatchBody,
@@ -44,7 +53,7 @@ class TapGestureCompletionWiringTest {
     val beforeBody = tapBody.substring(beforeOpen, KotlinSourceScan.matchBrace(tapBody, beforeOpen))
     assertTrue(
       "tap must extract after quiescence",
-      "hierarchyDebouncer.extractAfterQuiescence(" in beforeBody,
+      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in beforeBody,
     )
     assertFalse("tap completion must not runBlocking", "runBlocking" in beforeBody)
 

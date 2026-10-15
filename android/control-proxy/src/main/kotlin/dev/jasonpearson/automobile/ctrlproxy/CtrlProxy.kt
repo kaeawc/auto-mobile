@@ -184,6 +184,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -192,6 +193,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -921,6 +924,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val serviceScope: CoroutineScope =
     CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
 
+  // Prototype cleanup must finish on Main even after serviceScope is cancelled during teardown.
+  private val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
   /**
    * The DEDICATED thread streamed gestures are driven on — deliberately NOT the main thread.
    * `StrokeDescription.continueStroke` must be issued promptly after the previous stroke completes
@@ -937,6 +943,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val gestureThread by lazy { gestureThreadFactory() }
   private val gestureHandler: Handler
     get() = gestureThread.handler
+
+  // Atomic terminal callbacks remain FIFO even while a tap's quiescence wait yields the handler.
+  private val gestureCompletionMutex = Mutex()
 
   internal var dragDeadline: GestureDeadline = GestureDeadline { delayMs, onTimeout ->
     val task = Runnable { onTimeout() }
@@ -2355,7 +2364,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (::prototypeController.isInitialized) {
       // Dismiss (reason teardown) without terminal destruction: a same-process rebind reuses this
       // controller, and onServiceConnected has early-exit paths that would leave a destroyed one.
-      CoroutineScope(Dispatchers.Main.immediate).launch { prototypeController.dismissForUnbind() }
+      teardownScope.launch { prototypeController.dismissForUnbind() }
     }
     return super.onUnbind(intent)
   }
@@ -2443,7 +2452,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (::prototypeController.isInitialized) {
       // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
       // a pending request releases the controller mutex on cancellation, then cleanup resumes.
-      CoroutineScope(Dispatchers.Main.immediate).launch { prototypeController.destroy() }
+      teardownScope.launch { prototypeController.destroy() }
     }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()
@@ -2558,7 +2567,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
+  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
     var extractionRequested = false
     hierarchyDebouncer.extractIfStale(sinceTimestamp) {
       extractionRequested = true
@@ -2575,7 +2584,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun setHierarchyInterval(intervalMs: Long?) {
+  override suspend fun setHierarchyInterval(intervalMs: Long?) {
     val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
     if (::hierarchyDebouncer.isInitialized) {
       hierarchyDebouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
@@ -2583,7 +2592,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
 
-  override fun requestScreenshot(request: RequestScreenshot) {
+  override suspend fun requestScreenshot(request: RequestScreenshot) {
     val requestId = request.requestId
     val displayId = request.displayId
     val hidePrototypes = request.hidePrototypes
@@ -2591,7 +2600,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     broadcastScreenshot(requestId, displayId, hidePrototypes)
   }
 
-  override fun requestDoubleTapCoordinates(
+  override suspend fun requestDoubleTapCoordinates(
     requestId: String?,
     x: Double,
     y: Double,
@@ -2602,7 +2611,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performTapCoordinates(requestId, x, y, 50L, frameContext, displayId, doubleTap = true)
   }
 
-  override fun requestTapCoordinates(request: RequestTapCoordinates) {
+  override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
     val requestId = request.requestId
     val x = request.x
     val y = request.y
@@ -2614,7 +2623,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
   }
 
-  override fun requestSwipe(request: RequestSwipe) {
+  override suspend fun requestSwipe(request: RequestSwipe) {
     val requestId = request.requestId
     val x1 = request.x1
     val y1 = request.y1
@@ -2628,7 +2637,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
   }
 
-  override fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
+  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
     val requestId = request.requestId
     val x1 = request.x1
     val y1 = request.y1
@@ -2641,7 +2650,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset, displayId)
   }
 
-  override fun requestDrag(request: RequestDrag) {
+  override suspend fun requestDrag(request: RequestDrag) {
     val requestId = request.requestId
     val x1 = request.x1
     val y1 = request.y1
@@ -2668,7 +2677,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override fun requestPinch(request: RequestPinch) {
+  override suspend fun requestPinch(request: RequestPinch) {
     val requestId = request.requestId
     val centerX = request.centerX
     val centerY = request.centerY
@@ -2690,7 +2699,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override fun requestGestureStart(request: RequestGestureStart) {
+  override suspend fun requestGestureStart(request: RequestGestureStart) {
     val requestId = request.requestId
     val gestureId = request.gestureId
     val x = request.x
@@ -2782,12 +2791,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
   }
 
-  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {
+  override suspend fun requestGestureMove(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+  ) {
     rememberedInsert = null
     gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
   }
 
-  override fun requestGestureEnd(
+  override suspend fun requestGestureEnd(
     requestId: String?,
     gestureId: String,
     x: Double,
@@ -2881,7 +2895,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
-  override fun requestInsertTextState(requestId: String?) {
+  override suspend fun requestInsertTextState(requestId: String?) {
     // The host awaits this reply BEFORE dispatching ADB key events. No baseline is stored globally.
     launchRequestScope(requestId) {
       if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
@@ -2919,7 +2933,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestInsertText(request: RequestInsertText) {
+  override suspend fun requestInsertText(request: RequestInsertText) {
     val requestId = request.requestId
     val text = request.text
     val expectedSuffix = request.expectedSuffix
@@ -2929,7 +2943,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
   }
 
-  override fun requestCommitText(request: RequestCommitText) {
+  override suspend fun requestCommitText(request: RequestCommitText) {
     val requestId = request.requestId
     val text = request.text
     val priorImeId = request.priorImeId
@@ -3023,7 +3037,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
+  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
     val tombstone =
       ImeCommitState().apply {
         cancelled.set(true)
@@ -3051,7 +3065,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestSetKeyboardProfile(requestId: String?, profileId: String) {
+  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) {
     val profile = KeyboardProfiles.byId(profileId)
     if (profile == null) {
       val expected = KeyboardProfiles.all.joinToString(", ") { it.id }
@@ -3085,7 +3099,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestListKeyboardProfiles(
+  override suspend fun requestListKeyboardProfiles(
     requestId: String?,
     supportedCatalogVersions: List<Int>,
   ) {
@@ -3135,7 +3149,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestImeAction(request: RequestImeAction) {
+  override suspend fun requestImeAction(request: RequestImeAction) {
     val requestId = request.requestId
     val action = request.action
     val frameContext = request.frameContext
@@ -3144,9 +3158,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performImeAction(requestId, action)
   }
 
-  override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
+  override suspend fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
-  override fun requestClickFocusedInput(requestId: String?) {
+  override suspend fun requestClickFocusedInput(requestId: String?) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
     // Like performNodeAction, stay on the inbound command queue until settling and replying.
@@ -3163,57 +3177,54 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           recycle = { node -> node.recycle() },
           settleAfterClick = ::refreshHierarchyAfterNodeAction,
         )
-      kotlinx.coroutines.runBlocking {
-        broadcastActionResult(
-          requestId,
-          "click",
-          outcome.success,
-          outcome.error,
-          System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastActionResult(
+        requestId,
+        "click",
+        outcome.success,
+        outcome.error,
+        System.currentTimeMillis() - startTime,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
-      if (e is CancellationException) throw e
       Log.e(TAG, "Focused input click failed", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastActionResult(
-          requestId,
-          "click",
-          false,
-          e.message ?: "Focused input click failed",
-          System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastActionResult(
+        requestId,
+        "click",
+        false,
+        e.message ?: "Focused input click failed",
+        System.currentTimeMillis() - startTime,
+      )
     }
   }
 
-  override fun requestAction(
+  override suspend fun requestAction(
     requestId: String?,
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
   ) = performNodeAction(requestId, action, resourceId, selector)
 
-  override fun requestActivateAccessibilityLink(
+  override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: NodeSelector?,
   ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
-  override fun requestClipboard(requestId: String?, action: String, text: String?) =
+  override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
     performClipboard(requestId, action, text)
 
-  override fun installCaCert(requestId: String?, certificate: String) =
+  override suspend fun installCaCert(requestId: String?, certificate: String) =
     performInstallCaCertificate(requestId, certificate)
 
-  override fun installCaCertFromPath(requestId: String?, devicePath: String) =
+  override suspend fun installCaCertFromPath(requestId: String?, devicePath: String) =
     performInstallCaCertificateFromPath(requestId, devicePath)
 
-  override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
+  override suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
     performRemoveCaCertificate(requestId, alias, certificate)
 
-  override fun requestGlobalAction(request: RequestGlobalAction) {
+  override suspend fun requestGlobalAction(request: RequestGlobalAction) {
     val requestId = request.requestId
     val action = request.action
     val frameContext = request.frameContext
@@ -3223,7 +3234,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performGlobalActionRequest(requestId, action)
   }
 
-  override fun validateFrameContext(requestId: String?, frameContext: String) {
+  override suspend fun validateFrameContext(requestId: String?, frameContext: String) {
     val matches = frameContext == currentFrameContext()
     asyncActionRunner.launch(requestId, "validate_frame_context") {
       webSocketServer.broadcast(
@@ -3243,19 +3254,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestDeviceInfo(requestId: String?) = performDeviceInfoRequest(requestId)
+  override suspend fun requestDeviceInfo(requestId: String?) = performDeviceInfoRequest(requestId)
 
-  override fun getDeviceOwnerStatus(requestId: String?) = performGetDeviceOwnerStatus(requestId)
+  override suspend fun getDeviceOwnerStatus(requestId: String?) =
+    performGetDeviceOwnerStatus(requestId)
 
-  override fun getPermission(
+  override suspend fun getPermission(
     requestId: String?,
     permission: String?,
     requestPermission: Boolean?,
   ) = handleGetPermission(requestId, permission, requestPermission)
 
-  override fun setRecompositionTracking(enabled: Boolean) = setRecompositionTrackingEnabled(enabled)
+  override suspend fun setRecompositionTracking(enabled: Boolean) =
+    setRecompositionTrackingEnabled(enabled)
 
-  override fun setAccessibilityFlags(
+  override suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
@@ -3268,10 +3281,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       occlusionEnabled = occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+  override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
     broadcastNetworkMockRules(requestId, rulesJson)
 
-  override fun setNetworkErrorSimulation(
+  override suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
@@ -3279,14 +3292,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     remainingMs: Long?,
   ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
-  override fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
+  override suspend fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
 
-  override fun getTraversalOrder(requestId: String?) = handleGetTraversalOrder(requestId)
+  override suspend fun getTraversalOrder(requestId: String?) = handleGetTraversalOrder(requestId)
 
-  override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
-    handleAddHighlight(requestId, highlightId, shape)
+  override suspend fun addHighlight(
+    requestId: String?,
+    highlightId: String?,
+    shape: HighlightShape?,
+  ) = handleAddHighlight(requestId, highlightId, shape)
 
-  override fun showPrototype(
+  override suspend fun showPrototype(
     requestId: String?,
     spec: PrototypeSpec,
     displayId: Int?,
@@ -3299,11 +3315,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
+  override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
     launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
   }
 
-  override fun savePrototype(
+  override suspend fun savePrototype(
     requestId: String?,
     spec: PrototypeSpec,
     label: String,
@@ -3312,27 +3328,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     launchRequestScope(requestId) { savedPrototypeController.save(requestId, spec, label, icon) }
   }
 
-  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {
+  override suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {
     launchRequestScope(requestId) { savedPrototypeController.pin(requestId, id, icon) }
   }
 
-  override fun listSavedPrototypes(requestId: String?) {
+  override suspend fun listSavedPrototypes(requestId: String?) {
     launchRequestScope(requestId) { savedPrototypeController.list(requestId) }
   }
 
-  override fun deleteSavedPrototype(requestId: String?, id: String) {
+  override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
   }
 
-  override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) {
+  override suspend fun patchPrototype(
+    requestId: String?,
+    id: String,
+    baseRevision: Long?,
+    ops: JsonArray,
+  ) {
     launchRequestScope(requestId) { prototypeController.patch(requestId, id, baseRevision, ops) }
   }
 
-  override fun inspectPrototypes(requestId: String?) {
+  override suspend fun inspectPrototypes(requestId: String?) {
     launchRequestScope(requestId) { prototypeController.inspect(requestId) }
   }
 
-  override fun putPrototypeAsset(
+  override suspend fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
@@ -3343,17 +3364,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun removePrototypeAsset(requestId: String?, id: String) {
+  override suspend fun removePrototypeAsset(requestId: String?, id: String) {
     launchRequestScope(requestId) { prototypeAssetController.remove(requestId, id) }
   }
 
-  override fun listPreferenceFiles(requestId: String?, packageName: String) =
+  override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
     handleListPreferenceFiles(requestId, packageName)
 
-  override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     handleGetPreferences(requestId, packageName, fileName)
 
-  override fun discoverKeystore(requestId: String?, packageName: String) {
+  override suspend fun discoverKeystore(requestId: String?, packageName: String) {
     asyncActionRunner.launch(requestId, "discover_keystore") {
       val state =
         dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(this@CtrlProxy, packageName)
@@ -3369,7 +3390,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
+  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
     asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
       val state =
         dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
@@ -3389,30 +3410,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
-    handleListDataStores(requestId, packageName, adapterName)
+  override suspend fun listDataStores(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+  ) = handleListDataStores(requestId, packageName, adapterName)
 
-  override fun getDataStore(
+  override suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
   ) = handleGetDataStore(requestId, packageName, adapterName, storeName)
 
-  override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
     handleSubscribeStorage(requestId, packageName, fileName)
 
-  override fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    handleUnsubscribeStorage(requestId, packageName, fileName)
+  override suspend fun unsubscribeStorage(
+    requestId: String?,
+    packageName: String,
+    fileName: String,
+  ) = handleUnsubscribeStorage(requestId, packageName, fileName)
 
-  override fun getPreference(
+  override suspend fun getPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
   ) = handleGetPreference(requestId, packageName, fileName, key)
 
-  override fun setPreference(
+  override suspend fun setPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -3421,30 +3448,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     type: String,
   ) = handleSetPreference(requestId, packageName, fileName, key, value, type)
 
-  override fun removePreference(
+  override suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
   ) = handleRemovePreference(requestId, packageName, fileName, key)
 
-  override fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
+  override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
     handleClearPreferences(requestId, packageName, fileName)
 
-  override fun startRecording() {
+  override suspend fun startRecording() {
     // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording started")
   }
 
-  override fun stopRecording() {
+  override suspend fun stopRecording() {
     // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording stopped")
   }
 
-  override fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
+  override suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
     performSettingsRead(requestId, namespace, key)
 
-  override fun requestSettingsPut(
+  override suspend fun requestSettingsPut(
     requestId: String?,
     namespace: String,
     key: String,
@@ -3452,19 +3479,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     valueType: String,
   ) = performSettingsWrite(requestId, namespace, key, value, valueType)
 
-  override fun requestSettingsList(requestId: String?, namespace: String) =
+  override suspend fun requestSettingsList(requestId: String?, namespace: String) =
     performSettingsList(requestId, namespace)
 
-  override fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) =
-    performInstalledPackages(requestId, includeSystem, userId)
+  override suspend fun requestInstalledPackages(
+    requestId: String?,
+    includeSystem: Boolean,
+    userId: Int?,
+  ) = performInstalledPackages(requestId, includeSystem, userId)
 
-  override fun requestPackageInfo(
+  override suspend fun requestPackageInfo(
     requestId: String?,
     packageName: String,
     includePermissions: Boolean,
   ) = performPackageInfo(requestId, packageName, includePermissions)
 
-  override fun requestLaunchIntent(requestId: String?, packageName: String) =
+  override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     performLaunchIntent(requestId, packageName)
 
   private fun setRecompositionTrackingEnabled(enabled: Boolean) {
@@ -5006,7 +5036,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     startTimeMs: Long,
     gestureBuiltTimeMs: Long,
     frameContext: String? = null,
-    beforeCompletedResult: () -> Unit = {},
+    beforeCompletedResult: suspend () -> Unit = {},
     onResult: (GestureDispatchOutcome) -> Unit,
   ) {
     rememberedInsert = null
@@ -5034,11 +5064,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           gesture,
           object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-              lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)
+              // Keep extraction, perf closure and result in callback order on the gesture thread;
+              // quiescence polling yields that thread instead of blocking its continuation queue.
+              serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+                gestureCompletionMutex.withLock {
+                  lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)
+                }
+              }
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
-              lifecycle.cancelled(onResult)
+              serviceScope.launch(gestureHandler.asCoroutineDispatcher().immediate) {
+                gestureCompletionMutex.withLock { lifecycle.cancelled(onResult) }
+              }
             }
           },
           gestureHandler,
@@ -5344,7 +5382,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         beforeCompletedResult = {
           // Wait for UI to settle after tap, then extract fresh hierarchy.
           freshHierarchy =
-            hierarchyDebouncer.extractAfterQuiescence(
+            hierarchyDebouncer.extractAfterQuiescenceSuspending(
               quiescenceMs = HierarchyQuiescence.POLL_MS,
               maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
@@ -5712,7 +5750,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * a non-empty selection is replaced. If the selection is invalid, refresh the node once and
    * append at the end of its current text if the refreshed selection is still invalid.
    */
-  private fun performInsertText(
+  private suspend fun performInsertText(
     requestId: String?,
     text: String,
     expectedSuffix: String?,
@@ -5720,7 +5758,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     precedingState: InsertTextSnapshot? = null,
   ) {
     val startTime = System.currentTimeMillis()
-    perfProvider.serial("performInsertText")
+    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
+    val insertPerf = MutablePerfEntry("performInsertText", startTime)
+    fun finishPerf() {
+      if (insertPerf.endTime == null) {
+        insertPerf.endTime = System.currentTimeMillis()
+        perfProvider.complete(insertPerf)
+      }
+    }
 
     var nodeToRecycle: android.view.accessibility.AccessibilityNodeInfo? = null
     val warnings = mutableListOf<String>()
@@ -5729,7 +5774,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val originalNode = findFocusedEditableNode(rootInActiveWindow)
       if (originalNode == null) {
         rememberedInsert = null
-        perfProvider.end()
+        finishPerf()
         launchRequestScope(requestId) {
           broadcastInsertTextResult(
             requestId,
@@ -5747,15 +5792,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         rememberedInsert = null
         targetNode.recycle()
         nodeToRecycle = null
-        perfProvider.end()
-        kotlinx.coroutines.runBlocking {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            "Cannot insert text into a password field without exposing its original value",
-            System.currentTimeMillis() - startTime,
-          )
-        }
+        finishPerf()
+        broadcastInsertTextResult(
+          requestId,
+          false,
+          "Cannot insert text into a password field without exposing its original value",
+          System.currentTimeMillis() - startTime,
+        )
         return
       }
 
@@ -5810,7 +5853,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             expectedSuffix = "",
             readSnapshot = { readFreshSnapshot().also { snapshot = it } },
             nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+            pause = { ms -> kotlinx.coroutines.delay(ms) },
             matches = { s ->
               nodeKey() == remembered.first &&
                 !s.isShowingHintText &&
@@ -5831,7 +5874,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             baseline = precedingState,
             readSnapshot = { readFreshSnapshot().also { snapshot = it } },
             nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+            pause = { ms -> kotlinx.coroutines.delay(ms) },
           )
         if (!observed) {
           warnings.add(
@@ -5856,16 +5899,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         nodeToRecycle?.recycle()
         nodeToRecycle = null
         rememberedInsert = null
-        perfProvider.end()
-        kotlinx.coroutines.runBlocking {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            error,
-            System.currentTimeMillis() - startTime,
-            warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-          )
-        }
+        finishPerf()
+        broadcastInsertTextResult(
+          requestId,
+          false,
+          error,
+          System.currentTimeMillis() - startTime,
+          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        )
         return
       }
       // Reuse only when no command/event invalidated the same entry during polling.
@@ -5914,16 +5955,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (unsupportedAction != null) {
         targetNode.recycle()
         nodeToRecycle = null
-        perfProvider.end()
-        kotlinx.coroutines.runBlocking {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            "Focused editable node does not support ${unsupportedAction.value}",
-            System.currentTimeMillis() - startTime,
-            warning = precedingWarning,
-          )
-        }
+        finishPerf()
+        broadcastInsertTextResult(
+          requestId,
+          false,
+          "Focused editable node does not support ${unsupportedAction.value}",
+          System.currentTimeMillis() - startTime,
+          warning = precedingWarning,
+        )
         return
       }
 
@@ -5966,7 +6005,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             plan,
             readSnapshot = ::readMutationSnapshot,
             nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+            pause = { ms -> kotlinx.coroutines.delay(ms) },
           )
         } else null
       AutoMobileLog.d(
@@ -6037,36 +6076,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       nodeToRecycle?.recycle()
       nodeToRecycle = null
-      perfProvider.end()
+      finishPerf()
 
-      kotlinx.coroutines.runBlocking {
-        broadcastInsertTextResult(
-          requestId,
-          outcome.success,
-          outcome.error,
-          System.currentTimeMillis() - startTime,
-          outcome.partialApplication,
-          outcome.warning,
-          outcome.caretPlaced,
-          if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
-        )
-      }
+      broadcastInsertTextResult(
+        requestId,
+        outcome.success,
+        outcome.error,
+        System.currentTimeMillis() - startTime,
+        outcome.partialApplication,
+        outcome.warning,
+        outcome.caretPlaced,
+        if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
+      )
       if (setTextSucceeded) refreshHierarchyAfterTextInput()
+    } catch (e: CancellationException) {
+      rememberedInsert = null
+      nodeToRecycle?.recycle()
+      finishPerf()
+      throw e
     } catch (e: Exception) {
       rememberedInsert = null
       nodeToRecycle?.recycle()
-      perfProvider.end()
+      finishPerf()
       Log.e(TAG, "Error inserting text", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          e.message,
-          System.currentTimeMillis() - startTime,
-          partialApplication = textMutated,
-          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-        )
-      }
+      broadcastInsertTextResult(
+        requestId,
+        false,
+        e.message,
+        System.currentTimeMillis() - startTime,
+        partialApplication = textMutated,
+        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+      )
     }
   }
 
@@ -6111,20 +6151,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Dispatch navigation through the active IME when possible, otherwise approximate it with focus
    * traversal. Other keyboard actions retain their AccessibilityService handling.
    */
-  private fun performImeAction(requestId: String?, action: String) {
+  private suspend fun performImeAction(requestId: String?, action: String) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performImeAction: action='$action'")
-    perfProvider.serial("performImeAction")
+    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
+    val imePerf = MutablePerfEntry("performImeAction", startTime)
+    fun finishPerf() {
+      if (imePerf.endTime == null) {
+        imePerf.endTime = System.currentTimeMillis()
+        perfProvider.complete(imePerf)
+      }
+    }
 
     var root: android.view.accessibility.AccessibilityNodeInfo? = null
     var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
     var approximated: Boolean? = null
     try {
-      perfProvider.startOperation("findFocusedNode")
+      val findFocusedNodePerf = MutablePerfEntry("findFocusedNode", System.currentTimeMillis())
+      imePerf.children.add(findFocusedNodePerf)
       root = rootInActiveWindow
       focusedNode = findFocusedEditableNode(root)
-      perfProvider.endOperation("findFocusedNode")
+      findFocusedNodePerf.endTime = System.currentTimeMillis()
 
       val navigationActionId =
         when (action) {
@@ -6134,9 +6182,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       val editorActionResult =
         if (navigationActionId != null) {
-          kotlinx.coroutines.runBlocking {
-            CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
-          }
+          CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
         } else null
       // Accessibility nodes expose no configured imeOptions. ACTION_IME_ENTER alone does not
       // prove the editor is configured for NEXT, so an unavailable IME uses traversal.
@@ -6150,7 +6196,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       approximated = step.approximated
       val error = step.error
       if (error != null) {
-        perfProvider.end()
+        finishPerf()
         val errorTime = System.currentTimeMillis()
         Log.w(TAG, error)
         launchRequestScope(requestId) {
@@ -6159,7 +6205,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return
       }
 
-      perfProvider.startOperation("executeAction")
+      val executeActionPerf = MutablePerfEntry("executeAction", System.currentTimeMillis())
+      imePerf.children.add(executeActionPerf)
       val success =
         when (step) {
           ImeActionStep.EDITOR_NEXT,
@@ -6210,6 +6257,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
             try {
               Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
+            } catch (e: CancellationException) {
+              throw e
             } catch (e: Exception) {
               Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
               false
@@ -6220,52 +6269,51 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             false
           }
         }
-      perfProvider.endOperation("executeAction")
+      executeActionPerf.endTime = System.currentTimeMillis()
 
-      perfProvider.end()
+      finishPerf()
 
       Log.d(TAG, "IME action completed: success=$success")
 
       // Wait for UI to settle, then extract fresh hierarchy
       if (success) {
         val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescence(
+          hierarchyDebouncer.extractAfterQuiescenceSuspending(
             quiescenceMs = HierarchyQuiescence.POLL_MS,
             maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
             pollIntervalMs = 10L,
           )
         if (freshHierarchy != null) {
-          kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
+          broadcastHierarchyUpdate(freshHierarchy, sync = true)
         }
       }
 
       val totalTime = System.currentTimeMillis() - startTime
       Log.d(TAG, "IME action total time: ${totalTime}ms")
 
-      kotlinx.coroutines.runBlocking {
-        broadcastImeActionResult(
-          requestId,
-          action,
-          success,
-          if (success) null else "Action failed",
-          totalTime,
-          approximated,
-        )
-      }
+      broadcastImeActionResult(
+        requestId,
+        action,
+        success,
+        if (success) null else "Action failed",
+        totalTime,
+        approximated,
+      )
+    } catch (e: CancellationException) {
+      finishPerf()
+      throw e
     } catch (e: Exception) {
-      perfProvider.end()
+      finishPerf()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastImeActionResult(
-          requestId,
-          action,
-          false,
-          e.message,
-          errorTime - startTime,
-          approximated,
-        )
-      }
+      broadcastImeActionResult(
+        requestId,
+        action,
+        false,
+        e.message,
+        errorTime - startTime,
+        approximated,
+      )
     } finally {
       if (focusedNode !== root) {
         focusedNode?.recycle()
@@ -6278,7 +6326,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Perform select all text using AccessibilityService's ACTION_SET_SELECTION. This is
    * significantly faster than using ADB double-tap gestures.
    */
-  private fun performSelectAll(requestId: String?) {
+  private suspend fun performSelectAll(requestId: String?) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSelectAll")
@@ -6294,9 +6342,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val errorTime = System.currentTimeMillis()
         val error = "No focused editable node found"
         Log.w(TAG, error)
-        kotlinx.coroutines.runBlocking {
-          broadcastSelectAllResult(requestId, false, error, errorTime - startTime)
-        }
+        broadcastSelectAllResult(requestId, false, error, errorTime - startTime)
         return
       }
 
@@ -6356,21 +6402,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val totalTime = System.currentTimeMillis() - startTime
       Log.d(TAG, "Select all total time: ${totalTime}ms")
 
-      kotlinx.coroutines.runBlocking {
-        broadcastSelectAllResult(
-          requestId,
-          success,
-          outcome.error,
-          totalTime,
-        )
-      }
+      broadcastSelectAllResult(
+        requestId,
+        success,
+        outcome.error,
+        totalTime,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing select all", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
-      }
+      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
     }
   }
 
@@ -6489,19 +6533,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
-  private fun refreshHierarchyAfterNodeAction() {
+  private suspend fun refreshHierarchyAfterNodeAction() {
     val freshHierarchy =
-      hierarchyDebouncer.extractAfterQuiescence(
+      hierarchyDebouncer.extractAfterQuiescenceSuspending(
         quiescenceMs = HierarchyQuiescence.POLL_MS,
         maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
         pollIntervalMs = 10L,
       )
     if (freshHierarchy != null) {
-      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
+      broadcastHierarchyUpdate(freshHierarchy, sync = true)
     }
   }
 
-  private fun performNodeAction(
+  private suspend fun performNodeAction(
     requestId: String?,
     action: String,
     resourceId: String?,
@@ -6576,23 +6620,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val totalTime = System.currentTimeMillis() - startTime
       Log.d(TAG, "Action total time: ${totalTime}ms")
 
-      kotlinx.coroutines.runBlocking {
-        broadcastActionResult(
-          requestId,
-          action,
-          success,
-          if (success) null else actionError ?: "performAction returned false",
-          totalTime,
-          alreadySatisfied,
-        )
-      }
+      broadcastActionResult(
+        requestId,
+        action,
+        success,
+        if (success) null else actionError ?: "performAction returned false",
+        totalTime,
+        alreadySatisfied,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
-      }
+      broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
     }
   }
 
@@ -6600,7 +6642,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Perform clipboard operations using ClipboardManager and AccessibilityService. Supports copy,
    * paste, clear, and get operations.
    */
-  private fun performClipboard(requestId: String?, action: String, text: String?) {
+  private suspend fun performClipboard(requestId: String?, action: String, text: String?) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performClipboard: action='$action'")
     perfProvider.serial("performClipboard")
@@ -6619,6 +6661,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 clipboardManager.setPrimaryClip(clip)
                 Log.d(TAG, "Clipboard copy successful (${text.length} chars)")
                 Triple(true, null, null)
+              } catch (e: CancellationException) {
+                throw e
               } catch (e: Exception) {
                 Log.e(TAG, "Clipboard copy failed", e)
                 Triple(false, null, "Copy failed: ${e.message}")
@@ -6642,6 +6686,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 Log.w(TAG, readError)
                 Triple(false, null, readError)
               }
+            } catch (e: CancellationException) {
+              throw e
             } catch (e: Exception) {
               Log.e(TAG, "Clipboard get failed", e)
               Triple(false, null, "Get failed: ${e.message}")
@@ -6659,6 +6705,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 Log.d(TAG, "Clipboard cleared using empty clip (API < 28)")
               }
               Triple(true, null, null)
+            } catch (e: CancellationException) {
+              throw e
             } catch (e: Exception) {
               Log.e(TAG, "Clipboard clear failed", e)
               Triple(false, null, "Clear failed: ${e.message}")
@@ -6694,6 +6742,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   Triple(false, null, "Paste action failed")
                 }
               }
+            } catch (e: CancellationException) {
+              throw e
             } catch (e: Exception) {
               Log.e(TAG, "Clipboard paste failed", e)
               Triple(false, null, "Paste failed: ${e.message}")
@@ -6714,20 +6764,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.d(TAG, "Clipboard total time: ${totalTime}ms")
 
       // Broadcast clipboard result
-      kotlinx.coroutines.runBlocking {
-        broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
-      }
+      broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
-      }
+      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
     }
   }
 
-  private fun performSettingsRead(requestId: String?, namespace: String, key: String) {
+  private suspend fun performSettingsRead(requestId: String?, namespace: String, key: String) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSettingsRead: namespace=$namespace key=$key")
     perfProvider.serial("performSettingsRead")
@@ -6758,28 +6806,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Why: surface permission errors cleanly so the TS caller can fall back to ADB
       error = "SecurityException: ${e.message}"
       Log.w(TAG, "Settings read denied: $namespace/$key", e)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "Read failed: ${e.message}"
       Log.e(TAG, "Settings read failed: $namespace/$key", e)
     } finally {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastSettingsGetResult(
-          requestId,
-          namespace,
-          key,
-          success,
-          value,
-          found,
-          error,
-          totalTime,
-        )
-      }
+      broadcastSettingsGetResult(
+        requestId,
+        namespace,
+        key,
+        success,
+        value,
+        found,
+        error,
+        totalTime,
+      )
     }
   }
 
-  private fun performSettingsWrite(
+  private suspend fun performSettingsWrite(
     requestId: String?,
     namespace: String,
     key: String,
@@ -6839,19 +6887,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Surface SecurityException so the TS client can fall back to ADB instead of crashing.
       error = "SecurityException: ${e.message}"
       Log.w(TAG, "Settings write denied: $namespace/$key", e)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "Write failed: ${e.message}"
       Log.e(TAG, "Settings write failed: $namespace/$key", e)
     } finally {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastSettingsPutResult(requestId, namespace, key, success, error, totalTime)
-      }
+      broadcastSettingsPutResult(requestId, namespace, key, success, error, totalTime)
     }
   }
 
-  private fun performSettingsList(requestId: String?, namespace: String) {
+  private suspend fun performSettingsList(requestId: String?, namespace: String) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSettingsList: namespace=$namespace")
     perfProvider.serial("performSettingsList")
@@ -6891,15 +6939,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     } catch (e: SecurityException) {
       error = "SecurityException: ${e.message}"
       Log.w(TAG, "Settings list denied: $namespace", e)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "List failed: ${e.message}"
       Log.e(TAG, "Settings list failed: $namespace", e)
     } finally {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastSettingsListResult(requestId, namespace, success, entries, error, totalTime)
-      }
+      broadcastSettingsListResult(requestId, namespace, success, entries, error, totalTime)
     }
   }
 
@@ -6943,21 +6991,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Enumerate installed packages via PackageManager. Returns over WebSocket so callers can avoid
    * the per-call ADB round-trip cost of `pm list packages`.
    */
-  private fun performInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) {
+  private suspend fun performInstalledPackages(
+    requestId: String?,
+    includeSystem: Boolean,
+    userId: Int?,
+  ) {
     val startTime = System.currentTimeMillis()
     val currentUserId = CurrentUserId.current()
     if (userId != null && userId != currentUserId) {
-      kotlinx.coroutines.runBlocking {
-        broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = false,
-          userId = currentUserId,
-          packages = emptyList(),
-          error =
-            "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
-          totalTimeMs = System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastInstalledPackagesResult(
+        requestId = requestId,
+        success = false,
+        userId = currentUserId,
+        packages = emptyList(),
+        error =
+          "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
+        totalTimeMs = System.currentTimeMillis() - startTime,
+      )
       return
     }
 
@@ -7004,33 +7054,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       }
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = true,
-          userId = currentUserId,
-          packages = records,
-          error = null,
-          totalTimeMs = totalTime,
-        )
-      }
+      broadcastInstalledPackagesResult(
+        requestId = requestId,
+        success = true,
+        userId = currentUserId,
+        packages = records,
+        error = null,
+        totalTimeMs = totalTime,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "performInstalledPackages failed", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = false,
-          userId = currentUserId,
-          packages = emptyList(),
-          error = "Failed to enumerate packages: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastInstalledPackagesResult(
+        requestId = requestId,
+        success = false,
+        userId = currentUserId,
+        packages = emptyList(),
+        error = "Failed to enumerate packages: ${e.message}",
+        totalTimeMs = System.currentTimeMillis() - startTime,
+      )
     }
   }
 
   /** Read package metadata via PackageManager. */
-  private fun performPackageInfo(
+  private suspend fun performPackageInfo(
     requestId: String?,
     packageName: String,
     includePermissions: Boolean,
@@ -7063,6 +7111,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           } else {
             @Suppress("DEPRECATION") packageManager.getInstallerPackageName(packageName)
           }
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
           null
         }
@@ -7082,112 +7132,108 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val mainActivity =
         try {
           packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
           null
         }
 
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastPackageInfoResult(
-          requestId = requestId,
-          success = true,
-          packageName = packageName,
-          isSystem = isSystem,
-          applicationLabel = applicationLabel,
-          versionName = info.versionName,
-          versionCode = versionCode,
-          installerPackage = installerPackage,
-          firstInstallTime = info.firstInstallTime,
-          lastUpdateTime = info.lastUpdateTime,
-          allowBackup = allowBackup,
-          requestedPermissions = requested,
-          grantedPermissions = granted,
-          mainActivity = mainActivity,
-          error = null,
-          totalTimeMs = totalTime,
-        )
-      }
+      broadcastPackageInfoResult(
+        requestId = requestId,
+        success = true,
+        packageName = packageName,
+        isSystem = isSystem,
+        applicationLabel = applicationLabel,
+        versionName = info.versionName,
+        versionCode = versionCode,
+        installerPackage = installerPackage,
+        firstInstallTime = info.firstInstallTime,
+        lastUpdateTime = info.lastUpdateTime,
+        allowBackup = allowBackup,
+        requestedPermissions = requested,
+        grantedPermissions = granted,
+        mainActivity = mainActivity,
+        error = null,
+        totalTimeMs = totalTime,
+      )
     } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
-      kotlinx.coroutines.runBlocking {
-        broadcastPackageInfoResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          isSystem = false,
-          applicationLabel = null,
-          versionName = null,
-          versionCode = null,
-          installerPackage = null,
-          firstInstallTime = null,
-          lastUpdateTime = null,
-          allowBackup = null,
-          requestedPermissions = emptyList(),
-          grantedPermissions = emptyMap(),
-          mainActivity = null,
-          error = "Package not installed or not visible: $packageName",
-          totalTimeMs = System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastPackageInfoResult(
+        requestId = requestId,
+        success = false,
+        packageName = packageName,
+        isSystem = false,
+        applicationLabel = null,
+        versionName = null,
+        versionCode = null,
+        installerPackage = null,
+        firstInstallTime = null,
+        lastUpdateTime = null,
+        allowBackup = null,
+        requestedPermissions = emptyList(),
+        grantedPermissions = emptyMap(),
+        mainActivity = null,
+        error = "Package not installed or not visible: $packageName",
+        totalTimeMs = System.currentTimeMillis() - startTime,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "performPackageInfo failed for $packageName", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastPackageInfoResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          isSystem = false,
-          applicationLabel = null,
-          versionName = null,
-          versionCode = null,
-          installerPackage = null,
-          firstInstallTime = null,
-          lastUpdateTime = null,
-          allowBackup = null,
-          requestedPermissions = emptyList(),
-          grantedPermissions = emptyMap(),
-          mainActivity = null,
-          error = "Failed to read package info: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastPackageInfoResult(
+        requestId = requestId,
+        success = false,
+        packageName = packageName,
+        isSystem = false,
+        applicationLabel = null,
+        versionName = null,
+        versionCode = null,
+        installerPackage = null,
+        firstInstallTime = null,
+        lastUpdateTime = null,
+        allowBackup = null,
+        requestedPermissions = emptyList(),
+        grantedPermissions = emptyMap(),
+        mainActivity = null,
+        error = "Failed to read package info: ${e.message}",
+        totalTimeMs = System.currentTimeMillis() - startTime,
+      )
     }
   }
 
   /** Resolve the launcher activity component for a package. */
-  private fun performLaunchIntent(requestId: String?, packageName: String) {
+  private suspend fun performLaunchIntent(requestId: String?, packageName: String) {
     val startTime = System.currentTimeMillis()
     try {
       val intent = packageManager.getLaunchIntentForPackage(packageName)
       val component = intent?.component?.flattenToShortString()
       val totalTime = System.currentTimeMillis() - startTime
       val success = component != null
-      kotlinx.coroutines.runBlocking {
-        broadcastLaunchIntentResult(
-          requestId = requestId,
-          success = success,
-          packageName = packageName,
-          componentName = component,
-          error = if (!success) "No launch intent for $packageName" else null,
-          totalTimeMs = totalTime,
-        )
-      }
+      broadcastLaunchIntentResult(
+        requestId = requestId,
+        success = success,
+        packageName = packageName,
+        componentName = component,
+        error = if (!success) "No launch intent for $packageName" else null,
+        totalTimeMs = totalTime,
+      )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "performLaunchIntent failed for $packageName", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastLaunchIntentResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          componentName = null,
-          error = "Failed to resolve launch intent: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
-        )
-      }
+      broadcastLaunchIntentResult(
+        requestId = requestId,
+        success = false,
+        packageName = packageName,
+        componentName = null,
+        error = "Failed to resolve launch intent: ${e.message}",
+        totalTimeMs = System.currentTimeMillis() - startTime,
+      )
     }
   }
 
   /** Install a CA certificate via DevicePolicyManager (device owner only). */
-  private fun performInstallCaCertificate(requestId: String?, certificate: String) {
+  private suspend fun performInstallCaCertificate(requestId: String?, certificate: String) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performInstallCaCertificate")
     perfProvider.serial("installCaCert")
@@ -7235,6 +7281,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (!success) {
         error = "DevicePolicyManager.installCaCert returned false"
       }
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "Failed to install CA certificate: ${e.message}"
       Log.e(TAG, "Error installing CA certificate", e)
@@ -7244,28 +7292,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastCaCertResult(requestId, "install", success, alias, error, totalTime)
-      }
+      broadcastCaCertResult(requestId, "install", success, alias, error, totalTime)
     }
   }
 
   /** Install a CA certificate from a device file path (device owner only). */
-  private fun performInstallCaCertificateFromPath(requestId: String?, devicePath: String) {
+  private suspend fun performInstallCaCertificateFromPath(requestId: String?, devicePath: String) {
     val startTime = System.currentTimeMillis()
     val payload = readCertificatePayloadFromPath(devicePath)
     if (payload == null) {
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastCaCertResult(
-          requestId,
-          "install",
-          false,
-          null,
-          "Certificate file is empty or unreadable: $devicePath",
-          totalTime,
-        )
-      }
+      broadcastCaCertResult(
+        requestId,
+        "install",
+        false,
+        null,
+        "Certificate file is empty or unreadable: $devicePath",
+        totalTime,
+      )
       return
     }
 
@@ -7273,7 +7317,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Remove a CA certificate via DevicePolicyManager (device owner only). */
-  private fun performRemoveCaCertificate(
+  private suspend fun performRemoveCaCertificate(
     requestId: String?,
     alias: String?,
     certificate: String?,
@@ -7348,15 +7392,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             "CA certificate still installed after uninstall"
           }
       }
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "Failed to remove CA certificate: ${e.message}"
       Log.e(TAG, "Error removing CA certificate", e)
     } finally {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastCaCertResult(requestId, "remove", success, resolvedAlias, error, totalTime)
-      }
+      broadcastCaCertResult(requestId, "remove", success, resolvedAlias, error, totalTime)
     }
   }
 
@@ -7371,7 +7415,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Report device owner status for the accessibility service package. */
-  private fun performGetDeviceOwnerStatus(requestId: String?) {
+  private suspend fun performGetDeviceOwnerStatus(requestId: String?) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performGetDeviceOwnerStatus")
     perfProvider.serial("deviceOwnerStatus")
@@ -7383,21 +7427,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       isDeviceOwner = devicePolicyManager.isDeviceOwnerApp(packageName)
       isAdminActive = devicePolicyManager.isAdminActive(deviceAdminComponent)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       error = "Failed to read device owner status: ${e.message}"
       Log.e(TAG, "Error reading device owner status", e)
     } finally {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
-      kotlinx.coroutines.runBlocking {
-        broadcastDeviceOwnerStatusResult(
-          requestId,
-          isDeviceOwner,
-          isAdminActive,
-          error,
-          totalTime,
-        )
-      }
+      broadcastDeviceOwnerStatusResult(
+        requestId,
+        isDeviceOwner,
+        isAdminActive,
+        error,
+        totalTime,
+      )
     }
   }
 

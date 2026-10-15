@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -8,7 +9,7 @@ class InsertTextSettleTest {
     InsertTextSnapshot(text, hint, start, end)
 
   @Test
-  fun `null baseline retains legacy suffix behavior`() {
+  fun `null baseline retains legacy suffix behavior`() = runTest {
     var polls = 0
     var pauses = 0
     assertTrue(
@@ -27,7 +28,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `waits until snapshot ends with suffix`() {
+  fun `waits until snapshot ends with suffix`() = runTest {
     var now = 0L
     var polls = 0
     val pauses = mutableListOf<Long>()
@@ -48,7 +49,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `deadline passes without suffix`() {
+  fun `deadline passes without suffix`() = runTest {
     var now = 0L
     var totalPause = 0L
     assertFalse(
@@ -67,7 +68,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `null snapshot node gone returns false`() {
+  fun `null snapshot node gone returns false`() = runTest {
     assertFalse(awaitPrecedingInput("x", { null }, { 0L }, { error("must not pause") }))
   }
 
@@ -85,7 +86,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `stale previous-insert text is refreshed until exact remembered content appears`() {
+  fun `stale previous-insert text is refreshed until exact remembered content appears`() = runTest {
     var now = 0L
     var reads = 0
     assertTrue(
@@ -102,7 +103,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `changed field never equals remembered content and waiting is bounded`() {
+  fun `changed field never equals remembered content and waiting is bounded`() = runTest {
     var now = 0L
     assertFalse(
       awaitPrecedingInput(
@@ -117,7 +118,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `pre-existing suffix waits for repeated key event to land`() {
+  fun `pre-existing suffix waits for repeated key event to land`() = runTest {
     var now = 0L
     var reads = 0
     val baseline = snapshot("éx", 2)
@@ -136,7 +137,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `pre-existing suffix with no change times out`() {
+  fun `pre-existing suffix with no change times out`() = runTest {
     var now = 0L
     val baseline = snapshot("éx", 2)
     assertFalse(awaitPrecedingInput("x", { baseline }, { now }, { now += it }, baseline = baseline))
@@ -160,7 +161,7 @@ class InsertTextSettleTest {
   }
 
   @Test
-  fun `transformed input takes bounded warning path`() {
+  fun `transformed input takes bounded warning path`() = runTest {
     var now = 0L
     var reads = 0
     assertFalse(

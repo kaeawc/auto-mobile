@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -73,12 +74,12 @@ class HierarchyDebouncerSuppressionTest {
         },
       )
     val explicit = HierarchySnapshotOptions(displayId = 2)
-    debouncer.extractAfterQuiescence(
+    debouncer.extractAfterQuiescenceSuspending(
       quiescenceMs = 0,
       initialEventWaitMs = 0,
       snapshotOptions = explicit,
     )
-    debouncer.extractAfterQuiescence(quiescenceMs = 0, initialEventWaitMs = 0)
+    debouncer.extractAfterQuiescenceSuspending(quiescenceMs = 0, initialEventWaitMs = 0)
     assertEquals(2, optionsSeen.size)
     assertSame(explicit, optionsSeen.first())
     assertEquals(2, optionsSeen.first().displayId)
@@ -131,11 +132,13 @@ class HierarchyDebouncerSuppressionTest {
       thread(name = "first extraction") {
         firstFailure.set(
           runCatching {
-            debouncer.extractAfterQuiescence(
-              quiescenceMs = 0,
-              maxWaitMs = 1,
-              initialEventWaitMs = 0,
-            )
+            runBlocking {
+              debouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = 0,
+                maxWaitMs = 1,
+                initialEventWaitMs = 0,
+              )
+            }
           }
             .exceptionOrNull(),
         )
@@ -146,11 +149,13 @@ class HierarchyDebouncerSuppressionTest {
         thread(name = "second extraction") {
           secondFailure.set(
             runCatching {
-              debouncer.extractAfterQuiescence(
-                quiescenceMs = 0,
-                maxWaitMs = 1,
-                initialEventWaitMs = 0,
-              )
+              runBlocking {
+                debouncer.extractAfterQuiescenceSuspending(
+                  quiescenceMs = 0,
+                  maxWaitMs = 1,
+                  initialEventWaitMs = 0,
+                )
+              }
             }
               .exceptionOrNull(),
           )
@@ -207,11 +212,13 @@ class HierarchyDebouncerSuppressionTest {
     val worker = thread {
       failure.set(
         runCatching {
-          debouncer.extractAfterQuiescence(
-            quiescenceMs = 0,
-            maxWaitMs = 1,
-            initialEventWaitMs = 0,
-          )
+          runBlocking {
+            debouncer.extractAfterQuiescenceSuspending(
+              quiescenceMs = 0,
+              maxWaitMs = 1,
+              initialEventWaitMs = 0,
+            )
+          }
         }
           .exceptionOrNull(),
       )

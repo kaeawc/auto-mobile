@@ -113,6 +113,42 @@ test("never-ready worker uses the default 10000ms init budget and is replaced", 
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
+test("query timeout records 1500ms of worker readiness before the SQL deadline", async () => {
+  const { timer, workers, probe } = setup();
+  const check = observe(probe.check());
+  workers[0]!.answerImmediately = false;
+  timer.advanceTime(1500);
+  workers[0]!.message({ type: "ready" });
+  await drainUntilQuiescent(timer);
+  expect(workers[0]!.requests).toHaveLength(1);
+  timer.advanceTime(1000);
+  expect(await check.result).toMatchObject({
+    phase: "query",
+    timeoutMs: 1000,
+    startupMs: 1500,
+  });
+  expect(workers[0]!.terminateCalls).toBe(1);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("worker error after ready but before posting rejects without waiting for a timeout", async () => {
+  const { timer, workers, probe } = setup();
+  const check = observe(probe.check());
+  workers[0]!.message({ type: "ready" });
+  workers[0]!.emit("error", new Error("worker died before receiving SELECT"));
+  const error = await check.result;
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).toMatchObject({ message: "Database health probe worker is no longer available" });
+  expect(workers[0]!.requests).toHaveLength(0);
+  expect(timer.now()).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  const next = observe(probe.check());
+  expect(workers).toHaveLength(2);
+  workers[1]!.message({ type: "ready" });
+  expect(await next.result).toBeUndefined();
+});
+
 test("configured init timeout logs the elapsed budget and readiness duration", async () => {
   const { timer, workers, probe } = setup(2000);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});

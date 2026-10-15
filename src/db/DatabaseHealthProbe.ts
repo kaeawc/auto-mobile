@@ -32,6 +32,7 @@ export class DatabaseHealthProbeTimeoutError extends Error {
   constructor(
     readonly timeoutMs: number,
     readonly phase: "init" | "query" = "query",
+    readonly startupMs?: number,
   ) {
     super(`Database health probe timed out after ${timeoutMs}ms`);
     this.name = "DatabaseHealthProbeTimeoutError";
@@ -42,7 +43,7 @@ export class DatabaseHealthProbeInitTimeoutError extends DatabaseHealthProbeTime
   declare readonly phase: "init";
 
   constructor(timeoutMs: number) {
-    super(timeoutMs, "init");
+    super(timeoutMs, "init", 0);
     this.name = "DatabaseHealthProbeInitTimeoutError";
     this.message = `Database health probe worker did not become ready within ${timeoutMs}ms`;
   }
@@ -131,7 +132,9 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
 
     // The injected executor retains its single whole-call deadline. Only the
     // default worker path separates cold startup from the SQL round-trip.
+    const startupStartedAt = this.timer.monotonicNow?.() ?? this.timer.now();
     const worker = this.executeSelectOne ? undefined : this.getWorker();
+    let startupMs = 0;
     if (worker && !worker.ready) {
       await raceWithDeadline(worker.readiness, {
         timer: this.timer,
@@ -150,6 +153,7 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
           );
         },
       });
+      startupMs = Math.max(0, (this.timer.monotonicNow?.() ?? this.timer.now()) - startupStartedAt);
     }
 
     // check() owns the single authoritative SQL timeout (#6655); the worker
@@ -161,12 +165,12 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
         timeoutMs: this.timeoutMs,
         unref: true,
         label: "Database health probe",
-        timeoutError: () => new DatabaseHealthProbeTimeoutError(this.timeoutMs),
+        timeoutError: () => new DatabaseHealthProbeTimeoutError(this.timeoutMs, "query", startupMs),
         onTimeout: () => {
           if (worker) {
             this.abandonPendingWorkerRequest(
               worker,
-              new DatabaseHealthProbeTimeoutError(this.timeoutMs),
+              new DatabaseHealthProbeTimeoutError(this.timeoutMs, "query", startupMs),
             );
           }
         },

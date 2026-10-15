@@ -32,7 +32,8 @@ describe("registered interaction handler cancellation", () => {
     ToolRegistry.clearTools();
   });
 
-  test.each(devices)("tapAt cancels during the double-tap gap on %s", async (device) => {
+  // iOS delivers a double tap as one runner request, so only Android has a gap to cancel inside.
+  test.each([devices[0]!])("tapAt cancels during the double-tap gap on %s", async (device) => {
     const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
     setTapAtElementFactory(() => tapAt);
     const gapTimer = new FakeTimer();
@@ -67,6 +68,25 @@ describe("registered interaction handler cancellation", () => {
       expect(dispatches).toHaveLength(1);
     } finally {
       gapTimer.resolveAll();
+      sleep.mockRestore();
+    }
+  });
+
+  test("iOS tapAt doubleTap is one runner double tap with no gap sleep", async () => {
+    const device = devices[1]!;
+    const { tapAt, timer, iosDispatches } = createTapAt(device);
+    setTapAtElementFactory(() => tapAt);
+    const sleep = spyOn(timer, "sleep");
+    try {
+      const response = await registeredHandler("tapAt")(device, {
+        x: 1,
+        y: 2,
+        action: "doubleTap",
+      });
+      expect(response).not.toMatchObject({ isError: true });
+      expect(iosDispatches.map(({ kind }) => kind)).toEqual(["double"]);
+      expect(sleep.mock.calls.filter(([ms]) => ms === DOUBLE_TAP_GAP_MS)).toHaveLength(0);
+    } finally {
       sleep.mockRestore();
     }
   });

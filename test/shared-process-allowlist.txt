@@ -75,6 +75,7 @@ test/daemon/deviceDisconnectHandler.test.ts
 test/daemon/deviceForwardLeaseIdleReleaser.test.ts
 test/daemon/deviceGestureRecordingSocketServerReadinessSession.test.ts
 test/daemon/deviceHealthMarkers.test.ts
+test/daemon/deviceHold.test.ts
 test/daemon/deviceLeaseActivity.test.ts
 test/daemon/deviceLeaseOwnerQuery.test.ts
 test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts

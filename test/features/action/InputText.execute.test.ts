@@ -1,4 +1,10 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import type { ExecResult } from "../../../src/models";
+import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -18,8 +24,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
-import { TextRequestState } from "../../../src/features/action/textTransportTimeout";
-import { drainMicrotasks, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import {
+  TextRequestState,
+  runWithTextRequestContext,
+} from "../../../src/features/action/textTransportTimeout";
+import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
@@ -164,6 +173,125 @@ describe("InputText.execute", () => {
     expect(state.hasPending()).toBe(false);
     transport.mockRestore();
   });
+
+  for (const path of ["key-event plan", "IME done", "IME previous"] as const) {
+    test.each(["child exit", "bounded grace"] as const)(
+      `${path} keeps aborted text pending until %s`,
+      async (settlement) => {
+        fakeTimer = new FakeTimer();
+        getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+          fakeA11yService as unknown as AndroidCtrlProxyClient,
+        );
+        const child = new EventEmitter() as ChildProcess;
+        const signals: (string | number | undefined)[] = [];
+        child.kill = (signal) => {
+          signals.push(signal);
+          return true;
+        };
+        const childResult = Promise.withResolvers<ExecResult>();
+        // execFile's callback reports termination after the child's exit, not on kill().
+        child.once("exit", () => childResult.reject(new Error("child exited")));
+        const host = new FakeProcessExecutor();
+        const dispatch = spyOn(host, "executeCommandWithChild").mockReturnValue({
+          child,
+          result: childResult.promise,
+        });
+        const adb = new AdbClient(
+          androidDevice,
+          null,
+          null,
+          new DefaultRetryExecutor(fakeTimer),
+          fakeTimer,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          host,
+        );
+        // Exercise real cancellation/settlement without SDK lookup or a real process.
+        const internals = adb as unknown as {
+          isTestMode: boolean;
+          getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+        };
+        internals.isTestMode = false;
+        internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+        spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
+        const input = new InputText(androidDevice, adb);
+        wireFakes(input);
+        const controller = new AbortController();
+        const reason = new Error("text cancelled");
+        const state = new TextRequestState();
+        const result = runWithAbortSignal(controller.signal, () =>
+          runWithTextRequestContext({ getDeadlineMs: () => undefined, textState: state }, () =>
+            path === "key-event plan"
+              ? input.appendText("a", undefined, undefined, controller.signal)
+              : input.execute(
+                  "hi",
+                  path === "IME done" ? "done" : "previous",
+                  false,
+                  "a11y",
+                  controller.signal,
+                ),
+          ),
+        );
+        const outcome = result.then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+        if (path !== "key-event plan") {
+          await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+            description: "IME action delay",
+          });
+          fakeTimer.advanceTime(100);
+        }
+        await drainUntil(() => dispatch.mock.calls.length === 1, {
+          description: "adb text dispatch",
+        });
+        expect(dispatch.mock.calls[0]?.[1]?.join(" ")).toBe(
+          `shell input keyevent ${path === "key-event plan" ? "KEYCODE_A" : path === "IME done" ? "KEYCODE_ENTER" : "KEYCODE_SHIFT_LEFT"}`,
+        );
+        expect(state.hasPending()).toBe(true);
+        let settled = false;
+        const waiter = state.settled().then(() => {
+          settled = true;
+        });
+
+        try {
+          controller.abort(reason);
+          await drainMicrotasks(100);
+          expect(signals).toEqual(["SIGTERM"]);
+          expect(settled).toBe(false);
+          expect(state.hasPending()).toBe(true);
+
+          if (settlement === "child exit") {
+            child.emit("exit", null, "SIGTERM");
+          } else {
+            // Use the existing AdbClient grace timers; no real-time sleeps.
+            expect(fakeTimer.getMsUntilNextDueEvent()).toBe(1_000);
+            fakeTimer.advanceTime(1_000);
+            await drainMicrotasks(100);
+            expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+            expect(settled).toBe(false);
+            fakeTimer.advanceTime(999);
+            await drainMicrotasks(100);
+            expect(settled).toBe(false);
+            fakeTimer.advanceTime(1);
+          }
+
+          expect(await outcome).toEqual({ error: reason });
+          await waiter;
+          expect(settled).toBe(true);
+          expect(state.hasPending()).toBe(false);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+          expect(dispatch).toHaveBeenCalledTimes(1);
+        } finally {
+          child.emit("exit", null, "SIGKILL");
+          await outcome;
+          dispatch.mockRestore();
+        }
+      },
+    );
+  }
 
   test.each(["eventLast", "eventAll", "append"] as const)(
     "%s marks every in-flight adb key command and settles afterwards",

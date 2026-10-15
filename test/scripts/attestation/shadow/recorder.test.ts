@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { posix } from "node:path";
 import { ShadowStore } from "../../../../scripts/ci/attestation/shadow/recorder";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const shadowDir = "/shadow";
-const metricsPath = join(shadowDir, "shadow-metrics.json");
+// FakeFileSystem keys are normalized to forward slashes, so build expected keys with posix join.
+const metricsPath = posix.join(shadowDir, "shadow-metrics.json");
 
 describe("ShadowStore", () => {
   test("writes schema atomically with injected filesystem and clock", async () => {
@@ -13,8 +14,9 @@ describe("ShadowStore", () => {
     const rename = fs.rename.bind(fs);
     let temporaryContentsAtRename: string | undefined;
     fs.rename = async (oldPath: string, newPath: string) => {
-      if (oldPath === metricsPath + ".tmp") {
-        temporaryContentsAtRename = fs.getWrittenFiles().get(oldPath);
+      // Source paths use path.join (backslashes on Windows); read via the fake's normalizing API.
+      if (oldPath.replace(/\\/g, "/") === metricsPath + ".tmp") {
+        temporaryContentsAtRename = await fs.readFile(oldPath);
       }
       await rename(oldPath, newPath);
     };
@@ -39,6 +41,29 @@ describe("ShadowStore", () => {
       metrics: { generatedAtMs: 100 },
     });
     expect(fs.getWrittenFiles().has(metricsPath + ".tmp")).toBe(false);
+  });
+  test("fake filesystem reads resolve backslashed paths to normalized keys", async () => {
+    const fs = new FakeFileSystem();
+    await fs.ensureDir("\\shadow");
+    await fs.writeFile("\\shadow\\a.tmp", "data", "utf8");
+    expect(await fs.readFile("/shadow/a.tmp")).toBe("data");
+    expect(await fs.readFile("\\shadow\\a.tmp")).toBe("data");
+    expect(fs.getWrittenFiles().get("\\shadow\\a.tmp")).toBeUndefined();
+  });
+  test("fake filesystem keys never contain backslashes", async () => {
+    const fs = new FakeFileSystem();
+    const recorder = new ShadowStore({ fs, timer: new FakeTimer(), dir: shadowDir });
+    await recorder.record({
+      tier: 1,
+      treeHash: "hash",
+      runId: "run",
+      verdict: "skip",
+      hadAttestation: false,
+      ciResult: "pass",
+    });
+    const keys = [...fs.getWrittenFiles().keys()];
+    expect(keys).toEqual([metricsPath]);
+    expect(keys.some((key) => key.includes("\\"))).toBe(false);
   });
   test("dedupes, caps oldest records, and recovers corrupt data", async () => {
     const fs = new FakeFileSystem();

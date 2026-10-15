@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.lang.reflect.Proxy
 import java.util.concurrent.Executor
 
@@ -81,7 +82,7 @@ internal object DeviceStateTransitions {
       capability = "DeviceStateCallback proxy"
       val callback = callback(callbackClass, onState)
       capability = "DeviceStateManager.registerCallback invocation"
-      register.invoke(manager, context.mainExecutor, callback)
+      register.invoke(manager, ContextCompat.getMainExecutor(context), callback)
       AutoCloseable { unregister.invoke(manager, callback) }
     } catch (e: ReflectiveOperationException) {
       Log.w("CtrlProxyDeviceState", "$capability unavailable; fold-posture events are lost", e)

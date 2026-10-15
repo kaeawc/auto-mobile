@@ -562,6 +562,7 @@ test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxyText.test.ts
 test/features/observe/ios/CtrlProxyWireDeadline.test.ts
 test/features/observe/ios/CtrlProxyWireDeadlineOutcome.test.ts
+test/features/observe/ios/IosRunnerResponseContract.contract.test.ts
 test/features/observe/ios/IosScreenIdentity.test.ts
 test/features/observe/ios/IosScreenIdentityKeyboardVisibility.test.ts
 test/features/observe/ios/IosSdkContractFixtures.contract.test.ts
@@ -569,7 +570,6 @@ test/features/observe/ios/IosSdkScreenIdentity.test.ts
 test/features/observe/ios/cleanupIosHierarchy.test.ts
 test/features/observe/ios/ctrlProxyHierarchyStaleFallback.test.ts
 test/features/observe/ios/ctrlProxyReadOnlyBackoff.test.ts
-test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts
 test/features/observe/ios/ctrlProxyWireScan.test.ts
 test/features/observe/ios/decodeCtrlProxyMessage.test.ts
 test/features/observe/ios/decodeSdkEventBatches.test.ts

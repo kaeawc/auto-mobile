@@ -376,7 +376,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "PooledDevice LRU order seeded for a newly discovered device, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.assignDeviceToBoundSession": {
+  "src/daemon/explicitDeviceBind.ts ExplicitDeviceBind.assignDeviceToBoundSession": {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },
@@ -384,15 +384,15 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.adoptSystemUiAnrReplacement": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.adoptSystemUiAnrReplacement": {
     writes: 1,
     reason: "PooledDevice LRU order carried to a SystemUI-ANR replacement device.",
   },
-  "src/daemon/devicePool.ts DevicePool.replaceStoppedDeviceForSystemUiAnr": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.replaceStoppedDeviceForSystemUiAnr": {
     writes: 1,
     reason: "PooledDevice LRU order carried to a SystemUI-ANR replacement device.",
   },
-  "src/daemon/devicePool.ts DevicePool.restoreSystemUiAnrRecoverySession": {
+  "src/daemon/deviceReplacement.ts DeviceReplacement.restoreSystemUiAnrRecoverySession": {
     writes: 1,
     reason: "PooledDevice LRU order on SystemUI-ANR recovery.",
   },

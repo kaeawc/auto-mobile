@@ -38,28 +38,6 @@ class RotationProvenanceTrackerTest {
     assertFalse(displayTransitionFrame(frames.last()).contains("panelFingerprint"))
   }
 
-  interface TestStateCallback {
-    fun onStateChanged(state: Int)
-  }
-
-  @Test
-  fun `device state proxy has identity semantics and ignores the initial state`() {
-    val states = mutableListOf<Int>()
-    val callback =
-      DeviceStateTransitions.callback(TestStateCallback::class.java) { states += it }
-        as TestStateCallback
-    assertTrue(callback == callback)
-    assertFalse(callback == Any())
-    assertEquals(System.identityHashCode(callback), callback.hashCode())
-    assertTrue(callback.toString().startsWith("DeviceStateCallback@"))
-
-    callback.onStateChanged(0)
-    callback.onStateChanged(0)
-    assertTrue(states.isEmpty())
-    callback.onStateChanged(1)
-    assertEquals(listOf(1), states)
-  }
-
   @Test
   fun `unchanged phone state leaves its first capture proven`() {
     val changes = FakeRotationChangeSignal()

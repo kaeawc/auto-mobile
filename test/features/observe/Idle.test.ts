@@ -39,6 +39,19 @@ describe("Idle - Unit Tests", function () {
     ).not.toHaveProperty("noFrameData");
   });
 
+  test("failed gfxinfo read marks frame stats unavailable", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("dumpsys gfxinfo", new Error("read failed"));
+    const subject = new Idle(
+      { deviceId: "d", name: "d", platform: "android" },
+      new FakeAdbClientFactory(adb),
+      new FakeTimer(),
+    );
+    const result = await subject.getUiStability("com.example.app", null, null, null, null, false);
+    expect(result).toHaveProperty("frameStatsUnavailable", true);
+    expect(result).not.toHaveProperty("noFrameData");
+  });
+
   describe("getTouchStatus", function () {
     // Inject FakeTimer so the read of "now" is deterministic and the boundary
     // between `>=` (isIdle) and `<` (hard limit) is pinned. The previous version

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   Exec,
   GitTreeProbe,
@@ -31,7 +32,7 @@ describe("git tree probe", () => {
     expect(calls).toHaveLength(2);
   });
   test("selects jj-only workspaces and reports unsupported tree hashing", async () => {
-    expect(selectVcs((path) => path === "/repo/.jj", "/repo")).toBe("jj");
+    expect(selectVcs((path) => path === join("/repo", ".jj"), "/repo")).toBe("jj");
     const probe = new GitTreeProbe(
       "jj",
       async (_cmd, args) => ({

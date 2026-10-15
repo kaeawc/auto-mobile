@@ -53,7 +53,7 @@ attestation_head=""
 if [[ -e "${ROOT}/.git" ]]; then
   attestation_head="$(git -C "${ROOT}" rev-parse HEAD 2>/dev/null || true)"
 elif [[ -d "${ROOT}/.jj" ]]; then
-  attestation_head="$(cd "${ROOT}" && jj log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+  attestation_head="$(jj -R "${ROOT}" log -r @- --no-graph -T commit_id 2>/dev/null || true)"
 fi
 # Failure to capture initial cleanliness must suppress the attestation.
 attestation_start="$(bun "${ROOT}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane node 2>/dev/null || true)"
@@ -215,4 +215,4 @@ for index in "${!gate_names[@]}"; do
   result="$(printf '%s' "${gate_results[$index]}" | tr '[:upper:]' '[:lower:]')"
   attestation_args+=("${gate_names[$index]}=${result}:${gate_seconds[$index]}")
 done
-"${PREPUSH_ATTESTATION_RECORDER:-$ROOT/scripts/ci/record-attestations.sh}" node "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "${attestation_args[@]}" || true
+"${PREPUSH_ATTESTATION_RECORDER:-$ROOT/scripts/ci/record-attestations.sh}" node "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" ${attestation_args[@]+"${attestation_args[@]}"} || true

@@ -1,6 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.accessibilityservice.AccessibilityService
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FakePrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FakePrototypeTimer
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
@@ -9,6 +15,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
@@ -17,17 +24,36 @@ import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.embeddedServer
+import io.ktor.websocket.CloseReason
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.BeforeClass
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers
 
 /**
  * Verifies that [CtrlProxyMessageHandler] decodes each wire message into the correct sealed
@@ -67,6 +93,18 @@ class CtrlProxyMessageHandlerTest {
 
   private suspend fun dispatch(message: String) {
     handler.handleMessage(json.decodeFromString<WebSocketRequest>(message))
+  }
+
+  private suspend fun assertOverloadDispatch(
+    message: String,
+    expected: Pair<String, List<Any?>>,
+  ) {
+    val overloads = RecordingCtrlProxyOverloads()
+    val result =
+      CtrlProxyMessageHandler(overloads, sdkInt = { 30 })
+        .handleMessage(json.decodeFromString<WebSocketRequest>(message))
+    assertNull(result)
+    assertEquals(listOf(expected), overloads.calls)
   }
 
   /** Dispatch and return the synchronous response (non-null only for the guard/error paths). */
@@ -116,6 +154,24 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `hierarchy dispatch preserves nullable limits and display in the full overload`() = runTest {
+    for (maxDepth in listOf(null, 0)) {
+      for (maxNodes in listOf(null, 37)) {
+        for (displayId in listOf(null, 2)) {
+          assertOverloadDispatch(
+            """{"type":"request_hierarchy","requestId":"hierarchy","disableAllFiltering":true,"maxDepth":$maxDepth,"maxNodes":$maxNodes,"displayId":$displayId}""",
+            "requestHierarchy" to listOf<Any?>(true, maxDepth, maxNodes, displayId, "hierarchy"),
+          )
+        }
+      }
+    }
+    assertOverloadDispatch(
+      """{"type":"request_hierarchy"}""",
+      "requestHierarchy" to listOf<Any?>(false, null, null, null, null),
+    )
+  }
+
+  @Test
   fun `dispatches request_hierarchy_if_stale`() = runTest {
     dispatch("""{"type":"request_hierarchy_if_stale","requestId":"h2","sinceTimestamp":12345}""")
     assertEquals("requestHierarchyIfStale" to listOf<Any?>(12345L, "h2"), lastCall)
@@ -148,6 +204,25 @@ class CtrlProxyMessageHandlerTest {
       assertEquals("requestScreenshot" to listOf<Any?>("s2", 3, true), lastCall)
     }
 
+  @Test
+  fun `screenshot dispatch selects the hide overload only when requested`() = runTest {
+    for (displayId in listOf(null, 3)) {
+      for (hidePrototypes in listOf(false, true)) {
+        val expected =
+          if (hidePrototypes) listOf<Any?>("screenshot", displayId, true)
+          else listOf<Any?>("screenshot", displayId)
+        assertOverloadDispatch(
+          """{"type":"request_screenshot","requestId":"screenshot","displayId":$displayId,"hidePrototypes":$hidePrototypes}""",
+          "requestScreenshot" to expected,
+        )
+      }
+    }
+    assertOverloadDispatch(
+      """{"type":"request_screenshot"}""",
+      "requestScreenshot" to listOf<Any?>(null, null),
+    )
+  }
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------
@@ -159,6 +234,28 @@ class CtrlProxyMessageHandlerTest {
     )
     // Coordinates dispatch as Double (#2927); integer JSON decodes to identical .0 values.
     assertEquals("requestSwipe" to listOf<Any?>("sw1", 0.0, 100.0, 0.0, 500.0, 400L), lastCall)
+  }
+
+  @Test
+  fun `swipe dispatch preserves frame and display in the full overload`() = runTest {
+    for (frame in listOf("null", "\"frame-swipe\"")) {
+      for (displayId in listOf(null, 0, 2)) {
+        assertOverloadDispatch(
+          """{"type":"request_swipe","requestId":"swipe","x1":1.25,"y1":2.5,"x2":3.75,"y2":4.125,"duration":417,"frameContext":$frame,"displayId":$displayId}""",
+          "requestSwipe" to
+            listOf<Any?>(
+              "swipe",
+              1.25,
+              2.5,
+              3.75,
+              4.125,
+              417L,
+              if (frame == "null") null else "frame-swipe",
+              displayId,
+            ),
+        )
+      }
+    }
   }
 
   @Test
@@ -181,6 +278,25 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `tap dispatch selects single or double tap preserving frame and display`() = runTest {
+    for (frame in listOf("null", "\"frame-tap\"")) {
+      for (displayId in listOf(null, 0, 2)) {
+        for (doubleTap in listOf(false, true)) {
+          val context = if (frame == "null") null else "frame-tap"
+          val expected =
+            if (doubleTap)
+              "requestDoubleTapCoordinates" to listOf<Any?>("tap", 1.25, 2.5, context, displayId)
+            else "requestTapCoordinates" to listOf<Any?>("tap", 1.25, 2.5, 73L, context, displayId)
+          assertOverloadDispatch(
+            """{"type":"request_tap_coordinates","requestId":"tap","x":1.25,"y":2.5,"duration":73,"frameContext":$frame,"displayId":$displayId,"doubleTap":$doubleTap}""",
+            expected,
+          )
+        }
+      }
+    }
+  }
+
+  @Test
   fun `dispatches request_two_finger_swipe`() = runTest {
     dispatch(
       """{"type":"request_two_finger_swipe","requestId":"tf1","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":50}""",
@@ -190,6 +306,16 @@ class CtrlProxyMessageHandlerTest {
       "requestTwoFingerSwipe" to listOf<Any?>("tf1", 0.0, 0.0, 10.0, 20.0, 300L, 50),
       lastCall,
     )
+  }
+
+  @Test
+  fun `two finger swipe dispatch preserves offset and nullable display`() = runTest {
+    for (displayId in listOf(null, 0, 2)) {
+      assertOverloadDispatch(
+        """{"type":"request_two_finger_swipe","requestId":"two","x1":1.25,"y1":2.5,"x2":3.75,"y2":4.125,"duration":417,"offset":23,"displayId":$displayId}""",
+        "requestTwoFingerSwipe" to listOf<Any?>("two", 1.25, 2.5, 3.75, 4.125, 417L, 23, displayId),
+      )
+    }
   }
 
   @Test
@@ -203,6 +329,50 @@ class CtrlProxyMessageHandlerTest {
       lastCall,
     )
   }
+
+  @Test
+  fun `drag dispatch resolves each legacy duration independently and preserves routing`() =
+    runTest {
+      val durations =
+        listOf(
+          Triple("", 600L, 300L),
+          Triple(",\"holdTime\":810,\"duration\":510", 810L, 510L),
+          Triple(
+            ",\"pressDurationMs\":600,\"dragDurationMs\":300,\"holdTime\":810,\"duration\":510",
+            810L,
+            510L,
+          ),
+          Triple(
+            ",\"pressDurationMs\":71,\"dragDurationMs\":83,\"holdTime\":810,\"duration\":510",
+            71L,
+            83L,
+          ),
+          Triple(",\"pressDurationMs\":71,\"holdTime\":810,\"duration\":510", 71L, 510L),
+          Triple(",\"dragDurationMs\":83,\"holdTime\":810,\"duration\":510", 810L, 83L),
+        )
+      for ((fields, press, drag) in durations) {
+        for (frame in listOf("null", "\"frame-drag\"")) {
+          for (displayId in listOf(null, 2)) {
+            assertOverloadDispatch(
+              """{"type":"request_drag","requestId":"drag","x1":1.25,"y1":2.5,"x2":3.75,"y2":4.125,"holdDurationMs":19,"frameContext":$frame,"displayId":$displayId$fields}""",
+              "requestDrag" to
+                listOf<Any?>(
+                  "drag",
+                  1.25,
+                  2.5,
+                  3.75,
+                  4.125,
+                  press,
+                  drag,
+                  19L,
+                  if (frame == "null") null else "frame-drag",
+                  displayId,
+                ),
+            )
+          }
+        }
+      }
+    }
 
   @Test
   fun `dispatches request_pinch`() = runTest {
@@ -237,6 +407,26 @@ class CtrlProxyMessageHandlerTest {
       "requestSwipe" to listOf<Any?>("sw-frac", 0.5, 100.25, 10.75, 500.125, 400L),
       lastCall,
     )
+  }
+
+  @Test
+  fun `pinch dispatch preserves rotation duration and nullable display`() = runTest {
+    for (displayId in listOf(null, 0, 2)) {
+      assertOverloadDispatch(
+        """{"type":"request_pinch","requestId":"pinch","centerX":1.25,"centerY":2.5,"distanceStart":3.75,"distanceEnd":4.125,"rotationDegrees":27.5,"duration":417,"displayId":$displayId}""",
+        "requestPinch" to listOf<Any?>("pinch", 1.25, 2.5, 3.75, 4.125, 27.5f, 417L, displayId),
+      )
+    }
+  }
+
+  @Test
+  fun `gesture start dispatch preserves stream id coordinates and nullable display`() = runTest {
+    for (displayId in listOf(null, 0, 2)) {
+      assertOverloadDispatch(
+        """{"type":"request_gesture_start","requestId":"start","gestureId":"stream","x":1.25,"y":2.5,"displayId":$displayId}""",
+        "requestGestureStart" to listOf<Any?>("start", "stream", 1.25, 2.5, displayId),
+      )
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -292,6 +482,29 @@ class CtrlProxyMessageHandlerTest {
     assertGuarded(response, "x")
     assertTrue(response is TapCoordinatesResult)
     assertEquals("t", (response as TapCoordinatesResult).requestId)
+  }
+
+  @Test
+  fun `gesture start rejects each non finite coordinate without dispatch`() = runTest {
+    for ((field, x, y) in
+      listOf(Triple("x", Double.NaN, 2.0), Triple("y", 1.0, Double.POSITIVE_INFINITY))) {
+      val response = handler.handleMessage(RequestGestureStart("start-guard", "stream", x, y))
+      assertGuarded(response, field)
+      assertTrue(response is SwipeResult)
+      assertEquals("start-guard", (response as SwipeResult).requestId)
+    }
+  }
+
+  @Test
+  fun `double tap rejects each non finite coordinate without dispatch`() = runTest {
+    for ((field, x, y) in
+      listOf(Triple("x", Double.NaN, 2.0), Triple("y", 1.0, Double.POSITIVE_INFINITY))) {
+      val response =
+        handler.handleMessage(RequestTapCoordinates("double-guard", x, y, doubleTap = true))
+      assertGuarded(response, field)
+      assertTrue(response is TapCoordinatesResult)
+      assertEquals("double-guard", (response as TapCoordinatesResult).requestId)
+    }
   }
 
   @Test
@@ -503,6 +716,14 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `framed set text dispatch preserves resource and keyboard arguments`() = runTest {
+    assertOverloadDispatch(
+      """{"type":"request_set_text","requestId":"framed-text","text":"Hello","resourceId":"field","dismissKeyboard":true,"frameContext":"frame-text"}""",
+      "requestSetText" to listOf<Any?>("framed-text", "Hello", "field", true, "frame-text"),
+    )
+  }
+
+  @Test
   fun `request_insert_text with expectedSuffix routes the capability call`() = runTest {
     dispatch("""{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}""")
     assertEquals("requestInsertText" to listOf<Any?>("id", "t", "ab", false, null), lastCall)
@@ -520,6 +741,21 @@ class CtrlProxyMessageHandlerTest {
   fun `dispatches request_insert_text`() = runTest {
     dispatch("""{"type":"request_insert_text","requestId":"txt2","text":" world"}""")
     assertEquals("requestInsertText" to listOf<Any?>("txt2", " world", null, false, null), lastCall)
+  }
+
+  @Test
+  fun `insert text dispatch preserves all capability arguments together`() = runTest {
+    assertOverloadDispatch(
+      """{"type":"request_insert_text","requestId":"insert","text":"😀","expectedSuffix":"x","acceptsCaretNotPlaced":true,"precedingState":{"text":"éx","isShowingHintText":true,"selectionStart":1,"selectionEnd":2}}""",
+      "requestInsertText" to
+        listOf<Any?>(
+          "insert",
+          "😀",
+          "x",
+          true,
+          dev.jasonpearson.automobile.protocol.InsertTextState("éx", true, 1, 2),
+        ),
+    )
   }
 
   @Test
@@ -561,6 +797,30 @@ class CtrlProxyMessageHandlerTest {
       "requestCommitText" to
         listOf<Any?>("commit-3", "abc", null, ImeTextDelivery.KEY_EVENTS, 9_000L),
       lastCall,
+    )
+  }
+
+  @Test
+  fun `commit text dispatch preserves delivery budget prior IME and trace together`() = runTest {
+    for ((wireDelivery, delivery) in
+      listOf(
+        "commit" to ImeTextDelivery.COMMIT,
+        "keyEvents" to ImeTextDelivery.KEY_EVENTS,
+        "clearField" to ImeTextDelivery.CLEAR_FIELD,
+      )) {
+      for (timeout in listOf(null, 9000L)) {
+        for (trace in listOf(false, true)) {
+          assertOverloadDispatch(
+            """{"type":"request_commit_text","requestId":"commit","text":"value","priorImeId":"prior/ime","delivery":"$wireDelivery","timeoutMs":$timeout,"trace":$trace}""",
+            "requestCommitText" to
+              listOf<Any?>("commit", "value", "prior/ime", delivery, timeout, trace),
+          )
+        }
+      }
+    }
+    assertOverloadDispatch(
+      """{"type":"request_commit_text","text":"value"}""",
+      "requestCommitText" to listOf<Any?>(null, "value", null, ImeTextDelivery.COMMIT, null, false),
     )
   }
 
@@ -1360,4 +1620,234 @@ class CtrlProxyMessageHandlerTest {
     assertFalse(result.success)
     assertEquals("render failed", result.error)
   }
+}
+
+/** Service-level differences that the Android-free dispatch recorder cannot observe. */
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
+class CtrlProxyActionOverloadServiceTest {
+  private lateinit var fixture: CtrlProxyGestureServiceFixture
+  private val json = Json { ignoreUnknownKeys = true }
+
+  @Before
+  fun setUp() {
+    fixture = CtrlProxyGestureServiceFixture()
+  }
+
+  @After
+  fun tearDown() {
+    fixture.close()
+  }
+
+  private class RecordingTransport : WebSocketServer.ClientTransport {
+    val messages = mutableListOf<String>()
+
+    override suspend fun send(message: String) {
+      messages.add(message)
+    }
+
+    override suspend fun close(reason: CloseReason) = Unit
+  }
+
+  private fun recordResults(scope: CoroutineScope): List<String> {
+    ReflectionHelpers.getField<CoroutineScope>(fixture.service, "serviceScope").cancel()
+    ReflectionHelpers.setField(fixture.service, "serviceScope", scope)
+    val server = WebSocketServer(scope = scope)
+    // Like CtrlProxyHierarchyRequestTest: mark running with an unstarted engine. No listener,
+    // connection, logcat, or device is started; results go only to the in-memory transport.
+    ReflectionHelpers.setField(server, "server", embeddedServer(CIO, port = 0) {})
+    ReflectionHelpers.setField(fixture.service, "webSocketServer", server)
+    // The original runner captured the scope which the gesture fixture cancelled at construction.
+    ReflectionHelpers.setField(
+      fixture.service,
+      "asyncActionRunner",
+      AsyncActionRunner(scope, broadcastResponse = { server.broadcast(it) }),
+    )
+    val transport = RecordingTransport()
+    server.registerClient(1, transport)
+    return transport.messages
+  }
+
+  private fun resultSince(messages: List<String>, before: Int, type: String): JsonObject {
+    val result = json.parseToJsonElement(messages.drop(before).single()).jsonObject
+    assertEquals(type, result["type"]?.jsonPrimitive?.content)
+    return result
+  }
+
+  @Test
+  fun `set text legacy and fresh overloads clear caret but stale frame preserves it`() = runTest {
+    val messages = recordResults(backgroundScope)
+    val fresh = fixture.freshFrameContext()
+    for (mode in listOf("legacy", "null", "fresh", "stale")) {
+      val before = messages.size
+      val caret = fixture.seedCaret()
+      when (mode) {
+        "legacy" -> fixture.actions.requestSetText(null, "value", null, false)
+        "null" -> fixture.actions.requestSetText(null, "value", null, false, null)
+        "fresh" -> fixture.actions.requestSetText(null, "value", null, false, fresh)
+        else -> fixture.actions.requestSetText(null, "value", null, false, "$fresh:stale")
+      }
+      if (mode == "stale") assertSame(caret, fixture.rememberedCaret())
+      else assertNull(fixture.rememberedCaret())
+      runCurrent()
+      val result = resultSince(messages, before, "set_text_result")
+      assertEquals(false, result["success"]?.jsonPrimitive?.boolean)
+      assertEquals(
+        if (mode == "stale")
+          "Stale frame context for input/set_text; observe a fresh frame before retrying"
+        else "No focused editable node found",
+        result["error"]?.jsonPrimitive?.content,
+      )
+    }
+  }
+
+  @Test
+  fun `IME action legacy and fresh overloads clear caret but stale frame preserves it`() = runTest {
+    val messages = recordResults(backgroundScope)
+    val fresh = fixture.freshFrameContext()
+    for (mode in listOf("legacy", "null", "fresh", "stale")) {
+      val before = messages.size
+      val caret = fixture.seedCaret()
+      when (mode) {
+        "legacy" -> fixture.actions.requestImeAction(null, "search")
+        "null" -> fixture.actions.requestImeAction(null, "search", null)
+        "fresh" -> fixture.actions.requestImeAction(null, "search", fresh)
+        else -> fixture.actions.requestImeAction(null, "search", "$fresh:stale")
+      }
+      if (mode == "stale") assertSame(caret, fixture.rememberedCaret())
+      else assertNull(fixture.rememberedCaret())
+      runCurrent()
+      val result = resultSince(messages, before, "ime_action_result")
+      assertEquals(false, result["success"]?.jsonPrimitive?.boolean)
+      // The rejection echoes the family name; normal execution echoes the requested IME action.
+      assertEquals(
+        if (mode == "stale") "ime_action" else "search",
+        result["action"]?.jsonPrimitive?.content,
+      )
+      assertEquals(
+        if (mode == "stale")
+          "Stale frame context for input/ime_action; observe a fresh frame before retrying"
+        else "No focused editable node found for IME action",
+        result["error"]?.jsonPrimitive?.content,
+      )
+    }
+  }
+
+  @Test
+  fun `global action legacy and fresh overloads clear caret but stale frame preserves it`() =
+    runTest {
+      val messages = recordResults(backgroundScope)
+      val fresh = fixture.freshFrameContext()
+      for (mode in listOf("legacy", "null", "fresh", "stale")) {
+        val before = messages.size
+        val globalActionsBefore = fixture.shadow.globalActionsPerformed.size
+        val caret = fixture.seedCaret()
+        when (mode) {
+          "legacy" -> fixture.actions.requestGlobalAction(null, "back")
+          "null" -> fixture.actions.requestGlobalAction(null, "back", null)
+          "fresh" -> fixture.actions.requestGlobalAction(null, "back", fresh)
+          else -> fixture.actions.requestGlobalAction(null, "back", "$fresh:stale")
+        }
+        if (mode == "stale") assertSame(caret, fixture.rememberedCaret())
+        else assertNull(fixture.rememberedCaret())
+        assertEquals(
+          if (mode == "stale") emptyList<Int>()
+          else listOf(AccessibilityService.GLOBAL_ACTION_BACK),
+          fixture.shadow.globalActionsPerformed.drop(globalActionsBefore),
+        )
+        runCurrent()
+        val result = resultSince(messages, before, "global_action_result")
+        assertEquals(
+          if (mode == "stale") "global_action" else "back",
+          result["action"]?.jsonPrimitive?.content,
+        )
+        if (mode == "stale") {
+          assertEquals(false, result["success"]?.jsonPrimitive?.boolean)
+          assertEquals(
+            "Stale frame context for input/global_action; observe a fresh frame before retrying",
+            result["error"]?.jsonPrimitive?.content,
+          )
+        }
+      }
+    }
+
+  @Test
+  @Config(sdk = [29])
+  fun `screenshot overloads preserve display and default to leaving prototypes visible`() =
+    runTest {
+      val messages = recordResults(backgroundScope)
+      val host = FakePrototypeHost()
+      ReflectionHelpers.setField(
+        fixture.service,
+        "prototypeController",
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, _, _ -> error("Screenshot must not mutate prototype state") },
+          lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        ),
+      )
+      // API 29 returns the unsupported-capture failure before Dispatchers.IO or the platform API.
+      // The real broadcast path still selects the display and enters the host's hide/restore path.
+      fixture.actions.requestScreenshot(null)
+      runCurrent()
+      var result = resultSince(messages, 0, "screenshot_error")
+      assertEquals(0, result["displayId"]?.jsonPrimitive?.int)
+      assertEquals(CtrlProxyScreenshotWire.GENERIC_ERROR, result["error"]?.jsonPrimitive?.content)
+      assertTrue(host.calls.isEmpty())
+      for (displayId in listOf(null, 0, 2)) {
+        for (hide in listOf(null, false, true)) {
+          val before = messages.size
+          val hostCallsBefore = host.calls.size
+          if (hide == null) fixture.actions.requestScreenshot(null, displayId)
+          else fixture.actions.requestScreenshot(null, displayId, hide)
+          runCurrent()
+          result = resultSince(messages, before, "screenshot_error")
+          assertEquals(displayId ?: 0, result["displayId"]?.jsonPrimitive?.int)
+          assertEquals(
+            CtrlProxyScreenshotWire.GENERIC_ERROR,
+            result["error"]?.jsonPrimitive?.content,
+          )
+          assertEquals(
+            if (hide == true) listOf("hideForCapture") else emptyList<String>(),
+            host.calls.drop(hostCallsBefore),
+          )
+          assertFalse(host.captureHidden)
+        }
+      }
+    }
+
+  @Test
+  fun `hierarchy overload resolves defaults independently and forwards explicit limits and display`() =
+    runTest {
+      val options = mutableListOf<Pair<Boolean, Triple<Int, Int, Int?>>>()
+      ReflectionHelpers.setField(
+        fixture.service,
+        "hierarchyDebouncer",
+        HierarchyDebouncer(
+          scope = backgroundScope,
+          extractHierarchy = { disableAllFiltering, snapshot ->
+            options.add(
+              disableAllFiltering to
+                Triple(snapshot.maxDepth, snapshot.maxNodes, snapshot.displayId),
+            )
+            null
+          },
+        ),
+      )
+      fixture.actions.requestHierarchy(true, null)
+      assertEquals(listOf(true to Triple<Int, Int, Int?>(100, 10_000, null)), options)
+      for (maxDepth in listOf(null, 0)) {
+        for (maxNodes in listOf(null, 37)) {
+          for (displayId in listOf(null, 2)) {
+            val before = options.size
+            fixture.actions.requestHierarchy(false, maxDepth, maxNodes, displayId, null)
+            assertEquals(
+              listOf(false to Triple(maxDepth ?: 100, maxNodes ?: 10_000, displayId)),
+              options.drop(before),
+            )
+          }
+        }
+      }
+    }
 }

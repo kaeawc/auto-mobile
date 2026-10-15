@@ -6,6 +6,128 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import kotlinx.serialization.json.JsonArray
 
 /**
+ * Records the handler's full overloads before interface defaults can drop newer arguments. The
+ * legacy recorder stays unchanged so its existing delegation tests still cover those defaults.
+ */
+class RecordingCtrlProxyOverloads(
+  private val delegate: RecordingCtrlProxyActions = RecordingCtrlProxyActions(),
+) : CtrlProxyActions by delegate {
+  val calls: MutableList<Pair<String, List<Any?>>>
+    get() = delegate.calls
+
+  private fun record(name: String, vararg args: Any?) {
+    calls.add(name to args.toList())
+  }
+
+  override suspend fun requestHierarchy(
+    disableAllFiltering: Boolean,
+    maxDepth: Int?,
+    maxNodes: Int?,
+    displayId: Int?,
+    requestId: String?,
+  ) = record("requestHierarchy", disableAllFiltering, maxDepth, maxNodes, displayId, requestId)
+
+  override fun requestScreenshot(requestId: String?, displayId: Int?) =
+    record("requestScreenshot", requestId, displayId)
+
+  override fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+
+  override fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) = record("requestTapCoordinates", requestId, x, y, duration, frameContext, displayId)
+
+  override fun requestTwoFingerSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    offset: Int,
+    displayId: Int?,
+  ) = record("requestTwoFingerSwipe", requestId, x1, y1, x2, y2, duration, offset, displayId)
+
+  override fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) =
+    record(
+      "requestDrag",
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      frameContext,
+      displayId,
+    )
+
+  override fun requestPinch(
+    requestId: String?,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
+    rotationDegrees: Float,
+    duration: Long,
+    displayId: Int?,
+  ) =
+    record(
+      "requestPinch",
+      requestId,
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      displayId,
+    )
+
+  override fun requestGestureStart(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    displayId: Int?,
+  ) = record("requestGestureStart", requestId, gestureId, x, y, displayId)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
+    timeoutMs: Long?,
+    trace: Boolean,
+  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs, trace)
+}
+
+/**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */

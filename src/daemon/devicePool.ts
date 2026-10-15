@@ -6718,9 +6718,10 @@ export class DevicePool {
   }
 
   /**
-   * Snapshot only the facts a consumer used before #11803. Early returns retain the old probe
-   * order: generic allocation never reads observation recovery targets, and held inventory
-   * never probes transport/health. Calls stay on this instance so injected test seams still work.
+   * Snapshot only the facts the named `consumer` read before #11803, then classify them with
+   * `deviceHold`. Each consumer keeps its old probe set and order: generic allocation never reads
+   * observation recovery targets, and held inventory never probes transport/health. Probes are
+   * called on this instance so injected test seams still work.
    */
   private holdFactsFor(
     device: PooledDevice,

@@ -84,6 +84,62 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     return await persistence.getSession?.(SESSION);
   }
 
+  test("activity sequence accepts a backward wall step and rejects a delayed older write", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record({ activitySeq: 1_000 }));
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 500,
+        activitySeq: 2_000,
+        expiresAtMs: 60_500,
+        livenessPolicy: "managed-execution",
+      }),
+    );
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 3_000,
+        activitySeq: 1_500,
+        expiresAtMs: 63_000,
+      }),
+    );
+    expect(await rowOf(persistence)).toMatchObject({
+      activity_seq: 2_000,
+      last_used_at_ms: 500,
+      expires_at_ms: 60_500,
+      liveness_policy: "managed-execution",
+    });
+    // Strict >: a policy rewrite at the same activity instant still applies.
+    await persistence.recordActivity(
+      SESSION,
+      record({
+        lastUsedAtMs: 500,
+        activitySeq: 2_000,
+        expiresAtMs: 70_500,
+      }),
+    );
+    expect(await rowOf(persistence)).toMatchObject({
+      expires_at_ms: 70_500,
+      liveness_policy: null,
+    });
+  });
+
+  test("omitted sequences use lastUsedAtMs and an upsert resets the daemon-local sequence", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record());
+    await persistence.recordActivity(SESSION, record({ lastUsedAtMs: 2_000 }));
+    await persistence.recordActivity(SESSION, record({ lastUsedAtMs: 1_500, expiresAtMs: 1_501 }));
+    expect(await rowOf(persistence)).toMatchObject({
+      activity_seq: 2_000,
+      last_used_at_ms: 2_000,
+      expires_at_ms: 5_000,
+    });
+    await persistence.upsertActiveSession(record({ activitySeq: 1 }));
+    await persistence.recordActivity(SESSION, record({ activitySeq: 2, lastUsedAtMs: 500 }));
+    expect(await rowOf(persistence)).toMatchObject({ activity_seq: 2, last_used_at_ms: 500 });
+  });
+
   test.each(["managed-execution", "heartbeat"])(
     "expired idle deadline recovery for %s",
     async (policy) => {

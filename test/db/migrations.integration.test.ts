@@ -90,6 +90,7 @@ describe("full migration chain", () => {
       "daemon_session_id",
       "created_at_ms",
       "last_used_at_ms",
+      "activity_seq",
       "expires_at_ms",
       "released_at_ms",
       "release_reason",

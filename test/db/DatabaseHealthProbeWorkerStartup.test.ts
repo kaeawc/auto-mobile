@@ -89,6 +89,44 @@ test("1500ms cold start succeeds and three warm daemon ticks reuse one worker", 
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
+test("clean exit after a successful check starts a fresh worker without a timeout", async () => {
+  const { timer, workers, probe } = setup();
+  const first = observe(probe.check());
+  workers[0]!.message({ type: "ready" });
+  expect(await first.result).toBeUndefined();
+  workers[0]!.answerImmediately = false;
+  workers[0]!.emit("exit", 0);
+
+  const next = observe(probe.check());
+  expect(workers).toHaveLength(2);
+  expect(workers[1]!.requests).toHaveLength(0);
+  workers[1]!.message({ type: "ready" });
+  expect(await next.result).toBeUndefined();
+  expect(workers[0]!.requests).toHaveLength(1);
+  expect(timer.now()).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("clean exit while a request is pending rejects without a timeout", async () => {
+  const { timer, workers, probe } = setup();
+  const check = observe(probe.check());
+  workers[0]!.answerImmediately = false;
+  workers[0]!.message({ type: "ready" });
+  await drainUntilQuiescent(timer);
+  expect(workers[0]!.requests).toHaveLength(1);
+  expect(check.settled).toBe(false);
+
+  workers[0]!.emit("exit", 0);
+  await drainUntilQuiescent(timer);
+  expect(check.settled).toBe(true);
+  const error = await check.result;
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).toMatchObject({ message: "Database health probe worker exited with code 0" });
+  expect(timer.now()).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
 test("never-ready worker uses the default 10000ms init budget and is replaced", async () => {
   const { timer, workers, probe } = setup();
   const first = observe(probe.check());

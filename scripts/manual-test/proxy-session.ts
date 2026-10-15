@@ -1110,7 +1110,7 @@ export async function runProxySessionCommand(
     return 2;
   }
 }
-function realDeps(): ProxySessionDeps {
+export function createProxySessionDeps(): ProxySessionDeps {
   const writeJson = (path: string, value: unknown): void => {
     const tmp = `${path}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
@@ -1281,7 +1281,7 @@ export async function main(): Promise<number> {
     console.log(parsed.help);
     return 0;
   }
-  return runProxySessionCommand(parsed, realDeps());
+  return runProxySessionCommand(parsed, createProxySessionDeps());
 }
 if (import.meta.main) {
   process.exitCode = await main();

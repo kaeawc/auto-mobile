@@ -902,8 +902,11 @@ export async function main(): Promise<number> {
     console.log(parsed.help);
     return 0;
   }
+  return runPrivateDaemonCommand(parsed, await createPrivateDaemonDeps());
+}
+export async function createPrivateDaemonDeps(): Promise<PrivateDaemonCliDeps> {
   const { connectFrameSocket, connectWithDeadline, FrameRpc } = await import("./daemon-frame");
-  return runPrivateDaemonCommand(parsed, {
+  return {
     timer: defaultTimer,
     hostStats: () => ({
       platform: platform(),
@@ -1036,7 +1039,7 @@ export async function main(): Promise<number> {
     },
     log: console.log,
     env: harnessChildEnvironment(process.env),
-  });
+  };
 }
 if (import.meta.main) {
   process.exitCode = await main();

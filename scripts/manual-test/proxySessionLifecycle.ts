@@ -92,14 +92,27 @@ export async function closeBrokerSession(
     throw new Error("Broker daemon client unavailable; cannot confirm release.");
   }
   const { config, token } = readBrokerIdentity(context, deps);
+  const init = z
+    .object({
+      session: z.object({
+        outcome: z.string(),
+        sessionUuid: z.string().nullable(),
+      }),
+    })
+    .parse(JSON.parse(deps.readFile(join(context.dir, "init.json"))));
+  const refused = init.session.outcome === "failed" && init.session.sessionUuid === null;
   const release = await waitForBrokerRelease({
     client,
     requestId: config.requestId,
     token,
     timer: deps.timer,
-    requireReleased: true,
+    requireReleased: !refused,
   });
-  if (release.sessionUuid !== grantedSession(context, deps)) {
+  if (
+    refused
+      ? release.outcome !== "failed" || release.sessionUuid !== null
+      : release.sessionUuid !== grantedSession(context, deps)
+  ) {
     throw new Error("Close release status session mismatch.");
   }
   const path = join(context.dir, "closed.json");
@@ -119,7 +132,9 @@ export async function closeBrokerSession(
   );
   const closed = z.record(z.unknown()).parse(JSON.parse(deps.readFile(path)));
   deps.writeJson(path, { ...closed, release });
-  recordBrokerRelease(context, deps);
+  if (!refused) {
+    recordBrokerRelease(context, deps);
+  }
 }
 export async function runBrokerLifecycle(
   command: ProxySessionCommand,

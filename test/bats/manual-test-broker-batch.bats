@@ -95,7 +95,7 @@ plan() {
   [ ! -e "${BATCH}" ]
 }
 
-@test "broker wrappers target the future orchestrator and bind to daemon 1" {
+@test "broker wrappers target the orchestrator and bind to daemon 1" {
   run plan
   [ "${status}" -eq 0 ]
   PLAN="${output}" bun -e '
@@ -107,5 +107,14 @@ plan() {
       if (!file.content.includes("\"$@\"")) throw new Error("lost wrapper argv");
     }
   '
+  [ ! -e "${BATCH}" ]
+}
+
+@test "broker-batch help works under Bun without a daemon or batch" {
+  unset MT_BATCH
+  run bun "${BATS_TEST_DIRNAME}/../../scripts/manual-test/broker-batch.ts" --help
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'broker<N> up'* ]]
+  [[ "${output}" == *'status | down | report'* ]]
   [ ! -e "${BATCH}" ]
 }

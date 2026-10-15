@@ -1363,3 +1363,21 @@ posixTest(
     expect(f.writes.length).toBe(before);
   },
 );
+
+posixTest("broker close joins a terminal refusal without inventing a device release", async () => {
+  const f = brokerFixture("failed");
+  expect(await f.up(["--expect", "failed:capacity_exhausted"])).toBe(0);
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.statusResults = [{ ...f.session, cleanupPending: true }, f.session];
+  f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+  const closing = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  await drainUntilQuiescent(f.timer);
+  expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).not.toHaveProperty("release");
+  f.timer.advanceTime(250);
+  expect(await closing).toBe(0);
+  expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).toMatchObject({
+    release: { outcome: "failed", sessionUuid: null, cleanupPending: false },
+  });
+  expect(f.files.has("/batch/evidence/ledger.jsonl")).toBe(false);
+});

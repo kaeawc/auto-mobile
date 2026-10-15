@@ -14,16 +14,7 @@ import {
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const validGfxinfoOutput = `
-        50th percentile: 8.5ms
-        90th percentile: 12.3ms
-        95th percentile: 15.7ms
-        99th percentile: 22.1ms
-        Total frames rendered: 120
-        Number Missed Vsync: 5
-        Number Slow UI thread: 3
-        Number Frame deadline missed: 2
-      `;
+import { validGfxinfoOutput, noFrameGfxinfoOutput } from "./gfxinfoFixtures";
 
 describe("Idle - Unit Tests", function () {
   let idle: Idle;
@@ -37,6 +28,15 @@ describe("Idle - Unit Tests", function () {
     };
     const fakeAdb = new FakeAdbExecutor();
     idle = new Idle(mockDevice, new FakeAdbClientFactory(fakeAdb));
+  });
+
+  test("marks missing frame stats and omits the marker for valid stats", () => {
+    expect(
+      idle.processFrameStatsForStability(noFrameGfxinfoOutput, null, null, null, null),
+    ).toHaveProperty("noFrameData", true);
+    expect(
+      idle.processFrameStatsForStability(validGfxinfoOutput, null, null, null, null),
+    ).not.toHaveProperty("noFrameData");
   });
 
   describe("getTouchStatus", function () {

@@ -14,6 +14,11 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { shellQuote } from "../../utils/shellQuote";
 
+/** Consecutive missing-frame polls allowed before ending the stability wait. */
+export const NO_FRAME_STATS_GRACE_POLLS = 10;
+/** Minimum duration of a consecutive missing-frame streak before ending the wait. */
+export const NO_FRAME_STATS_GRACE_MS = 1000;
+
 export class AwaitIdle implements AwaitIdleInterface {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
@@ -168,6 +173,7 @@ export class AwaitIdle implements AwaitIdleInterface {
     signal?: AbortSignal,
   ): Promise<{
     updatedState: typeof state;
+    noFrameData?: boolean;
     shouldUpdateLastNonIdleTime: boolean;
   }> {
     const stabilityResult = await this.idle.getUiStability(
@@ -194,6 +200,7 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     return {
       updatedState,
+      ...(stabilityResult.noFrameData ? { noFrameData: true } : {}),
       shouldUpdateLastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime,
     };
   }
@@ -228,9 +235,28 @@ export class AwaitIdle implements AwaitIdleInterface {
     // Use the provided state instead of initializing
     let state = initState;
     let pollCount = 0;
+    let consecutiveNoFrameData = 0;
+    let noFrameDataStreakStart: number | null = null;
+    const hasExhaustedNoFrameGrace = (noFrameData: boolean | undefined): boolean => {
+      if (!noFrameData) {
+        consecutiveNoFrameData = 0;
+        noFrameDataStreakStart = null;
+        return false;
+      }
+      if (consecutiveNoFrameData === 0) {
+        noFrameDataStreakStart = this.timer.now();
+      }
+      consecutiveNoFrameData++;
+      return (
+        consecutiveNoFrameData >= NO_FRAME_STATS_GRACE_POLLS &&
+        noFrameDataStreakStart !== null &&
+        this.timer.now() - noFrameDataStreakStart >= NO_FRAME_STATS_GRACE_MS
+      );
+    };
     let isStable = false;
     const deadlineMs = initState.startTime + timeoutMs;
     const finalMetrics: {
+      idleEndReason?: GfxMetrics["idleEndReason"];
       percentile50thMs: number | null;
       percentile90thMs: number | null;
       percentile95thMs: number | null;
@@ -271,6 +297,14 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.missedVsyncCount = state.prevMissedVsync;
         finalMetrics.slowUiThreadCount = state.prevSlowUiThread;
         finalMetrics.frameDeadlineMissedCount = state.prevFrameDeadlineMissed;
+
+        if (hasExhaustedNoFrameGrace(checkResult.noFrameData)) {
+          logger.info(
+            `[AwaitIdle] Ending UI stability wait after ${consecutiveNoFrameData} consecutive polls without valid frame stats for ${packageName}`,
+          );
+          finalMetrics.idleEndReason = "noFrameStats";
+          break;
+        }
 
         // Now check if we've been stable (criteria passing) for required duration
         const timeoutCheck = this.checkUiStabilityTimeout(
@@ -335,13 +369,7 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     return {
       packageName,
-      percentile50thMs: finalMetrics.percentile50thMs,
-      percentile90thMs: finalMetrics.percentile90thMs,
-      percentile95thMs: finalMetrics.percentile95thMs,
-      percentile99thMs: finalMetrics.percentile99thMs,
-      missedVsyncCount: finalMetrics.missedVsyncCount,
-      slowUiThreadCount: finalMetrics.slowUiThreadCount,
-      frameDeadlineMissedCount: finalMetrics.frameDeadlineMissedCount,
+      ...finalMetrics,
       pollCount,
       stabilityWaitMs,
       isStable,

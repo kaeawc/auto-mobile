@@ -148,6 +148,7 @@ describe("SimulatorTccSqliteClient", () => {
             JSON.stringify([
               { name: "service" },
               { name: "client" },
+              { name: "auth_version" },
               { name: "auth_value" },
               { name: "prompt_count" },
             ]),
@@ -157,6 +158,7 @@ describe("SimulatorTccSqliteClient", () => {
               {
                 service: "kTCCServiceCamera",
                 client: "com.example.app",
+                auth_version: 1,
                 auth_value: 2,
                 prompt_count: 1,
               },
@@ -189,6 +191,7 @@ describe("SimulatorTccSqliteClient", () => {
       {
         service: "kTCCServiceCamera",
         client: "com.example.app",
+        auth_version: 1,
         auth_value: 2,
         prompt_count: 1,
       },
@@ -210,7 +213,7 @@ describe("SimulatorTccSqliteClient", () => {
       '.parameter set :service0 "kTCCServiceCamera"',
       databasePath,
       [
-        "select service, client, auth_value, prompt_count",
+        "select service, client, auth_version, auth_value, prompt_count",
         "from access",
         "where client = :appId and service in (:service0);",
       ].join("\n"),

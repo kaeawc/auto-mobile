@@ -12,7 +12,7 @@ import {
   livenessHandoverPayload,
   type LivenessHandover,
 } from "../proxyLivenessRecovery";
-import type { NotFoundAnswerOutcome } from "../daemonMcpProxy";
+import type { NotFoundAnswerOutcome } from "./notFoundDecision";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"

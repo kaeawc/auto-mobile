@@ -174,6 +174,7 @@ export class AwaitIdle implements AwaitIdleInterface {
   ): Promise<{
     updatedState: typeof state;
     noFrameData?: boolean;
+    frameStatsUnavailable?: boolean;
     shouldUpdateLastNonIdleTime: boolean;
   }> {
     const stabilityResult = await this.idle.getUiStability(
@@ -201,7 +202,35 @@ export class AwaitIdle implements AwaitIdleInterface {
     return {
       updatedState,
       ...(stabilityResult.noFrameData ? { noFrameData: true } : {}),
+      ...(stabilityResult.frameStatsUnavailable ? { frameStatsUnavailable: true } : {}),
       shouldUpdateLastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime,
+    };
+  }
+
+  private createNoFrameGraceCheck(deadlineMs: number) {
+    let consecutiveNoFrameData = 0;
+    let noFrameDataStreakStart: number | null = null;
+    return (
+      noFrameData: boolean | undefined,
+      frameStatsUnavailable: boolean | undefined,
+    ): boolean => {
+      if (frameStatsUnavailable || this.timer.now() >= deadlineMs) {
+        return false;
+      }
+      if (!noFrameData) {
+        consecutiveNoFrameData = 0;
+        noFrameDataStreakStart = null;
+        return false;
+      }
+      if (consecutiveNoFrameData === 0) {
+        noFrameDataStreakStart = this.timer.now();
+      }
+      consecutiveNoFrameData++;
+      return (
+        consecutiveNoFrameData >= NO_FRAME_STATS_GRACE_POLLS &&
+        noFrameDataStreakStart !== null &&
+        this.timer.now() - noFrameDataStreakStart >= NO_FRAME_STATS_GRACE_MS
+      );
     };
   }
 
@@ -235,26 +264,9 @@ export class AwaitIdle implements AwaitIdleInterface {
     // Use the provided state instead of initializing
     let state = initState;
     let pollCount = 0;
-    let consecutiveNoFrameData = 0;
-    let noFrameDataStreakStart: number | null = null;
-    const hasExhaustedNoFrameGrace = (noFrameData: boolean | undefined): boolean => {
-      if (!noFrameData) {
-        consecutiveNoFrameData = 0;
-        noFrameDataStreakStart = null;
-        return false;
-      }
-      if (consecutiveNoFrameData === 0) {
-        noFrameDataStreakStart = this.timer.now();
-      }
-      consecutiveNoFrameData++;
-      return (
-        consecutiveNoFrameData >= NO_FRAME_STATS_GRACE_POLLS &&
-        noFrameDataStreakStart !== null &&
-        this.timer.now() - noFrameDataStreakStart >= NO_FRAME_STATS_GRACE_MS
-      );
-    };
     let isStable = false;
     const deadlineMs = initState.startTime + timeoutMs;
+    const hasExhaustedNoFrameGrace = this.createNoFrameGraceCheck(deadlineMs);
     const finalMetrics: {
       idleEndReason?: GfxMetrics["idleEndReason"];
       percentile50thMs: number | null;
@@ -298,9 +310,9 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.slowUiThreadCount = state.prevSlowUiThread;
         finalMetrics.frameDeadlineMissedCount = state.prevFrameDeadlineMissed;
 
-        if (hasExhaustedNoFrameGrace(checkResult.noFrameData)) {
+        if (hasExhaustedNoFrameGrace(checkResult.noFrameData, checkResult.frameStatsUnavailable)) {
           logger.info(
-            `[AwaitIdle] Ending UI stability wait after ${consecutiveNoFrameData} consecutive polls without valid frame stats for ${packageName}`,
+            `[AwaitIdle] Ending UI stability wait after the grace period without valid frame stats for ${packageName}`,
           );
           finalMetrics.idleEndReason = "noFrameStats";
           break;
@@ -340,18 +352,26 @@ export class AwaitIdle implements AwaitIdleInterface {
     // Get final gfxinfo to capture percentiles
     if (deadlineMs > this.timer.now()) {
       try {
-        const finalGfxInfo = await perf.track("finalGfxinfo", async () => {
-          return withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
-            this.adb.executeCommand(
-              `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-              remainingMs,
-              DUMPSYS_MAX_BUFFER,
-              undefined,
-              activeSignal,
-            ),
+        const metrics = await perf.track("finalGfxinfo", async () => {
+          const finalGfxInfo = await withRemainingBudget(
+            deadlineMs,
+            this.timer,
+            signal,
+            (activeSignal, remainingMs) =>
+              this.adb.executeCommand(
+                `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+                remainingMs,
+                DUMPSYS_MAX_BUFFER,
+                undefined,
+                activeSignal,
+              ),
           );
+          const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
+          if (this.idle.validateFrameData(metrics)) {
+            delete finalMetrics.idleEndReason;
+          }
+          return metrics;
         });
-        const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
         finalMetrics.percentile50thMs = metrics.percentile50th;
         finalMetrics.percentile90thMs = metrics.percentile90th;
         finalMetrics.percentile95thMs = metrics.percentile95th;
@@ -361,7 +381,7 @@ export class AwaitIdle implements AwaitIdleInterface {
         finalMetrics.frameDeadlineMissedCount = metrics.frameDeadlineMissed;
       } catch (err) {
         signal?.throwIfAborted();
-        logger.info(`[AwaitIdle] Failed to get final gfxinfo: ${err}`);
+        logger.warn(`[AwaitIdle] Failed to get final gfxinfo: ${err}`);
       }
     }
 

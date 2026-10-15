@@ -18,6 +18,7 @@ with the same sorted-key `JSONEncoder` configuration as `WebSocketServer.encodeR
 It includes every `ResponseType` raw value, examples for all 45 host-reshaped response types,
 focus/traversal passthrough responses, `runner_busy` blocking metadata, and the production
 `CommandError` descriptions/codes plus `GestureError.focusQueryFailed`.
+Error responses model `encodeResponse`'s `perfTiming` injection, while a separate unsuccessful response has no error string or code.
 
 Capture from the repository root:
 

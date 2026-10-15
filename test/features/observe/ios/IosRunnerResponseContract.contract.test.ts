@@ -48,6 +48,12 @@ const typedResults: Record<string, Record<string, unknown>> = {
       packageName: "fixture.app",
       screenWidth: 390,
       screenHeight: 844,
+      insets: {
+        available: false,
+        source: "unavailable",
+        units: "unknown",
+        displayCutoutInfo: { classification: "unknown" },
+      },
     },
     perfTiming: timing,
     frameContext: "frame-42",
@@ -273,6 +279,14 @@ describe("Swift runner production response encoders → host decoder", () => {
           errorMessage:
             "iOS runner is busy executing request_activate_accessibility_link for 35.0s (its deadline passed 5.0s ago; the gesture is a blocking XCUITest call the runner cannot interrupt); bounded runner recovery is required. The blocking action's outcome is unknown; observe fresh state before deciding whether to repeat it",
         });
+      } else if (name === "error_success_false_without_error") {
+        expect(decoded?.result).toMatchObject({
+          success: false,
+          totalTimeMs: 17,
+          perfTiming: timing,
+        });
+        expect(decoded?.result).toHaveProperty("error", undefined);
+        expect(decoded?.result).not.toHaveProperty("errorCode");
       } else if (name.startsWith("error_")) {
         const error = fixture.commandErrors.find((entry) => name === `error_${entry.name}`);
         expect(error).toBeDefined();
@@ -280,14 +294,50 @@ describe("Swift runner production response encoders → host decoder", () => {
           success: false,
           totalTimeMs: 17,
           error: error!.error,
+          perfTiming: timing,
           ...(error!.errorCode ? { errorCode: error!.errorCode } : {}),
         });
+        if (error!.errorCode === null) {
+          expect(decoded?.result).not.toHaveProperty("errorCode");
+        } else {
+          expect(decoded?.result).toHaveProperty("errorCode", error!.errorCode);
+        }
       } else if (["current_focus_result", "traversal_order_result"].includes(name)) {
-        expect(decoded?.result).toBe(wire); // Deliberate passthrough: every wire field retained.
+        if (name === "current_focus_result") {
+          expect(decoded?.result).toMatchObject({
+            type: "current_focus_result",
+            requestId,
+            success: true,
+            totalTimeMs: 17,
+          });
+        } else {
+          expect(decoded?.result).toMatchObject({
+            type: "traversal_order_result",
+            requestId,
+            success: true,
+            totalTimeMs: 17,
+            focusedIndex: 0,
+            totalCount: 0,
+            elements: [],
+          });
+        }
+        expect(decoded?.result).toEqual(wire); // Passthrough retains the full wire envelope.
       } else {
         const expected = genericTypes.has(name) ? expectedGeneric(name) : typedResults[name];
         expect(expected).toBeDefined();
         expect(decoded?.result).toMatchObject(expected);
+        if (name === "hierarchy_update") {
+          expect(decoded?.result).toMatchObject({
+            hierarchy: {
+              insets: {
+                available: false,
+                source: "unavailable",
+                units: "unknown",
+                displayCutoutInfo: { classification: "unknown" },
+              },
+            },
+          });
+        }
       }
     });
   }

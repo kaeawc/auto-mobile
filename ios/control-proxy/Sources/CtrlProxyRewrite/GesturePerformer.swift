@@ -12,7 +12,7 @@ import os
 ///
 /// Rewrite archetype — `@MainActor`. Every gesture ultimately drives XCUITest on the
 /// main thread. The reference hopped onto main per operation with `DispatchQueue.main.sync`
-/// (`runOnMainThread` / `runOnMainThreadNonThrowing`); isolating the whole class to the
+/// (`runOnMainThread`); isolating the whole class to the
 /// main actor removes those hops — each public method already runs there. `NSException`s
 /// XCUITest can still raise are caught by `catchingObjCException` (throwing) and the
 /// private `catchingObjCExceptionNonThrowing` (log + fallback), the rewrite's expression
@@ -823,9 +823,9 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         /// `catchingObjCException` for methods that cannot propagate errors: a caught
-        /// `NSException` is logged and `fallback` returned. The reference's
-        /// `runOnMainThreadNonThrowing`; the `main.sync` hop is gone (we run on main) but
-        /// the XCUITest `NSException` guard remains necessary.
+        /// `NSException` is logged and `fallback` returned. The `main.sync` hop of the
+        /// reference is gone (we run on main) but the XCUITest `NSException` guard
+        /// remains necessary.
         private func catchingObjCExceptionNonThrowing<T>(_ block: () -> T, fallback: T) -> T {
             do {
                 return try catchingObjCException(block)

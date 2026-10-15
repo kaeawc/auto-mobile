@@ -7,7 +7,7 @@ export const DEFAULT_TEXT_REQUEST_TIMEOUT_MS = 5000;
 export const MAX_TEXT_REQUEST_TIMEOUT_MS = 120_000;
 const TEXT_REPLY_HEADROOM_MS = 2000;
 
-// ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:1347-1360
+// ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:1347-1360
 // calls XCUIApplication.typeText with no
 // per-key cadence or overall typing budget. This conservative allowance needs
 // one simulator measurement; it is not a measured XCUITest rate.

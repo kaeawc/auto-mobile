@@ -4,7 +4,7 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "dist/src/utils/workers/iosBundleExtractWorker.js",
   "dist/schemas/test-plan.schema.json",
   "schemas/test-plan.schema.json",
-  // FileMigrationProvider resolves db/migrations beside the bundled index.js.
+  // Static imports are the default; keep raw migrations available for directory env overrides.
   "dist/src/db/migrations/",
   // Raw migrations import this sibling, copied by copyDatabaseRuntimeFiles.
   "dist/src/db/eventTables.ts",

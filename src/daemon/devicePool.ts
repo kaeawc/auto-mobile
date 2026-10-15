@@ -6,6 +6,7 @@ import {
   type MultiDeviceAllocationOutcome,
 } from "./multiDeviceAllocation";
 import { ForeignClaims } from "./foreignClaims";
+import { ConnectionOwnership } from "./connectionOwnership";
 import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
@@ -1024,6 +1025,7 @@ export class DevicePool {
   private assignmentMutex = new Mutex();
   private readonly multiDeviceAllocations = this.createMultiDeviceAllocationQueue();
   private readonly foreignClaims = this.createForeignClaims();
+  private readonly connectionOwnership = this.createConnectionOwnership();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -1237,8 +1239,6 @@ export class DevicePool {
   }>();
   private rehydrationReservationsStopped = false;
   private readonly intentionallyCancelledRecoverySessions = new WeakSet<Session>();
-  /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
-  private readonly claimedDeviceIds = new Map<string, ForeignDeviceOwnership>();
 
   constructor({
     env,
@@ -1493,6 +1493,14 @@ export class DevicePool {
       },
       getDevice: (deviceId) => this.devices.get(deviceId),
       getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
+    });
+  }
+
+  private createConnectionOwnership(): ConnectionOwnership {
+    // Field initialization precedes dependency setup; defer reads until claims use.
+    return new ConnectionOwnership({
+      foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
+      getDevice: (deviceId) => this.devices.get(deviceId),
     });
   }
 
@@ -5953,29 +5961,12 @@ export class DevicePool {
    * assignment.
    */
   private async publishDeviceClaim(deviceId: string): Promise<boolean> {
-    const ownership = this.foreignOwnershipFor(this.devices.get(deviceId)?.platform);
-    if (!ownership) {
-      return true;
-    }
-    if (!(await ownership.claim(deviceId))) {
-      return false;
-    }
-    this.claimedDeviceIds.set(deviceId, ownership);
-    // The claim is this daemon's, not one session's: a session that took the device since
-    // depends on it, so it is only withdrawn when nothing here holds the device (#11565).
-    if (!this.devices.get(deviceId)?.sessionId) {
-      this.releaseDeviceClaim(deviceId);
-    }
-    return true;
+    return this.connectionOwnership.publishDeviceClaim(deviceId);
   }
 
   /** Withdraw this daemon's claim once no session of this daemon holds the device. */
   private releaseDeviceClaim(deviceId: string): void {
-    const ownership = this.claimedDeviceIds.get(deviceId);
-    if (ownership) {
-      this.claimedDeviceIds.delete(deviceId);
-      ownership.release(deviceId);
-    }
+    this.connectionOwnership.releaseDeviceClaim(deviceId);
   }
 
   /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
@@ -6027,9 +6018,7 @@ export class DevicePool {
     for (const sessionId of [...this.rehydrationReservations.keys()]) {
       this.releaseRehydrationReservation(sessionId, true);
     }
-    for (const deviceId of [...this.claimedDeviceIds.keys()]) {
-      this.releaseDeviceClaim(deviceId);
-    }
+    this.connectionOwnership.releaseAll();
   }
 
   /**
@@ -7542,7 +7531,7 @@ export class DevicePool {
       return;
     }
     if (await ownership.claim(replacementDevice.id)) {
-      this.claimedDeviceIds.set(replacementDevice.id, ownership);
+      this.connectionOwnership.recordClaim(replacementDevice.id, ownership);
       return;
     }
     await ownership.refresh([replacementDevice.id]);
@@ -7711,7 +7700,7 @@ export class DevicePool {
   ): Promise<ShutdownDeviceReservation> {
     const { device } = reservation;
     const ownership = this.foreignOwnershipFor(device.platform);
-    if (!ownership || this.claimedDeviceIds.has(device.id)) {
+    if (!ownership || this.connectionOwnership.hasClaim(device.id)) {
       // No claims tracked for this platform, or a session of this daemon already claims it.
       return reservation;
     }
@@ -7725,7 +7714,7 @@ export class DevicePool {
           } finally {
             // Release may be called more than once; withdraw once, and never a claim a session
             // of this daemon published since.
-            if (!withdrawn && !this.claimedDeviceIds.has(device.id)) {
+            if (!withdrawn && !this.connectionOwnership.hasClaim(device.id)) {
               ownership.release(device.id);
             }
             withdrawn = true;

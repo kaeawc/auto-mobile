@@ -111,7 +111,7 @@ export function bindingRefusal(
     return undefined;
   }
   if (
-    entry.holder === "binding" &&
+    entry.holder === "session_broker" &&
     entry.execSessionUuid !== null &&
     input.requesterSessionUuid === entry.execSessionUuid
   ) {

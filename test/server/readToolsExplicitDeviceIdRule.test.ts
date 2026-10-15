@@ -775,7 +775,7 @@ for (const platform of ["android", "ios"] as const) {
                   throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
                     platform: "android",
                     stableDeviceId: h!.device.name,
-                    holder: "binding",
+                    holder: "session_broker",
                     scopeKey: "scope",
                     bindingIndex: 0,
                     scopeState: null,

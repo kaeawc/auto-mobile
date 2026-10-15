@@ -72,7 +72,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
         : {
             platform: "ios",
             stableDeviceId,
-            holder: "binding",
+            holder: "session_broker",
             scopeKey: "scope",
             bindingIndex: 0,
             scopeState: null,
@@ -193,7 +193,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
       reservation("row-a", SIM_A),
       reservation("row-b", SIM_B),
     ]);
-    expect(pool.genericAvailability(SIM_A)).toBe("binding");
+    expect(pool.genericAvailability(SIM_A)).toBe("session_broker");
     expect(pool.genericAvailability(SIM_B)).toBe("reserved");
 
     // Once the slot lets go, nothing else holds the device: it was never reserved for the row.

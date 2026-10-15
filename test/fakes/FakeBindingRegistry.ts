@@ -379,7 +379,7 @@ export class FakeBindingRegistry implements BindingRegistry {
         {
           platform: assignment.platform,
           stableDeviceId: assignment.stableDeviceId,
-          holder: "binding",
+          holder: "session_broker",
           scopeKey: assignment.scopeKey,
           bindingIndex: assignment.bindingIndex,
           scopeState: scope.state,

@@ -291,6 +291,17 @@ Session info supplies the currently bound native device as descriptive metadata;
 it is not a device-selection operation. These are harness lifecycle commands,
 not model tools.
 
+## Native device identity
+
+New native devices use `ambroker-<scope>-<idx>-g<gen>-<nonce>` names. Product
+ownership also recognizes the legacy `amslot-` prefix for upgrade compatibility.
+Both remain charged to the native resource budget and excluded from the normal
+pool, including interrupted creations without registry rows. Scoped interrupted
+creations remain adoptable by their original binding; persisted assignments use
+the same release, cache eviction and journaled destruction paths across upgrades.
+A product name alone never authorizes deletion. Inventory reports
+`runtime.heldBy: "session_broker"` for broker devices.
+
 ## Ownership and recovery
 
 There is one host registry and one native journal authority. The broker adds

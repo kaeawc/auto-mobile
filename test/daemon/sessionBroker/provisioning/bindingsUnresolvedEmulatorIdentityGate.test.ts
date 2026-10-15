@@ -68,7 +68,7 @@ describe("a binding's emulator whose AVD name the pool could not read", () => {
   test("the availability surface and the input gate agree that it is not a free device", async () => {
     await pool.bindingStableIds("android");
     // What listDevices / pool stats report for it.
-    expect(pool.genericAvailability(BINDING_EMULATOR.deviceId)).toBe("binding");
+    expect(pool.genericAvailability(BINDING_EMULATOR.deviceId)).toBe("session_broker");
 
     // A generic caller's device-driving frame (socket input, an MCP control call).
     const input = await refusal(

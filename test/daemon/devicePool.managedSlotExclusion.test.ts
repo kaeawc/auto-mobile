@@ -84,6 +84,20 @@ describe("DevicePool binding exclusion", () => {
     timer.reset();
   });
 
+  test.each(["amslot-upgrade-0-g1-nonce", "ambroker-upgrade-0-g1-nonce"])(
+    "unregistered product inventory %s stays outside the normal pool on both platforms",
+    async (name) => {
+      await setUp([
+        { ...ios("SIM-UPGRADE"), name },
+        { ...android("emulator-5554"), name },
+      ]);
+      expect(pool.getIdleDevices()).toEqual([]);
+      expect(pool.getAvailableDeviceCount()).toBe(0);
+      expect(pool.genericAvailability("SIM-UPGRADE")).toBe("session_broker");
+      expect(pool.genericAvailability("emulator-5554")).toBe("session_broker");
+    },
+  );
+
   test("generic single-device allocation skips an idle device a binding holds", async () => {
     await assignBindingDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
@@ -247,6 +261,32 @@ describe("DevicePool binding exclusion", () => {
 
     expect((error as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
   });
+
+  test.each(["amslot-upgrade-0-g1-nonce", "ambroker-upgrade-0-g1-nonce"])(
+    "auto-start skips unregistered product AVD %s",
+    async (name) => {
+      await setUp([android("d1")]);
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      manager.deviceImages = [
+        { name, platform: "android", isRunning: false },
+        { name: "spare-avd", platform: "android", isRunning: false },
+      ];
+      await settle(
+        runWithAbortSignal(new AbortController().signal, () =>
+          asPlanAllocation(sessions, "base", ["base:B"], () =>
+            pool.assignMultipleDevicesByCriteria(
+              ["base", "base:B"].map((sessionId) => ({
+                sessionId,
+                criteria: { platform: "android" as const },
+              })),
+              4_000,
+            ),
+          ),
+        ),
+      );
+      expect(manager.startedDevices.map((device) => device.name)).toEqual(["spare-avd"]);
+    },
+  );
 
   test("auto-start never boots a stopped AVD a binding holds", async () => {
     await assignBindingDevice(registry, "android", "slot-avd");

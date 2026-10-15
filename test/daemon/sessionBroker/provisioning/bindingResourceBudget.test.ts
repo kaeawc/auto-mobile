@@ -72,7 +72,9 @@ class SnapshotRaceRegistry implements BindingResourceRegistry {
     }
     // Model SQL's assignments before adoption, followed by free rows/journal after adoption.
     return [
-      ...before.filter((device) => device.holder === "binding" && device.scopeState !== null),
+      ...before.filter(
+        (device) => device.holder === "session_broker" && device.scopeState !== null,
+      ),
       ...after.filter((device) => device.holder === "free" || device.scopeState === null),
     ];
   }
@@ -189,6 +191,27 @@ describe("binding total-resource budget", () => {
   async function usage() {
     return computeBindingResourceUsage(await registry.snapshotBindingResources());
   }
+
+  test.each(["amslot-", "ambroker-"])(
+    "%s inventory orphans on both platforms still consume the native budget",
+    async (prefix) => {
+      inventory.devices = [
+        { platform: "android", name: `${prefix}upgrade-0-g1-nonce`, isRunning: false },
+        {
+          platform: "ios",
+          name: `${prefix}upgrade-1-g1-nonce`,
+          deviceId: "SIM-UPGRADE",
+          isRunning: false,
+        },
+        { platform: "ios", name: "amslotx", deviceId: "SIM-USER", isRunning: false },
+      ];
+      const entry = await creation("ambroker-new-0-g1-nonce");
+      expect(await budget(2).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { total: 3, orphaned: 2, preparing: 1 },
+      });
+    },
+  );
 
   test("no limit admits without ever reading the registry", async () => {
     const admission = new RegistryBindingResourceBudget({

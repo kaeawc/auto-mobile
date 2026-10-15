@@ -239,7 +239,7 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
           throw new DeviceAssignedToBindingError("videoRecording", target.deviceId, {
             platform: "android",
             stableDeviceId: "managed-avd",
-            holder: "binding",
+            holder: "session_broker",
             scopeKey: "scope",
             bindingIndex: 0,
             scopeState: "active",

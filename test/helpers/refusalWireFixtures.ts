@@ -597,7 +597,7 @@ const BUILDERS: readonly FixtureEntry[] = [
         new DeviceAssignedToBindingError("killDevice", DEVICE, {
           platform: "android",
           stableDeviceId: "amslot-0123abcd-0-g1",
-          holder: "binding",
+          holder: "session_broker",
           scopeKey: "0123abcd",
           bindingIndex: 0,
           scopeState: "valid",
@@ -833,7 +833,7 @@ function boundSessionError(): DeviceOutsideBoundSessionError {
 const SLOT_HOLDER = {
   platform: "android",
   stableDeviceId: "amslot-0123abcd-0-g1",
-  holder: "binding",
+  holder: "session_broker",
   scopeKey: "0123abcd",
   bindingIndex: 0,
   scopeState: "valid",

@@ -103,7 +103,7 @@ describe("direct frames from a managed connection outside its slots", () => {
   const slotEntry: ManagedDeviceEntry = {
     platform: "android",
     stableDeviceId: slotDevice.deviceId,
-    holder: "binding",
+    holder: "session_broker",
     scopeKey: SCOPE_KEY,
     bindingIndex: 0,
     scopeState: "valid",

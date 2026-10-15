@@ -970,7 +970,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
               {
                 platform: row.platform,
                 stableDeviceId: row.stable_device_id,
-                holder: "binding",
+                holder: "session_broker",
                 scopeKey: row.scope_key,
                 bindingIndex: row.slot_index,
                 scopeState: row.scope_state,

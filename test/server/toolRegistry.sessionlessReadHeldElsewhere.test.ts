@@ -188,7 +188,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
         throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
           platform: "android",
           stableDeviceId: "Pixel_B",
-          holder: "binding",
+          holder: "session_broker",
           scopeKey: "scope",
           bindingIndex: 0,
           scopeState: null,

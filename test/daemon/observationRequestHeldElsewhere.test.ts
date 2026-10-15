@@ -92,7 +92,7 @@ async function observeAs(options: {
       throw new DeviceAssignedToBindingError("observe", input.deviceId, {
         platform: "ios",
         stableDeviceId: "Pixel_9",
-        holder: "binding",
+        holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
         scopeState: null,

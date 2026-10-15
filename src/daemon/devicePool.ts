@@ -1,3 +1,4 @@
+import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import {
   DeviceAllocation,
   type AllocationDiscoverySnapshots,
@@ -271,7 +272,7 @@ function resolveConsoleBusyRegistry(
  * daemon, or a readiness/shutdown/recovery reservation. Every inventory surface derives its
  * "available" and `poolStatus` from this one answer.
  */
-export type GenericAvailability = "free" | "binding" | "foreign_daemon" | "reserved";
+export type GenericAvailability = "free" | "session_broker" | "foreign_daemon" | "reserved";
 
 /** The three buckets `getStats()` and every per-device `poolStatus` partition the pool into. */
 export type PoolStatusBucket = "idle" | "assigned" | "error";
@@ -8340,7 +8341,7 @@ export class DevicePool {
       return "free";
     }
     if (this.isBindingDevice(device)) {
-      return "binding";
+      return "session_broker";
     }
     if (this.isDrivenByForeignDaemon(device)) {
       return "foreign_daemon";
@@ -8383,6 +8384,10 @@ export class DevicePool {
    * is managed, so it is excluded too: unknown identity never frees an assignment.
    */
   private isBindingDevice(device: PooledDevice): boolean {
+    // Registry loss or an interrupted pre-upgrade create must not lend product inventory.
+    if (isProductBrokerDevice(device.avdName ?? device.name)) {
+      return true;
+    }
     const exclusion = this.bindingExclusion;
     if (!exclusion) {
       return false;
@@ -8440,7 +8445,7 @@ export class DevicePool {
       return new DeviceAssignedToBindingError(input.action, input.deviceId, {
         platform: device.platform,
         stableDeviceId: input.deviceId,
-        holder: "binding",
+        holder: "session_broker",
         scopeKey: "",
         bindingIndex: null,
         scopeState: null,

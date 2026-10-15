@@ -58,7 +58,7 @@ describe("listDevices reports ownership allocation enforces", () => {
 
     const [binding, free] = listDevicePayloads(devices, pool, new Map());
     expect(binding.runtime.poolStatus).toBe("assigned");
-    expect(binding.runtime.heldBy).toBe("binding");
+    expect(binding.runtime.heldBy).toBe("session_broker");
     expect(binding.runtime.session).toBeNull();
     expect(free.runtime.poolStatus).toBe("idle");
     expect(free.runtime.heldBy).toBeUndefined();

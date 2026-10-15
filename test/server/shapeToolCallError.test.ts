@@ -82,7 +82,7 @@ describe("shapeToolCallError", () => {
       new DeviceAssignedToBindingError("tapOn", "device", {
         platform: "android",
         stableDeviceId: "device",
-        holder: "binding",
+        holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
         scopeState: "valid",

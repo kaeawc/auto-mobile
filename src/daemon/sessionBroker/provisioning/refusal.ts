@@ -96,7 +96,7 @@ export class DeviceAssignedToBindingError extends ActionableError {
   ) {
     super(
       `${action} refused: device '${deviceId}' (${entry.platform} ${entry.stableDeviceId}) is ` +
-        (entry.holder === "binding"
+        (entry.holder === "session_broker"
           ? `assigned to binding ${entry.bindingIndex}`
           : "reserved for bindings") +
         ` (code ${DEVICE_ASSIGNED_TO_BINDING_CODE}). It stays reserved while idle; ` +

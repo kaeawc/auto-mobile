@@ -348,8 +348,8 @@ export function poolHoldFor(
   deviceId: string,
 ): { heldBy?: DeviceHeldBy; reserved?: boolean } {
   const availability = devicePool?.genericAvailability(deviceId);
-  if (availability === "binding") {
-    return { heldBy: "binding" };
+  if (availability === "session_broker") {
+    return { heldBy: "session_broker" };
   }
   if (availability === "foreign_daemon") {
     return { heldBy: "other_daemon" };
@@ -496,7 +496,7 @@ export const deviceDescriptionSchema = z
         lifecycle: lifecycleSchema,
         readiness: readinessSchema,
         poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
-        heldBy: z.enum(["binding", "other_daemon"]).optional(),
+        heldBy: z.enum(["session_broker", "other_daemon"]).optional(),
         session: z
           .object({
             sessionUuid: nullableString,

@@ -1,5 +1,6 @@
 import { parseStrictPositiveInteger } from "../../../utils/envNumbers";
-import { BINDING_DEVICE_NAME_PREFIX, type BindingInventory } from "./reconciler";
+import type { BindingInventory } from "./reconciler";
+import { isProductBrokerDevice } from "../persistedIdentity";
 import { deviceStableId } from "../registry/deviceIdentity";
 import type { DeviceInfo } from "../../../models/index";
 import { ActionableError } from "../../../models/ActionableError";
@@ -213,7 +214,7 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
           !journal.some(
             (entry) =>
               entry.kind === "create" &&
-              device.holder === "binding" &&
+              device.holder === "session_broker" &&
               device.scopeState !== null &&
               entry.scopeKey === device.scopeKey &&
               entry.bindingIndex === device.bindingIndex &&
@@ -252,7 +253,7 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
 function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    if (!stableId || !device.name.startsWith(BINDING_DEVICE_NAME_PREFIX)) {
+    if (!stableId || !isProductBrokerDevice(device.name)) {
       continue;
     }
     const key = resourceKey(device.platform, stableId);

@@ -189,7 +189,7 @@ describe("deleteDevice failure mapping agrees with killDevice's wire shaping", (
   const slotEntry = {
     platform: "ios",
     stableDeviceId: "IOS-PEER",
-    holder: "binding",
+    holder: "session_broker",
     bindingIndex: 1,
   } as never;
   const cases: Array<[string, () => unknown]> = [

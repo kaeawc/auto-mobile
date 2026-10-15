@@ -230,7 +230,7 @@ async function assertBrokerInventoryOwned(
   const foreign = (await registry.snapshotManagedDevices()).some(
     (device) =>
       device.scopeKey !== scopeKey ||
-      device.holder !== "binding" ||
+      device.holder !== "session_broker" ||
       device.bindingIndex === null ||
       !occupied.has(device.bindingIndex),
   );

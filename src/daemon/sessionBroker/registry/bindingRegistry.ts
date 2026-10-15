@@ -241,7 +241,7 @@ export type DeviceHolder = {
 export interface ManagedDeviceEntry {
   platform: BindingPlatform;
   stableDeviceId: string;
-  holder: "binding";
+  holder: "session_broker";
   scopeKey: string;
   bindingIndex: number | null;
   scopeState: BindingScopeState | null;
@@ -595,7 +595,7 @@ export function journalTargetEntries(
       {
         platform,
         stableDeviceId,
-        holder: "binding",
+        holder: "session_broker",
         scopeKey: entry.scopeKey,
         bindingIndex: entry.bindingIndex,
         scopeState: null,

@@ -1486,7 +1486,7 @@ describe("MCP Booted Device Resources", () => {
         try {
           const { result, status } = await readIos(timer);
           expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
-          expect(status("SIM-HELD")?.heldBy).toBe("binding");
+          expect(status("SIM-HELD")?.heldBy).toBe("session_broker");
           expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
           expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
           expect(pool.getAvailableDeviceCount()).toBe(1);

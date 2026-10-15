@@ -947,7 +947,7 @@ export function describeBindingRegistryContract(
           {
             platform: "android",
             stableDeviceId: "amslot-new-g1",
-            holder: "binding",
+            holder: "session_broker",
             scopeKey: key.scopeKey,
             bindingIndex: 0,
             scopeState: null,
@@ -977,7 +977,7 @@ export function describeBindingRegistryContract(
         const entry = {
           platform: "ios",
           stableDeviceId: name,
-          holder: "binding",
+          holder: "session_broker",
           scopeKey: key.scopeKey,
           bindingIndex: 0,
           scopeState: null,

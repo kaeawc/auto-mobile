@@ -46,7 +46,7 @@ describe("RegistryBindingExclusion", () => {
         platform: "android",
         stableIds: [undefined, "emulator-5554", "binding-avd"],
       }),
-    ).toMatchObject({ holder: "binding", scopeKey: binding.scopeKey, bindingIndex: 0 });
+    ).toMatchObject({ holder: "session_broker", scopeKey: binding.scopeKey, bindingIndex: 0 });
     expect(exclusion.holderOf({ platform: "ios", stableIds: ["binding-avd"] })).toBeUndefined();
     expect(exclusion.holderOf({ platform: "android", stableIds: ["spare-avd"] })).toBeUndefined();
     expect([...exclusion.stableIdsFor("android")]).toEqual(["binding-avd"]);

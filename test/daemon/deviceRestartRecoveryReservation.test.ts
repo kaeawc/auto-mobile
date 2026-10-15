@@ -76,7 +76,7 @@ describe("device restart reserves the entire recovery window", () => {
         ? {
             platform: "ios",
             stableDeviceId: SIM.deviceId,
-            holder: "binding",
+            holder: "session_broker",
             scopeKey: "scope",
             bindingIndex: 0,
             scopeState: null,
@@ -242,7 +242,7 @@ describe("device restart reserves the entire recovery window", () => {
     managed = true;
     await handoff();
     expect(internals.rehydrationReservations.size).toBe(0);
-    expect(pool.genericAvailability(SIM.deviceId)).toBe("binding");
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("session_broker");
     managed = false;
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
     await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);

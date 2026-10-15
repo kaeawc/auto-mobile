@@ -1,5 +1,4 @@
-import { BINDING_DEVICE_NAME_PREFIX } from "../persistedIdentity";
-export { BINDING_DEVICE_NAME_PREFIX } from "../persistedIdentity";
+import { BROKER_DEVICE_NAME_PREFIX, isProductBrokerDevice } from "../persistedIdentity";
 import { BindingJournalRemovalRegistryTimeout } from "../registry/bindingJournal";
 import { createHash } from "node:crypto";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
@@ -537,7 +536,7 @@ export type BindingReconcileResult =
 // ---------------------------------------------------------------------------------------------
 
 /**
- * `amslot-<8 hex of scope key>-<binding>-g<generation>-<attempt nonce>`, valid as an AVD and
+ * `ambroker-<8 hex of scope key>-<binding>-g<generation>-<attempt nonce>`, valid as an AVD and
  * simulator name. The per-attempt nonce keeps two concurrent attempts on the same binding (another
  * daemon, or a retry while the first attempt still runs) from creating the same AVD name, whose
  * name is its stable id, so one attempt's cleanup can never delete the other's device.
@@ -550,11 +549,11 @@ export function bindingDeviceName(key: BindingKey, generation: number, nonce: st
   if (safeNonce.length === 0) {
     throw new Error(`Binding device name nonce '${nonce}' has no usable characters`);
   }
-  return `${bindingDeviceNamePrefix(key)}${generation}-${safeNonce}`;
+  return `${BROKER_DEVICE_NAME_PREFIX}${bindingDeviceNameSuffix(key)}${generation}-${safeNonce}`;
 }
 
-function bindingDeviceNamePrefix(key: BindingKey): string {
-  return `${BINDING_DEVICE_NAME_PREFIX}${key.scopeKey.slice(0, 8)}-${key.bindingIndex}-g`;
+function bindingDeviceNameSuffix(key: BindingKey): string {
+  return `${key.scopeKey.slice(0, 8)}-${key.bindingIndex}-g`;
 }
 
 export function computeManagedSpecFingerprint(
@@ -1759,7 +1758,7 @@ export class BindingReconciler {
     devices: DeviceInfo[],
   ): Promise<{ device: DeviceInfo; source: "orphan" } | undefined> {
     const { request } = context;
-    const prefix = bindingDeviceNamePrefix(request.key);
+    const suffix = bindingDeviceNameSuffix(request.key);
     const hint = request.priorDeviceHint?.stableId;
     const listed = devices
       .filter((device) => device.platform === request.platform)
@@ -1771,13 +1770,18 @@ export class BindingReconciler {
           a.stableId.localeCompare(b.stableId),
       );
     for (const { device, stableId } of listed) {
-      const source = device.name.startsWith(prefix) ? "orphan" : undefined;
+      // Preserve the binding-specific adoption fence across both product name generations.
+      const source =
+        isProductBrokerDevice(device.name) &&
+        device.name.slice(device.name.indexOf("-") + 1).startsWith(suffix)
+          ? "orphan"
+          : undefined;
       if (!source) {
         continue;
       }
       if (source === "orphan") {
         // A leftover of this binding's interrupted create is adoptable only if nobody holds it: no
-        // binding, and no session (an orphan is not excluded from generic clients).
+        // binding, and no session (product names are excluded from generic clients).
         const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
         if (holder || this.sessionsOn(device).length > 0) {
           continue;

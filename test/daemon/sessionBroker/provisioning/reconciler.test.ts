@@ -159,6 +159,33 @@ describe("BindingReconciler", () => {
     return result.device.stableId;
   }
 
+  test.each(["ios", "android"] as const)(
+    "upgrade adopts a legacy %s interrupted creation without creating a replacement",
+    async (platform) => {
+      const spec =
+        platform === "ios"
+          ? SPEC_18
+          : {
+              runtime: "system-images;android-35;google_apis;arm64-v8a",
+              deviceType: "pixel_8",
+            };
+      const name = `amslot-${key.scopeKey.slice(0, 8)}-0-g1-upgrade`;
+      inventory.devices.push({
+        name,
+        platform,
+        runtime: spec.runtime,
+        deviceType: spec.deviceType,
+        ...(platform === "ios" ? { deviceId: "SIM-UPGRADE" } : {}),
+        isRunning: false,
+      });
+      const ready = expectReady(await reconciler.reconcile(request(spec, { platform })));
+      expect(ready.disposition).toBe("adopted");
+      expect(ready.device.name).toBe(name);
+      expect(provisioner.created()).toEqual([]);
+      expect((await registry.getAssignment(key))?.deviceName).toBe(name);
+    },
+  );
+
   describe("booting a device that already exists", () => {
     test("the binding's own stopped or booting device is provisioned without asking the probe", async () => {
       const ownId = await seedAssigned();
@@ -1559,7 +1586,7 @@ describe("BindingReconciler", () => {
       const first = bindingDeviceName(key, 1, "attempt-a");
       const second = bindingDeviceName(key, 1, "attempt-b");
       expect(first).not.toBe(second);
-      expect(first).toStartWith("amslot-");
+      expect(first).toStartWith("ambroker-");
       expect(first).toMatch(/^[a-z0-9-]+$/);
     });
 

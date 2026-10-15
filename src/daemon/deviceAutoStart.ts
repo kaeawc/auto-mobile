@@ -1,3 +1,4 @@
+import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
@@ -628,6 +629,7 @@ export class DeviceAutoStart {
   isExcludedFromAutoStart(image: DeviceInfo): boolean {
     return (
       this.isAutoStartSuppressed(image) ||
+      isProductBrokerDevice(image.name) ||
       this.port.bindingExclusion?.holderOf(managedRefForImage(image)) !== undefined
     );
   }

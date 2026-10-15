@@ -237,7 +237,7 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     // Generic exclusion reads these: the device is still held by the binding, not freed.
     expect(await registry.isDeviceAssignedToValidBinding("android", AVD)).toBe(true);
     expect(await registry.snapshotManagedDevices()).toEqual([
-      expect.objectContaining({ stableDeviceId: AVD, holder: "binding", bindingIndex: 0 }),
+      expect.objectContaining({ stableDeviceId: AVD, holder: "session_broker", bindingIndex: 0 }),
     ]);
     await claim(S2);
   });

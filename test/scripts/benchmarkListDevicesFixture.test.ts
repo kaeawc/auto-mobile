@@ -49,7 +49,7 @@ describe("listDevices benchmark fixture (#11332)", () => {
     fixture = await installListDevicesFixture("daemon");
     const payload = await list();
     expect(payload.devices.map((d) => [d.runtime.deviceId, d.runtime.heldBy])).toEqual([
-      ["emulator-5554", "binding"],
+      ["emulator-5554", "session_broker"],
       ["emulator-5556", "other_daemon"],
       ["emulator-5558", undefined],
     ]);

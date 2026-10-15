@@ -171,7 +171,7 @@ describe("binding Android hold snapshot", () => {
     const entry: ManagedDeviceEntry = {
       platform: "android",
       stableDeviceId: "Pixel",
-      holder: "binding",
+      holder: "session_broker",
       scopeKey: "scope",
       bindingIndex: 0,
       scopeState: "valid",

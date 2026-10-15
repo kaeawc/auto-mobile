@@ -8,13 +8,11 @@ import { KEY_EVENT_SETTLE_MS } from "../../src/features/action/InputText";
 import { IME_DIAGNOSTIC_ATTEMPTS } from "../../src/features/action/imeFailureDiagnostics";
 import { RECENT_APPS_VERIFY_ATTEMPTS } from "../../src/features/action/RecentApps";
 import { DROPDOWN_OPEN_SETTLE_MS } from "../../src/features/action/SetUIState";
-import { IOS_DOUBLE_TAP_GAP_MS } from "../../src/features/action/TapOnElement";
 import { CTRL_PROXY_CONNECT_ATTEMPTS } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { SCREENSHOT_RECORD_ATTEMPTS } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 
 describe("retry and settle constants", () => {
-  test("preserves the existing tap, typing, dropdown, and biometric delays", () => {
-    expect(IOS_DOUBLE_TAP_GAP_MS).toBe(200);
+  test("preserves the existing typing, dropdown, and biometric delays", () => {
     expect(KEY_EVENT_SETTLE_MS).toBe(100);
     expect(DROPDOWN_OPEN_SETTLE_MS).toBe(200);
     expect(BIOMETRIC_PROMPT_SETTLE_MS).toBe(100);

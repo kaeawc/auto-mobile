@@ -5437,7 +5437,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         throwIfAborted(signal);
         // adb tears down its listener asynchronously after --remove; this short busy window is expected and bounded.
         logger.debug(
-          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/3)`,
+          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/${CTRL_PROXY_CONNECT_ATTEMPTS})`,
         );
         await awaitWhileRequestIsLive(this.timer.sleep(backoff.delayForAttempt(attempt)), signal);
         if (this.closed) {

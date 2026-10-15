@@ -83,9 +83,6 @@ import {
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
-// iOS requires a pause between the two taps.
-export const IOS_DOUBLE_TAP_GAP_MS = 200;
-
 // Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";

@@ -786,7 +786,7 @@ export class AppPreferences {
         );
       } catch (error) {
         finalError = error;
-        if (attempt === 1 || !isRetryableIosDefaultsError(error)) {
+        if (attempt === PREFERENCE_READ_ATTEMPTS - 1 || !isRetryableIosDefaultsError(error)) {
           throw toActionableError(
             error,
             "Failed to execute iOS defaults command; check simulator availability and retry",

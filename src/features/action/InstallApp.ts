@@ -77,7 +77,7 @@ import {
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
-// Two reads preserve the existing physical install verification bound.
+// Two reads preserve the existing iOS install verification bound.
 export const IOS_INSTALL_VERIFY_ATTEMPTS = 2;
 // Three attempts preserve the existing physical install verification bound.
 export const IOS_PHYSICAL_VERIFY_ATTEMPTS = 3;

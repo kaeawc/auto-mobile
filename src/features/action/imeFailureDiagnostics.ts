@@ -417,7 +417,7 @@ async function verifyImeCommitReadBack(
       if (suffixMatches !== false || imeCommitSubsequenceMatches(observedText, text)) {
         return result;
       }
-      if (attempt === 2) {
+      if (attempt === IME_DIAGNOSTIC_ATTEMPTS - 1) {
         return withImeFailure(
           {
             ...result,

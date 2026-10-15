@@ -14,11 +14,9 @@ import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import {
   exploreSchema,
   getNavigationGraphSchema,
-  navigateToHandler,
+  createNavigateToHandler,
   navigateToSchema,
   registerNavigationTools,
-  resetNavigateToFactory,
-  setNavigateToFactory,
 } from "../../src/server/navigationTools";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
@@ -53,7 +51,6 @@ describe("navigation tool session graph selection", () => {
     adbFactorySpy.mockRestore();
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
-    resetNavigateToFactory();
   });
 
   test.each(["android", "ios"] as const)(
@@ -337,8 +334,8 @@ describe("navigation tool session graph selection", () => {
         return { success: true };
       },
     );
-    setNavigateToFactory(
-      (selectedDevice) =>
+    const navigateToHandler = createNavigateToHandler({
+      navigateToFactory: (selectedDevice) =>
         new NavigateTo(
           selectedDevice,
           new FakeAdbClientFactory(),
@@ -347,7 +344,7 @@ describe("navigation tool session graph selection", () => {
           graph,
           timer,
         ),
-    );
+    });
     const call = spyOn(ToolRegistry, "callInternal");
     try {
       const args = Object.freeze({
@@ -377,18 +374,20 @@ describe("navigation tool session graph selection", () => {
   });
 
   test("omits absent request budget keys from handler options", async () => {
-    setNavigateToFactory(() => ({
-      execute: async (options) => {
-        expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_TIMEOUT_PARAM)).toBe(false);
-        expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_DEADLINE_PARAM)).toBe(false);
-        return {
-          success: true,
-          targetScreen: options.targetScreen,
-          stepsExecuted: 0,
-          durationMs: 0,
-        };
-      },
-    }));
+    const navigateToHandler = createNavigateToHandler({
+      navigateToFactory: () => ({
+        execute: async (options) => {
+          expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_TIMEOUT_PARAM)).toBe(false);
+          expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_DEADLINE_PARAM)).toBe(false);
+          return {
+            success: true,
+            targetScreen: options.targetScreen,
+            stepsExecuted: 0,
+            durationMs: 0,
+          };
+        },
+      }),
+    });
     for (const budget of [
       {},
       {
@@ -408,17 +407,19 @@ describe("navigation tool session graph selection", () => {
     expect(exploreSchema.parse({}).platform).toBeUndefined();
 
     let executedPlatform: string | undefined;
-    setNavigateToFactory(() => ({
-      execute: async (options) => {
-        executedPlatform = options.platform;
-        return {
-          success: true,
-          currentScreen: "Settings",
-          targetScreen: "Settings",
-          stepsExecuted: 0,
-        };
-      },
-    }));
+    const navigateToHandler = createNavigateToHandler({
+      navigateToFactory: () => ({
+        execute: async (options) => {
+          executedPlatform = options.platform;
+          return {
+            success: true,
+            currentScreen: "Settings",
+            targetScreen: "Settings",
+            stepsExecuted: 0,
+          };
+        },
+      }),
+    });
     await navigateToHandler(device, navigateArgs);
     expect(executedPlatform).toBe("ios");
   });
@@ -429,17 +430,19 @@ describe("navigation tool session graph selection", () => {
     expect(exploreSchema.parse({ platform: "android" }).platform).toBe("android");
 
     let executedPlatform: string | undefined;
-    setNavigateToFactory(() => ({
-      execute: async (options) => {
-        executedPlatform = options.platform;
-        return {
-          success: true,
-          currentScreen: "Settings",
-          targetScreen: "Settings",
-          stepsExecuted: 0,
-        };
-      },
-    }));
+    const navigateToHandler = createNavigateToHandler({
+      navigateToFactory: () => ({
+        execute: async (options) => {
+          executedPlatform = options.platform;
+          return {
+            success: true,
+            currentScreen: "Settings",
+            targetScreen: "Settings",
+            stepsExecuted: 0,
+          };
+        },
+      }),
+    });
     await navigateToHandler(device, navigateArgs);
     expect(executedPlatform).toBe("android");
   });
@@ -509,14 +512,16 @@ describe("navigation tool session graph selection", () => {
       screensDiscovered: 0,
       coverage: { explored: 0, total: 0, percentage: 0 },
     } as Awaited<ReturnType<Explore["execute"]>>);
-    setNavigateToFactory(() => ({
-      execute: async () => ({
-        success: true,
-        currentScreen: "Settings",
-        targetScreen: "Settings",
-        stepsExecuted: 0,
+    registerNavigationTools({
+      navigateToFactory: () => ({
+        execute: async () => ({
+          success: true,
+          currentScreen: "Settings",
+          targetScreen: "Settings",
+          stepsExecuted: 0,
+        }),
       }),
-    }));
+    });
 
     try {
       const calls = [

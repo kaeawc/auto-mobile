@@ -8,6 +8,10 @@ export const PROXY_SESSION_COMMANDS = [
   "subscribe",
   "status",
   "close",
+  "release",
+  "abandon",
+  "info",
+  "owner-kill",
 ] as const;
 export const PROXY_SESSION_FLAGS: Record<string, { ops: readonly string[]; meaning: string }> = {
   "--dir": {
@@ -17,6 +21,10 @@ export const PROXY_SESSION_FLAGS: Record<string, { ops: readonly string[]; meani
   "--client": {
     ops: PROXY_SESSION_COMMANDS,
     meaning: "Batch client name from MT_BATCH/broker/clients.json.",
+  },
+  "--as-client": {
+    ops: ["release", "abandon"],
+    meaning: "Isolation tests only: use another batch client's stored token; prints a notice.",
   },
   "--resume": { ops: ["up"], meaning: "Replay the same request.json and owner-token bytes." },
   "--profile": {
@@ -74,7 +82,12 @@ Commands:
   resources                List resources and templates.
   subscribe <uri>          Subscribe; notifications stay in notifications.jsonl.
   status                   Report session outcome, grant/profile/failure, owner liveness and daemonSocketAlive; --all prints all clients.
-  close                    Close the proxy cleanly and release its execution.
+  close                    Close cleanly; wait up to 240 s for a released broker receipt.
+  release                  Release the granted session with the stored token; wait for cleanup (240 s).
+  abandon                  Abandon the stored request, including unknown requests (240 s).
+  info                     Save the grant's current native device descriptor to info.json.
+  owner-kill               Signal only the recorded disposable owner after start-identity confirmation.
+release/abandon/info/owner-kill require --client; tokens are always read from owner-token.
 up/serve require BOTH a live private daemon pid and an answering control socket; start the private daemon first.
 Broker sessionUuid/profile are in init.json.session printed by up and status.
 Broker calls require a ready grant and live driver. Broker clients refuse resources, device inventory reads, startDevice/provisionDevice/getAndroid/getApple/killDevice, and --allow-selector.

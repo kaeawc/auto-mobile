@@ -1,3 +1,5 @@
+import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, spyOn, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
@@ -1029,3 +1031,284 @@ posixTest(
     expect(f.writes.length).toBe(before);
   },
 );
+
+posixTest(
+  "broker lifecycle release polls cleanup, abandon accepts unknown requests, and info writes native binding",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    const released = { ...f.session, outcome: "released" as const, cleanupPending: false };
+    broker.releaseResults = [{ sessionUuid: "own-session", outcome: "cleanup_pending" }];
+    broker.statusResults = [{ ...released, cleanupPending: true }, released];
+    const pending = runProxySessionCommand(parsed(["release", "--client", "a-phone"]), f.deps);
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(250);
+    expect(await pending).toBe(0);
+    expect(broker.calls.map((c) => c.method)).toEqual(["release", "status", "status"]);
+    broker.abandonResults = [
+      {
+        ...released,
+        outcome: "failed",
+        sessionUuid: null,
+        failure: {
+          code: "session_request_abandoned",
+          retryable: false,
+          message: "Abandoned unknown request",
+        },
+      },
+    ];
+    f.files.delete(join(brokerDir, "init.json"));
+    expect(await runProxySessionCommand(parsed(["abandon", "--client", "a-phone"]), f.deps)).toBe(
+      0,
+    );
+    f.initialize();
+    broker.infoResults = [{ assignedDevice: { id: "native", name: "broker-device" } }];
+    expect(await runProxySessionCommand(parsed(["info", "--client", "a-phone"]), f.deps)).toBe(0);
+    expect(JSON.parse(f.files.get(join(brokerDir, "info.json"))!)).toEqual(broker.infoResults[0]);
+    const token = f.files.get(join(brokerDir, "owner-token"))!;
+    expect(broker.calls[0].args).toEqual(["own-session", token]);
+    expect(f.logs.join(" ")).not.toContain(token);
+  },
+);
+posixTest(
+  "as-client is batch guarded, reads only stored tokens, and redacts both owners",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    f.files.set(
+      "/batch/sessions/other/request.json",
+      JSON.stringify({
+        ...JSON.parse(f.files.get(join(brokerDir, "request.json"))!),
+        requestId: "batch-id-other-1",
+      }),
+    );
+    f.files.set("/batch/sessions/other/attempts.json", '["batch-id-other-1"]');
+    f.files.set("/batch/sessions/other/owner-token", "other-secret");
+    for (const name of ["a-phone", "missing"]) {
+      expect(
+        await runProxySessionCommand(
+          parsed(["release", "--client", "a-phone", "--as-client", name]),
+          f.deps,
+        ),
+      ).toBe(2);
+    }
+    expect(broker.calls).toEqual([]);
+    broker.releaseResults = [{ sessionUuid: "own-session", outcome: "unknown_session" }];
+    expect(
+      await runProxySessionCommand(
+        parsed(["release", "--client", "a-phone", "--as-client", "other"]),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(broker.calls.at(-1)?.args).toEqual(["own-session", "other-secret"]);
+    expect(f.logs.join(" ")).toContain("Isolation test:");
+    broker.abandonResults = [
+      new Error(`other-secret ${f.files.get(join(brokerDir, "owner-token"))!}`),
+    ];
+    expect(
+      await runProxySessionCommand(
+        parsed(["abandon", "--client", "a-phone", "--as-client", "other"]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.logs.join(" ")).not.toContain("other-secret");
+    expect(f.logs.join(" ")).not.toContain(f.files.get(join(brokerDir, "owner-token"))!);
+  },
+);
+posixTest(
+  "owner-kill fences PID reuse, missing identity, and driver/proxy targets before signaling",
+  async () => {
+    for (const mode of ["different", "unknown", "missing", "driver", "proxy"] as const) {
+      const f = brokerFixture();
+      await f.up(["--owner", "disposable"]);
+      const signals: unknown[] = [];
+      f.deps.compareOwnerIdentity = () =>
+        mode === "different" ? "different" : mode === "unknown" ? "unknown" : "same";
+      f.deps.signalPid = (...args) => {
+        signals.push(args);
+      };
+      if (mode === "missing") {
+        f.files.delete(join(brokerDir, "owner-identity"));
+      }
+      if (mode === "driver" || mode === "proxy") {
+        f.files.set(join(brokerDir, `${mode}.pid`), "2468\n");
+      }
+      expect(
+        await runProxySessionCommand(parsed(["owner-kill", "--client", "a-phone"]), f.deps),
+      ).toBe(2);
+      expect(signals).toEqual([]);
+    }
+  },
+);
+posixTest(
+  "owner-kill escalates only a confirmed disposable owner and rechecks identity",
+  async () => {
+    for (const reused of [false, true]) {
+      const f = brokerFixture();
+      await f.up(["--owner", "disposable"]);
+      const signals: Array<[number, string]> = [];
+      let checked = 0;
+      f.deps.compareOwnerIdentity = () => (++checked === 2 && reused ? "different" : "same");
+      f.deps.signalPid = (pid, signal) => {
+        signals.push([pid, signal]);
+      };
+      f.deps.isPidAlive = (pid) =>
+        pid !== 2468 || !signals.some(([, signal]) => signal === "SIGKILL");
+      const pending = runProxySessionCommand(parsed(["owner-kill", "--client", "a-phone"]), f.deps);
+      await drainUntilQuiescent(f.timer);
+      f.timer.advanceTime(1000);
+      expect(await pending).toBe(reused ? 2 : 0);
+      expect(signals).toEqual(
+        reused
+          ? [[2468, "SIGTERM"]]
+          : [
+              [2468, "SIGTERM"],
+              [2468, "SIGKILL"],
+            ],
+      );
+    }
+  },
+);
+posixTest("broker close waits for released status and records driver close evidence", async () => {
+  const f = brokerFixture();
+  await f.up();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.statusResults = [
+    { ...f.session, cleanupPending: false },
+    { ...f.session, outcome: "released" },
+  ];
+  f.files.set(join(brokerDir, "out", "request-2.json"), '{"ok":true,"result":{}}');
+  f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+  const pending = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  await drainUntilQuiescent(f.timer);
+  expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).not.toHaveProperty("release");
+  f.timer.advanceTime(250);
+  expect(await pending).toBe(0);
+  expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).toMatchObject({
+    reason: "closed",
+    release: { outcome: "released" },
+  });
+  expect(broker.calls.map((c) => c.method)).toEqual(["status", "status"]);
+});
+posixTest(
+  "broker live status is included per client and connection failure stays diagnostic",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.statusResults = [{ ...f.session, outcome: "released" }];
+    expect(await runProxySessionCommand(parsed(["status", "--client", "a-phone"]), f.deps)).toBe(0);
+    expect(JSON.parse(f.logs.at(-1)!)).toMatchObject({ liveStatus: { outcome: "released" } });
+    expect(await runProxySessionCommand(parsed(["status", "--all"]), f.deps)).toBe(0);
+    expect(f.logs.at(-1)).toContain('"outcome":"released"');
+    broker.statusResults = [new Error("socket refused")];
+    expect(await runProxySessionCommand(parsed(["status", "--client", "a-phone"]), f.deps)).toBe(0);
+    expect(JSON.parse(f.logs.at(-1)!)).toMatchObject({ liveStatus: { unavailable: true } });
+  },
+);
+
+posixTest(
+  "broker status resolves daemon 1 socket from batch.json rather than wrapper environment",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    const socket = "/batch/daemon1/broker.sock";
+    f.files.set(
+      "/batch/batch.json",
+      JSON.stringify({
+        broker: { daemon: 1 },
+        specs: [
+          { index: 2, socketPath: "/batch/daemon2/other.sock" },
+          { index: 1, socketPath: socket },
+        ],
+      }),
+    );
+    const paths: string[] = [];
+    f.deps.createBrokerDaemonClient = (path) => {
+      paths.push(path);
+      return broker;
+    };
+    f.deps.probeDaemonSocket = async (path) => {
+      expect(path).toBe(socket);
+      return { alive: true };
+    };
+    expect(await runProxySessionCommand(parsed(["status", "--client", "a-phone"]), f.deps)).toBe(0);
+    expect(await runProxySessionCommand(parsed(["status", "--all"]), f.deps)).toBe(0);
+    expect(paths).toEqual([socket, socket]);
+  },
+);
+posixTest("release and close cannot succeed on unknown or perpetually pending status", async () => {
+  for (const op of ["release", "close"] as const) {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.releaseResults = [{ sessionUuid: "own-session", outcome: "cleanup_pending" }];
+    broker.statusResults = [undefined];
+    if (op === "close") {
+      f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+    }
+    const pending = runProxySessionCommand(parsed([op, "--client", "a-phone"]), f.deps);
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(240000);
+    expect(await pending).toBe(2);
+    expect(f.logs.join(" ")).toContain("timed out");
+    if (op === "close") {
+      expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).not.toHaveProperty(
+        "release",
+      );
+    }
+    f.timer.reset();
+  }
+});
+posixTest(
+  "clean close publishes a request then joins driver evidence and release status",
+  async () => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.statusResults = [{ ...f.session, outcome: "released" }];
+    const writeJson = f.deps.writeJson;
+    f.deps.writeJson = (path, value) => {
+      writeJson(path, value);
+      if (path === join(brokerDir, "in", "request-2.json")) {
+        f.files.set(join(brokerDir, "out", "request-2.json"), '{"ok":true}');
+      }
+    };
+    const pending = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+    await drainUntilQuiescent(f.timer);
+    expect(JSON.parse(f.files.get(join(brokerDir, "in", "request-2.json"))!)).toMatchObject({
+      op: "close",
+    });
+    f.files.set(join(brokerDir, "closed.json"), '{"reason":"close_requested"}');
+    f.timer.advanceTime(50);
+    expect(await pending).toBe(0);
+    expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).toMatchObject({
+      reason: "close_requested",
+      release: { outcome: "released" },
+    });
+  },
+);
+posixTest("lifecycle operations require the stored identity and broker-only flags", async () => {
+  for (const op of ["release", "abandon", "info", "owner-kill"]) {
+    expect(parseProxySessionArgs([op, "--dir", dir])).toHaveProperty("error");
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    f.files.delete(join(brokerDir, "owner-token"));
+    expect(await runProxySessionCommand(parsed([op, "--client", "a-phone"]), f.deps)).toBe(2);
+    expect(broker.calls).toEqual([]);
+  }
+  expect(
+    parseProxySessionArgs(["info", "--client", "a-phone", "--as-client", "other"]),
+  ).toHaveProperty("error");
+});

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 REPO="${REPO:-kaeawc/auto-mobile}"
+LOG_FETCH_RETRY_SLEEP_SECONDS="${LOG_FETCH_RETRY_SLEEP_SECONDS:-5}"
 if [[ "$#" -ne 2 ]]; then
   echo "Usage: scripts/ci/rerun-contended-runner.sh <run-id> <run-attempt>" >&2
   exit 2
@@ -40,7 +41,22 @@ while IFS=$'\t' read -r job_id job_name; do
       exit 0
       ;;
   esac
-  gh api ${gh_escape_args[@]+"${gh_escape_args[@]}"} "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file"
+  log_fetch_status=0
+  for log_fetch_attempt in 1 2; do
+    if gh api ${gh_escape_args[@]+"${gh_escape_args[@]}"} "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" </dev/null; then
+      log_fetch_status=0
+      break
+    else
+      log_fetch_status=$?
+    fi
+    if [[ "$log_fetch_attempt" -eq 1 ]]; then
+      sleep "$LOG_FETCH_RETRY_SLEEP_SECONDS"
+    fi
+  done
+  if [[ "$log_fetch_status" -ne 0 ]]; then
+    echo "Skipping run $run_id: could not fetch logs for job '$job_name' (job $job_id) after 2 attempts; gh api exited $log_fetch_status."
+    exit 0
+  fi
   if unzip -Z1 "$log_file" >/dev/null 2>&1; then
     log_text="$(unzip -p "$log_file")"
   else

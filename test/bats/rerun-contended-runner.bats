@@ -5,7 +5,9 @@ SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ci/rerun-c
 setup() {
   export FIXTURE="$BATS_TEST_TMPDIR/run.json"
   export GH_CALLS="$BATS_TEST_TMPDIR/gh-calls"
+  export LOG_CALL_COUNTER="$BATS_TEST_TMPDIR/log-call-counter"
   export JOB_LOG="$BATS_TEST_TMPDIR/job.log"
+  export LOG_FETCH_RETRY_SLEEP_SECONDS=0
   export FAKE_GH_ALLOW_ESCAPE=supported
   export REPO=kaeawc/auto-mobile
   mkdir -p "$BATS_TEST_TMPDIR/bin"
@@ -29,7 +31,11 @@ case "$1 $2" in
     elif [[ "$FAKE_GH_ALLOW_ESCAPE" == unsupported && "$*" == *--allow-escape-sequences* ]]; then
       exit 1
     fi
-    [[ "${FAKE_LOG_ERROR:-0}" == 0 ]] || exit 1
+    log_calls=0
+    [[ ! -f "$LOG_CALL_COUNTER" ]] || log_calls="$(cat "$LOG_CALL_COUNTER")"
+    log_calls=$((log_calls + 1))
+    printf '%s\n' "$log_calls" > "$LOG_CALL_COUNTER"
+    [[ "$log_calls" -gt "${FAKE_LOG_FAILURES:-0}" ]] || exit 1
     cat "$JOB_LOG"
     ;;
   'run rerun') ;;
@@ -130,10 +136,21 @@ assert_no_rerun() {
   grep -F 'run rerun' "$GH_CALLS"
 }
 
-@test "log API errors fail without rerunning" {
-  export FAKE_LOG_ERROR=1
+@test "a failed log fetch retries and reruns when the retry succeeds" {
+  export FAKE_LOG_FAILURES=1
   run bash "$SCRIPT" 123 1
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LOG_CALL_COUNTER")" -eq 2 ]
+  [ "$(grep -Fc 'actions/jobs/1/logs' "$GH_CALLS")" -eq 2 ]
+  grep -F 'run rerun' "$GH_CALLS"
+}
+
+@test "two failed log fetches skip successfully without rerunning" {
+  export FAKE_LOG_FAILURES=2
+  run bash "$SCRIPT" 123 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not fetch logs for job 'Node Unit Tests (ubuntu-latest)' (job 1) after 2 attempts"* ]]
+  [ "$(cat "$LOG_CALL_COUNTER")" -eq 2 ]
   ! grep -F 'run rerun' "$GH_CALLS"
 }
 

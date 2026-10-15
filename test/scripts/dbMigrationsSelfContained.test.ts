@@ -6,6 +6,9 @@ import { join, posix } from "node:path";
 import ts from "typescript";
 import packageJson from "../../package.json";
 
+// Bundled into dist, devDependency since #12474, and still resolvable by
+// AUTOMOBILE_MIGRATIONS_DIR override-folder migrations (see migrationDependencyIntegrity.ts).
+const BUNDLED_MIGRATION_RUNTIME_PACKAGES = ["kysely"];
 const migrationsDir = join(import.meta.dir, "../../src/db/migrations");
 const migrationFiles = [...new Glob("**/*.ts").scanSync({ cwd: migrationsDir })].sort();
 const siblingRuntimeFiles = ["eventTables.ts"] as const;
@@ -13,7 +16,10 @@ const overrideFolderFiles = new Set<string>([
   ...siblingRuntimeFiles,
   ...migrationFiles.map((file) => `migrations/${file.replaceAll("\\", "/")}`),
 ]);
-const dependencies = Object.keys(packageJson.dependencies);
+const dependencies = [
+  ...Object.keys(packageJson.dependencies),
+  ...BUNDLED_MIGRATION_RUNTIME_PACKAGES,
+];
 
 function isTypeOnlyImport(clause: ts.ImportClause | undefined): boolean {
   if (!clause) {
@@ -182,5 +188,11 @@ describe("raw DB migration override folder is self-contained", () => {
   test("every migration runtime dependency is available in the override folder", () => {
     expect(migrationFiles.length).toBeGreaterThan(0);
     expect(violations).toEqual([]);
+  });
+
+  test("bundled migration runtime packages are devDependencies", () => {
+    for (const dependency of BUNDLED_MIGRATION_RUNTIME_PACKAGES) {
+      expect(packageJson.devDependencies[dependency]).toBeDefined();
+    }
   });
 });

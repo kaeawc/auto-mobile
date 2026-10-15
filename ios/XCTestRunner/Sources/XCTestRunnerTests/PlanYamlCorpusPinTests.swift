@@ -168,7 +168,7 @@ final class PlanYamlCorpusPinTests: XCTestCase {
             }
             actual[name] = Golden(
                 metadata: Outcome { try Metadata(PlanMetadataParser.parse(from: yaml)) },
-                secretParameterKeys: PlanMetadataParser.parseSecretParameterKeys(from: yaml).sorted(),
+                secretParameterKeys: try PlanMetadataParser.parseSecretParameterKeys(from: yaml).sorted(),
                 toolNames: PlanStepToolParser.toolNames(from: yaml),
                 substitutions: substitutions
             )

@@ -285,7 +285,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         // always equals the recovery context. The `substituted` string keeps the real values for the
         // daemon.
         let secretValues = SecretRedaction.secretValues(
-            resolveSecretValues(rawPlan: planContent)
+            try resolveSecretValues(rawPlan: planContent)
         )
         PerfTimer
             .log(
@@ -641,9 +641,9 @@ public final class AutoMobilePlanExecutor: Sendable {
     /// `${...}` inside a key name is resolved with the same substitution; and for each key both its raw
     /// parameter value and its actual substituted value (`PlanParameterSubstitutor.substituteText` applied to the bare
     /// `${key}`, matching the ordered single pass exactly) are collected.
-    private func resolveSecretValues(rawPlan: String) -> [String] {
+    private func resolveSecretValues(rawPlan: String) throws -> [String] {
         let declaredKeys = configuration.secretParameterKeys
-            .union(PlanMetadataParser.parseSecretParameterKeys(from: rawPlan))
+            .union(try PlanMetadataParser.parseSecretParameterKeys(from: rawPlan))
         guard !declaredKeys.isEmpty else {
             return []
         }

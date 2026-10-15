@@ -60,22 +60,20 @@ enum PlanParameterSubstitutor {
             return .sequence(Node.Sequence(values, sequence.tag, .block, sequence.mark, sequence.anchor))
         case let .scalar(scalar):
             let original = placeholders.restore(scalar.string)
-            let value: String
             if scalar.style == .folded {
-                // Fold replacement line breaks as YAML would in this source scalar, without
-                // reparsing any surrounding plan structure. The sentinel fixes chomp boundaries.
-                var foldedParameters = parameters
                 for (key, replacement) in parameters {
                     if let token = placeholders.tokens["${\(key)}"], scalar.string.contains(token),
-                       replacement.contains("\n") || replacement.contains("\r")
+                       replacement.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
                     {
-                        foldedParameters[key] = try fold(replacement)
+                        throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                            "Plan line \(scalar.mark?.line ?? 1): a parameter value with a line break cannot be substituted into a "
+                                + "folded (>) block scalar, which would fold the break into a space. Use a literal (|) "
+                                + "block scalar or a double-quoted scalar (\"${name}\")."
+                        )
                     }
                 }
-                value = placeholders.expand(scalar.string, parameters: foldedParameters)
-            } else {
-                value = placeholders.expand(scalar.string, parameters: parameters)
             }
+            let value = placeholders.expand(scalar.string, parameters: parameters)
             guard original != value else {
                 return .scalar(Node.Scalar(original, scalar.tag, scalar.style, scalar.mark, scalar.anchor))
             }
@@ -87,18 +85,6 @@ enum PlanParameterSubstitutor {
         case .alias:
             return node
         }
-    }
-
-    private static func fold(_ value: String) throws -> String {
-        let normalized = value.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        // Appending non-whitespace keeps trailing replacement newlines inside the folded content.
-        let content = (normalized + "\u{E002}").components(separatedBy: "\n")
-            .map { "  " + $0 }.joined(separator: "\n")
-        guard let folded = try Yams.compose(yaml: ">2-\n" + content)?.scalar?.string else {
-            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan("Cannot fold YAML parameter scalar.")
-        }
-        return String(folded.dropLast())
     }
 
     /// Ask the structured parser whether the entire replacement is one unquoted scalar. No YAML

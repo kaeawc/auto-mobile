@@ -9,16 +9,16 @@ import Foundation
 /// the single source of truth for what actually landed in the plan (issue #6029 review — an
 /// independent fixpoint could mismatch the executor's single ordered pass, or blow up on a
 /// self-referential value). The executor hands over the concrete substituted secret strings; this
-/// type expands each into its Unicode NFC/NFD forms and scrubs every occurrence. `internal` — its
-/// only consumer is the executor, and `SecretRedactionTests` unit-tests it directly. Mirrors
+/// type expands each into its folded and Unicode NFC/NFD forms and scrubs every occurrence.
+/// `internal` — its only consumer is the executor, and `SecretRedactionTests` unit-tests it directly. Mirrors
 /// Android's `SecretRedactor`.
 enum SecretRedaction {
     static let placeholder = "***REDACTED***"
 
     /// Expand the executor-supplied concrete secret strings into the exact byte forms to scrub: each
-    /// value in its NFC and NFD Unicode forms — so a decomposed on-screen/error occurrence still
-    /// matches a composed value (and vice versa) — and, for each of those, its JSON-string-escaped
-    /// form, plus its YAML double-quoted form. The recovery loop's tool/observe results are JSON
+    /// value and its folded line-break spelling in their NFC and NFD Unicode forms — so a decomposed
+    /// on-screen/error occurrence still matches a composed value (and vice versa) — and, for each,
+    /// its JSON-string-escaped form, plus its YAML double-quoted form. The recovery loop's tool/observe results are JSON
     /// (issue #6094), so a secret containing a JSON-special character (`"`, `\`, newline, tab, CR)
     /// appears only in escaped form there and
     /// the literal `redact` would miss it. Blank inputs are dropped. Dedup is by UTF-16 code units,
@@ -28,7 +28,8 @@ enum SecretRedaction {
         var result: [String] = []
         var seen: Set<[UInt16]> = []
         for value in concreteValues where !value.isEmpty {
-            for form in normalizationForms(of: value) {
+            let spellings = value.unicodeScalars.contains { $0 == "\n" || $0 == "\r" } ? [value, foldedSpelling(value)] : [value]
+            for form in spellings.flatMap({ normalizationForms(of: $0) }) where !form.isEmpty {
                 // Cover the raw value and its JSON-escaped forms through the transport-encoding depth
                 // the runners actually apply: iOS surfaces one encoding layer, and Android reserializes
                 // the enclosing MCP `JsonElement` over an already-encoded `content[].text`, so a
@@ -46,6 +47,30 @@ enum SecretRedaction {
                     }
                 }
             }
+        }
+        return result
+    }
+
+    /// Defense in depth for folded scalar text observed from older plans or external tools.
+    /// Normalize CRLF/lone CR, then fold one break to a space and each longer run to one fewer LF.
+    private static func foldedSpelling(_ value: String) -> String {
+        let normalized = value.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var result = ""
+        var breaks = 0
+        for scalar in normalized.unicodeScalars {
+            if scalar == "\n" {
+                breaks += 1
+            } else {
+                if breaks > 0 {
+                    result += breaks == 1 ? " " : String(repeating: "\n", count: breaks - 1)
+                    breaks = 0
+                }
+                result.unicodeScalars.append(scalar)
+            }
+        }
+        if breaks > 0 {
+            result += breaks == 1 ? " " : String(repeating: "\n", count: breaks - 1)
         }
         return result
     }

@@ -163,6 +163,11 @@ final class PlanParameterSubstitutorTests: XCTestCase {
 
     func testBlockScalarEndsAtTheNextSiblingKeyOnADashLine() throws {
         let plan = "steps:\n  - text: >-\n      ${p}\n    label: ${q}"
+        XCTAssertThrowsError(try sub(plan, ["p": "a\nb", "q": "z #"])) { error in
+            guard case AutoMobilePlanExecutor.ExecutorError.invalidPlan = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+        }
         try assertYamlEqual(
             sub(plan, ["p": "a b", "q": "z #"]),
             "steps:\n  - text: >-\n      a b\n    label: \"z #\""
@@ -274,13 +279,20 @@ final class PlanParameterSubstitutorTests: XCTestCase {
 
     // MARK: Folded block scalars
 
-    func testFoldedBlockScalarAppliesYamlFoldingToReplacementLineBreaks() throws {
+    func testFoldedBlockScalarRejectsReplacementLineBreaks() throws {
         let plan = "steps:\n  - tool: x\n    text: >\n      before ${p} after\n    label: ${q}"
-        for value in ["a\nb", "a\rb"] {
-            try assertYamlEqual(
-                sub(plan, ["p": value, "q": "L"]),
-                "steps:\n  - tool: x\n    text: >\n      before a b after\n    label: L"
-            )
+        for value in ["a\nb", "a\rb", "a\r\nb"] {
+            XCTAssertThrowsError(try sub(plan, ["p": value, "q": "L"])) { error in
+                guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                    return XCTFail("expected invalidPlan, got \(error)")
+                }
+                XCTAssertEqual(
+                    message,
+                    "Plan line 3: a parameter value with a line break cannot be substituted into a "
+                        + "folded (>) block scalar, which would fold the break into a space. Use a literal (|) "
+                        + "block scalar or a double-quoted scalar (\"${name}\")."
+                )
+            }
         }
         try assertYamlEqual(
             sub(plan, ["p": "a b", "q": "L"]),

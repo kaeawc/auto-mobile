@@ -45,23 +45,26 @@ enum PlanMetadataParser {
     }
 
     /// Parse the RAW plan so supplied parameter values cannot alter the secret declaration.
-    static func parseSecretParameterKeys(from yamlContent: String) -> Set<String> {
+    static func parseSecretParameterKeys(from yamlContent: String) throws -> Set<String> {
         let placeholders = PlanYamlPlaceholders(yamlContent)
+        let root: Node?
         do {
-            guard let declaration = try Yams.compose(yaml: placeholders.yaml)?["secretParameters"] else {
-                return []
-            }
-            let entries = declaration.sequence.map(Array.init) ?? [declaration]
-            return Set(entries.compactMap { node in
-                guard let value = node.scalar?.string, !value.isEmpty else { return nil }
-                return placeholders.restore(value)
-            })
+            root = try Yams.compose(yaml: placeholders.yaml)
         } catch {
-            // Safe: substitution first rejects this same raw YAML with parameters; without them
-            // nothing is redacted, and the daemon rejects the malformed plan.
-            StdoutLogger().warn("Cannot parse plan secretParameters: \(error)")
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan("Invalid YAML: \(error)")
+        }
+        guard let declaration = root?["secretParameters"] else {
             return []
         }
+        let entries = declaration.sequence.map(Array.init) ?? [declaration]
+        return try Set(entries.map { node in
+            guard let value = node.scalar?.string, !value.isEmpty else {
+                throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                    "secretParameters must be a string or a list of non-empty strings"
+                )
+            }
+            return placeholders.restore(value)
+        })
     }
 
     private static func device(

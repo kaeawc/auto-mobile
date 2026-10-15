@@ -1328,10 +1328,26 @@ private final class ScriptedCapturingModelResponder: ModelResponding, @unchecked
 
 /// Raw-plan secret parsing uses Yams with protected placeholders. Escapes and multiline plain
 /// scalars now follow YAML semantics (including `API\nTOKEN` folding to `API TOKEN`), matching
-/// Android. Invalid YAML logs at warn and yields no keys: substitution rejects that same raw plan
-/// first when parameters are supplied; without parameters nothing is redacted and the daemon rejects it.
+/// Android. Invalid YAML and malformed secret declarations fail before recovery redaction work.
 final class PlanMetadataSecretParametersParsingTests: XCTestCase {
-    func testFlushZeroIndentBlockSequenceIsParsed() {
+    func testSingleScalarIsParsed() throws {
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: "secretParameters: token"), ["token"])
+    }
+
+    func testInvalidSecretDeclarationsThrow() {
+        for declaration in ["{token: true}", "[a, {b: c}]", "[a, \"\"]", "\"\"", "[a, []]", ""] {
+            XCTAssertThrowsError(try PlanMetadataParser.parseSecretParameterKeys(
+                from: "secretParameters: \(declaration)\nsteps: []"
+            )) { error in
+                guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                    return XCTFail("expected invalidPlan, got \(error)")
+                }
+                XCTAssertEqual(message, "secretParameters must be a string or a list of non-empty strings")
+            }
+        }
+    }
+
+    func testFlushZeroIndentBlockSequenceIsParsed() throws {
         let yaml = """
         name: P
         secretParameters:
@@ -1340,10 +1356,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
     }
 
-    func testIndentedBlockSequenceIsParsed() {
+    func testIndentedBlockSequenceIsParsed() throws {
         let yaml = """
         name: P
         secretParameters:
@@ -1351,22 +1367,22 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
     }
 
-    func testInlineFlowListIsParsed() {
+    func testInlineFlowListIsParsed() throws {
         let yaml = "name: P\nsecretParameters: [TOKEN, \"PASSWORD\"]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
     }
 
-    func testInlineFlowListDoesNotSplitOnCommaInsideQuotes() {
+    func testInlineFlowListDoesNotSplitOnCommaInsideQuotes() throws {
         let yaml = "name: P\nsecretParameters: [\"API,TOKEN\", plain]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "plain"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "plain"])
     }
 
     // MARK: - Multiline flow sequence (#6097)
 
-    func testMultilineFlowListWithClosingBracketOnOwnLineIsParsed() {
+    func testMultilineFlowListWithClosingBracketOnOwnLineIsParsed() throws {
         // The bracketed flow value spans multiple lines with `]` alone on the last line — the form the
         // line scanner previously dropped, silently disabling redaction (#6097 fail-open gap).
         let yaml = """
@@ -1378,10 +1394,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
     }
 
-    func testMultilineFlowListWithTrailingCommaAndClosingBracketTrailingItemIsParsed() {
+    func testMultilineFlowListWithTrailingCommaAndClosingBracketTrailingItemIsParsed() throws {
         // Trailing comma after the last item, and `]` trailing the final item rather than on its own line.
         let yaml = """
         name: P
@@ -1392,10 +1408,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD", "API"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD", "API"])
     }
 
-    func testMultilineFlowListToleratesQuotedCommaAndPlaceholderKeys() {
+    func testMultilineFlowListToleratesQuotedCommaAndPlaceholderKeys() throws {
         // Quoted comma is not a separator, and `${...}` key names stay literal (resolved later) — the
         // multiline path must respect the same rules as the single-line inline path.
         let yaml = """
@@ -1407,10 +1423,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "${SECRET_KEY}"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API,TOKEN", "${SECRET_KEY}"])
     }
 
-    func testEmptyMultilineFlowListYieldsEmptySet() {
+    func testEmptyMultilineFlowListYieldsEmptySet() throws {
         let yaml = """
         name: P
         secretParameters: [
@@ -1418,10 +1434,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertTrue(PlanMetadataParser.parseSecretParameterKeys(from: yaml).isEmpty)
+        XCTAssertTrue(try PlanMetadataParser.parseSecretParameterKeys(from: yaml).isEmpty)
     }
 
-    func testMultilineFlowQuotedHashKeyDoesNotDropFollowingKey() {
+    func testMultilineFlowQuotedHashKeyDoesNotDropFollowingKey() throws {
         // A `#` inside a quoted item is literal YAML, not a comment. If comments are stripped
         // line-by-line before quote state is known, `"API#TOKEN"` is truncated to `"API`, the now
         // unterminated quote swallows the rest of the declaration, and PASSWORD is dropped — its
@@ -1435,10 +1451,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API#TOKEN", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API#TOKEN", "PASSWORD"])
     }
 
-    func testMultilineFlowEscapedQuoteBeforeBracketDoesNotDropFollowingKey() {
+    func testMultilineFlowEscapedQuoteBeforeBracketDoesNotDropFollowingKey() throws {
         // A double-quoted scalar may contain an escaped quote (`\"`); the `]` that follows it is still
         // inside the scalar, not the sequence terminator. Without escape tracking the terminator finder
         // stops early and PASSWORD is dropped — fail-open (#6097 Codex P2).
@@ -1451,19 +1467,19 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["a\"]b", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["a\"]b", "PASSWORD"])
     }
 
-    func testFlowTrailingCommentAfterClosingBracketIsIgnored() {
+    func testFlowTrailingCommentAfterClosingBracketIsIgnored() throws {
         // A comment after the closing `]` (with or without a leading space) must be ignored, and TOKEN
         // still parsed. Dropping it would leak TOKEN's value (#6097 Codex — comment after `]`).
         let spaced = "name: P\nsecretParameters: [TOKEN] # trailing comment\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: spaced), ["TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: spaced), ["TOKEN"])
         let unspaced = "name: P\nsecretParameters: [TOKEN]#c\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: unspaced), ["TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: unspaced), ["TOKEN"])
     }
 
-    func testMultilineFlowClosingBracketFollowedByCommentIsIgnored() {
+    func testMultilineFlowClosingBracketFollowedByCommentIsIgnored() throws {
         let yaml = """
         name: P
         secretParameters: [
@@ -1473,13 +1489,17 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN", "PASSWORD"])
     }
 
-    func testUnrecognizedTokenWarnsAndReturnsNoSecretKeys() {
+    func testUnrecognizedTokenThrowsInvalidYaml() throws {
         let yaml = "name: P\nsecretParameters: [TOKEN, @@weird@@]\nsteps:\n  - tool: observe"
-        // Safe because substitution rejects this same raw plan before secret metadata is used.
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [])
+        XCTAssertThrowsError(try PlanMetadataParser.parseSecretParameterKeys(from: yaml)) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.hasPrefix("Invalid YAML: "), message)
+        }
         XCTAssertThrowsError(try PlanParameterSubstitutor.substitute(
             in: yaml,
             parameters: ["TOKEN": "secret"]
@@ -1490,10 +1510,14 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         }
     }
 
-    func testUnterminatedFlowSequenceWarnsAndReturnsNoSecretKeys() {
+    func testUnterminatedFlowSequenceThrowsInvalidYaml() throws {
         let yaml = "name: P\nsecretParameters: [\n  TOKEN,\n  PASSWORD"
-        // Safe because substitution rejects this same raw plan before secret metadata is used.
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [])
+        XCTAssertThrowsError(try PlanMetadataParser.parseSecretParameterKeys(from: yaml)) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.hasPrefix("Invalid YAML: "), message)
+        }
         XCTAssertThrowsError(try PlanParameterSubstitutor.substitute(
             in: yaml,
             parameters: ["TOKEN": "secret"]
@@ -1504,63 +1528,67 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         }
     }
 
-    func testDoubleQuotedLineContinuationKeyIsCaptured() {
+    func testDoubleQuotedLineContinuationKeyIsCaptured() throws {
         // A double-quoted key using YAML line continuation (`"API\`⏎`TOKEN"` decodes to `APITOKEN`)
         // must be captured so its value is redacted (#6097 Codex — line continuation).
         let yaml = "name: P\nsecretParameters: [\n  \"API\\\n  TOKEN\"\n]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
     }
 
-    func testCRLFAuthoredQuotedMultilineKeyHasNoCarriageReturn() {
+    func testCRLFAuthoredQuotedMultilineKeyHasNoCarriageReturn() throws {
         // A CRLF-authored quoted multiline key must not embed `\r` (#6097 Codex — CRLF). The quoted
         // scalar folds to `API TOKEN`.
         let yaml = "name: P\r\nsecretParameters: [\r\n  \"API\r\n  TOKEN\"\r\n]\r\nsteps:\r\n  - tool: observe"
-        let keys = PlanMetadataParser.parseSecretParameterKeys(from: yaml)
+        let keys = try PlanMetadataParser.parseSecretParameterKeys(from: yaml)
         XCTAssertEqual(keys, ["API TOKEN"])
         XCTAssertFalse(keys.contains { $0.contains("\r") }, "no key may contain a carriage return")
     }
 
-    func testPlainMultilineFlowScalarFoldsIntoOneSecretKey() {
+    func testPlainMultilineFlowScalarFoldsIntoOneSecretKey() throws {
         let yaml = "name: P\nsecretParameters: [\n  API\n  TOKEN\n]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API TOKEN"])
     }
 
-    func testQuotedWhitespaceOnlyKeyIsNotDropped() {
+    func testQuotedWhitespaceOnlyKeyIsNotDropped() throws {
         // Stripping the quotes before the trim would discard `" "`; a single space is a valid quoted
         // key and must be kept so its parameter value is redacted (#6097 Codex — quoted whitespace).
         let yaml = "name: P\nsecretParameters: [\" \"]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [" "])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), [" "])
     }
 
-    func testDoubleQuotedHexEscapeIsDecodedToSpecCorrectKey() {
+    func testDoubleQuotedHexEscapeIsDecodedToSpecCorrectKey() throws {
         // Issue #6141: `\x54` decodes to `T`, so `"API\x54OKEN"` yields the key `APITOKEN` — matching
         // what snakeyaml gives the Android runner.
         let yaml = "name: P\nsecretParameters: [\"API\\x54OKEN\"]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
     }
 
-    func testDoubleQuotedUnicodeEscapesAreDecoded() {
+    func testDoubleQuotedUnicodeEscapesAreDecoded() throws {
         // `A` -> A, `\U00000042` -> B (issue #6141).
         let yaml = "name: P\nsecretParameters: [\"\\u0041\\U00000042\"]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["AB"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["AB"])
     }
 
-    func testDoubleQuotedControlEscapesAreDecoded() {
+    func testDoubleQuotedControlEscapesAreDecoded() throws {
         // `\t` -> TAB, `\n` -> LF (issue #6141).
         let yaml = "name: P\nsecretParameters: [\"A\\tB\\nC\"]\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["A\tB\nC"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["A\tB\nC"])
     }
 
-    func testBlockSequenceDoubleQuotedHexEscapeIsDecoded() {
+    func testBlockSequenceDoubleQuotedHexEscapeIsDecoded() throws {
         // The block-sequence form decodes escapes the same way as the flow form (issue #6141).
         let yaml = "name: P\nsecretParameters:\n  - \"API\\x54OKEN\"\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["APITOKEN"])
     }
 
-    func testMalformedHexEscapeWarnsAndReturnsNoSecretKeys() {
+    func testMalformedHexEscapeThrowsInvalidYaml() throws {
         let yaml = "name: P\nsecretParameters: [\"API\\xZZ\"]\nsteps:\n  - tool: observe"
-        // Safe because substitution rejects this same raw plan before secret metadata is used.
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), [])
+        XCTAssertThrowsError(try PlanMetadataParser.parseSecretParameterKeys(from: yaml)) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.hasPrefix("Invalid YAML: "), message)
+        }
         XCTAssertThrowsError(try PlanParameterSubstitutor.substitute(
             in: yaml,
             parameters: ["TOKEN": "secret"]
@@ -1571,13 +1599,13 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         }
     }
 
-    func testSingleQuotedBlockScalarUnescapesDoubledQuote() {
+    func testSingleQuotedBlockScalarUnescapesDoubledQuote() throws {
         // A single-quoted scalar is literal except `''` -> `'` (issue #6141).
         let yaml = "name: P\nsecretParameters:\n  - 'API''TOKEN'\nsteps:\n  - tool: observe"
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API'TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["API'TOKEN"])
     }
 
-    func testFlushBlockStopsAtNextTopLevelKey() {
+    func testFlushBlockStopsAtNextTopLevelKey() throws {
         let yaml = """
         name: P
         secretParameters:
@@ -1586,14 +1614,14 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
         steps:
           - tool: observe
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["TOKEN"])
     }
 
-    func testNoSecretParametersYieldsEmptySet() {
-        XCTAssertTrue(PlanMetadataParser.parseSecretParameterKeys(from: "name: P\nsteps:\n  - tool: observe").isEmpty)
+    func testNoSecretParametersYieldsEmptySet() throws {
+        XCTAssertTrue(try PlanMetadataParser.parseSecretParameterKeys(from: "name: P\nsteps:\n  - tool: observe").isEmpty)
     }
 
-    func testToleratesPlaceholderKeyAndUnrelatedPlaceholderLists() {
+    func testToleratesPlaceholderKeyAndUnrelatedPlaceholderLists() throws {
         // A parameterized key name is kept literal here (resolved later); an unrelated flow list with
         // placeholders (which a full YAML load would choke on) must not affect the scan (#6029 review).
         let yaml = """
@@ -1607,10 +1635,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
           - tool: inputText
             text: "${SECRET_KEY}"
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["${SECRET_KEY}"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["${SECRET_KEY}"])
     }
 
-    func testScansRawPlanSoInjectedContentInAValueCannotAddKeys() {
+    func testScansRawPlanSoInjectedContentInAValueCannotAddKeys() throws {
         // Parsing runs on the RAW plan: a `${EVIL}` value that would expand to a fake secretParameters
         // block cannot inject keys, because the scanner never sees substituted values (#6029 review).
         let yaml = """
@@ -1621,13 +1649,71 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
           - tool: inputText
             text: "${EVIL}"
         """
-        XCTAssertEqual(PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["REAL"])
+        XCTAssertEqual(try PlanMetadataParser.parseSecretParameterKeys(from: yaml), ["REAL"])
     }
 }
 
-/// Direct redaction tests for `SecretRedaction` — the type now only expands Unicode forms and scrubs;
+/// Direct redaction tests for `SecretRedaction` — the type expands secret spellings and scrubs;
 /// resolution/substitution is the executor's job (tested end-to-end below). (#6029 convergence)
 final class SecretRedactionTests: XCTestCase {
+    func testFoldedMultilineSecretIsRejectedAndItsFoldedSpellingIsRedacted() throws {
+        let plan = "steps:\n  - tool: x\n    text: >\n      ${key}\nsecretParameters: [key]"
+        let secret = "-----BEGIN KEY-----\nMIIEsecretbody\n-----END KEY-----"
+        XCTAssertThrowsError(try PlanParameterSubstitutor.substitute(in: plan, parameters: ["key": secret])) { error in
+            guard case AutoMobilePlanExecutor.ExecutorError.invalidPlan = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+        }
+        let concreteValues = SecretRedaction.secretParameterValues(
+            declaredKeys: try PlanMetadataParser.parseSecretParameterKeys(from: plan), parameters: ["key": secret]
+        )
+        XCTAssertEqual(
+            SecretRedaction.redact(
+                "error: -----BEGIN KEY----- MIIEsecretbody -----END KEY-----",
+                secretValues: SecretRedaction.secretValues(concreteValues)
+            ),
+            "error: \(SecretRedaction.placeholder)"
+        )
+    }
+
+    func testFoldedSecretSpellingsNormalizeLineBreaksAndPreserveBlankLines() {
+        for (secret, folded) in [
+            ("a\nb", "a b"), ("a\r\nb", "a b"), ("a\rb", "a b"),
+            ("a\n\nb", "a\nb"), ("a\r\n\r\nb", "a\nb"), ("a\n\n\nb", "a\n\nb"),
+        ] {
+            let values = SecretRedaction.secretValues([secret])
+            for spelling in [secret, folded] {
+                var transported = spelling
+                for _ in 0 ..< 3 {
+                    XCTAssertEqual(
+                        SecretRedaction.redact("before \(transported) after", secretValues: values),
+                        "before \(SecretRedaction.placeholder) after"
+                    )
+                    transported = SecretRedaction.jsonEscaped(transported)
+                }
+            }
+        }
+    }
+
+    func testFoldedSecretHasUnicodeAndYamlTransportVariants() {
+        let secret = "caf\u{00E9}\"\u{01}\r\n\r\nbody\nend"
+        let folded = "caf\u{00E9}\"\u{01}\nbody end"
+        let yamlEscaped = #"café\"\x01\nbody end"#
+        let values = SecretRedaction.secretValues([secret])
+        for spelling in [folded, yamlEscaped] {
+            for form in [spelling, spelling.decomposedStringWithCanonicalMapping] {
+                var transported = form
+                for _ in 0 ..< 3 {
+                    XCTAssertEqual(
+                        SecretRedaction.redact("before \(transported) after", secretValues: values),
+                        "before \(SecretRedaction.placeholder) after"
+                    )
+                    transported = SecretRedaction.jsonEscaped(transported)
+                }
+            }
+        }
+    }
+
     func testRedactsLibyamlDoubleQuotedEscapesAndTheirJsonTransportForms() throws {
         let secret = "start\u{00}\u{07}\u{08}\t\n\u{0B}\u{0C}\r\u{1B}\"\\\u{01}\u{1F}\u{7F}\u{9F}"
             + "\u{85}\u{A0}\u{2028}\u{2029}\u{FEFF}\u{FFFE}\u{FFFF}😀end"

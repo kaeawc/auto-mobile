@@ -68,7 +68,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun addHighlight(
+              override suspend fun addHighlight(
                 requestId: String?,
                 highlightId: String?,
                 shape: HighlightShape?,
@@ -88,7 +88,7 @@ class WebSocketServerIntegrationTest {
   }
 
   /** Get the actual port the server is listening on. Must be called after server.start(). */
-  private fun getServerPort(): Int {
+  private suspend fun getServerPort(): Int {
     return server.getActualPort() ?: error("Server not running or port not available")
   }
 
@@ -902,7 +902,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 throw RuntimeException("kaboom")
               }
             },
@@ -946,7 +946,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 throw RuntimeException("kaboom")
               }
             },
@@ -1042,11 +1042,11 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun setRecompositionTracking(enabled: Boolean) {
+              override suspend fun setRecompositionTracking(enabled: Boolean) {
                 order.add("flags")
               }
 
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 order.add("screenshot")
               }
             },
@@ -1088,7 +1088,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 val requestId = request.requestId
 
                 testScope.launch {
@@ -1212,7 +1212,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 val requestId = request.requestId
 
                 testScope.launch {
@@ -1361,7 +1361,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 val requestId = request.requestId
 
                 // Fire-and-forget: the real work runs in a launched coroutine that throws
@@ -1450,7 +1450,7 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestScreenshot(request: RequestScreenshot) {
+              override suspend fun requestScreenshot(request: RequestScreenshot) {
                 val requestId = request.requestId
 
                 runnerHolder[0]!!.launch(requestId, "screenshot") {

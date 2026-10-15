@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -47,7 +48,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `tap requests clear caret before framework dispatch`() {
+  fun `tap requests clear caret before framework dispatch`() = runTest {
     for (context in listOf(null, fixture.freshFrameContext())) {
       for (displayId in listOf(2, 0, null)) {
         assertAtomicClearsCaret {
@@ -67,7 +68,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `swipe requests clear caret before framework dispatch`() {
+  fun `swipe requests clear caret before framework dispatch`() = runTest {
     for (context in listOf(null, fixture.freshFrameContext())) {
       for (displayId in listOf(2, 0, null)) {
         assertAtomicClearsCaret {
@@ -89,7 +90,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `two finger swipe requests clear caret before framework dispatch`() {
+  fun `two finger swipe requests clear caret before framework dispatch`() = runTest {
     for (displayId in listOf(2, 0, null)) {
       assertAtomicClearsCaret {
         actions.requestTwoFingerSwipe(
@@ -109,7 +110,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `drag requests clear caret before framework dispatch`() {
+  fun `drag requests clear caret before framework dispatch`() = runTest {
     for (context in listOf(null, fixture.freshFrameContext())) {
       for (displayId in listOf(2, 0, null)) {
         assertAtomicClearsCaret {
@@ -133,7 +134,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `pinch requests clear caret before framework dispatch`() {
+  fun `pinch requests clear caret before framework dispatch`() = runTest {
     for (displayId in listOf(2, 0, null)) {
       assertAtomicClearsCaret {
         actions.requestPinch(
@@ -153,7 +154,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `default display gesture start clears caret before framework dispatch`() {
+  fun `default display gesture start clears caret before framework dispatch`() = runTest {
     assertClearsCaret {
       actions.requestGestureStart(
         RequestGestureStart(requestId = "start", gestureId = "stream", x = 100.0, y = 100.0),
@@ -162,7 +163,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `display id gesture start clears caret before framework dispatch`() {
+  fun `display id gesture start clears caret before framework dispatch`() = runTest {
     assertClearsCaret {
       actions.requestGestureStart(
         RequestGestureStart(
@@ -177,7 +178,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `gesture move clears caret before continued framework dispatch`() {
+  fun `gesture move clears caret before continued framework dispatch`() = runTest {
     actions.requestGestureStart(
       RequestGestureStart(
         requestId = "start",
@@ -192,7 +193,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `gesture end clears caret before terminal framework dispatch`() {
+  fun `gesture end clears caret before terminal framework dispatch`() = runTest {
     actions.requestGestureStart(
       RequestGestureStart(
         requestId = "start",
@@ -207,7 +208,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `tap requests reject stale context before clearing caret or dispatching`() {
+  fun `tap requests reject stale context before clearing caret or dispatching`() = runTest {
     assertStaleRejected("tap coordinates") { context, displayId ->
       actions.requestTapCoordinates(
         RequestTapCoordinates("stale", 100.0, 100.0, 10L, context, displayId),
@@ -216,7 +217,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `swipe requests reject stale context before clearing caret or dispatching`() {
+  fun `swipe requests reject stale context before clearing caret or dispatching`() = runTest {
     assertStaleRejected("swipe") { context, displayId ->
       actions.requestSwipe(
         RequestSwipe("stale", 100.0, 100.0, 200.0, 200.0, 50L, context, displayId),
@@ -225,7 +226,7 @@ class CtrlProxyGestureOverloadParityTest {
   }
 
   @Test
-  fun `drag requests reject stale context before clearing caret or dispatching`() {
+  fun `drag requests reject stale context before clearing caret or dispatching`() = runTest {
     assertStaleRejected("drag") { context, displayId ->
       actions.requestDrag(
         RequestDrag(
@@ -244,12 +245,12 @@ class CtrlProxyGestureOverloadParityTest {
     }
   }
 
-  private fun assertAtomicClearsCaret(request: () -> Unit) {
+  private suspend fun assertAtomicClearsCaret(request: suspend () -> Unit) {
     assertClearsCaret(request)
     fixture.cancelLastStroke()
   }
 
-  private fun assertClearsCaret(request: () -> Unit) {
+  private suspend fun assertClearsCaret(request: suspend () -> Unit) {
     val before = shadow.gesturesDispatched.size
     val observationsBefore = shadow.rememberedAtDispatch.size
     val sentinel = fixture.seedCaret()
@@ -264,9 +265,9 @@ class CtrlProxyGestureOverloadParityTest {
     assertNull(fixture.rememberedCaret())
   }
 
-  private fun assertStaleRejected(
+  private suspend fun assertStaleRejected(
     resultName: String,
-    request: (String, Int?) -> Unit,
+    request: suspend (String, Int?) -> Unit,
   ) {
     val stale = fixture.freshFrameContext() + ":stale"
     for (displayId in listOf(2, 0, null)) {

@@ -58,7 +58,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `tap dispatches to explicit displays and defaults when absent`() {
+  fun `tap dispatches to explicit displays and defaults when absent`() = runTest {
     assertAtomicRouting(strokeCount = 1, duration = 10L) { displayId ->
       fixture.actions.requestTapCoordinates(
         RequestTapCoordinates(
@@ -74,7 +74,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `completed tap refreshes the requested display including absent display`() {
+  fun `completed tap refreshes the requested display including absent display`() = runTest {
     val optionsSeen = mutableListOf<HierarchySnapshotOptions>()
     // The first read starts the wait; every later read skips the initial wait and satisfies
     // quiescence, without reaching the real delay or the max-wait warning path.
@@ -114,7 +114,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `long press dispatches to explicit displays and defaults when absent`() {
+  fun `long press dispatches to explicit displays and defaults when absent`() = runTest {
     assertAtomicRouting(strokeCount = 1, duration = 1000L) { displayId ->
       fixture.actions.requestTapCoordinates(
         RequestTapCoordinates(
@@ -130,7 +130,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `swipe dispatches to explicit displays and defaults when absent`() {
+  fun `swipe dispatches to explicit displays and defaults when absent`() = runTest {
     assertAtomicRouting(strokeCount = 1) { displayId ->
       fixture.actions.requestSwipe(
         RequestSwipe(
@@ -148,7 +148,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `two finger swipe dispatches to explicit displays and defaults when absent`() {
+  fun `two finger swipe dispatches to explicit displays and defaults when absent`() = runTest {
     assertAtomicRouting(strokeCount = 2) { displayId ->
       fixture.actions.requestTwoFingerSwipe(
         RequestTwoFingerSwipe(
@@ -166,7 +166,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `drag dispatches to explicit displays and defaults when absent`() {
+  fun `drag dispatches to explicit displays and defaults when absent`() = runTest {
     assertChainedRouting(segmentCount = 3) { displayId ->
       fixture.actions.requestDrag(
         RequestDrag(
@@ -186,7 +186,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `pinch dispatches to explicit displays and defaults when absent`() {
+  fun `pinch dispatches to explicit displays and defaults when absent`() = runTest {
     assertAtomicRouting(strokeCount = 2) { displayId ->
       fixture.actions.requestPinch(
         RequestPinch(
@@ -204,23 +204,23 @@ class CtrlProxyDisplayRoutingDispatchTest {
   }
 
   @Test
-  fun `stream retains non default display through press move and lift`() {
+  fun `stream retains non default display through press move and lift`() = runTest {
     assertStreamingRouting(2)
   }
 
   @Test
-  fun `stream retains explicit default display through press move and lift`() {
+  fun `stream retains explicit default display through press move and lift`() = runTest {
     assertStreamingRouting(Display.DEFAULT_DISPLAY)
   }
 
   @Test
-  fun `stream defaults display when absent through press move and lift`() {
+  fun `stream defaults display when absent through press move and lift`() = runTest {
     assertStreamingRouting(null)
   }
 
   @Test
   @Config(sdk = [29])
-  fun `API 29 rejects secondary display but accepts zero and absent display`() {
+  fun `API 29 rejects secondary display but accepts zero and absent display`() = runTest {
     fixture.actions.requestSwipe(
       RequestSwipe(
         requestId = "unsupported",
@@ -262,10 +262,10 @@ class CtrlProxyDisplayRoutingDispatchTest {
     }
   }
 
-  private fun assertAtomicRouting(
+  private suspend fun assertAtomicRouting(
     strokeCount: Int,
     duration: Long? = null,
-    request: (Int?) -> Unit,
+    request: suspend (Int?) -> Unit,
   ) {
     for (displayId in listOf(2, Display.DEFAULT_DISPLAY, null)) {
       val before = fixture.shadow.gesturesDispatched.size
@@ -279,7 +279,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
     }
   }
 
-  private fun assertChainedRouting(segmentCount: Int, request: (Int?) -> Unit) {
+  private suspend fun assertChainedRouting(segmentCount: Int, request: suspend (Int?) -> Unit) {
     for (displayId in listOf(2, Display.DEFAULT_DISPLAY, null)) {
       val before = fixture.shadow.gesturesDispatched.size
       request(displayId)
@@ -296,7 +296,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
     }
   }
 
-  private fun assertStreamingRouting(displayId: Int?) {
+  private suspend fun assertStreamingRouting(displayId: Int?) {
     val actions = fixture.actions
     actions.requestGestureStart(
       RequestGestureStart(

@@ -54,7 +54,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText validates password and actions before mutating text`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performInsertText(")
+    val body = functionBody(source, "private suspend fun performInsertText(")
     val passwordGuard = body.indexOf("if (targetNode.isPassword)")
     val selectionPlan = body.indexOf("planInsertText(")
     val refresh = body.indexOf("var snapshot = readFreshSnapshot()")
@@ -83,7 +83,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `refresh replacements are validated before reading text and remembered state has hooks`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performInsertText(")
+    val body = functionBody(source, "private suspend fun performInsertText(")
     val refresh = functionBody(body, "fun readFreshSnapshot()")
     val guard =
       refresh.indexOf(
@@ -97,13 +97,13 @@ class SetTextAcknowledgementOrderTest {
     for (signature in
       listOf(
         "private suspend fun performSetText(",
-        "private fun performImeAction(",
-        "private fun performSelectAll(",
-        "private fun performNodeAction(",
+        "private suspend fun performImeAction(",
+        "private suspend fun performSelectAll(",
+        "private suspend fun performNodeAction(",
         "private fun performGlobalActionRequest(",
-        "override fun requestGestureStart(",
-        "override fun requestGestureMove(",
-        "override fun requestGestureEnd(",
+        "override suspend fun requestGestureStart(",
+        "override suspend fun requestGestureMove(",
+        "override suspend fun requestGestureEnd(",
       )) {
       assertTrue(
         "$signature clears caret",
@@ -121,7 +121,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText waits for mutation before reading selection actions`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performInsertText(")
+    val body = functionBody(source, "private suspend fun performInsertText(")
     val mutation = body.indexOf("textMutated = setTextSucceeded")
     val poll = body.indexOf("awaitInsertTextMutation(", startIndex = mutation)
     val selection = body.indexOf("val selectionAttempted", startIndex = mutation)
@@ -152,7 +152,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText reports caret warnings after attempting selection`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performInsertText(")
+    val body = functionBody(source, "private suspend fun performInsertText(")
     val selection = body.indexOf("val selectionReturned")
     val selectionAction = body.indexOf("targetNode.performAction(", startIndex = selection)
     val selectionDecision = body.indexOf("val selectionSucceeded", startIndex = selectionAction)
@@ -197,7 +197,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performInsertText acknowledges before asynchronously refreshing successful text mutations`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performInsertText(")
+    val body = functionBody(source, "private suspend fun performInsertText(")
     val setText = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = setText)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = acknowledgement)

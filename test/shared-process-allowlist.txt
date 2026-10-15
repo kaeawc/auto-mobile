@@ -220,6 +220,8 @@ test/daemon/poolOwnershipConcurrency.twoDaemon.regressions.test.ts
 test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
+test/daemon/proxy/HeartbeatKeeper.test.ts
+test/daemon/proxy/proxySessionState.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
@@ -356,6 +358,7 @@ test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
 test/features/action/HandleIntentChooser.test.ts
 test/features/action/InstallApp.signingGuard.test.ts
+test/features/action/IosDoubleTap.test.ts
 test/features/action/IosLockScreenUnlocker.test.ts
 test/features/action/IosSdkTriggerReadiness.test.ts
 test/features/action/IosSelectionScreenSize.test.ts
@@ -553,6 +556,7 @@ test/features/observe/Window.test.ts
 test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
 test/features/observe/android/AndroidCtrlProxyClientRecoveryRaces.test.ts
 test/features/observe/android/AndroidScreenIdentity.test.ts
+test/features/observe/android/AndroidWireContract.contract.test.ts
 test/features/observe/android/CtrlProxyFocus.Conversion.test.ts
 test/features/observe/android/CtrlProxyForwardClientProbe.test.ts
 test/features/observe/android/CtrlProxyForwardLease.test.ts
@@ -845,6 +849,7 @@ test/lint/processSafety.test.ts
 test/lint/rawControlBytesInSources.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
+test/lint/relativeImportCasing.test.ts
 test/lint/releaseReasonWireBuilders.test.ts
 test/lint/screenControlDocsParams.test.ts
 test/lint/serverToolTestSeamGuard.test.ts
@@ -934,7 +939,6 @@ test/scripts/ciTimeToGreenReport.test.ts
 test/scripts/circleciMacosJobs.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
 test/scripts/clockSemanticsReport.test.ts
-test/scripts/copyDbRuntimeFiles.test.ts
 test/scripts/daemonLogWorkflow.test.ts
 test/scripts/dbMigrationsSelfContained.test.ts
 test/scripts/dependabotRuntimePinsWorkflow.test.ts
@@ -1427,6 +1431,7 @@ test/utils/stableStringify.property.test.ts
 test/utils/stableStringify.test.ts
 test/utils/startupMaintenance.test.ts
 test/utils/throwIfAborted.test.ts
+test/utils/toolFailureSignal.test.ts
 test/utils/toolUtils.compactJson.test.ts
 test/utils/toolUtils.property.test.ts
 test/utils/toolUtilsStructuredField.test.ts

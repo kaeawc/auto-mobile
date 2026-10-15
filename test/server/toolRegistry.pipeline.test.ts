@@ -305,62 +305,116 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test.each([
-    { payload: { success: false, error: "device unavailable" }, deviceLossWins: true },
-    { payload: { success: true, value: "ok" }, deviceLossWins: false },
-    { payload: { value: "ok" }, deviceLossWins: false },
-  ])(
-    "classifies JSON-text response $payload after device loss",
-    async ({ payload, deviceLossWins }) => {
-      const controller = new AbortController();
-      const finalizedResponse = createJSONToolResponse(payload);
-      restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
-        executionTargetResolver: {
-          async resolveExecutionTarget(input: any) {
-            return {
-              args: input.args,
-              baseSessionUuid: "session-1",
-              device,
-              internalCall: false,
-              sessionUuid: "session-1",
-              shouldResolveDevice: true,
-            };
-          },
-        },
-        afterToolCall: {
-          async handle() {
-            controller.abort(
-              new DeviceLostError(
-                device.deviceId,
-                `device-disconnected:${device.deviceId}`,
-                "loss-test",
-              ),
-            );
-            return { durationMs: 0, finalizedResponse };
-          },
-        },
-        planLifecycleManager: {
-          async afterExecution() {},
-        },
-      });
-      ToolRegistry.registerDeviceAware(
-        "jsonTextFailureProbe",
-        "JSON text failure probe",
-        z.object({}),
-        async () => ({ success: true }),
-      );
-
-      const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
-        {},
-        undefined,
-        controller.signal,
-      );
-      if (deviceLossWins) {
-        await expect(call).rejects.toBeInstanceOf(DeviceLostError);
-      } else {
-        await expect(call).resolves.toEqual(finalizedResponse);
-      }
+    {
+      label: "marked text-only failure",
+      response: () => createJSONToolResponse({ success: false, error: "device unavailable" }),
+      deviceLossWins: true,
     },
-  );
+    {
+      label: "unmarked JSON text is not sniffed as failure",
+      response: () => ({ content: [{ type: "text", text: '{"success":false}' }] }),
+      deviceLossWins: false,
+    },
+    {
+      label: "unmarked JSON text with an error is not sniffed as failure",
+      response: () => ({
+        content: [{ type: "text", text: '{"success":false,"error":"device-secret"}' }],
+      }),
+      deviceLossWins: false,
+    },
+    {
+      label: "structured success wins over marked text failure",
+      response: () => ({
+        ...createJSONToolResponse({ success: false }),
+        structuredContent: { success: true },
+      }),
+      deviceLossWins: false,
+    },
+    {
+      label: "explicit success wins over marked text failure",
+      response: () => ({ ...createJSONToolResponse({ success: false }), success: true }),
+      deviceLossWins: false,
+    },
+    {
+      label: "isError wins over structured success",
+      response: () => ({ structuredContent: { success: true }, isError: true }),
+      deviceLossWins: true,
+    },
+    {
+      label: "explicit failure wins over structured success",
+      response: () => ({ structuredContent: { success: true }, success: false }),
+      deviceLossWins: true,
+    },
+    {
+      label: "structured failure wins over explicit success",
+      response: () => ({ structuredContent: { success: false }, success: true }),
+      deviceLossWins: true,
+    },
+    {
+      label: "plain text",
+      response: () => ({ content: [{ type: "text", text: "plain text" }] }),
+      deviceLossWins: false,
+    },
+    {
+      label: "text success",
+      response: () => createJSONToolResponse({ success: true, value: "ok" }),
+      deviceLossWins: false,
+    },
+    {
+      label: "text without success",
+      response: () => createJSONToolResponse({ value: "ok" }),
+      deviceLossWins: false,
+    },
+  ])("classifies $label after device loss", async ({ response, deviceLossWins }) => {
+    const controller = new AbortController();
+    const finalizedResponse = response();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input: any) {
+          return {
+            args: input.args,
+            baseSessionUuid: "session-1",
+            device,
+            internalCall: false,
+            sessionUuid: "session-1",
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      afterToolCall: {
+        async handle() {
+          controller.abort(
+            new DeviceLostError(
+              device.deviceId,
+              `device-disconnected:${device.deviceId}`,
+              "loss-test",
+            ),
+          );
+          return { durationMs: 0, finalizedResponse };
+        },
+      },
+      planLifecycleManager: {
+        async afterExecution() {},
+      },
+    });
+    ToolRegistry.registerDeviceAware(
+      "jsonTextFailureProbe",
+      "JSON text failure probe",
+      z.object({}),
+      async () => ({ success: true }),
+    );
+
+    const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
+      {},
+      undefined,
+      controller.signal,
+    );
+    if (deviceLossWins) {
+      await expect(call).rejects.toBeInstanceOf(DeviceLostError);
+    } else {
+      await expect(call).resolves.toEqual(finalizedResponse);
+    }
+  });
 
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();

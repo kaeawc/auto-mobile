@@ -94,7 +94,7 @@ export interface AppPermissionStateResult {
   verified?: boolean;
   reason?: string;
   accessLevel?: "readWrite" | "addOnly";
-  evidence?: "storedTccGrant";
+  evidence?: "storedTccGrant" | "impliedByFullPhotosGrant";
   authValue?: number;
   raw?: Record<string, string | number | boolean | null>;
 }

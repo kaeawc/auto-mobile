@@ -29,7 +29,9 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   createFailureOnAttempt: number | null = null;
   private createAttempts = 0;
   private readonly rows = new Map<string, DeviceSession>();
-  getSession?: (sessionUuid: string) => Promise<DeviceSession | undefined>;
+  async getSession(sessionUuid: string): Promise<DeviceSession | undefined> {
+    return this.rows.get(sessionUuid);
+  }
 
   /** Mirrors the repository's claimed-row precondition: the incarnation and a re-issuable reason. */
   private matchesIncarnation(row: DeviceSession | undefined, expected: RecoverableRowIncarnation) {
@@ -128,6 +130,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       daemon_session_id: record.daemonSessionId ?? null,
       created_at_ms: existing?.created_at_ms ?? record.createdAtMs,
       last_used_at_ms: record.lastUsedAtMs,
+      activity_seq: record.activitySeq ?? record.lastUsedAtMs,
       expires_at_ms: record.expiresAtMs,
       released_at_ms: null,
       release_reason: null,
@@ -143,12 +146,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
-    this.enableSessionLookup();
     return this.rows.get(record.sessionUuid)!.stable_identity_generation ?? 0;
-  }
-
-  private enableSessionLookup(): void {
-    this.getSession = (sessionUuid) => Promise.resolve(this.rows.get(sessionUuid));
   }
 
   async listRecoverableSessions(
@@ -202,7 +200,12 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       // Mirrors DeviceSessionRepository: zero matched rows is a failure (#11129).
       throw new DeviceSessionNotActiveError(sessionUuid);
     }
+    const seq = update.activitySeq ?? update.lastUsedAtMs;
+    if ((row.activity_seq ?? 0) > seq) {
+      return;
+    }
     Object.assign(row, {
+      activity_seq: Math.max(row.activity_seq ?? 0, seq),
       last_used_at_ms: update.lastUsedAtMs,
       expires_at_ms: update.expiresAtMs,
       session_timeout_ms: update.sessionTimeoutMs,
@@ -235,7 +238,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     const row = this.rows.get(sessionUuid);
     if (!row || row.status !== "active") {
-      return;
+      throw new DeviceSessionNotActiveError(sessionUuid);
     }
     row.liveness_owner_token = ownerToken;
   }
@@ -324,6 +327,5 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
 
   seed(row: DeviceSession): void {
     this.rows.set(row.session_uuid, row);
-    this.enableSessionLookup();
   }
 }

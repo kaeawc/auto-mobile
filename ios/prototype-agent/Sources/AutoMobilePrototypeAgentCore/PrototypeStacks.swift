@@ -8,6 +8,14 @@ struct PrototypeStackSnapshot: Equatable {
 }
 
 enum PrototypeStacks {
+    /// Raw stack-screen children for JSONValue validators that must inspect every authored screen.
+    static func screenChildren(in fields: [String: JSONValue], path: String) -> [(JSONValue, String)] {
+        guard case let .object(screens)? = fields["screens"] else { return [] }
+        return screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }).compactMap { name in
+            screens[name].map { ($0, screenPath(path, name: name)) }
+        }
+    }
+
     /// Shared fixture path spelling, including screen names containing quotes or punctuation.
     static func screenPath(_ path: String, name: String) -> String {
         let encoder = JSONEncoder()

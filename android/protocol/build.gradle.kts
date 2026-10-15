@@ -28,6 +28,17 @@ tasks.withType<Test>().configureEach {
     .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("prototypeSpecFixtures")
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/android-contract"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("androidWireContractFixtures")
+  val fixtureOutput = providers.environmentVariable("AUTOMOBILE_FIXTURE_OUT_DIR")
+  inputs.property("wireContractOutputDirectory", fixtureOutput.orElse(""))
+  if (fixtureOutput.isPresent) {
+    environment("AUTOMOBILE_FIXTURE_OUT_DIR", fixtureOutput.get())
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf("Regenerating wire contract fixture") { true }
+  }
 }
 
 // Version comes from root project's gradle.properties (VERSION_NAME)

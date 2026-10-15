@@ -503,6 +503,7 @@ export interface DeviceSessionsTable {
   daemon_session_id: string | null;
   created_at_ms: number;
   last_used_at_ms: number;
+  activity_seq: Generated<number>;
   expires_at_ms: number;
   released_at_ms: number | null;
   release_reason: string | null;

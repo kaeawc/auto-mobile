@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import {
   PROXY_ACTIVITY_CLOCKS,
   SESSION_ACTIVITY_CLOCKS,
@@ -96,6 +96,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
     "DaemonMcpProxy.heartbeatHeldSession",
   ],
+  "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.heartbeatHeldSession"],
 };
 
 /**
@@ -130,10 +131,10 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
   "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
   "src/daemon/daemonMcpProxy.ts": [
-    "DaemonMcpProxy.evictAbandonedHeldSessions",
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
     "DaemonMcpProxy.isBoundSessionReplayExpired",
   ],
+  "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.evictAbandonedHeldSessions"],
 };
 
 /**
@@ -281,6 +282,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.boundSessionUuidAt": {
+    writes: 1,
+    reason:
+      "Delegation: the setter forwards the caller's existing activity-clock value to " +
+      "ProxySessionState without reading the clock or changing when callers write it.",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
     writes: 1,
     reason:
@@ -779,39 +786,238 @@ function calleesOf(model: FileModel, unit: FunctionUnit): string[] {
   return result;
 }
 
+/** A function in some scanned file: the unit a cross-file (port) walk visits. */
+interface FunctionRef {
+  readonly path: string;
+  readonly key: string;
+}
+
+/**
+ * Port members to the owner methods they forward to (ORCHESTRATOR-CHOSEN, #11816).
+ *
+ * Extracted collaborators (the heartbeat keeper, the DevicePool splits) reach the class that owns
+ * them only through a port object that the owner builds with arrow forwarders:
+ * `{ dropHeldSession: (...args) => this.dropHeldSession(...args) }`. A `this.m()` walk stops at
+ * `this.port.dropHeldSession()`, so the owner's helper (and any clock write behind it) went
+ * unchecked. The index is built from those forwarders themselves, so it cannot drift from the
+ * code: a member name maps to every owner method that some port factory forwards it to. Following
+ * every candidate over-approximates when two ports share a member name, which can only add a
+ * report, never hide one.
+ */
+type PortIndex = ReadonlyMap<string, readonly FunctionRef[]>;
+
+/** Property names a collaborator stores its port under (`this.port`, `this.deps.port`, `this.pool`). */
+const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool"]);
+
+/** Unwrap only forwarder results: `void` elsewhere still means retiring a clock. */
+function unwrapForwarder(expression: ts.Expression): ts.Expression {
+  let current = unwrap(expression);
+  while (ts.isAwaitExpression(current) || ts.isVoidExpression(current)) {
+    current = unwrap(current.expression);
+  }
+  return current;
+}
+
+/** Direct or delegated owner call (including `this.m.bind(this)`). */
+function forwardedOwnerMethod(initializer: ts.Expression): ts.PropertyAccessExpression | undefined {
+  let body = unwrapForwarder(initializer);
+  if (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) {
+    const inner = body.body;
+    if (ts.isBlock(inner)) {
+      const statement = inner.statements.length === 1 ? inner.statements[0] : undefined;
+      const result =
+        statement && (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement))
+          ? statement.expression
+          : undefined;
+      if (!result) {
+        return undefined;
+      }
+      body = unwrapForwarder(result);
+    } else {
+      body = unwrapForwarder(inner);
+    }
+  }
+  if (!ts.isCallExpression(body)) {
+    return undefined;
+  }
+  const callee = unwrap(body.expression);
+  if (!ts.isPropertyAccessExpression(callee)) {
+    return undefined;
+  }
+  const bound = unwrap(callee.expression);
+  if (callee.name.text === "bind") {
+    return ts.isPropertyAccessExpression(bound) &&
+      body.arguments.length === 1 &&
+      body.arguments[0]!.kind === ts.SyntaxKind.ThisKeyword
+      ? bound
+      : undefined;
+  }
+  return callee;
+}
+
+/** Resolve delegate types only from scanned ASTs, without filesystem reads or libraries. */
+function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
+  const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+  const host = ts.createCompilerHost(options);
+  const modelAt = (path: string): FileModel | undefined =>
+    models.get(isAbsolute(path) ? relative(ROOT, path).split(sep).join("/") : path);
+  host.getCurrentDirectory = () => ROOT;
+  host.fileExists = (path) => modelAt(path) !== undefined;
+  host.readFile = (path) => modelAt(path)?.source.text;
+  host.getSourceFile = (path) => modelAt(path)?.source;
+  host.directoryExists = () => true;
+  host.getDirectories = () => [];
+  host.realpath = (path) => path;
+  return ts.createProgram([...models.keys()], options, host).getTypeChecker();
+}
+
+function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
+  const index = new Map<string, FunctionRef[]>();
+  const checker = portTypeChecker(models);
+  for (const model of models.values()) {
+    for (const unit of model.functions.values()) {
+      if (unit.className === undefined) {
+        continue;
+      }
+      const visit = (node: ts.Node): void => {
+        if (ts.isObjectLiteralExpression(node)) {
+          for (const property of node.properties) {
+            const member =
+              ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+                ? property.name.text
+                : undefined;
+            const owner =
+              member !== undefined && ts.isPropertyAssignment(property)
+                ? forwardedOwnerMethod(property.initializer)
+                : undefined;
+            if (member === undefined || owner === undefined) {
+              continue;
+            }
+            const receiver = unwrap(owner.expression);
+            // Only a direct `this` or one delegate field on `this` is a port forwarder.
+            if (
+              receiver.kind !== ts.SyntaxKind.ThisKeyword &&
+              !(
+                ts.isPropertyAccessExpression(receiver) &&
+                unwrap(receiver.expression).kind === ts.SyntaxKind.ThisKeyword
+              )
+            ) {
+              continue;
+            }
+            const declaration = checker
+              .getTypeAtLocation(receiver)
+              .getSymbol()
+              ?.declarations?.find((node): node is ts.ClassDeclaration =>
+                ts.isClassDeclaration(node),
+              );
+            const target =
+              receiver.kind === ts.SyntaxKind.ThisKeyword
+                ? { path: model.path, key: `${unit.className}.${owner.name.text}` }
+                : declaration?.name
+                  ? {
+                      path: [...models.values()].find(
+                        (candidate) => candidate.source === declaration.getSourceFile(),
+                      )!.path,
+                      key: `${declaration.name.text}.${owner.name.text}`,
+                    }
+                  : undefined;
+            if (target && models.get(target.path)?.functions.has(target.key)) {
+              const list = index.get(member) ?? [];
+              if (!list.some((ref) => ref.path === target.path && ref.key === target.key)) {
+                index.set(member, [...list, target]);
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(unit.node);
+    }
+  }
+  return index;
+}
+
+/** Owner methods `unit` reaches through `<…>.port.m()` / `<…>.pool.m()` calls. */
+function portCalleesOf(unit: FunctionUnit, ports: PortIndex): FunctionRef[] {
+  const found: FunctionRef[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callee = unwrap(node.expression);
+      if (ts.isPropertyAccessExpression(callee)) {
+        const receiver = unwrap(callee.expression);
+        if (ts.isPropertyAccessExpression(receiver) && PORT_FIELDS.has(receiver.name.text)) {
+          found.push(...(ports.get(callee.name.text) ?? []));
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(unit.node);
+  return found;
+}
+
 interface Violation {
+  readonly path?: string;
   readonly root: string;
   readonly via: string;
   readonly clock: string;
   readonly line: number;
 }
 
-/**
- * Rule 1: walk each liveness-only root through its same-file callees and report
- * every activity-clock write, except inside a sanctioned re-derivation helper.
- */
+interface PortScan {
+  readonly models: ReadonlyMap<string, FileModel>;
+  readonly ports: PortIndex;
+}
+
+/** Shared closure walk, pruning sanctioned helpers only in the root model. */
+function reachableFrom(
+  model: FileModel,
+  roots: readonly string[],
+  sanctioned: ReadonlySet<string>,
+  scan?: PortScan,
+): FunctionRef[] {
+  const reached: FunctionRef[] = [];
+  const seen = new Set<string>();
+  const queue = roots.map((key) => ({ path: model.path, key }));
+  for (let index = 0; index < queue.length; index++) {
+    const ref = queue[index]!;
+    const id = `${ref.path} ${ref.key}`;
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    const owner = ref.path === model.path ? model : scan?.models.get(ref.path);
+    const unit = owner?.functions.get(ref.key);
+    if (!owner || !unit || (ref.path === model.path && sanctioned.has(ref.key))) {
+      continue;
+    }
+    reached.push(ref);
+    queue.push(
+      ...calleesOf(owner, unit).map((key) => ({ path: ref.path, key })),
+      ...(scan ? portCalleesOf(unit, scan.ports) : []),
+    );
+  }
+  return reached;
+}
+
+/** Rule 1: report activity-clock writes in each root's unsanctioned closure. */
 function livenessViolations(
   model: FileModel,
   roots: readonly string[],
   sanctioned: ReadonlySet<string>,
+  scan?: PortScan,
 ): Violation[] {
-  const violations: Violation[] = [];
-  for (const root of roots) {
-    const seen = new Set<string>([root]);
-    const queue = [root];
-    while (queue.length > 0) {
-      const key = queue.shift()!;
-      const unit = model.functions.get(key);
-      if (!unit || sanctioned.has(key)) {
-        continue;
-      }
-      violations.push(...unitWritesOf(model, unit).map((write) => ({ root, via: key, ...write })));
-      const next = calleesOf(model, unit).filter((callee) => !seen.has(callee));
-      next.forEach((callee) => seen.add(callee));
-      queue.push(...next);
-    }
-  }
-  return violations;
+  return roots.flatMap((root) =>
+    reachableFrom(model, [root], sanctioned, scan).flatMap((ref) => {
+      const owner = ref.path === model.path ? model : scan!.models.get(ref.path)!;
+      return unitWritesOf(owner, owner.functions.get(ref.key)!).map((write) => ({
+        root,
+        via: ref.key,
+        ...(ref.path === model.path ? {} : { path: ref.path }),
+        ...write,
+      }));
+    }),
+  );
 }
 
 /**
@@ -1070,6 +1276,7 @@ function repoPath(full: string): string {
 describe("liveness paths never write activity clocks (#10656, #10668)", () => {
   const models = new Map<string, FileModel>();
   const inventory = new Map<string, number[]>();
+  let ports: PortIndex = new Map();
   // Parsing the scanned daemon/server/db files can take seconds on a loaded runner.
   const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
@@ -1098,6 +1305,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         models.set(path, parse(path, readFileSync(join(ROOT, path), "utf8")));
       }
     }
+    ports = buildPortIndex(models);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("every liveness-only entry point and re-derivation helper still exists", () => {
@@ -1118,8 +1326,11 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     const found = new Map<string, Violation[]>();
     for (const [path, roots] of Object.entries(NON_ACTIVITY_PATHS)) {
       const sanctioned = new Set(DEADLINE_REDERIVATION_HELPERS[path] ?? []);
-      for (const violation of livenessViolations(models.get(path)!, roots, sanctioned)) {
-        const key = `${path} ${violation.via}`;
+      for (const violation of livenessViolations(models.get(path)!, roots, sanctioned, {
+        models,
+        ports,
+      })) {
+        const key = `${violation.path ?? path} ${violation.via}`;
         const list = found.get(key) ?? [];
         // One write reached from several roots is still one write.
         if (!list.some((existing) => existing.line === violation.line)) {
@@ -1138,6 +1349,22 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     expect(unexpected).toEqual([]);
     // A fixed baseline entry must be removed so the write cannot quietly return.
     expect(Object.keys(KNOWN_LIVENESS_WRITES).filter((key) => !found.has(key))).toEqual([]);
+  });
+
+  test("the keeper root reaches the proxy helpers behind its port (#11816)", () => {
+    const keeperPath = "src/daemon/proxy/HeartbeatKeeper.ts";
+    const roots = LIVENESS_ONLY[keeperPath]!;
+    expect(roots).toEqual(["HeartbeatKeeper.heartbeatHeldSession"]);
+    const reached = reachableFrom(models.get(keeperPath)!, roots, new Set(), { models, ports });
+    const proxy = "src/daemon/daemonMcpProxy.ts";
+    expect(reached.map((ref) => `${ref.path} ${ref.key}`)).toEqual(
+      expect.arrayContaining([
+        `${proxy} DaemonMcpProxy.recordHeldSessionTerminalLoss`,
+        `${proxy} DaemonMcpProxy.dropHeldSession`,
+        `${proxy} DaemonMcpProxy.recordHeldSessionHeartbeatSuccess`,
+        `${proxy} DaemonMcpProxy.handleHeldSessionHeartbeatError`,
+      ]),
+    );
   });
 
   test("liveness paths in other files never call a SessionManager method that records tool activity", () => {
@@ -1337,6 +1564,168 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       expect(
         summary(livenessViolations(seeded, ["Manager.rollback", "Manager.ack"], new Set())),
       ).toEqual(["Manager.rollback:lastUsedAt", "Manager.ack:boundSessionUuidAt"]);
+    });
+
+    test("follows a port call from a collaborator to the owner method behind the forwarder (#11816)", () => {
+      const keeper = parse(
+        "keeper.ts",
+        "class Keeper { constructor(private readonly deps: { port: { drop(id: string): void } }) {} beat(id) { this.deps.port.drop(id); } }",
+      );
+      const owner = parse(
+        "owner.ts",
+        [
+          "class Owner {",
+          "  make() { return { drop: (...args) => this.drop(...args) }; }",
+          "  drop(id) { this.stamp(id); }",
+          "  stamp(session) { session.lastUsedAt = 5; }",
+          "}",
+        ].join("\n"),
+      );
+      const models = new Map([
+        [keeper.path, keeper],
+        [owner.path, owner],
+      ]);
+      const ports = buildPortIndex(models);
+      expect(ports.get("drop")).toEqual([{ path: "owner.ts", key: "Owner.drop" }]);
+      // Without the port edge the walk ends at the keeper and sees nothing (the old blind spot).
+      expect(livenessViolations(keeper, ["Keeper.beat"], new Set())).toEqual([]);
+      const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports });
+      expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
+        ["owner.ts", "Owner.stamp", "lastUsedAt"],
+      ]);
+    });
+
+    test.each([
+      ["pool receiver", "this.pool.drop(id)", "(id) => this.drop(id)"],
+      ["bound method", "this.port.drop(id)", "this.drop.bind(this)"],
+      ["awaited call", "this.port.drop(id)", "async (id) => await this.drop(id)"],
+      ["void block", "this.port.drop(id)", "(id) => { this.drop(id); }"],
+      ["void expression", "this.port.drop(id)", "(id) => void this.drop(id)"],
+      ["wrapped void block", "this.port.drop(id)", "(id) => { void (this.drop(id)); }"],
+      ["returned call", "this.port.drop(id)", "(id) => { return this.drop(id); }"],
+    ])("follows %s port forwarders", (_name, call, forwarder) => {
+      const keeper = parse("keeper.ts", `class Keeper { beat(id) { ${call}; } }`);
+      const owner = parse(
+        "owner.ts",
+        `class Owner {
+        make() { return { drop: ${forwarder} }; }
+        drop(session) { session.lastUsedAt = 5; }
+      }`,
+      );
+      const models = new Map([
+        [keeper.path, keeper],
+        [owner.path, owner],
+      ]);
+      const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), {
+        models,
+        ports: buildPortIndex(models),
+      });
+      expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
+        ["owner.ts", "Owner.drop", "lastUsedAt"],
+      ]);
+    });
+
+    test("fans out a shared port member to both owners", () => {
+      const keeper = parse("keeper.ts", "class Keeper { beat(id) { this.port.drop(id); } }");
+      const first = parse(
+        "first.ts",
+        `class First {
+        make() { return { drop: (id) => this.remove(id) }; }
+        remove(session) { session.lastUsedAt = 5; }
+      }`,
+      );
+      const second = parse(
+        "second.ts",
+        `class Second {
+        make() { return { drop: (id) => this.discard(id) }; }
+        discard(session) { session.expiresAt = 5; }
+      }`,
+      );
+      const models = new Map([keeper, first, second].map((model) => [model.path, model]));
+      const scan = { models, ports: buildPortIndex(models) };
+      expect(reachableFrom(keeper, ["Keeper.beat"], new Set(), scan)).toEqual([
+        { path: "keeper.ts", key: "Keeper.beat" },
+        { path: "first.ts", key: "First.remove" },
+        { path: "second.ts", key: "Second.discard" },
+      ]);
+      expect(
+        livenessViolations(keeper, ["Keeper.beat"], new Set(), scan).map((v) => v.clock),
+      ).toEqual(["lastUsedAt", "expiresAt"]);
+    });
+
+    test("sanctions a helper only in the root file, even with identical class and method names", () => {
+      const root = parse(
+        "root.ts",
+        `class Owner {
+        beat(id) { this.drop(id); this.port.drop(id); }
+        drop(session) { session.lastUsedAt = 5; }
+      }`,
+      );
+      const other = parse(
+        "other.ts",
+        `class Owner {
+        make() { return { drop: (id) => this.drop(id) }; }
+        drop(session) { session.expiresAt = 5; }
+      }`,
+      );
+      const models = new Map([
+        [root.path, root],
+        [other.path, other],
+      ]);
+      expect(
+        livenessViolations(root, ["Owner.beat"], new Set(["Owner.drop"]), {
+          models,
+          ports: buildPortIndex(models),
+        }).map((v) => [v.path, v.via, v.clock]),
+      ).toEqual([["other.ts", "Owner.drop", "expiresAt"]]);
+    });
+
+    test.each([
+      ["declared field", "private sessionManager: Manager;"],
+      ["parameter property", "constructor(private sessionManager: Manager) {}"],
+      ["constructor new", "sessionManager; constructor() { this.sessionManager = new Manager(); }"],
+      [
+        "typed constructor parameter",
+        "sessionManager; constructor(manager: Manager) { this.sessionManager = manager; }",
+      ],
+    ])("resolves a delegate from its %s", (_name, declaration) => {
+      const keeper = parse("keeper.ts", "class Keeper { beat(id) { this.port.getSession(id); } }");
+      const owner = parse(
+        "owner.ts",
+        `import { Manager } from "./manager";
+        class Owner {
+          ${declaration}
+          make() { return { getSession: (id) => this.sessionManager.getSession(id) }; }
+        }`,
+      );
+      const manager = parse(
+        "manager.ts",
+        `export class Manager {
+        getSession(session) { session.lastUsedAt = 5; }
+      }`,
+      );
+      const models = new Map([keeper, owner, manager].map((model) => [model.path, model]));
+      const ports = buildPortIndex(models);
+      expect(ports.get("getSession")).toEqual([{ path: "manager.ts", key: "Manager.getSession" }]);
+      expect(
+        livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports }).map((v) => [
+          v.path,
+          v.via,
+          v.clock,
+        ]),
+      ).toEqual([["manager.ts", "Manager.getSession", "lastUsedAt"]]);
+    });
+
+    test("does not guess an untyped delegate from an unrelated class with the same method", () => {
+      const owner = parse(
+        "owner.ts",
+        `class Owner {
+        constructor(manager) { this.sessionManager = manager; }
+        make() { return { getSession: (id) => this.sessionManager.getSession(id) }; }
+      }
+      class Manager { getSession(session) { session.lastUsedAt = 5; } }`,
+      );
+      expect(buildPortIndex(new Map([[owner.path, owner]])).has("getSession")).toBe(false);
     });
 
     test("reports a liveness path calling a tool-activity method on another object", () => {

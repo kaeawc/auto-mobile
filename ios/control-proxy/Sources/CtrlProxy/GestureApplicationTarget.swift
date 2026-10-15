@@ -156,10 +156,30 @@ enum GestureKind: String, CaseIterable, Equatable {
     case pinch
 }
 
-/// Pure construction of the app-free drag event path, so the timing semantics are testable on
-/// the host. The synthesized record presses for `press`, moves for `move`, then rests at the end
-/// point for `hold` before lifting, the same press, drag and hold the `XCUICoordinate` drag has.
+/// App-free gesture sequencing and event paths, with timing testable on the host.
+/// The drag record presses for `press`, moves for `move`, then holds for `hold` before lifting.
 enum UnpinnedGestureSynthesis {
+    /// Touch-up to next touch-down; the synthesis helper separately enforces minimum contact.
+    static let doubleTapGap: TimeInterval = 0.05
+
+    /// Keep both contacts in one command without a rebound XCUIApplication idle wait (#10858).
+    /// Inject delivery and waiting so host tests exercise the route without platform I/O or sleep.
+    static func tap(
+        doubleTap: Bool, deliver: () throws -> Bool, wait: (TimeInterval) -> Void
+    )
+        throws -> Bool
+    {
+        guard try deliver() else { return false }
+        if doubleTap {
+            wait(doubleTapGap)
+            guard try deliver() else {
+                // The first tap already landed; falling back would add an unintended gesture.
+                throw GesturePerformer.GestureError.gestureFailed("second synthesized double-tap contact unavailable")
+            }
+        }
+        return true
+    }
+
     /// Non-finite or negative durations become 0, matching the event helper's own clamp.
     static func drag(
         start: GesturePoint, end: GesturePoint, press: TimeInterval, move: TimeInterval, hold: TimeInterval,

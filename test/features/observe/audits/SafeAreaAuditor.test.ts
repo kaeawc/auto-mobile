@@ -4,7 +4,7 @@ import {
   capLayoutWarnings,
   MAX_LAYOUT_WARNINGS,
 } from "../../../../src/features/observe/audits/SafeAreaAuditor";
-import type { LayoutWarning, ObserveResult } from "../../../../../src/models";
+import type { LayoutWarning, ObserveResult } from "../../../../src/models";
 
 function observation(): ObserveResult {
   return {

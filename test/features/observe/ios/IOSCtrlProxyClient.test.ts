@@ -4928,6 +4928,44 @@ describe("IOSCtrlProxyClient", function () {
     });
   });
 
+  test.each(
+    [["double_tap_v1"], ["display_cutout_info"], [], undefined].map((features) => ({ features })),
+  )("double tap requires runner feature %p before dispatch", async ({ features }) => {
+    const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      const dispatch = spyOn(socket!, "send");
+      const pending = client.requestDoubleTapCoordinates(10, 20, 100);
+      await flushMicrotasks();
+      expect(dispatch.mock.calls.some(([raw]) => JSON.parse(String(raw)).doubleTap)).toBe(false);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_tap_coordinates"],
+          supportedFeatures: features,
+        }),
+      );
+      await flushMicrotasks();
+      const result = await pending;
+      const taps = dispatch.mock.calls.filter(([raw]) => JSON.parse(String(raw)).doubleTap);
+      if (features?.includes("double_tap_v1")) {
+        expect(taps).toHaveLength(1);
+        expect(result.dispatched).toBe(true);
+      } else {
+        expect(taps).toHaveLength(0);
+        expect(result).toMatchObject({ success: false, dispatched: false });
+        expect(result.error).toContain("too old for a double tap");
+        expect(result.error).toContain("rebuild and redeploy");
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   describe("getSupportedCommands", function () {
     test("returns the advertised command set (sorted) once the runner handshakes", async function () {
       const testTimer = fakeTimer;

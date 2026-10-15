@@ -196,16 +196,15 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect((fakeIosClient as any).longPress).toBeUndefined();
   });
 
-  test("doubleTap dispatches two requestTapCoordinates calls at the element's center", async () => {
+  test("doubleTap dispatches one requestDoubleTapCoordinates call at the element's center", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
     const result = await tapAny.execute({ action: "doubleTap" });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getTapHistory()).toEqual([
-      { x: 42, y: 84, duration: 50 },
-      { x: 42, y: 84, duration: 50 },
-    ]);
+    expect(fakeIosClient.doubleTapHistory).toEqual([{ x: 42, y: 84 }]);
+    expect(fakeIosClient.getTapHistory()).toEqual([]);
+    expect(fakeTimer.getSleepHistory()).not.toContain(200);
   });
 
   test("longPress dispatches one requestTapCoordinates call with the long-press duration", async () => {
@@ -442,32 +441,18 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(signalArg).toBe(controller.signal);
   });
 
-  test("doubleTap sizes an explicit requestTapCoordinates timeout for both presses, floored at the established 5s default", async () => {
+  test("doubleTap sizes one transport timeout for the atomic request", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
-
+    const doubleSpy = spyOn(fakeIosClient, "requestDoubleTapCoordinates");
     const result = await tapAny.execute({ action: "doubleTap" });
-
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledTimes(2);
-    expect(tapSpy).toHaveBeenNthCalledWith(
-      1,
+    expect(tapSpy).toHaveBeenCalledTimes(0);
+    expect(doubleSpy).toHaveBeenCalledTimes(1);
+    expect(doubleSpy).toHaveBeenCalledWith(
       42,
       84,
-      50,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
-    expect(tapSpy).toHaveBeenNthCalledWith(
-      2,
-      42,
-      84,
-      50,
-      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
       undefined,
       undefined,
       expect.any(Function),
@@ -872,26 +857,18 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       expect(result.error).toContain("CtrlProxy iOS tap failed: Element gone");
     });
 
-    test("an unconfirmed second tap of a double tap notes that one tap was delivered", async () => {
+    test("an unanswered double tap does not claim partial delivery", async () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
-      let calls = 0;
-      spyOn(fakeIosClient, "requestTapCoordinates").mockImplementation(async () => {
-        calls++;
-        return calls === 1
-          ? { success: true, totalTimeMs: 1 }
-          : {
-              success: false,
-              totalTimeMs: 5000,
-              error: "Tap timed out after 5000ms",
-              dispatched: true,
-              acknowledged: false,
-            };
+      fakeIosClient.setTapResult({
+        success: false,
+        totalTimeMs: 5000,
+        error: "Tap timed out after 5000ms",
+        dispatched: true,
+        acknowledged: false,
       });
-
       const result = await tapAny.execute({ action: "doubleTap" });
-
       expect(result.error).toContain("Tap outcome is indeterminate");
-      expect(result.error).toContain("one tap was delivered");
+      expect(result.error).not.toContain("one tap was delivered");
     });
   });
 

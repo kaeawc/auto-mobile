@@ -92,7 +92,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
   test("the release is recorded, so a later call naming the UUID is refused as terminal", async () => {
     expect(await explicitRelease()).toMatchObject({ success: true });
 
-    const rowReason = (await persistence.getSession?.(SESSION))?.release_reason;
+    const rowReason = (await persistence.getSession(SESSION))?.release_reason;
     // A device tool call naming the released UUID (requireIssuedSession) must not re-issue it.
     const laterCall = await sessions
       .getOrCreateSession(SESSION, pool, undefined, undefined, true)
@@ -139,7 +139,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
   test("a row another live daemon took is not this daemon's to terminalize", async () => {
     sessions.attachDaemonSessionId("this-daemon");
     sessions.attachLiveDaemonSessionIds(() => new Set(["this-daemon", "peer-daemon"]));
-    const row = await persistence.getSession?.(SESSION);
+    const row = await persistence.getSession(SESSION);
     row!.daemon_session_id = "peer-daemon";
 
     expect(await explicitRelease()).toMatchObject({
@@ -147,7 +147,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       result: { alreadyReleased: true },
     });
 
-    expect((await persistence.getSession?.(SESSION))?.release_reason).toBe("daemon-restart");
+    expect((await persistence.getSession(SESSION))?.release_reason).toBe("daemon-restart");
     expect(sessions.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
   });
 
@@ -173,7 +173,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     expect({
       raced,
       live: sessions.hasSession(SESSION),
-      rowReason: (await persistence.getSession?.(SESSION))?.release_reason,
+      rowReason: (await persistence.getSession(SESSION))?.release_reason,
       holder: pool.getDevice(SIM)?.sessionId ?? null,
     }).toEqual({ raced: true, live: false, rowReason: "explicit-release", holder: null });
   });

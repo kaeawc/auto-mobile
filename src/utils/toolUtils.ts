@@ -4,6 +4,7 @@
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
+import { markToolFailure } from "./toolFailureSignal";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -19,6 +20,10 @@ export const stringifyToolResponse = (content: unknown): string => {
   // tapOn/text matching.
   return JSON.stringify(content, stripAccessibilityExtras);
 };
+
+const toolTextContent = (payload: unknown): Array<{ type: "text"; text: string }> => [
+  { type: "text", text: stringifyToolResponse(payload) },
+];
 
 /**
  * Interface for tool response formatter
@@ -57,14 +62,12 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
       text: string;
     }>;
   } {
-    return {
-      content: [
-        {
-          type: "text",
-          text: stringifyToolResponse(content),
-        },
-      ],
+    const response: ReturnType<ToolResponseFormatter["createJSONToolResponse"]> = {
+      content: toolTextContent(content),
     };
+    return content !== null && typeof content === "object" && content.success === false
+      ? markToolFailure(response)
+      : response;
   }
 
   /**
@@ -146,12 +149,7 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
       ? (Object.fromEntries(Object.entries(content)) as T)
       : content;
   const response: StructuredToolResponse<T> = {
-    content: [
-      {
-        type: "text",
-        text: stringifyToolResponse(structuredContent),
-      },
-    ],
+    content: toolTextContent(structuredContent),
     structuredContent,
   };
   if (content && typeof content === "object") {

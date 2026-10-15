@@ -130,12 +130,9 @@ import {
 } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
-import {
-  getStructuredField,
-  getStructuredPayload,
-  StructuredToolResponse,
-} from "../utils/toolUtils";
+import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
+import { isMarkedToolFailure } from "../utils/toolFailureSignal";
 import {
   APP_ID_MAX_LENGTH,
   APP_ID_PATTERN,
@@ -672,28 +669,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isJSONTextFailureContent(content: unknown): boolean {
-  if (
-    !Array.isArray(content) ||
-    content.length !== 1 ||
-    !isRecord(content[0]) ||
-    content[0].type !== "text" ||
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
-    typeof content[0].text !== "string"
-  ) {
-    return false;
-  }
-  try {
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
-    const payload: unknown = JSON.parse(content[0].text);
-    return isRecord(payload) && payload.success === false;
-  } catch (error) {
-    // Plain text is a valid response, so an invalid JSON envelope remains a non-failure.
-    logger.debug(`[ToolRegistry] Response text is not JSON: ${error}`);
-    return false;
-  }
-}
-
 function isToolResponseFailure(response: unknown): boolean {
   if (!isRecord(response)) {
     return false;
@@ -701,14 +676,15 @@ function isToolResponseFailure(response: unknown): boolean {
   if (response.isError === true || response.success === false) {
     return true;
   }
-  const structuredContent = getStructuredPayload(response);
+  // getStructuredPayload also parses text; only explicit structured status belongs here.
+  const structuredContent = response.structuredContent;
   if (isRecord(structuredContent) && typeof structuredContent.success === "boolean") {
     return structuredContent.success === false;
   }
   if (response.success === true) {
     return false;
   }
-  return isJSONTextFailureContent(response.content);
+  return isMarkedToolFailure(response);
 }
 
 function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
@@ -2383,9 +2359,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       toolStartMs,
     } = input;
 
-    // Unwrap MCP response envelope to get the inner result for success/error checks.
-    // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
-    // instead of a plain { success, error } object.
+    // Unwrap the payload for result logging and finalization metadata.
+    // Pipeline failure classification uses explicit status and the out-of-band mark.
     const unwrapped = unwrapToolResponse(response, name);
 
     const toolSuccess =
@@ -3476,6 +3451,7 @@ async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal } = input;
   if (target.deviceRead) {
@@ -3503,7 +3479,7 @@ async function invokeResolvedDeviceHandler(input: {
         signal,
       }),
     );
-    succeeded = !isToolResponseFailure(response);
+    succeeded = !input.isResponseFailure(response);
     return response;
   } finally {
     signal?.removeEventListener("abort", onAbort);
@@ -3544,6 +3520,8 @@ export class ToolRegistryClass {
   private navigationToolCallRecorder: NavigationToolCallRecorder;
   private afterToolCall: AfterToolCallHandler;
   private planLifecycleManager: PlanLifecycleManager;
+  private readonly isResponseFailure = (response: unknown): boolean =>
+    isToolResponseFailure(response);
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
@@ -3683,11 +3661,7 @@ export class ToolRegistryClass {
     // delivery requires an explicit per-tool opt-in.
     const transportRecovery = this.prepareDeviceAwareRegistration(name, options);
     // Create a wrapper that handles device ID injection
-    const wrappedHandler: ToolHandler = async (
-      args: any,
-      progress?: ProgressCallback,
-      signal?: AbortSignal,
-    ) => {
+    const wrappedHandler: ToolHandler = async (args, progress, signal) => {
       const selectionContext = getToolSelectionContext();
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
@@ -3748,6 +3722,7 @@ export class ToolRegistryClass {
                   signal,
                   auditRunner: this.auditRunner,
                   navigationRecorder: this.navigationToolCallRecorder,
+                  isResponseFailure: this.isResponseFailure,
                 });
                 if (resolvedTarget.deviceRead) {
                   signal?.throwIfAborted();
@@ -3773,10 +3748,10 @@ export class ToolRegistryClass {
                 toolStartMs,
               });
               toolDurationMs = afterToolCallResult.durationMs;
-              if (isToolResponseFailure(afterToolCallResult.finalizedResponse)) {
+              if (this.isResponseFailure(afterToolCallResult.finalizedResponse)) {
                 throwDeviceLostFromAbortSignal(signal);
               }
-              succeeded = !isToolResponseFailure(afterToolCallResult.finalizedResponse);
+              succeeded = !this.isResponseFailure(afterToolCallResult.finalizedResponse);
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
               throwDeviceLostFromAbortSignal(signal);

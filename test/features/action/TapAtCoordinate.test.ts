@@ -25,6 +25,7 @@ import {
 } from "../../../src/features/action/tapAtGesture";
 import { tapAtSchema } from "../../../src/server/interactionTools";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
+import { resolveTapAtCoordinates } from "../../../src/features/action/TapAtCoordinate";
 import type {
   CoordinateTapClient,
   IosCoordinateTapClient,
@@ -84,6 +85,24 @@ function createAndroidTapAtWithClient(
 }
 
 describe("TapAtCoordinate", () => {
+  test("coordinate resolver uses the supplied tool name and defaults to tapAt", () => {
+    const observed = observation(10, 10);
+    expect(resolveTapAtCoordinates({ x: 10, y: 0 }, observed, "android")).toMatchObject({
+      error: expect.stringContaining("tapAt coordinates (10, 0)"),
+    });
+    expect(resolveTapAtCoordinates({ x: 10, y: 0 }, observed, "android", "hitTest")).toMatchObject({
+      error: expect.stringContaining("hitTest coordinates (10, 0)"),
+    });
+    expect(
+      resolveTapAtCoordinates(
+        { x: 0, y: 0 },
+        { ...observed, screenSize: undefined } as ObserveResult,
+        "android",
+        "hitTest",
+      ),
+    ).toMatchObject({ error: "hitTest requires a positive screenSize from a fresh observation" });
+  });
+
   describe("device-lock annotation", () => {
     test.each([true, false])("matches the base annotation for secure=%s", async (secure) => {
       const deviceLock = { locked: true, keyguardShowing: true, secure };

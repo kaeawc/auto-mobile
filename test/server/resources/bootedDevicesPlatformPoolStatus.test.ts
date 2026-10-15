@@ -15,8 +15,17 @@ import {
   setDeviceLockProbe,
   setDeviceManager,
   setIosLockStateProbe,
-  setOrientationReaderFactory,
+  registerBootedDeviceResources,
+  type BootedDeviceResourceDependencies,
 } from "../../../src/server/bootedDeviceResources";
+
+let deps: BootedDeviceResourceDependencies = {};
+function useOrientationReaderFactory(
+  value: BootedDeviceResourceDependencies["injectedOrientationReaderFactory"] | null,
+): void {
+  deps = { ...deps, injectedOrientationReaderFactory: value ?? undefined };
+  registerBootedDeviceResources(deps);
+}
 
 const ios: BootedDevice = {
   name: "iPhone 15 Pro",
@@ -40,7 +49,7 @@ describe("per-platform booted resource pool summary", () => {
     setDeviceManager(utils);
     setDeviceLockProbe(async () => ({ locked: false, keyguardShowing: false }));
     setIosLockStateProbe(async () => undefined);
-    setOrientationReaderFactory(() => new FakeOrientationReader());
+    useOrientationReaderFactory(() => new FakeOrientationReader());
   });
 
   afterEach(() => {
@@ -49,7 +58,7 @@ describe("per-platform booted resource pool summary", () => {
     }
     setDeviceLockProbe(null);
     setIosLockStateProbe(null);
-    setOrientationReaderFactory(null);
+    useOrientationReaderFactory(null);
     setDeviceManager(null);
     resetBootedDevicesResourceCache();
   });
@@ -70,7 +79,7 @@ describe("per-platform booted resource pool summary", () => {
     await pool.initializeWithDevices([ios, android]);
     DaemonState.getInstance().initialize(sessions, pool);
     try {
-      const result = await getBootedDevicesForPlatforms(["ios"], timer);
+      const result = await getBootedDevicesForPlatforms(["ios"], timer, deps);
       expect(result.devices.map((device) => device.runtime.deviceId)).toEqual([ios.deviceId]);
       // The resource lists one iOS device; its pool summary must describe that platform only.
       expect(result.poolStatus?.total).toBe(1);

@@ -196,6 +196,13 @@ function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefin
   );
 }
 
+function isOutsideScreenBounds(
+  point: { x: number; y: number },
+  screenSize: ObserveResult["screenSize"],
+): boolean {
+  return point.x < 0 || point.x >= screenSize.width || point.y < 0 || point.y >= screenSize.height;
+}
+
 /** Android rounds to integer raster pixels; keep crop endpoints on the final included pixel. */
 function androidIntegerLimits(
   options: TapAtOptions,
@@ -212,6 +219,7 @@ export function resolveTapAtCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
+  toolName: string = "tapAt",
 ): { x: number; y: number } | { x: number; y: number; error: string } {
   const { x: rawX, y: rawY } = inputPoint(options);
   const optionError = coordinateOptionError(options);
@@ -225,7 +233,7 @@ export function resolveTapAtCoordinates(
     return {
       x: rawX,
       y: rawY,
-      error: "tapAt requires a positive screenSize from a fresh observation",
+      error: `${toolName} requires a positive screenSize from a fresh observation`,
     };
   }
   const point = options.image
@@ -235,16 +243,11 @@ export function resolveTapAtCoordinates(
         y: resolveAxis(rawY, screenSize.height, space),
       };
   const { x: resolvedX, y: resolvedY } = point;
-  if (
-    resolvedX < 0 ||
-    resolvedX >= screenSize.width ||
-    resolvedY < 0 ||
-    resolvedY >= screenSize.height
-  ) {
+  if (isOutsideScreenBounds({ x: resolvedX, y: resolvedY }, screenSize)) {
     return {
       x: rawX,
       y: rawY,
-      error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
+      error: `${toolName} coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
     };
   }
   const limits = androidIntegerLimits(options, screenSize);

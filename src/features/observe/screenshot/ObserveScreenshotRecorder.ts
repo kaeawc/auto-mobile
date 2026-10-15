@@ -1,6 +1,3 @@
-// Two attempts preserve the existing screenshot recording retry bound.
-export const SCREENSHOT_RECORD_ATTEMPTS = 2;
-
 import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
@@ -28,6 +25,9 @@ import {
 } from "./ScreenshotStateRegistry";
 import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
+
+// Two attempts preserve the existing screenshot recording retry bound.
+export const SCREENSHOT_RECORD_ATTEMPTS = 2;
 
 /** Capture-time options for the non-settled captures, which keep the device's own encoding. */
 export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hidePrototypes">;

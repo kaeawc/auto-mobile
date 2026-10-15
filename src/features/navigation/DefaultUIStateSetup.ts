@@ -1,16 +1,3 @@
-// Setup taps need time to update the UI.
-const SETUP_TAP_SETTLE_MS = 100;
-// Modal dismissal needs time to finish.
-const MODAL_DISMISS_SETTLE_MS = 300;
-// Back-button dismissal needs time before verification.
-const BACK_BUTTON_DISMISS_SETTLE_MS = 200;
-// Bottom-sheet dismissal needs time before verification.
-const BOTTOM_SHEET_DISMISS_SETTLE_MS = 200;
-// Scrim taps need time before dismissal verification.
-const SCRIM_TAP_DISMISS_SETTLE_MS = 200;
-// Close-button taps need time before dismissal verification.
-const CLOSE_BUTTON_DISMISS_SETTLE_MS = 200;
-
 import { BootedDevice } from "../../models";
 import { ObserveResult } from "../../models/ObserveResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -30,6 +17,19 @@ import { isTruthy } from "../../models/Element";
 import { ElementResolver, matchedSourceNode } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+
+// Setup taps need time to update the UI.
+const SETUP_TAP_SETTLE_MS = 100;
+// Modal dismissal needs time to finish.
+const MODAL_DISMISS_SETTLE_MS = 300;
+// Back-button dismissal needs time before verification.
+const BACK_BUTTON_DISMISS_SETTLE_MS = 200;
+// Bottom-sheet dismissal needs time before verification.
+const BOTTOM_SHEET_DISMISS_SETTLE_MS = 200;
+// Scrim taps need time before dismissal verification.
+const SCRIM_TAP_DISMISS_SETTLE_MS = 200;
+// Close-button taps need time before dismissal verification.
+const CLOSE_BUTTON_DISMISS_SETTLE_MS = 200;
 
 /**
  * Default implementation of UIStateSetup that handles UI state alignment

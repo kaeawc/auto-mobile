@@ -1,6 +1,3 @@
-// Two reads preserve the existing recent-app verification bound.
-export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
-
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -15,6 +12,9 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
+
+// Two reads preserve the existing recent-app verification bound.
+export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
 
 const POST_NAVIGATION_VERIFY_READS = 2;
 const POST_NAVIGATION_VERIFY_DELAY_MS = 250;

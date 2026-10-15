@@ -1,6 +1,3 @@
-// screenrecord needs time to finish writing the device file.
-const SCREENRECORD_FINALIZE_SETTLE_MS = 1000;
-
 import { DeviceUnreachableError } from "../../models/DeviceUnreachableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
@@ -45,6 +42,9 @@ import {
   probeScreenrecordDisplayFlag,
   resolveAndroidRecordingDisplay,
 } from "./AndroidRecordingDisplay";
+
+// screenrecord needs time to finish writing the device file.
+const SCREENRECORD_FINALIZE_SETTLE_MS = 1000;
 
 interface AndroidBackendHandle {
   kind: "android";

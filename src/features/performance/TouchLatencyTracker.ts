@@ -1,6 +1,3 @@
-// Samples are spaced to avoid overlapping touch measurements.
-const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
-
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -15,6 +12,9 @@ import { Idle } from "../observe/Idle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { calculateMedian } from "../shared/MetricsUtils";
 import { shellQuote } from "../../utils/shellQuote";
+
+// Samples are spaced to avoid overlapping touch measurements.
+const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
 
 /**
  * Result of a touch latency measurement

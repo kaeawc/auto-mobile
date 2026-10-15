@@ -1,6 +1,3 @@
-// The biometric prompt needs a brief settle before verification.
-export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
-
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -22,6 +19,9 @@ import {
 } from "./IosSdkTrigger";
 import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
+
+// The biometric prompt needs a brief settle before verification.
+export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";

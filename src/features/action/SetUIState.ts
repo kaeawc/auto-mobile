@@ -1,6 +1,3 @@
-// Dropdown controls need time to open before selection.
-export const DROPDOWN_OPEN_SETTLE_MS = 200;
-
 import { runWithTextRequestContext } from "./textTransportTimeout";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -21,6 +18,9 @@ import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+
+// Dropdown controls need time to open before selection.
+export const DROPDOWN_OPEN_SETTLE_MS = 200;
 
 /**
  * Subscribes `listener` to extensions of the live transport deadline and

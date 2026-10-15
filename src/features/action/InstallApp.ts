@@ -1,8 +1,3 @@
-// Two reads preserve the existing physical install verification bound.
-export const IOS_INSTALL_VERIFY_ATTEMPTS = 2;
-// Three attempts preserve the existing physical install verification bound.
-export const IOS_PHYSICAL_VERIFY_ATTEMPTS = 3;
-
 import {
   outputLooksLikeShellFailure,
   packageListingContains,
@@ -81,6 +76,12 @@ import {
 } from "./androidInstallTimeoutRecovery";
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
+
+// Two reads preserve the existing physical install verification bound.
+export const IOS_INSTALL_VERIFY_ATTEMPTS = 2;
+// Three attempts preserve the existing physical install verification bound.
+export const IOS_PHYSICAL_VERIFY_ATTEMPTS = 3;
+
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
 const IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS = 200;
 

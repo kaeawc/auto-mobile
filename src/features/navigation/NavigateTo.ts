@@ -1,6 +1,3 @@
-// Back presses need time to update the screen before the next press.
-const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
-
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -54,6 +51,9 @@ import {
   type ForegroundObservation,
   type ForegroundObserver,
 } from "./foregroundOverlay";
+
+// Back presses need time to update the screen before the next press.
+const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
 
 /**
  * Options for the navigateTo tool.

@@ -1,6 +1,3 @@
-// Three attempts preserve the existing connection retry bound.
-export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
-
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
@@ -21,6 +18,10 @@ import {
 } from "./foreignCtrlProxyForwardEvidence";
 import { isProcessRunning } from "../../../utils/processLiveness";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
+
+// Three attempts preserve the existing connection retry bound.
+export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
+
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
  *

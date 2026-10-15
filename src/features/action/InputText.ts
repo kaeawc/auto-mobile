@@ -1,6 +1,3 @@
-// The UI needs a brief settle after a key event.
-export const KEY_EVENT_SETTLE_MS = 100;
-
 import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -35,6 +32,9 @@ import {
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 import { getRequestContext } from "../../utils/AbortContext";
+
+// The UI needs a brief settle after a key event.
+export const KEY_EVENT_SETTLE_MS = 100;
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
 

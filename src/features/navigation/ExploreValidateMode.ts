@@ -1,6 +1,3 @@
-// Validation waits for the explored screen to settle.
-const EXPLORE_VALIDATION_SETTLE_MS = 500;
-
 import { createHash } from "crypto";
 import type { Element } from "../../models";
 import type { NavigationEdge, NavigationGraphService } from "./NavigationGraphManager";
@@ -10,6 +7,9 @@ import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
+
+// Validation waits for the explored screen to settle.
+const EXPLORE_VALIDATION_SETTLE_MS = 500;
 
 /**
  * Initialize graph traversal state for validate mode

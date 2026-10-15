@@ -1,6 +1,3 @@
-// iOS requires a pause between the two taps.
-export const IOS_DOUBLE_TAP_GAP_MS = 200;
-
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
@@ -85,6 +82,9 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+// iOS requires a pause between the two taps.
+export const IOS_DOUBLE_TAP_GAP_MS = 200;
 
 // Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();

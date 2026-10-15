@@ -1,6 +1,3 @@
-// Two attempts preserve the existing preference read retry bound.
-const PREFERENCE_READ_ATTEMPTS = 2;
-
 import {
   IOS_SDK_REDACTED_VALUE,
   iosPreferenceType,
@@ -45,6 +42,9 @@ import {
 import { resolveDefaultAndroidPreferencesUser } from "./resolveAndroidPreferencesUser";
 import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
+
+// Two attempts preserve the existing preference read retry bound.
+const PREFERENCE_READ_ATTEMPTS = 2;
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";

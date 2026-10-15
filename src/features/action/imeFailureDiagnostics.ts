@@ -1,6 +1,3 @@
-// Three attempts preserve the existing diagnostic retry bound.
-export const IME_DIAGNOSTIC_ATTEMPTS = 3;
-
 import type { ObserveResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -14,6 +11,9 @@ import {
   imeCommitSuffixMatches,
   imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
+
+// Three attempts preserve the existing diagnostic retry bound.
+export const IME_DIAGNOSTIC_ATTEMPTS = 3;
 
 export interface ImeFailureDiagnostic {
   stage:

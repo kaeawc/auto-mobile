@@ -1,10 +1,3 @@
-// Exploration waits for the UI to settle after an action.
-const EXPLORE_ACTION_SETTLE_MS = 1000;
-// Exploration waits for scrolling to settle.
-const EXPLORE_SCROLL_SETTLE_MS = 1000;
-// Long exploration transitions need extra time to settle.
-const EXPLORE_LONG_SETTLE_MS = 2000;
-
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
@@ -35,6 +28,13 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+
+// Exploration waits for the UI to settle after an action.
+const EXPLORE_ACTION_SETTLE_MS = 1000;
+// Exploration waits for scrolling to settle.
+const EXPLORE_SCROLL_SETTLE_MS = 1000;
+// Long exploration transitions need extra time to settle.
+const EXPLORE_LONG_SETTLE_MS = 2000;
 
 // Re-export consumed types
 export type { ExploreOptions } from "./ExploreTypes";

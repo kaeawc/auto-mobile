@@ -1,6 +1,3 @@
-// Blocker checks wait for the UI to settle after interaction.
-const BLOCKER_DETECTION_SETTLE_MS = 1000;
-
 import type {
   BaseActionResult,
   BootedDevice,
@@ -16,6 +13,9 @@ import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
 import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+
+// Blocker checks wait for the UI to settle after interaction.
+const BLOCKER_DETECTION_SETTLE_MS = 1000;
 
 /**
  * Minimal tap-action seam consumed by the blocker handlers. They inspect the

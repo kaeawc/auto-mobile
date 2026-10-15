@@ -1,6 +1,3 @@
-// Restore polling uses a fixed half-second interval.
-const SAVED_PROTOTYPE_POLL_INTERVAL_MS = 500;
-
 import type { BootedDevice } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -18,6 +15,9 @@ import {
   type MirroredSavedPrototype,
   type SavedPrototypeMirror,
 } from "./savedPrototypeMirror";
+
+// Restore polling uses a fixed half-second interval.
+const SAVED_PROTOTYPE_POLL_INTERVAL_MS = 500;
 
 export interface SavedPrototypeRestoreDevice {
   putAsset(upload: PrototypeAssetUpload): Promise<SavedPrototypeRestoreResult>;

@@ -237,6 +237,14 @@ test/daemon/rehydrationReservationAutolock.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
+test/daemon/sessionBroker/admission.test.ts
+test/daemon/sessionBroker/handlers.test.ts
+test/daemon/sessionBroker/hostConfig.test.ts
+test/daemon/sessionBroker/iosBaselineReset.test.ts
+test/daemon/sessionBroker/service.test.ts
+test/daemon/sessionBroker/sqliteStore.test.ts
+test/daemon/sessionBrokerProxyAcquisition.test.ts
+test/daemon/sessionBrokerProxyLifecycle.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
 test/daemon/sessionCacheTypedSlots.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
@@ -316,6 +324,11 @@ test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
+test/devices/sessionCatalog/androidCatalogAdapter.test.ts
+test/devices/sessionCatalog/iosCatalogAdapter.test.ts
+test/devices/sessionRequirements/matching.test.ts
+test/devices/sessionRequirements/parsing.test.ts
+test/devices/sessionRequirements/resolution.test.ts
 test/devices/waitForDeviceReadyOrCancel.test.ts
 test/docs/claudeMdToolReference.test.ts
 test/doctor/checks/daemonConnectivity.test.ts
@@ -875,6 +888,7 @@ test/models/formFactor.test.ts
 test/models/managedSlotContract.test.ts
 test/models/removedTools.test.ts
 test/models/screenScaleMetadata.test.ts
+test/models/sessionConfig.test.ts
 test/package/noBundledCoordinationServer.guard.test.ts
 test/package/webrtcRuntimeMetadata.test.ts
 test/packaging/bunPinConsistency.test.ts
@@ -906,6 +920,7 @@ test/planUtils.test.ts
 test/release/runtimePins.test.ts
 test/release/runtimeRoots.test.ts
 test/runtime/bunRuntimeGuard.test.ts
+test/scripts/affectedTests.test.ts
 test/scripts/aggregateEgressBaseline.test.ts
 test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/attestation/attestationCli.test.ts
@@ -1132,6 +1147,7 @@ test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts
 test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
+test/server/proxyServerSessionBroker.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
 test/server/resourceNotifySlowSibling.test.ts
@@ -1430,6 +1446,7 @@ test/utils/stableStringify.property.test.ts
 test/utils/stableStringify.test.ts
 test/utils/startupMaintenance.test.ts
 test/utils/throwIfAborted.test.ts
+test/utils/toolFailureSignal.rebuild.test.ts
 test/utils/toolFailureSignal.test.ts
 test/utils/toolUtils.compactJson.test.ts
 test/utils/toolUtils.property.test.ts

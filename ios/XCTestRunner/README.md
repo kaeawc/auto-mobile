@@ -272,7 +272,7 @@ xcodebuild test -scheme XCTestRunner -destination 'platform=iOS Simulator,name=i
 - Test scaffolding
 
 **Next Steps:**
-- Implement YAML plan parsing (integrate Yams)
+- Plan metadata and parameter substitution use Yams for structured YAML parsing.
 - Implement MCP client for tool execution
 - Add assertion verification logic
 - Add comprehensive test coverage

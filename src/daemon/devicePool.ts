@@ -7,6 +7,7 @@ import {
 } from "./multiDeviceAllocation";
 import { ForeignClaims } from "./foreignClaims";
 import { ConnectionOwnership } from "./connectionOwnership";
+import { DeviceAutoStart } from "./deviceAutoStart";
 import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
@@ -85,7 +86,6 @@ import {
   isSameHolderSession,
   MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -894,14 +894,6 @@ export interface DevicePoolDependencies {
   deviceSessionContinuityEnabled?: boolean;
 }
 
-/** Managed identity includes the name: iOS creation is excluded before its UDID is recorded. */
-function managedRefForImage(image: DeviceInfo): ManagedDeviceRef {
-  return {
-    platform: image.platform,
-    stableIds: [image.name, image.deviceId],
-  };
-}
-
 function createAdbServerResetQuarantine(
   port: AdbServerResetQuarantinePoolPort,
   factory?: DevicePoolDependencies["adbServerResetQuarantineFactory"],
@@ -1026,6 +1018,7 @@ export class DevicePool {
   private readonly multiDeviceAllocations = this.createMultiDeviceAllocationQueue();
   private readonly foreignClaims = this.createForeignClaims();
   private readonly connectionOwnership = this.createConnectionOwnership();
+  private readonly deviceAutoStart = this.createDeviceAutoStart();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -1062,8 +1055,6 @@ export class DevicePool {
   private androidAliasAppliedObservation = 0;
   private androidAliasRetirement = 0;
   private androidAliasAppliedDevices: BootedDevice[] = [];
-  private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
-  private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -1501,6 +1492,74 @@ export class DevicePool {
     return new ConnectionOwnership({
       foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
       getDevice: (deviceId) => this.devices.get(deviceId),
+    });
+  }
+
+  private createDeviceAutoStart(): DeviceAutoStart {
+    // Field initialization precedes dependency setup; defer reads until auto-start use.
+    const pool = this;
+    return new DeviceAutoStart({
+      get criteriaMatcher() {
+        return pool.criteriaMatcher;
+      },
+      get deviceManager() {
+        return pool.deviceManager;
+      },
+      get timer() {
+        return pool.timer;
+      },
+      get foreignDeviceOwnership() {
+        return pool.foreignDeviceOwnership;
+      },
+      get managedSlotExclusion() {
+        return pool.managedSlotExclusion;
+      },
+      get runtimeIdentity() {
+        return pool.runtimeIdentity;
+      },
+      get lifecycleCoordinator() {
+        return pool.lifecycleCoordinator;
+      },
+      get recoveringAndroidImages() {
+        return pool.recoveringAndroidImages;
+      },
+      get assignmentMutex() {
+        return pool.assignmentMutex;
+      },
+      get adbServerResetRecoveryReservations() {
+        return pool.adbServerResetRecoveryReservations;
+      },
+      refreshDevicesWithOutcome: () => this.refreshDevicesWithOutcome(),
+      refreshDevices: () => this.refreshDevices(),
+      refreshForeignOwnership: () => this.refreshForeignOwnership(),
+      trackStartedDeviceProcess: (device, childProcess) =>
+        this.trackStartedDeviceProcess(device, childProcess),
+      stopEmulatorProcess: (childProcess, retainLeaseUntil) =>
+        this.stopEmulatorProcess(childProcess, retainLeaseUntil),
+      getUnownedDevicesMatchingCriteria: (criteria) =>
+        this.getUnownedDevicesMatchingCriteria(criteria),
+      getDevicesByPlatform: (platform) => this.getDevicesByPlatform(platform),
+      getDevice: (deviceId) => this.devices.get(deviceId),
+      deviceHeldByExistingSession: (sessionId) => this.deviceHeldByExistingSession(sessionId),
+      addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
+        this.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
+      waitForDeviceReadyOrCancel: (
+        device,
+        childProcess,
+        timeoutMs,
+        signal,
+        timer,
+        cancelOwnedBoot,
+      ) =>
+        waitForDeviceReadyOrCancel(
+          this.deviceManager,
+          device,
+          childProcess,
+          timeoutMs,
+          signal,
+          timer,
+          cancelOwnedBoot,
+        ),
     });
   }
 
@@ -3561,45 +3620,7 @@ export class DevicePool {
     deadlineMs: number,
     platform?: Platform,
   ): Promise<number> {
-    if (!platform || requiredCount <= 0) {
-      return 0;
-    }
-
-    let started = 0;
-    try {
-      const candidates = await this.getStartableDeviceImageCandidates(platform);
-      if (candidates.length === 0) {
-        return 0;
-      }
-
-      const toStart = candidates.slice(0, requiredCount);
-
-      for (const device of toStart) {
-        const label = device.deviceId ?? device.name;
-        logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
-        const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
-        if (remainingTimeoutMs <= 0) {
-          break;
-        }
-        const ready = await this.startAndPublishAdditionalDevice(
-          device,
-          label,
-          deadlineMs,
-          device.platform,
-        );
-        if (ready) {
-          started++;
-        }
-      }
-
-      return started;
-    } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        await this.rethrowCapacityRefusal(error, started);
-      }
-      logger.warn(`[DevicePool] Failed to start additional devices: ${error}`);
-      return started;
-    }
+    return this.deviceAutoStart.startAdditionalDevices(requiredCount, deadlineMs, platform);
   }
 
   /**
@@ -3611,13 +3632,7 @@ export class DevicePool {
     error: BootCapacityExhaustedError,
     started: number,
   ): Promise<never> {
-    logger.warn(
-      `[DevicePool] Boot capacity exhausted after starting ${started} device(s): ${error.message}`,
-    );
-    if (started > 0) {
-      await this.refreshDevicesWithOutcome();
-    }
-    throw error;
+    return this.deviceAutoStart.rethrowCapacityRefusal(error, started);
   }
 
   /**
@@ -3635,70 +3650,16 @@ export class DevicePool {
     deadlineMs: number,
     platform: Platform,
   ): Promise<DevicePoolBootedDevice | null> {
-    const startResult = await this.runCoordinatedDeviceStart(
+    return this.deviceAutoStart.startAndPublishAdditionalDevice(
       device,
+      label,
       deadlineMs,
-      "start",
-      async ({ process: childProcess, outcome }, signal, retainLeaseUntil) => {
-        if (
-          device.platform === "android" &&
-          outcome !== "launched" &&
-          !(await this.canAdoptUnlaunchedEmulator(device, outcome))
-        ) {
-          return null;
-        }
-        const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
-        if (readinessTimeoutMs <= 0) {
-          logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
-          await this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil);
-          return null;
-        }
-        const ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(
-            this.deviceManager,
-            device,
-            childProcess,
-            readinessTimeoutMs,
-            signal,
-            this.timer,
-            () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
-          ),
-          device,
-        );
-        if (
-          device.platform === "android" &&
-          outcome !== "launched" &&
-          (await this.refusesForeignOwnedEmulator(device, ready.deviceId))
-        ) {
-          return null;
-        }
-        return { ready, childProcess };
-      },
+      platform,
     );
-    if (!startResult) {
-      if (startResult === undefined && platform === "android") {
-        // Rediscover the winner after releasing the lifecycle lease.
-        await this.refreshDevices();
-      }
-      return null;
-    }
-    // Start readiness and the lifecycle lease settle before assignmentMutex: never
-    // acquire the pool assignment lock while holding a start lease. The pool
-    // publish and process association share one assignment turn.
-    await this.assignmentMutex.runExclusive(async () => {
-      await this.addDevice(
-        startResult.ready,
-        device,
-        false,
-        this.runtimeIdentity.identityEvidenceForBootedDevice(startResult.ready),
-      );
-      await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
-    });
-    return startResult.ready;
   }
 
   private remainingStartDeadline(deadlineMs: number): number {
-    return Math.max(0, deadlineMs - this.timer.now());
+    return this.deviceAutoStart.remainingStartDeadline(deadlineMs);
   }
 
   private async runCoordinatedDeviceStart<T>(
@@ -3711,81 +3672,7 @@ export class DevicePool {
       retainLeaseUntil: (settlement: Promise<unknown>) => void,
     ) => Promise<T>,
   ): Promise<T | undefined> {
-    const timeoutMs = this.remainingStartDeadline(deadlineMs);
-    const controller = new AbortController();
-    const timeoutError = new ActionableError(
-      `Device pool start deadline elapsed for ${device.deviceId ?? device.name}`,
-    );
-    const timeoutHandle = this.timer.setTimeout(() => {
-      controller.abort(timeoutError);
-    }, timeoutMs);
-    const identity =
-      device.platform === "ios" && !device.deviceId
-        ? { kind: "selector" as const, platform: "ios" as const, selector: device.name }
-        : {
-            kind: "stable" as const,
-            platform: device.platform,
-            stableId: device.platform === "android" ? device.name : device.deviceId!,
-          };
-    const lifecycleLease = await this.lifecycleCoordinator
-      .reserve(identity, { operation, deadlineMs, signal: controller.signal })
-      .catch((error: unknown) => {
-        // The finally below only owns the timer once the lease is held (#11123).
-        this.timer.clearTimeout(timeoutHandle);
-        throw error;
-      });
-    const signal = AbortSignal.any([controller.signal, lifecycleLease.signal]);
-    let retainedLeaseSettlement: Promise<unknown> | undefined;
-    const retainLeaseUntil = (settlement: Promise<unknown>): void => {
-      retainedLeaseSettlement = retainedLeaseSettlement
-        ? Promise.all([retainedLeaseSettlement, settlement])
-        : settlement;
-    };
-    try {
-      // Recovery claimed before candidate selection is suppressed there. When
-      // recovery or another start claims after selection, acquisition waits for
-      // its lease; revalidate under that lease to join the winner's boot instead
-      // of launching the same AVD again (#8381).
-      // Every Android start, including uncontended starts, re-runs the existing
-      // candidate path: one listDeviceImages and (when images exist) one
-      // getBootedDevices. Android images with unknown running state are excluded.
-      // Keep the funnelled post-skip refresh outside the lifecycle lease.
-      if (device.platform === "android" && operation === "start") {
-        const candidates = await this.getStartableDeviceImageCandidates("android");
-        const pooled = this.getDevicesByPlatform("android");
-        if (
-          !candidates.some(
-            (candidate) =>
-              this.criteriaMatcher.getDeviceImageKey(candidate) ===
-              this.criteriaMatcher.getDeviceImageKey(device),
-          ) ||
-          this.isAutoStartSuppressed(device) ||
-          pooled.some(
-            (entry) =>
-              entry.id === device.deviceId || (entry.avdName ?? entry.name) === device.name,
-          )
-        ) {
-          return undefined;
-        }
-      }
-      const start = await this.startCoordinatedDeviceProcess(
-        device,
-        deadlineMs,
-        signal,
-        retainLeaseUntil,
-      );
-      return await action(start, signal, retainLeaseUntil);
-    } finally {
-      if (retainedLeaseSettlement) {
-        void retainedLeaseSettlement.then(
-          () => lifecycleLease.release(),
-          () => lifecycleLease.release(),
-        );
-      } else {
-        lifecycleLease.release();
-      }
-      this.timer.clearTimeout(timeoutHandle);
-    }
+    return this.deviceAutoStart.runCoordinatedDeviceStart<T>(device, deadlineMs, operation, action);
   }
 
   /**
@@ -3799,28 +3686,19 @@ export class DevicePool {
     signal: AbortSignal,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
   ): Promise<DeviceStartResult> {
-    try {
-      return await runWithAbortSignal(signal, () =>
-        this.startDeviceWithOutcome(device, deadlineMs),
-      );
-    } catch (error) {
-      if (isEmulatorLaunchCancelledError(error) && error.process) {
-        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
-      }
-      throw error;
-    }
+    return this.deviceAutoStart.startCoordinatedDeviceProcess(
+      device,
+      deadlineMs,
+      signal,
+      retainLeaseUntil,
+    );
   }
 
   private async startDeviceWithOutcome(
     device: DeviceInfo,
     deadlineMs: number,
   ): Promise<DeviceStartResult> {
-    const timeoutMs = this.remainingStartDeadline(deadlineMs);
-    if (this.deviceManager.startDeviceWithOutcome) {
-      return this.deviceManager.startDeviceWithOutcome(device, timeoutMs);
-    }
-    const process = await this.deviceManager.startDevice(device, timeoutMs);
-    return { process, outcome: process ? "launched" : "already-running" };
+    return this.deviceAutoStart.startDeviceWithOutcome(device, deadlineMs);
   }
 
   /**
@@ -3836,27 +3714,7 @@ export class DevicePool {
     device: DeviceInfo,
     outcome: DeviceStartResult["outcome"],
   ): Promise<boolean> {
-    const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
-    if (!discovery.succeededPlatforms.has("android")) {
-      // An incomplete adb listing cannot prove the emulator is ours to adopt (or
-      // free of a foreign lease); refuse rather than wait on it (#11103).
-      logger.warn(
-        `[DevicePool] Android discovery was incomplete; not adopting AVD '${device.name}' for allocation`,
-      );
-      return false;
-    }
-    const visible = discovery.devices.find((booted) => booted.name === device.name);
-    if (visible) {
-      return !(await this.refusesForeignOwnedEmulator(device, visible.deviceId));
-    }
-    if (outcome === "duplicate-of-external") {
-      logger.warn(
-        `[DevicePool] AVD '${device.name}' is running in another process that this daemon's adb cannot see; not adopting it for allocation`,
-      );
-      return false;
-    }
-    // Still booting, or booting in this process: readiness names it, then the lease is checked.
-    return true;
+    return this.deviceAutoStart.canAdoptUnlaunchedEmulator(device, outcome);
   }
 
   /**
@@ -3869,18 +3727,7 @@ export class DevicePool {
     device: DeviceInfo,
     deviceId: string,
   ): Promise<boolean> {
-    if (!this.foreignDeviceOwnership) {
-      return false;
-    }
-    await this.foreignDeviceOwnership.refresh([deviceId]);
-    const ownerPid = this.foreignDeviceOwnership.foreignOwnerPid(deviceId);
-    if (ownerPid === undefined && !this.foreignDeviceOwnership.foreignClaimUnreadable?.(deviceId)) {
-      return false;
-    }
-    logger.warn(
-      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process${ownerPid === undefined ? "" : ` (PID ${ownerPid})`}; not adopting it for allocation`,
-    );
-    return true;
+    return this.deviceAutoStart.refusesForeignOwnedEmulator(device, deviceId);
   }
 
   private async cancelCoordinatedDeviceStart(
@@ -3888,72 +3735,18 @@ export class DevicePool {
     childProcess: ChildProcess | null,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    if (device.platform === "android") {
-      await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
-      return;
-    }
-    childProcess?.kill();
+    return this.deviceAutoStart.cancelCoordinatedDeviceStart(
+      device,
+      childProcess,
+      retainLeaseUntil,
+    );
   }
 
   private async startAdditionalDevicesForCriteria(
     requests: DeviceAllocationRequest[],
     deadlineMs: number,
   ): Promise<number> {
-    const reservedDeviceIds = new Set<string>();
-    const excludedImageIds = new Set<string>();
-    let started = 0;
-    let refreshed = false;
-
-    // A session that already holds a device (an executePlan base session) uses that device, so
-    // it can never stand in for another label's request.
-    const unheldRequests = requests.filter((request) => {
-      const held = this.deviceHeldByExistingSession(request.sessionId);
-      if (held) {
-        reservedDeviceIds.add(held.id);
-      }
-      return !held;
-    });
-    const findExisting = (request: DeviceAllocationRequest) =>
-      this.getUnownedDevicesMatchingCriteria(request.criteria).find(
-        (device) => device.status !== "error" && !reservedDeviceIds.has(device.id),
-      );
-
-    for (const request of unheldRequests) {
-      const existing = findExisting(request);
-      if (existing) {
-        reservedDeviceIds.add(existing.id);
-        continue;
-      }
-
-      const outcome = await this.startAdditionalDeviceMatchingCriteria(
-        request.criteria,
-        excludedImageIds,
-        deadlineMs,
-        async () => {
-          if (refreshed) {
-            return undefined;
-          }
-          // A booted device can be missing from the pool, e.g. dropped after a reboot until
-          // something acquires it. Re-discover once before cold-booting an AVD (mt-0083 D2).
-          refreshed = true;
-          await this.refreshDevicesWithOutcome();
-          await this.refreshForeignOwnership();
-          return findExisting(request);
-        },
-      ).catch((error: unknown) =>
-        error instanceof BootCapacityExhaustedError
-          ? this.rethrowCapacityRefusal(error, started)
-          : Promise.reject(error),
-      );
-      if (outcome) {
-        reservedDeviceIds.add(outcome.device.id);
-        if (outcome.started) {
-          started++;
-        }
-      }
-    }
-
-    return started;
+    return this.deviceAutoStart.startAdditionalDevicesForCriteria(requests, deadlineMs);
   }
 
   /**
@@ -3966,52 +3759,12 @@ export class DevicePool {
     deadlineMs: number,
     rediscover: () => Promise<PooledDevice | undefined>,
   ): Promise<{ device: PooledDevice; started: boolean } | null> {
-    if (!criteria?.platform) {
-      return null;
-    }
-
-    try {
-      const candidates = await this.getStartableDeviceImageCandidates(
-        criteria.platform,
-        criteria,
-        excludedImageIds,
-      );
-      const device = candidates[0];
-      if (!device) {
-        return null;
-      }
-      const rediscovered = await rediscover();
-      if (rediscovered) {
-        return { device: rediscovered, started: false };
-      }
-
-      const label = device.deviceId ?? device.name;
-      logger.info(
-        `[DevicePool] Starting ${device.platform} device ${label} for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}`,
-      );
-      excludedImageIds.add(this.criteriaMatcher.getDeviceImageKey(device));
-      const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
-      if (remainingTimeoutMs <= 0) {
-        return null;
-      }
-      const ready = await this.startAndPublishAdditionalDevice(
-        device,
-        label,
-        deadlineMs,
-        criteria.platform,
-      );
-      const pooled = ready ? this.devices.get(ready.deviceId) : undefined;
-      return pooled ? { device: pooled, started: true } : null;
-    } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        // The caller fails the allocation with the typed refusal (#11236).
-        throw error;
-      }
-      logger.warn(
-        `[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`,
-      );
-      return null;
-    }
+    return this.deviceAutoStart.startAdditionalDeviceMatchingCriteria(
+      criteria,
+      excludedImageIds,
+      deadlineMs,
+      rediscover,
+    );
   }
 
   /**
@@ -4020,14 +3773,7 @@ export class DevicePool {
    * so an incomplete scan refuses with a retryable error (#11103).
    */
   private async listBootedDevicesForStart(platform: Platform): Promise<BootedDevice[]> {
-    const discovery = await this.deviceManager.getBootedDevicesDetailed(platform);
-    if (!discovery.succeededPlatforms.has(platform)) {
-      throw new BootedDeviceDiscoveryIncompleteError(
-        platform,
-        discovery.discoveryErrors?.[platform],
-      );
-    }
-    return discovery.devices;
+    return this.deviceAutoStart.listBootedDevicesForStart(platform);
   }
 
   private async getStartableDeviceImageCandidates(
@@ -4035,43 +3781,11 @@ export class DevicePool {
     criteria?: DeviceAllocationCriteria,
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
-    if (this.managedSlotExclusion) {
-      await this.managedSlotExclusion.refresh({ requireCurrent: true });
-    }
-    const availableImages = await this.deviceManager.listDeviceImages(platform);
-    if (availableImages.length === 0) {
-      return [];
-    }
-
-    const bootedDevices = await this.listBootedDevicesForStart(platform);
-    const bootedIds = new Set(bootedDevices.map((device) => device.deviceId));
-    const bootedNames = new Set(bootedDevices.map((device) => device.name));
-    const candidates: DeviceInfo[] = [];
-
-    for (const image of availableImages) {
-      if (!this.criteriaMatcher.deviceImageMatchesCriteria(image, criteria)) {
-        continue;
-      }
-      if (!this.criteriaMatcher.isStartableDeviceImage(image)) {
-        continue;
-      }
-      if (excludedImageIds.has(this.criteriaMatcher.getDeviceImageKey(image))) {
-        continue;
-      }
-      if (this.isExcludedFromAutoStart(image)) {
-        continue;
-      }
-      if (image.deviceId && bootedIds.has(image.deviceId)) {
-        continue;
-      }
-      const running = await this.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
-      if (running) {
-        continue;
-      }
-      candidates.push(image);
-    }
-
-    return candidates;
+    return this.deviceAutoStart.getStartableDeviceImageCandidates(
+      platform,
+      criteria,
+      excludedImageIds,
+    );
   }
 
   private async isDeviceImageRunningForCandidate(
@@ -4079,38 +3793,16 @@ export class DevicePool {
     bootedIds: Set<string>,
     bootedNames: Set<string>,
   ): Promise<boolean> {
-    if (
-      image.platform === "android" &&
-      ((image.deviceId !== undefined && bootedIds.has(image.deviceId)) ||
-        bootedNames.has(image.name))
-    ) {
-      return true;
-    }
-    if (image.isRunning === true) {
-      return true;
-    }
-    if (image.isRunningStateKnown !== false) {
-      return image.deviceId ? bootedIds.has(image.deviceId) : bootedNames.has(image.name);
-    }
-    return await this.deviceManager.isDeviceImageRunning(image);
+    return this.deviceAutoStart.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
   }
 
   /** Suppressed, or held by a managed slot: generic auto-start never boots a slot's device (#11174). */
   private isExcludedFromAutoStart(image: DeviceInfo): boolean {
-    return (
-      this.isAutoStartSuppressed(image) ||
-      this.managedSlotExclusion?.holderOf(managedRefForImage(image)) !== undefined
-    );
+    return this.deviceAutoStart.isExcludedFromAutoStart(image);
   }
 
   private isAutoStartSuppressed(image: DeviceInfo): boolean {
-    return (
-      this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image)) ||
-      this.suppressedAutoStartDeviceImageKeys.has(`${image.platform}:${image.name}`) ||
-      (image.platform === "android" &&
-        (this.recoveringAndroidImages.has(image.name) ||
-          this.adbServerResetRecoveryReservations.has(image.name)))
-    );
+    return this.deviceAutoStart.isAutoStartSuppressed(image);
   }
 
   private hasPendingAndroidRecovery(platform?: Platform): boolean {
@@ -5433,29 +5125,14 @@ export class DevicePool {
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {
-    const imageKey = `${device.platform}:${device.avdName ?? device.name}`;
-    this.suppressedAutoStartDeviceImageKeys.add(device.id);
-    this.suppressedAutoStartDeviceImageKeys.add(imageKey);
-    this.suppressedAutoStartImageKeyByDeviceId.set(device.id, imageKey);
+    return this.deviceAutoStart.suppressAutoStartForDevice(device);
   }
 
   private clearAutoStartSuppressionForBootedDevice(
     device: BootedDevice,
     sourceImage?: DeviceInfo,
   ): void {
-    const rememberedImageKey = this.suppressedAutoStartImageKeyByDeviceId.get(device.deviceId);
-    const observedImageKey = `${device.platform}:${device.name}`;
-    const authoritativeImageKey =
-      sourceImage?.platform === device.platform
-        ? `${sourceImage.platform}:${sourceImage.name}`
-        : observedImageKey;
-    this.suppressedAutoStartDeviceImageKeys.delete(device.deviceId);
-    this.suppressedAutoStartDeviceImageKeys.delete(observedImageKey);
-    this.suppressedAutoStartDeviceImageKeys.delete(authoritativeImageKey);
-    if (rememberedImageKey === authoritativeImageKey) {
-      this.suppressedAutoStartDeviceImageKeys.delete(rememberedImageKey);
-      this.suppressedAutoStartImageKeyByDeviceId.delete(device.deviceId);
-    }
+    return this.deviceAutoStart.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
   }
 
   /**

@@ -285,9 +285,6 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       this.rejectWorker(state, error);
     });
     worker.on("exit", (code) => {
-      if (code === 0) {
-        return;
-      }
       this.rejectWorker(state, new Error(`Database health probe worker exited with code ${code}`));
     });
     return state;

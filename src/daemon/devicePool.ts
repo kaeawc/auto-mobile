@@ -5998,7 +5998,9 @@ export class DevicePool {
    * share one read of the device's ownership, and so at most one relinquish request to its peer,
    * instead of a status query and a relinquish round trip each. A bind always reads afresh.
    */
-  async assertNotClaimedByForeignDaemon(
+  // Not `async`: wrapping the delegate's promise in an async function adds microtask hops that
+  // fake-time settle helpers (readToolsExplicitDeviceIdRule) count; return it directly.
+  assertNotClaimedByForeignDaemon(
     deviceId: string,
     platform: Platform,
     remedy?: string,

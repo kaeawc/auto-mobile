@@ -102,8 +102,11 @@ not a supported interface and may break between runtimes.
 
 ## Implied add-only readback (#12462)
 
-On iOS 27.0 simulators (manual-test batch 20261015a, captures in `test/fixtures/ios-tcc-photos/`),
-a stored full `kTCCServicePhotos` grant (`auth_value` 2) made PhotoKit report add-only `authorized`
-even when a stale `kTCCServicePhotosAdd` row (`auth_value` 0, left by a revoke) existed. The host therefore
-reports `photos-add` as `granted` with `evidence: "impliedByFullPhotosGrant"` and `verified: false` in that
-case. This inference was observed on iOS 27.0 only; the iOS 26.5 matrix above differs, so it stays unverified.
+The inference from a full `kTCCServicePhotos` grant (`auth_value` 2) to `photos-add` applies only on
+simulator runtime major >= 27 (threshold ORCHESTRATOR-CHOSEN, issue #12486). The 27.0 capture in
+`test/fixtures/ios-tcc-photos/` shows add-only `authorized` even with a stale PhotosAdd row; the iOS
+26.5 fixture set shows it does not: PhotoKit addOnly is `notDetermined` after reset+grant photos and
+`denied` after revoke+grant photos. Runtime version comes from `device.iosVersion` or
+`device.osVersion`; with an unknown runtime, readback reports the stored PhotosAdd row. Gating on the
+Photos row's `auth_version` was considered (27.0 wrote 2, 26.5 wrote 1) and rejected as too indirect
+and undocumented.

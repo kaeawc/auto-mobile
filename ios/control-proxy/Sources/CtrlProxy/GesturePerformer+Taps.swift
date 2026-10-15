@@ -20,6 +20,10 @@ import os
             _ = try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
         }
 
+        public func doubleTap(x: Double, y: Double) throws {
+            _ = try performTap(x: x, y: y, duration: 0, requested: nil, forced: nil, doubleTap: true)
+        }
+
         private func forcedTapStrategy(_ value: String?) -> TapCoordinateStrategy? {
             guard let value else { return nil }
             let strategy = TapCoordinateStrategy(rawValue: value)
@@ -48,15 +52,21 @@ import os
         /// Cached observation geometry keeps the single-panel opt-out path free of new platform reads.
         private func performTap(
             x: Double, y: Double, duration: TimeInterval, requested: TapDiagnostics.Requested?,
-            forced: TapCoordinateStrategy?
+            forced: TapCoordinateStrategy?, doubleTap: Bool = false
         )
             throws -> TapDiagnostics?
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             let target = gestureApplicationTarget()
             let point = GesturePoint(x: x, y: y)
-            if try deliverToUnpinnedForegroundApp(
-                target: target, forced: forced, start: point, end: point, duration: duration
+            if try UnpinnedGestureSynthesis.tap(
+                doubleTap: doubleTap,
+                deliver: {
+                    try self.deliverToUnpinnedForegroundApp(
+                        target: target, forced: forced, start: point, end: point, duration: duration
+                    )
+                },
+                wait: { gap in RunLoop.current.run(until: Date(timeIntervalSinceNow: gap)) }
             ) {
                 return requested.map { requested in
                     TapDiagnostics(requested: .init(
@@ -76,7 +86,7 @@ import os
                 var diagnostics: TapDiagnostics?
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 let delivery = try factory.deliver(
-                    start: GesturePoint(x: x, y: y), press: duration, forced: forced
+                    start: GesturePoint(x: x, y: y), press: duration, forced: forced, doubleTap: doubleTap
                 ) { candidate in
                     if let requested {
                         let coordinate = candidate.coordinate

@@ -180,8 +180,11 @@ cleanup_affected_selection() {
 affected_test_selection() {
   local branch_changes worktree_changes untracked_changes="" selection_dir file
   local -a units=() integrations=()
+  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
   branch_changes="$(vcs_changed_files_since_merge_base origin/main)" || return $?
+  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
   worktree_changes="$(vcs_touched_files_including_deleted)" || return $?
+  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
   if ! vcs_uses_jj; then
     untracked_changes="$(git ls-files --others --exclude-standard)" || return $?
   fi

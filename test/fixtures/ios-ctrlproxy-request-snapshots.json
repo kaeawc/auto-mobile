@@ -128,6 +128,18 @@
       }
     },
     {
+      "name": "request_tap_coordinates_double_tap",
+      "builder": "CtrlProxyGestures.requestDoubleTapCoordinates",
+      "wire": {
+        "type": "request_tap_coordinates",
+        "requestId": "fixture-request-id",
+        "x": 120.5,
+        "y": 240.25,
+        "duration": 50,
+        "doubleTap": true
+      }
+    },
+    {
       "name": "request_swipe",
       "builder": "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
       "wire": {

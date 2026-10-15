@@ -266,7 +266,7 @@ async function prepareThenRecover(
       `[SessionBroker] Prepare reply was not received; checking request ${config.requestId}: ${errorMessage(error)}`,
       error,
     );
-    return await statusUntilSettled(config, ports, deadlineMs, signal, undefined);
+    return statusUntilSettled(config, ports, deadlineMs, signal, undefined);
   }
   const initial = isSessionBrokerResult(reply, config.requestId) ? reply : undefined;
   return initial?.outcome !== "pending" && initial !== undefined

@@ -22,6 +22,10 @@ private final class FakeGestureCoordinateProvider: GestureCoordinateProviding {
         return selection
     }
 
+    var doubleTaps = 0
+
+    func doubleTap(_: GestureCoordinateSelection) throws { doubleTaps += 1 }
+
     func tap(_: GestureCoordinateSelection, duration: TimeInterval) throws {
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
@@ -276,6 +280,10 @@ private final class FakeReferenceDisplayGestureProvider: DisplayGestureProviding
     func synthesizePinch(_: DisplayPinch) throws -> Bool { true }
 
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection { selection }
+
+    var doubleTaps = 0
+
+    func doubleTap(_: GestureCoordinateSelection) throws { doubleTaps += 1 }
 
     func tap(_: GestureCoordinateSelection, duration _: TimeInterval) throws { taps += 1 }
 

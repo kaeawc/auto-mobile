@@ -13,6 +13,8 @@ test/cli/termination.test.ts bun
 test/daemon/DaemonLauncher.test.ts mkfifo
 # `scripts/all_fast_validate_checks.sh --list` prints the check registry and runs no check.
 test/lint/fastValidationRegistryCoverage.test.ts bash
+# `git ls-files -z`, read-only, to check tracked TypeScript import path casing.
+test/lint/relativeImportCasing.test.ts git
 # `git ls-files -z`, read-only, to enumerate tracked Markdown.
 test/lint/validateMarkdownRepoPaths.test.ts git
 # `git grep -l`, read-only, over the tracked tree.

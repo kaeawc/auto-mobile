@@ -3,129 +3,20 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.RequestCommitText
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestGlobalAction
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestImeAction
+import dev.jasonpearson.automobile.protocol.RequestInsertText
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestScreenshot
+import dev.jasonpearson.automobile.protocol.RequestSetText
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import kotlinx.serialization.json.JsonArray
-
-/**
- * Records the handler's full overloads before interface defaults can drop newer arguments. The
- * legacy recorder stays unchanged so its existing delegation tests still cover those defaults.
- */
-class RecordingCtrlProxyOverloads(
-  private val delegate: RecordingCtrlProxyActions = RecordingCtrlProxyActions(),
-) : CtrlProxyActions by delegate {
-  val calls: MutableList<Pair<String, List<Any?>>>
-    get() = delegate.calls
-
-  private fun record(name: String, vararg args: Any?) {
-    calls.add(name to args.toList())
-  }
-
-  override suspend fun requestHierarchy(
-    disableAllFiltering: Boolean,
-    maxDepth: Int?,
-    maxNodes: Int?,
-    displayId: Int?,
-    requestId: String?,
-  ) = record("requestHierarchy", disableAllFiltering, maxDepth, maxNodes, displayId, requestId)
-
-  override fun requestScreenshot(requestId: String?, displayId: Int?) =
-    record("requestScreenshot", requestId, displayId)
-
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration, frameContext, displayId)
-
-  override fun requestTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) = record("requestTapCoordinates", requestId, x, y, duration, frameContext, displayId)
-
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-    displayId: Int?,
-  ) = record("requestTwoFingerSwipe", requestId, x1, y1, x2, y2, duration, offset, displayId)
-
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) =
-    record(
-      "requestDrag",
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-      displayId,
-    )
-
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-    displayId: Int?,
-  ) =
-    record(
-      "requestPinch",
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      displayId,
-    )
-
-  override fun requestGestureStart(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    displayId: Int?,
-  ) = record("requestGestureStart", requestId, gestureId, x, y, displayId)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
-    timeoutMs: Long?,
-    trace: Boolean,
-  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs, trace)
-}
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
@@ -134,57 +25,25 @@ class RecordingCtrlProxyOverloads(
 open class NoOpCtrlProxyActions : CtrlProxyActions {
   val patches = mutableListOf<List<Any?>>()
 
-  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
+  override suspend fun requestHierarchy(request: RequestHierarchy) {}
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
 
   override fun setHierarchyInterval(intervalMs: Long?) {}
 
-  override fun requestScreenshot(requestId: String?) {}
+  override fun requestScreenshot(request: RequestScreenshot) {}
 
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  ) {}
+  override fun requestSwipe(request: RequestSwipe) {}
 
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) {}
+  override fun requestTapCoordinates(request: RequestTapCoordinates) {}
 
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  ) {}
+  override fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {}
 
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  ) {}
+  override fun requestDrag(request: RequestDrag) {}
 
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  ) {}
+  override fun requestPinch(request: RequestPinch) {}
 
-  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) {}
+  override fun requestGestureStart(request: RequestGestureStart) {}
 
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {}
 
@@ -196,16 +55,11 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     cancel: Boolean,
   ) {}
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  ) {}
+  override suspend fun requestSetText(request: RequestSetText) {}
 
-  override fun requestInsertText(requestId: String?, text: String) {}
+  override fun requestInsertText(request: RequestInsertText) {}
 
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {}
+  override fun requestCommitText(request: RequestCommitText) {}
 
   override fun requestSetKeyboardProfile(requestId: String?, profileId: String) {}
 
@@ -214,7 +68,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     supportedCatalogVersions: List<Int>,
   ) {}
 
-  override fun requestImeAction(requestId: String?, action: String) {}
+  override fun requestImeAction(request: RequestImeAction) {}
 
   override fun requestSelectAll(requestId: String?) {}
 
@@ -242,7 +96,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) {}
 
-  override fun requestGlobalAction(requestId: String?, action: String) {}
+  override fun requestGlobalAction(request: RequestGlobalAction) {}
 
   override fun requestDeviceInfo(requestId: String?) {}
 
@@ -407,27 +261,17 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     calls.add(name to args.toList())
   }
 
-  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
-    record("requestHierarchy", disableAllFiltering, requestId)
+  override suspend fun requestHierarchy(request: RequestHierarchy) =
+    record("requestHierarchy", request)
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
     record("requestHierarchyIfStale", sinceTimestamp, requestId)
 
   override fun setHierarchyInterval(intervalMs: Long?) = record("setHierarchyInterval", intervalMs)
 
-  override fun requestScreenshot(requestId: String?) = record("requestScreenshot", requestId)
+  override fun requestScreenshot(request: RequestScreenshot) = record("requestScreenshot", request)
 
-  override fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
-    record("requestScreenshot", requestId, displayId, hidePrototypes)
-
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration)
+  override fun requestSwipe(request: RequestSwipe) = record("requestSwipe", request)
 
   override fun requestDoubleTapCoordinates(
     requestId: String?,
@@ -437,63 +281,18 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     displayId: Int?,
   ) = record("requestDoubleTapCoordinates", requestId, x, y, frameContext, displayId)
 
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
-    record("requestTapCoordinates", requestId, x, y, duration)
+  override fun requestTapCoordinates(request: RequestTapCoordinates) =
+    record("requestTapCoordinates", request)
 
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  ) = record("requestTwoFingerSwipe", requestId, x1, y1, x2, y2, duration, offset)
+  override fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
+    record("requestTwoFingerSwipe", request)
 
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  ) =
-    record(
-      "requestDrag",
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-    )
+  override fun requestDrag(request: RequestDrag) = record("requestDrag", request)
 
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  ) =
-    record(
-      "requestPinch",
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-    )
+  override fun requestPinch(request: RequestPinch) = record("requestPinch", request)
 
-  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) =
-    record("requestGestureStart", requestId, gestureId, x, y)
+  override fun requestGestureStart(request: RequestGestureStart) =
+    record("requestGestureStart", request)
 
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) =
     record("requestGestureMove", requestId, gestureId, x, y)
@@ -506,63 +305,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     cancel: Boolean,
   ) = record("requestGestureEnd", requestId, gestureId, x, y, cancel)
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard)
-
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-    frameContext: String?,
-  ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard, frameContext)
+  override suspend fun requestSetText(request: RequestSetText) = record("requestSetText", request)
 
   override fun requestInsertTextState(requestId: String?) =
     record("requestInsertTextState", requestId)
 
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
-  ) =
-    record(
-      "requestInsertText",
-      requestId,
-      text,
-      expectedSuffix,
-      acceptsCaretNotPlaced,
-      precedingState,
-    )
+  override fun requestInsertText(request: RequestInsertText) = record("requestInsertText", request)
 
-  override fun requestInsertText(requestId: String?, text: String) =
-    record("requestInsertText", requestId, text)
-
-  override fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
-    record("requestInsertText", requestId, text, expectedSuffix)
-
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-  ) = record("requestInsertText", requestId, text, expectedSuffix, acceptsCaretNotPlaced)
-
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
-    record("requestCommitText", requestId, text, priorImeId)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
-    timeoutMs: Long?,
-  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs)
+  override fun requestCommitText(request: RequestCommitText) = record("requestCommitText", request)
 
   override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
     record("requestCancelImeCommit", requestId, targetRequestId)
@@ -575,11 +325,7 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     supportedCatalogVersions: List<Int>,
   ) = record("requestListKeyboardProfiles", requestId, supportedCatalogVersions)
 
-  override fun requestImeAction(requestId: String?, action: String) =
-    record("requestImeAction", requestId, action)
-
-  override fun requestImeAction(requestId: String?, action: String, frameContext: String?) =
-    record("requestImeAction", requestId, action, frameContext)
+  override fun requestImeAction(request: RequestImeAction) = record("requestImeAction", request)
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
 
@@ -612,11 +358,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
     record("removeCaCert", requestId, alias, certificate)
 
-  override fun requestGlobalAction(requestId: String?, action: String) =
-    record("requestGlobalAction", requestId, action)
-
-  override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) =
-    record("requestGlobalAction", requestId, action, frameContext)
+  override fun requestGlobalAction(request: RequestGlobalAction) =
+    record("requestGlobalAction", request)
 
   override fun validateFrameContext(requestId: String?, frameContext: String) =
     record("validateFrameContext", requestId, frameContext)

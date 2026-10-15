@@ -96,6 +96,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
     "DaemonMcpProxy.heartbeatHeldSession",
   ],
+  "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.heartbeatHeldSession"],
 };
 
 /**
@@ -130,10 +131,10 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
   "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
   "src/daemon/daemonMcpProxy.ts": [
-    "DaemonMcpProxy.evictAbandonedHeldSessions",
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
     "DaemonMcpProxy.isBoundSessionReplayExpired",
   ],
+  "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.evictAbandonedHeldSessions"],
 };
 
 /**

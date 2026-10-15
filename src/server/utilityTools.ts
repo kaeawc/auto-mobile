@@ -35,6 +35,8 @@ import {
 } from "../features/utility/DeviceState";
 import {
   DisplayConfig,
+  MAX_ANDROID_DENSITY_DPI,
+  MIN_ANDROID_DENSITY_DPI,
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
@@ -390,12 +392,15 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
             "its inherited default. Android only. Omit to leave unchanged.",
         ),
       density: z
-        .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
+        .union([
+          z.number().min(MIN_ANDROID_DENSITY_DPI).max(MAX_ANDROID_DENSITY_DPI),
+          z.enum(["smaller", "default", "larger"]),
+        ])
         .optional()
         .describe(
           "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-            "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
-            "leave unchanged.",
+            `(smaller/default/larger). Numeric values must be ${MIN_ANDROID_DENSITY_DPI}-${MAX_ANDROID_DENSITY_DPI} dpi. ` +
+            "Android only; best-effort on physical devices. Omit to leave unchanged.",
         ),
       theme: z
         .enum(["light", "dark", "system", "custom"])

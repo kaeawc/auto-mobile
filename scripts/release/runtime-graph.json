@@ -1,7 +1,7 @@
 {
   "description": "Pinned runtime dependency graph for @kaeawc/auto-mobile. Regenerate with `bun scripts/release/pin-runtime-deps.ts --write` after a dependency or security update; see docs/design-docs/release/runtime-dependency-pinning.md.",
   "issue": 5421,
-  "roots": ["@jimp/core", "jimp", "kysely", "sharp"],
+  "roots": ["@jimp/core", "jimp", "sharp"],
   "dependencies": {
     "@borewit/text-codec": "0.2.2",
     "@emnapi/runtime": "1.11.3",
@@ -48,7 +48,6 @@
     "image-q": "4.0.0",
     "jimp": "1.6.1",
     "jpeg-js": "0.4.4",
-    "kysely": "0.29.6",
     "mime": "3.0.0",
     "ms": "2.1.3",
     "omggif": "1.0.10",

@@ -30,6 +30,8 @@ for root in scripts/github scripts/manual-test/python; do
 done
 
 awk -F '\t' -v allowfile="$tmp/allowlist" -v pythonroots="$tmp/python-roots" -v candidatefile="$tmp/candidates" -v refsfile="$tmp/refs" -v importsfile="$tmp/imports" -v unref="$tmp/unreferenced" -v testonly="$tmp/testonly" -v stale="$tmp/stale" -v listed="$tmp/listed" -v countfile="$tmp/count" -v failures="$tmp/failures" '
+  # Count distinct referrers per candidate as refs arrive; the END pass must not rescan every (candidate,file) key per candidate (quadratic, minutes on CI).
+  function addref(c,f) { if (!((c,f) in refs)) { refs[c,f]=1; count_of[c]++; if (f !~ /^test\// && f !~ /\.bats$/ && f !~ /\.test\.ts$/) nontest_of[c]=1 } }
   FILENAME == pythonroots { configured[$0]=1; next }
   FILENAME == candidatefile {
     candidate[++nc]=$0; n=split($0,a,"/"); b=a[n]; basecount[b]++; basepath[b,basecount[b]]=$0
@@ -44,17 +46,17 @@ awk -F '\t' -v allowfile="$tmp/allowlist" -v pythonroots="$tmp/python-roots" -v 
     # Shell variables may prefix a repository-relative suffix (for example $SCRIPT_DIR/lib/x.ts).
     if (n > 1 && (a[1] ~ /^\$/ || a[1] ~ /^[A-Z][A-Z0-9_]*$/ || a[1] ~ /_(root|dir)$/)) { suffix=""; for (j=2;j<=n;j++) suffix=suffix (j==2 ? "" : "/") a[j] }
     # Bare basename references intentionally satisfy all same-named candidates; qualified tokens require a path suffix match.
-    for (i=1;i<=basecount[b];i++) { c=basepath[b,i]; if (file != c && (normalized !~ /\// || c == normalized || c == suffix || c ~ ("/" suffix "$"))) refs[c,file]=1 }
+    for (i=1;i<=basecount[b];i++) { c=basepath[b,i]; if (file != c && (normalized !~ /\// || c == normalized || c == suffix || c ~ ("/" suffix "$"))) addref(c,file) }
     next
   }
   FILENAME == importsfile {
     file=$1; spec=$2; normalized=spec; while (normalized ~ /^\.\.?\//) sub(/^\.\.?\//,"",normalized); n=split(normalized,a,"/"); b=a[n]
-    if (index(b,".")==0) for (i=1;i<=stemcount[b];i++) { c=stempre[b,i]; stempath=c; sub(/\.(ts|mjs)$/,"",stempath); if (file != c && (normalized !~ /\// || stempath == normalized || stempath ~ ("/" normalized "$"))) refs[c,file]=1 }
+    if (index(b,".")==0) for (i=1;i<=stemcount[b];i++) { c=stempre[b,i]; stempath=c; sub(/\.(ts|mjs)$/,"",stempath); if (file != c && (normalized !~ /\// || stempath == normalized || stempath ~ ("/" normalized "$"))) addref(c,file) }
     next
   }
   FILENAME == allowfile { allowed[$1]=1; reason[$1]=$2; next }
   END {
-    for (i=1;i<=nc;i++) { c=candidate[i]; count=0; non_test=0; for (key in refs) { split(key,k,SUBSEP); if (k[1]==c) { count++; f=k[2]; if (f !~ /^test\// && f !~ /\.bats$/ && f !~ /\.test\.ts$/) non_test=1 } }
+    for (i=1;i<=nc;i++) { c=candidate[i]; count=count_of[c]+0; non_test=nontest_of[c]+0
       if (c in discovery) { count++; non_test=1 }
       if (!count) { state[c]="UNREFERENCED"; print "[scripts-referenced] UNREFERENCED " c > unref }
       else if (!non_test) { state[c]="TEST-ONLY"; print "[scripts-referenced] TEST-ONLY " c > testonly }

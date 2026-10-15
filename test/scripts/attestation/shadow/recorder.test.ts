@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { posix } from "node:path";
 import { ShadowStore } from "../../../../scripts/ci/attestation/shadow/recorder";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const shadowDir = "/shadow";
-const metricsPath = join(shadowDir, "shadow-metrics.json");
+// FakeFileSystem keys are normalized to forward slashes, so build expected keys with posix join.
+const metricsPath = posix.join(shadowDir, "shadow-metrics.json");
 
 describe("ShadowStore", () => {
   test("writes schema atomically with injected filesystem and clock", async () => {
@@ -39,6 +40,21 @@ describe("ShadowStore", () => {
       metrics: { generatedAtMs: 100 },
     });
     expect(fs.getWrittenFiles().has(metricsPath + ".tmp")).toBe(false);
+  });
+  test("fake filesystem keys never contain backslashes", async () => {
+    const fs = new FakeFileSystem();
+    const recorder = new ShadowStore({ fs, timer: new FakeTimer(), dir: shadowDir });
+    await recorder.record({
+      tier: 1,
+      treeHash: "hash",
+      runId: "run",
+      verdict: "skip",
+      hadAttestation: false,
+      ciResult: "pass",
+    });
+    const keys = [...fs.getWrittenFiles().keys()];
+    expect(keys).toEqual([metricsPath]);
+    expect(keys.some((key) => key.includes("\\"))).toBe(false);
   });
   test("dedupes, caps oldest records, and recovers corrupt data", async () => {
     const fs = new FakeFileSystem();

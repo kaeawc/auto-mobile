@@ -32,6 +32,7 @@ class FakeIncidentStore implements EmulatorLossIncidentStore {
       detectionPath: input.detectionPath,
       processExit: input.processExit,
       outputTail: input.outputTail,
+      outputUnavailable: input.outputUnavailable,
       lastAdbState: input.lastAdbState,
       session: input.session,
       recovery: { policy: input.recoveryPolicy, attempts: [] },
@@ -103,8 +104,10 @@ class FakePoolPort implements EmulatorLossIncidentPoolPort {
     return sessionClockMs - this.sessionClockOffsetMs;
   }
 
-  getProcessOutputTail(_deviceId: string): undefined {
-    return undefined;
+  tail: ReturnType<EmulatorLossIncidentPoolPort["getProcessOutputTail"]>;
+
+  getProcessOutputTail(_deviceId: string) {
+    return this.tail;
   }
 }
 
@@ -200,5 +203,50 @@ describe("EmulatorLossIncidentLedger", () => {
       await ledger.recordEmulatorLossIncident("emulator-5554", "device-discovery-miss"),
     ).toBeUndefined();
     expect(store.openCount).toBe(0);
+  });
+});
+
+describe("incident output availability", () => {
+  test("marks adopted emulators without an output tail", async () => {
+    const { ledger, store } = createLedger();
+    const id = (await ledger.recordEmulatorLossIncident("emulator-5554", "device-discovery-miss"))!;
+    expect((await store.get(id))?.outputUnavailable).toBe("adopted");
+    expect((await store.get(id))?.outputTail).toBeUndefined();
+  });
+
+  for (const path of ["watched-process-exit", "device-discovery-miss"] as const) {
+    test(`captures a present tail for ${path} without an adopted marker`, async () => {
+      const { ledger, store, port } = createLedger();
+      port.tail = { finalize: async () => "final tail", snapshot: () => "snapshot tail" };
+      const id = (await ledger.recordEmulatorLossIncident("emulator-5554", path))!;
+      expect((await store.get(id))?.outputTail).toBe(
+        path === "watched-process-exit" ? "final tail" : "snapshot tail",
+      );
+      expect((await store.get(id))?.outputUnavailable).toBeUndefined();
+    });
+  }
+
+  for (const path of ["watched-process-exit", "device-discovery-miss"] as const) {
+    test(`an empty tracked tail has neither output nor unavailable marker for ${path}`, async () => {
+      const { ledger, store, port } = createLedger();
+      port.tail = { snapshot: () => undefined, finalize: async () => undefined };
+      const id = (await ledger.recordEmulatorLossIncident("emulator-5554", path))!;
+      expect((await store.get(id))?.outputTail).toBeUndefined();
+      expect((await store.get(id))?.outputUnavailable).toBeUndefined();
+    });
+  }
+
+  test("a finalize rejection still opens an incident without a tail", async () => {
+    const { ledger, store, port } = createLedger();
+    port.tail = {
+      finalize: async () => {
+        throw new Error("capture failed");
+      },
+      snapshot: () => undefined,
+    };
+    const id = await ledger.recordEmulatorLossIncident("emulator-5554", "watched-process-exit");
+    expect(id).toBe("incident-1");
+    expect((await store.get(id!))?.outputTail).toBeUndefined();
+    expect((await store.get(id!))?.outputUnavailable).toBeUndefined();
   });
 });

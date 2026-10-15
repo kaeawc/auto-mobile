@@ -172,3 +172,5 @@ ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
 test/fixtures/ios-contract/*.json text eol=lf
 test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
+test/fixtures/ios-tcc-photos/*.json text eol=lf
+test/fixtures/ios-tcc-photos/*.md text eol=lf

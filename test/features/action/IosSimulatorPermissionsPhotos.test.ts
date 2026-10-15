@@ -1,6 +1,12 @@
+import {
+  FixtureTccReader,
+  loadPhotosTccCase,
+  photosTccCases,
+} from "../../helpers/iosTccPhotosFixtures";
 import { describe, expect, test } from "bun:test";
 import {
   IosSimulatorPermissions,
+  classifyIosSimulatorPermission,
   type TccPermissionReader,
 } from "../../../src/features/action/IosSimulatorPermissions";
 import type { TccPermissionRow } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
@@ -14,15 +20,9 @@ const device: BootedDevice = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
 };
 const appId = "com.example.app";
-// This row mirrors issue #12316/#12317-reported values, not a real simctl/TCC capture.
-// Decision logic is tested structurally with a fake TccPermissionReader and FakeSimCtlClient.
-const photosRow: TccPermissionRow = {
-  service: "kTCCServicePhotos",
-  client: appId,
-  auth_value: 2,
-  allowed: null,
-  prompt_count: null,
-};
+const photosRow = (await loadPhotosTccCase("full")).rows[0];
+const addOnlyRow = (await loadPhotosTccCase("addonly")).rows[0];
+const revokedRows = (await loadPhotosTccCase("revoked")).rows;
 
 class FakeTccReader implements TccPermissionReader {
   calls: Array<{ deviceId: string; appId: string; permissions?: string[] }> = [];
@@ -73,42 +73,46 @@ function expectUnverified(result: Awaited<ReturnType<IosSimulatorPermissions["se
 }
 
 describe("iOS simulator Photos permission honesty", () => {
-  test.each([photosRow, { ...photosRow, auth_value: null, allowed: 1 }])(
-    "stored Photos grant is unknown: %j",
-    async (row) => {
-      const { permissions, simctl } = fixture([row]);
-      const result = await permissions.getPermissions(appId, ["photos"]);
-      expect(result.success).toBe(true);
-      expect(result.permissions[0]).toMatchObject({
-        state: "unknown",
-        verified: false,
-        accessLevel: "readWrite",
-        evidence: "storedTccGrant",
-        authValue: row.auth_value ?? row.allowed,
-      });
-      expect(result.permissions[0]).toHaveProperty(
-        "reason",
-        expect.stringContaining("native PHPhotoLibrary"),
-      );
-      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
-    },
-  );
+  test.each([photosRow])("stored Photos grant is unknown: %j", async (row) => {
+    const { permissions, simctl } = fixture([row]);
+    const result = await permissions.getPermissions(appId, ["photos"]);
+    expect(result.success).toBe(true);
+    expect(result.permissions[0]).toMatchObject({
+      state: "unknown",
+      verified: false,
+      accessLevel: "readWrite",
+      evidence: "storedTccGrant",
+      authValue: row.auth_value ?? row.allowed,
+    });
+    expect(result.permissions[0]).toHaveProperty(
+      "reason",
+      expect.stringContaining("native PHPhotoLibrary"),
+    );
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("Photos preserves captured denial", async () => {
+    const { permissions } = fixture(revokedRows);
+    const result = await permissions.getPermissions(appId, ["photos"]);
+    expect(result.permissions[0]).toMatchObject({ state: "denied", accessLevel: "readWrite" });
+    expect(result.permissions[0]).not.toHaveProperty("evidence");
+  });
 
   test.each([
-    { authValue: 0, state: "denied" },
-    { authValue: 3, state: "limited" },
-  ])("Photos preserves $state", async ({ authValue, state }) => {
-    const { permissions } = fixture([{ ...photosRow, auth_value: authValue }]);
-    const result = await permissions.getPermissions(appId, ["photos"]);
-    expect(result.permissions[0].state).toBe(state);
-    expect(result.permissions[0].accessLevel).toBe("readWrite");
-    expect(result.permissions[0]).not.toHaveProperty("evidence");
-    expect(result.permissions[0]).not.toHaveProperty("verified");
-    expect(result.permissions[0]).not.toHaveProperty("reason");
+    { auth_value: 3, state: "limited" },
+    { auth_value: null, allowed: 1, state: "unknown" },
+  ])("classifier handles schema values without a native capture: %j", ({ state, ...fields }) => {
+    expect(
+      classifyIosSimulatorPermission("kTCCServicePhotos", {
+        service: "kTCCServicePhotos",
+        client: appId,
+        ...fields,
+      }).state,
+    ).toBe(state);
   });
 
   test("photos-add stays granted and identifies add-only access", async () => {
-    const { permissions } = fixture([{ ...photosRow, service: "kTCCServicePhotosAdd" }]);
+    const { permissions } = fixture([addOnlyRow]);
     const result = await permissions.getPermissions(appId);
     expect(result.permissions[0].state).toBe("granted");
     expect(result.permissions[0].accessLevel).toBe("addOnly");
@@ -273,5 +277,89 @@ describe("iOS simulator Photos permission honesty", () => {
     expect(result.results[1]).not.toHaveProperty("error");
     expect(result.warnings).toEqual([result.results[1].warning]);
     expect(result.results[1].warning).toContain("Photos grant was dispatched via simctl");
+  });
+});
+
+describe("captured Photos readback", () => {
+  test("a captured add-only grant stays unchanged beside a full grant", () => {
+    expect(classifyIosSimulatorPermission("kTCCServicePhotosAdd", addOnlyRow, photosRow)).toEqual({
+      state: "granted",
+      accessLevel: "addOnly",
+    });
+  });
+
+  test.each([undefined, ...revokedRows.filter((row) => row.service === "kTCCServicePhotos")])(
+    "missing or denied Photos cannot imply an add-only grant: %j",
+    (row) => {
+      expect(classifyIosSimulatorPermission("kTCCServicePhotosAdd", undefined, row)).toEqual({
+        state: "unknown",
+        accessLevel: "addOnly",
+      });
+    },
+  );
+
+  // No limited capture exists; exercise only the pure classifier's value semantics.
+  test.each([1, 3])("non-full Photos auth_value %i cannot imply add-only", (auth_value) => {
+    expect(
+      classifyIosSimulatorPermission("kTCCServicePhotosAdd", undefined, {
+        service: "kTCCServicePhotos",
+        client: appId,
+        auth_value,
+      }),
+    ).toEqual({ state: "unknown", accessLevel: "addOnly" });
+  });
+
+  test.each(
+    [undefined, ["photos-add"], ["photos", "photos-add"], ["kTCCServicePhotosAdd"]].map(
+      (query) => ({ query }),
+    ),
+  )("full2 overrides stale PhotosAdd for %j", async ({ query }) => {
+    const reader = new FixtureTccReader("full2");
+    const permissions = new IosSimulatorPermissions(device, new FakeSimCtlClient(), reader);
+    const result = await permissions.getPermissions(appId, query);
+    const stored = (await loadPhotosTccCase("full2")).rows.find(
+      (row) => row.service === "kTCCServicePhotosAdd",
+    );
+    expect(result.success).toBe(true);
+    const reason = result.permissions.find((row) => row.permission === "photos-add")?.reason;
+    expect(reason).toContain("stale");
+    expect(result.permissions.find((row) => row.permission === "photos-add")).toMatchObject({
+      state: "granted",
+      verified: false,
+      accessLevel: "addOnly",
+      evidence: "impliedByFullPhotosGrant",
+      reason: expect.stringContaining("implied by the full kTCCServicePhotos grant"),
+      authValue: 0,
+      raw: stored,
+    });
+    if (query) {
+      expect(result.permissions.map((row) => row.service)).toEqual(
+        query.map((permission) =>
+          permission === "photos" ? "kTCCServicePhotos" : "kTCCServicePhotosAdd",
+        ),
+      );
+      expect(reader.calls[0].permissions).toEqual(
+        query.length === 1 ? [...query, "photos"] : query,
+      );
+    }
+  });
+
+  test.each(photosTccCases)("native probe agrees with add-only readback: %s", async (name) => {
+    const reader = new FixtureTccReader(name);
+    const permissions = new IosSimulatorPermissions(device, new FakeSimCtlClient(), reader);
+    const { probe } = await loadPhotosTccCase(name);
+    const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
+    const [photos, add] = result.permissions;
+    const nativeStates = { authorized: "granted", denied: "denied", notDetermined: "unknown" };
+    expect(add.state).toBe(nativeStates[probe.addOnly.name]);
+    expect(photos.state).toBe(name === "revoked" ? "denied" : "unknown");
+    if (name === "full" || name === "full2") {
+      expect(add.evidence).toBe("impliedByFullPhotosGrant");
+      expect(photos).toMatchObject({ evidence: "storedTccGrant", verified: false });
+      expect(probe.readWrite.name).toBe("authorized");
+    } else {
+      expect(add).not.toHaveProperty("evidence");
+      expect(photos).not.toHaveProperty("evidence");
+    }
   });
 });

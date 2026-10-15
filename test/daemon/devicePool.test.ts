@@ -347,7 +347,11 @@ describe("DevicePool", () => {
     }
   }
 
-  class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
+  class DeferredDeviceSessionPersistence extends FakeDeviceSessionPersistence {
+    async recordLivenessOwnership(): Promise<void> {}
+
+    async replaceLivenessOwnership(): Promise<void> {}
+
     private writeStarted = Promise.withResolvers<void>();
     private writeFinished = Promise.withResolvers<void>();
     private deferWrite = true;
@@ -370,13 +374,14 @@ describe("DevicePool", () => {
       this.writeFinished.reject(error);
     }
 
-    async upsertActiveSession(): Promise<void> {
+    async upsertActiveSession(): Promise<number> {
       if (!this.deferWrite) {
-        return;
+        return 0;
       }
       this.deferWrite = false;
       this.writeStarted.resolve();
       await this.writeFinished.promise;
+      return 0;
     }
 
     async recordActivity(): Promise<void> {}
@@ -4047,16 +4052,22 @@ describe("DevicePool", () => {
           updated_at: "2026-09-14T00:00:00.000Z",
         };
         const persistedUpdates: DeviceSessionRecord[] = [];
-        const persistence: DeviceSessionPersistence = {
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession(record) {
-            persistedUpdates.push(record);
-          },
-          async recordActivity() {},
-          async markReleased() {},
-        };
+        const persistence: DeviceSessionPersistence = Object.assign(
+          new FakeDeviceSessionPersistence(),
+          {
+            recordLivenessOwnership: async () => {},
+            replaceLivenessOwnership: async () => {},
+            claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+            async getSession() {
+              return persisted;
+            },
+            async upsertActiveSession(record) {
+              persistedUpdates.push(record);
+            },
+            async recordActivity() {},
+            async markReleased() {},
+          } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+        );
         sessionManager.stopCleanupTimer();
         sessionManager = new SessionManager(fakeTimer, persistence);
         devicePool = new DevicePool(
@@ -4142,14 +4153,20 @@ describe("DevicePool", () => {
         created_at: "2026-09-14T00:00:00.000Z",
         updated_at: "2026-09-14T00:00:00.000Z",
       };
-      const persistence: DeviceSessionPersistence = {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {},
-        async recordActivity() {},
-        async markReleased() {},
-      };
+      const persistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased() {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = new DevicePool(
@@ -4219,19 +4236,25 @@ describe("DevicePool", () => {
         updated_at: "2026-09-14T00:00:00.000Z",
       };
       const releaseReasons: string[] = [];
-      const persistence: DeviceSessionPersistence = {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {
-          throw new Error("same-serial replacement must not create a recovered session");
-        },
-        async recordActivity() {},
-        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
-          releaseReasons.push(releaseReason);
-          persisted.release_reason = releaseReason;
-        },
-      };
+      const persistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("same-serial replacement must not create a recovered session");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+            releaseReasons.push(releaseReason);
+            persisted.release_reason = releaseReason;
+          },
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = new DevicePool(
@@ -4314,19 +4337,25 @@ describe("DevicePool", () => {
           updated_at: "2026-09-14T00:00:00.000Z",
         };
         const releaseReasons: string[] = [];
-        const persistence: DeviceSessionPersistence = {
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {
-            throw new Error("an absent recovery target must not create a recovered session");
-          },
-          async recordActivity() {},
-          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
-            releaseReasons.push(releaseReason);
-            persisted.release_reason = releaseReason;
-          },
-        };
+        const persistence: DeviceSessionPersistence = Object.assign(
+          new FakeDeviceSessionPersistence(),
+          {
+            recordLivenessOwnership: async () => {},
+            replaceLivenessOwnership: async () => {},
+            claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+            async getSession() {
+              return persisted;
+            },
+            async upsertActiveSession() {
+              throw new Error("an absent recovery target must not create a recovered session");
+            },
+            async recordActivity() {},
+            async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+              releaseReasons.push(releaseReason);
+              persisted.release_reason = releaseReason;
+            },
+          } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+        );
         sessionManager.stopCleanupTimer();
         sessionManager = new SessionManager(fakeTimer, persistence);
         devicePool = new DevicePool(
@@ -4384,14 +4413,20 @@ describe("DevicePool", () => {
         created_at: "2026-09-14T00:00:00.000Z",
         updated_at: "2026-09-14T00:00:00.000Z",
       };
-      const persistence: DeviceSessionPersistence = {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {},
-        async recordActivity() {},
-        async markReleased() {},
-      };
+      const persistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased() {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = new DevicePool(
@@ -4441,14 +4476,20 @@ describe("DevicePool", () => {
         created_at: "2026-09-14T00:00:00.000Z",
         updated_at: "2026-09-14T00:00:00.000Z",
       };
-      const persistence: DeviceSessionPersistence = {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {},
-        async recordActivity() {},
-        async markReleased() {},
-      };
+      const persistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased() {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = new DevicePool(
@@ -4500,14 +4541,20 @@ describe("DevicePool", () => {
         created_at: "2026-09-14T00:00:00.000Z",
         updated_at: "2026-09-14T00:00:00.000Z",
       };
-      const persistence: DeviceSessionPersistence = {
-        async getSession() {
-          return persisted;
-        },
-        async upsertActiveSession() {},
-        async recordActivity() {},
-        async markReleased() {},
-      };
+      const persistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased() {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = new DevicePool(
@@ -5969,18 +6016,24 @@ describe("DevicePool", () => {
       const secondWriteStarted = Promise.withResolvers<void>();
       const secondWriteFinished = Promise.withResolvers<void>();
       let writeCount = 0;
-      const sessionPersistence: DeviceSessionPersistence = {
-        async upsertActiveSession(): Promise<void> {
-          writeCount++;
-          if (writeCount === 2) {
-            secondWriteStarted.resolve();
-            await secondWriteFinished.promise;
-            throw new Error("persist create failed");
-          }
-        },
-        async recordActivity(): Promise<void> {},
-        async markReleased(): Promise<void> {},
-      };
+      const sessionPersistence: DeviceSessionPersistence = Object.assign(
+        new FakeDeviceSessionPersistence(),
+        {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          async upsertActiveSession(): Promise<void> {
+            writeCount++;
+            if (writeCount === 2) {
+              secondWriteStarted.resolve();
+              await secondWriteFinished.promise;
+              throw new Error("persist create failed");
+            }
+          },
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
+      );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, sessionPersistence);
       devicePool = new DevicePool(
@@ -6642,7 +6695,7 @@ describe("DevicePool", () => {
         outcome: "exhausted",
       });
       expect(sessionManager.getSession("session-1")).toBeNull();
-      expect(await persistence.getSession?.("session-1")).toMatchObject({
+      expect(await persistence.getSession("session-1")).toMatchObject({
         release_reason: deviceRestartReleaseReason("Pixel 8"),
         stable_device_id: "Pixel 8",
       });
@@ -6657,7 +6710,7 @@ describe("DevicePool", () => {
       await expect(resume).rejects.toMatchObject({
         release: { releaseReason: "restart-recovery-timeout", terminal: true },
       });
-      expect(await persistence.getSession?.("session-1")).toMatchObject({
+      expect(await persistence.getSession("session-1")).toMatchObject({
         status: "expired",
         release_reason: "restart-recovery-timeout",
       });

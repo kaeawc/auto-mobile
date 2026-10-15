@@ -1,3 +1,5 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
@@ -256,13 +258,19 @@ describe("ToolRegistry display inventory resolution", () => {
         created_at: "2026-09-03T00:00:00.000Z",
         updated_at: "2026-09-03T00:00:00.000Z",
       };
-      sessionManager = new SessionManager(timer, {
-        getSession: async () => persisted,
-        upsertActiveSession: async () => {},
-        recordActivity: async () => {},
-        markReleased: async () => {},
-        markStaleActiveSessionsExpired: async () => {},
-      });
+      sessionManager = new SessionManager(
+        timer,
+        Object.assign(new FakeDeviceSessionPersistence(), {
+          recordLivenessOwnership: async () => {},
+          replaceLivenessOwnership: async () => {},
+          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
+          getSession: async () => persisted,
+          upsertActiveSession: async () => {},
+          recordActivity: async () => {},
+          markReleased: async () => {},
+          markStaleActiveSessionsExpired: async () => {},
+        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
+      );
       const deviceUtils = new FakeDeviceUtils();
       deviceUtils.setBootedDevices(target.platform, [target]);
       const pool = new DevicePool(

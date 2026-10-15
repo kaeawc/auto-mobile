@@ -456,7 +456,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       // The session the supersede kept is still held, and its row is live again.
       expect(manager.getSession(SESSION)).not.toBeNull();
       expect(releases).toEqual([]);
-      expect(await store.getSession?.(SESSION)).toMatchObject({
+      expect(await store.getSession(SESSION)).toMatchObject({
         status: "active",
         release_reason: null,
       });
@@ -475,7 +475,7 @@ describe("session persistence guards live in the statement, not in a prior read"
 
       expect(await refresh(manager)).toBe("TerminalSessionError");
 
-      expect(await fake.getSession?.(SESSION)).toMatchObject({
+      expect(await fake.getSession(SESSION)).toMatchObject({
         status: "released",
         release_reason: "explicit-release",
       });

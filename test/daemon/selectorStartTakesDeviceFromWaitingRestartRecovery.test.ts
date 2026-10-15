@@ -103,7 +103,7 @@ describe("a session waiting in flight for its restarting device", () => {
       "not present in iOS simulator discovery",
       { attemptDeviceLossRecovery: true },
     );
-    expect((await persistence.getSession?.(HOLDER))?.release_reason).toBe(
+    expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
       `device-restart:${SIMULATOR.deviceId}`,
     );
 
@@ -156,7 +156,7 @@ describe("a session waiting in flight for its restarting device", () => {
     expect({
       holder: answers[HOLDER],
       deviceHeldBy: pool.getDevice(SIMULATOR.deviceId)?.sessionId,
-      holderRow: (await persistence.getSession?.(HOLDER))?.release_reason ?? null,
+      holderRow: (await persistence.getSession(HOLDER))?.release_reason ?? null,
     }).toEqual({
       holder: `holds ${SIMULATOR.deviceId}`,
       deviceHeldBy: HOLDER,

@@ -70,12 +70,10 @@ public final class CtrlProxy {
     /// test (`CtrlProxyLifecycleTests`) that substitutes a `FakeProxyTimer`.
     public convenience init(
         port: UInt16 = defaultPort,
-        storageInspector: (any StorageInspecting)? = nil,
         coordinator: CommandFailureCoordinator? = nil
     ) {
         self.init(
             port: port,
-            storageInspector: storageInspector,
             hierarchyPollTimer: SystemTimer(),
             coordinator: coordinator
         )
@@ -90,7 +88,6 @@ public final class CtrlProxy {
     /// unambiguous against that convenience one.
     init(
         port: UInt16 = defaultPort,
-        storageInspector: (any StorageInspecting)? = nil,
         hierarchyPollTimer: any ProxyTimer,
         coordinator: CommandFailureCoordinator? = nil,
         hasClients: (@Sendable () -> Bool)? = nil,
@@ -118,7 +115,6 @@ public final class CtrlProxy {
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
             perf: perf,
-            storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
@@ -343,13 +339,6 @@ private final class WeakCoordinator: @unchecked Sendable {
 // MARK: - Convenience Extensions
 
 extension CtrlProxy {
-    /// Creates and starts a service with default configuration.
-    public static func startDefault() throws -> CtrlProxy {
-        let service = CtrlProxy()
-        try service.start()
-        return service
-    }
-
     /// Creates and starts a service for a specific app.
     public static func start(bundleId: String, port: UInt16 = defaultPort) throws -> CtrlProxy {
         let service = CtrlProxy(port: port)

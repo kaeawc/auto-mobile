@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors surfaced by storage inspection. Ported verbatim from the reference
-/// `DefaultStorageInspecting.swift`; the `errorDescription` strings are part of the
+/// the storage inspector; the `errorDescription` strings are part of the
 /// wire-visible error text. `Sendable` because it is thrown across the command
 /// boundary in later phases.
 public enum StorageError: LocalizedError, Sendable {

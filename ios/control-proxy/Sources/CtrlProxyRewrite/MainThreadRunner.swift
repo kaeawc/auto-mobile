@@ -39,32 +39,3 @@ func runOnMainThread<T>(_ block: @escaping () throws -> T) throws -> T {
     }
     return try unwrapped.get()
 }
-
-/// Non-throwing variant for protocol methods that cannot propagate errors. ObjC
-/// exceptions are caught and logged; the fallback value is returned. See
-/// `runOnMainThread` for why the off-main crossing is `nonisolated(unsafe)`.
-func runOnMainThreadNonThrowing<T>(_ block: @escaping () -> T, fallback: T) -> T {
-    nonisolated(unsafe) let block = block
-    if Thread.isMainThread {
-        var result: T?
-        let exception = ObjCExceptionCatcher_tryBlock {
-            result = block()
-        }
-        if let exception {
-            print("[MainThread] ObjC exception in non-throwing context: \(exception.name) - \(exception.reason ?? "nil")")
-            return fallback
-        }
-        return result ?? fallback
-    }
-
-    nonisolated(unsafe) var result: T?
-    DispatchQueue.main.sync {
-        let exception = ObjCExceptionCatcher_tryBlock {
-            result = block()
-        }
-        if let exception {
-            print("[MainThread] ObjC exception in non-throwing context: \(exception.name) - \(exception.reason ?? "nil")")
-        }
-    }
-    return result ?? fallback
-}

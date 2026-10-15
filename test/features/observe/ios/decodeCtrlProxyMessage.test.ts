@@ -949,21 +949,19 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
   // here — per the spec we do not assert on their absence from the switch,
   // only subtract them so the genuinely-unhandled residue is isolated.
   //   1. set_hierarchy_poll_interval_result — poll-interval ack
-  //   2. screenshot_error                   — error push, handled client-side
-  //   3. current_focus_result               — focus push, no awaiter
-  //   4. traversal_order_result             — traversal push, no awaiter
-  //   5. connected                          — connection handshake push
+  //   2. current_focus_result               — focus push, no awaiter
+  //   3. traversal_order_result             — traversal push, no awaiter
+  //   4. connected                          — connection handshake push
   //   (set_network_mock_rules_result is now decoded: it carries rejectedMockIds, #10101)
   const FIRE_AND_FORGET_EXCUSES = [
     "set_hierarchy_poll_interval_result",
-    "screenshot_error",
     "current_focus_result",
     "traversal_order_result",
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 51 rawValues", () => {
-    expect(rawValues.length).toBe(51);
+  test("Swift ResponseType declares exactly 50 rawValues", () => {
+    expect(rawValues.length).toBe(50);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {

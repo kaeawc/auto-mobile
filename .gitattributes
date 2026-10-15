@@ -169,4 +169,5 @@ test/fixtures/managed-slots/*.sql text eol=lf
 
 # Shared iOS wire contracts are compared across Swift and TypeScript.
 test/fixtures/ios-contract/*.json text eol=lf
+test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf

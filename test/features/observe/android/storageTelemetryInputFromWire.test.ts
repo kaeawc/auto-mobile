@@ -35,6 +35,14 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
     });
   });
 
+  test.each(["add", "remove"])("passes through changeType %s", (changeType) => {
+    expect(storageTelemetryInputFromWire({ ...base, changeType }, 42).changeType).toBe(changeType);
+  });
+
+  test("defaults missing changeType to modify", () => {
+    expect(storageTelemetryInputFromWire({ ...base }, 42).changeType).toBe("modify");
+  });
+
   test("threads a runner-supplied previousValue through", () => {
     const input = storageTelemetryInputFromWire(
       {

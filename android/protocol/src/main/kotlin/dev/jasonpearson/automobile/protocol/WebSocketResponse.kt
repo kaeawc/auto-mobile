@@ -250,7 +250,14 @@ data class StorageChangedEvent(
   override val timestamp: Long,
   val packageName: String,
   val fileName: String,
-  val data: String, // JSON string of preferences
+  val data: String? = null, // Legacy JSON string of preferences
+  val key: String? = null,
+  val value: JsonElement? = null,
+  val valueType: String? = null,
+  val previousValue: JsonElement? = null,
+  val changeType: String? = null,
+  val eventTimestamp: Long? = null,
+  val sequenceNumber: Long? = null,
 ) : WebSocketResponse()
 
 @Serializable

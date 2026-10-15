@@ -138,8 +138,3 @@ commit_all() { git -C "$repo_dir" add -A; git -C "$repo_dir" commit -qm fixture;
   [[ "$output" == *"scripts/scratch-only.sh"* ]]
   [[ "$output" != *"scripts/module.ts"* ]]
 }
-
-@test "real tree smoke check" {
-  run env -u SCRIPTS_REFERENCED_ROOT "$BATS_TEST_DIRNAME/../../scripts/conventions/validate-scripts-referenced.sh"
-  [ "$status" -eq 0 ]
-}

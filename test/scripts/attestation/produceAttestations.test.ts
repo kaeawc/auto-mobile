@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   AttestationEnvelope,
   AttestationLane,
@@ -154,7 +155,7 @@ describe("produce attestations", () => {
       throw new Error("expected published envelope");
     }
     await new LocalFileSink("/attestations", fs).publish(recorded, "id-1");
-    expect(writes[0]?.path).toBe("/attestations/node-id-1.json");
+    expect(writes[0]?.path).toBe(join("/attestations", "node-id-1.json"));
     expect(writes[0]?.content.endsWith("\n")).toBe(true);
     expect(JSON.parse(writes[0]?.content ?? "{}").payload.lane).toBe("node");
   });

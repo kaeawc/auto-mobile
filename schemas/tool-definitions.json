@@ -1229,11 +1229,12 @@
           ]
         },
         "density": {
-          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Android only; best-effort on physical devices. Omit to leave unchanged.",
+          "description": "Effective display density: an explicit dpi (e.g. 480), or a relative bucket (smaller/default/larger). Numeric values must be 72-1280 dpi. Android only; best-effort on physical devices. Omit to leave unchanged.",
           "anyOf": [
             {
               "type": "number",
-              "minimum": 72
+              "minimum": 72,
+              "maximum": 1280
             },
             {
               "type": "string",

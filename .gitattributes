@@ -173,5 +173,6 @@ test/fixtures/ios-contract/*.json text eol=lf
 test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
 test/fixtures/ios-tcc-photos/*.json text eol=lf
+test/fixtures/ios-tcc-photos/ios26.5/*.json text eol=lf
 test/fixtures/ios-tcc-photos/*.md text eol=lf
 test/fixtures/ci-classify-failure/*.log text eol=lf

@@ -99,26 +99,12 @@ private actor RecordingPreferenceClient: SdkPreferenceFetching {
     }
 }
 
-private final class RunnerStorageTrap: StorageInspecting, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _calls = 0
-    var calls: Int { lock.lock(); defer { lock.unlock() }; return _calls }
-    private func record() { lock.lock(); _calls += 1; lock.unlock() }
-    func listSuites() -> [StorageSuiteInfo] { record(); return [] }
-    func getEntries(suiteName _: String?) -> [StorageEntry] { record(); return [] }
-    func getEntry(suiteName _: String?, key _: String) -> StorageEntry? { record(); return nil }
-    func setEntry(suiteName _: String?, key _: String, value _: String?, type _: String) throws { record() }
-    func removeEntry(suiteName _: String?, key _: String) throws { record() }
-    func clearEntries(suiteName _: String?) throws { record() }
-}
-
 @MainActor
 final class StorageRoutingTests: XCTestCase {
     private func handler(
         foreground: String = "com.example.app",
         sdkBundle: String? = "com.example.app",
-        client: RecordingPreferenceClient?,
-        runner: RunnerStorageTrap
+        client: RecordingPreferenceClient?
     )
         -> CommandHandler
     {
@@ -128,7 +114,6 @@ final class StorageRoutingTests: XCTestCase {
             elementLocator: locator,
             gesturePerformer: RewriteFakeGesturePerformer(),
             perf: PerfProvider(),
-            storageInspector: runner,
             sdkHierarchyClient: PreferenceHierarchyServer(bundleId: sdkBundle),
             sdkPreferenceClient: client
         )
@@ -142,10 +127,9 @@ final class StorageRoutingTests: XCTestCase {
         return try JSONDecoder().decode(WebSocketRequest.self, from: JSONSerialization.data(withJSONObject: payload))
     }
 
-    func testRoutesAllOperationsToSdkAndNeverUsesRunnerStorage() async throws {
+    func testRoutesAllOperationsToSdkPreferenceClient() async throws {
         let client = RecordingPreferenceClient()
-        let runner = RunnerStorageTrap()
-        let handler = handler(client: client, runner: runner)
+        let handler = handler(client: client)
         let suite = "duoStore"
         let fields: [String: Any] = ["fileName": suite, "key": "kvDuo"]
         let set = try await handler.handle(request(
@@ -183,12 +167,11 @@ final class StorageRoutingTests: XCTestCase {
         ])
         let tokens = await client.recordedTokens()
         XCTAssertEqual(tokens, ["launch-token", "launch-token", "launch-token"])
-        XCTAssertEqual(runner.calls, 0)
     }
 
     func testGetPreferenceEncodesRedactedFlagAndPreservesNormalWireOutput() async throws {
         let redactedHandler = handler(
-            client: RecordingPreferenceClient(redacted: true), runner: RunnerStorageTrap()
+            client: RecordingPreferenceClient(redacted: true)
         )
         let redactedResponse = try await redactedHandler.handle(request("get_preference", fields: ["key": "token"]))
         let redactedEntryResponse = try XCTUnwrap(redactedResponse as? StorageEntryResponse)
@@ -202,7 +185,7 @@ final class StorageRoutingTests: XCTestCase {
 
         for redacted in [nil, false] as [Bool?] {
             let normalHandler = handler(
-                client: RecordingPreferenceClient(redacted: redacted), runner: RunnerStorageTrap()
+                client: RecordingPreferenceClient(redacted: redacted)
             )
             let response = try await normalHandler.handle(request("get_preference", fields: ["key": "token"]))
             let encoder = JSONEncoder()
@@ -229,7 +212,7 @@ final class StorageRoutingTests: XCTestCase {
             StorageEntry(key: "theme", value: "dark", type: "STRING"),
             StorageEntry(key: "legacy", value: "value", type: "STRING", redacted: false),
         ])
-        let handler = handler(client: client, runner: RunnerStorageTrap())
+        let handler = handler(client: client)
         let result = try await handler.handle(request("get_preferences"))
         let response = try XCTUnwrap(result as? StorageEntriesResponse)
         let encoder = JSONEncoder()
@@ -241,11 +224,10 @@ final class StorageRoutingTests: XCTestCase {
         XCTAssertNil(entries[2]["redacted"])
     }
 
-    func testMissingSdkFailsWithoutRunnerWrite() async throws {
+    func testMissingSdkFailsWithoutDispatch() async throws {
         for sdkBundle in [nil, "com.other.app"] as [String?] {
             let client = RecordingPreferenceClient()
-            let runner = RunnerStorageTrap()
-            let handler = handler(sdkBundle: sdkBundle, client: client, runner: runner)
+            let handler = handler(sdkBundle: sdkBundle, client: client)
             let expected = "Command execution failed: iOS key-value storage requires com.example.app "
                 + "to embed and initialize the AutoMobile SDK and call UserDefaultsInspector.shared.setEnabled(true)"
                 + ": sdk_unavailable_not_dispatched"
@@ -262,13 +244,11 @@ final class StorageRoutingTests: XCTestCase {
             XCTAssertEqual(read?.error, expected)
             let calls = await client.recorded()
             XCTAssertEqual(calls, [])
-            XCTAssertEqual(runner.calls, 0)
         }
     }
 
     func testMissingPreferenceClientFailsBeforeDispatch() async throws {
-        let runner = RunnerStorageTrap()
-        let handler = handler(client: nil, runner: runner)
+        let handler = handler(client: nil)
         let expected = "Command execution failed: iOS key-value storage requires the target app "
             + "to embed the AutoMobile SDK: sdk_unavailable_not_dispatched"
         for type in ["set_preference", "remove_preference", "clear_preferences"] {
@@ -282,13 +262,11 @@ final class StorageRoutingTests: XCTestCase {
             as? StorageEntryResponse
         XCTAssertEqual(read?.success, false)
         XCTAssertEqual(read?.error, expected)
-        XCTAssertEqual(runner.calls, 0)
     }
 
     func testForegroundRefusalRemainsUnmarked() async throws {
         let client = RecordingPreferenceClient()
-        let runner = RunnerStorageTrap()
-        let handler = handler(foreground: "com.other.app", client: client, runner: runner)
+        let handler = handler(foreground: "com.other.app", client: client)
         let result = try await handler.handle(request("set_preference", fields: [
             "key": "kvDuo", "value": "42", "valueType": "INT",
         ])) as? WebSocketResponse
@@ -299,14 +277,12 @@ final class StorageRoutingTests: XCTestCase {
         )
         let calls = await client.recorded()
         XCTAssertEqual(calls, [])
-        XCTAssertEqual(runner.calls, 0)
     }
 
     func testMutationResponsesForwardResolutionAndOmitItForOlderSdk() async throws {
         for resolvedStore in ["standard", nil] as [String?] {
             let handler = handler(
-                client: RecordingPreferenceClient(resolvedStore: resolvedStore),
-                runner: RunnerStorageTrap()
+                client: RecordingPreferenceClient(resolvedStore: resolvedStore)
             )
             for type in ["set_preference", "remove_preference", "clear_preferences"] {
                 let result = try await handler.handle(request(type, fields: [
@@ -331,7 +307,7 @@ final class StorageRoutingTests: XCTestCase {
 
     func testOnlySetForwardsEffectiveValueDiffers() async throws {
         let handler = handler(
-            client: RecordingPreferenceClient(effectiveValueDiffers: true), runner: RunnerStorageTrap()
+            client: RecordingPreferenceClient(effectiveValueDiffers: true)
         )
         for type in ["set_preference", "remove_preference", "clear_preferences"] {
             let result = try await handler.handle(request(type, fields: [

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
@@ -14,6 +14,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
+import { warmedTests } from "../helpers/warmedTests";
 
 // #11557 item 2, both sides. An agent drives two devices through one stdio proxy: two acquired
 // sessions, the second being the proxy's latest binding. The daemon is replaced, and the new one
@@ -179,7 +180,7 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
 
     // Both rows are parked in recovery; from here on the daemon reads a row only to say why a
     // session is not found.
-    const readRow = persistence.getSession!;
+    const readRow = persistence.getSession.bind(persistence);
     let rowsReadable = reasonLookup === "works";
     persistence.getSession = async (sessionUuid) => {
       if (!rowsReadable) {
@@ -227,6 +228,9 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
 }
 
 describe("a live owner of two sessions that finish rehydrating after it reconnected", () => {
+  // Each scenario owns and cleans up its fakes; warm the proxy/rehydration path outside test timing.
+  const test = warmedTests(() => {});
+
   test("control: told not-found with the restart handoff, it keeps both", async () => {
     const outcome = await ownerOutcomeAfterRestart("works");
 

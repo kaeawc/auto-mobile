@@ -29,7 +29,9 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   createFailureOnAttempt: number | null = null;
   private createAttempts = 0;
   private readonly rows = new Map<string, DeviceSession>();
-  getSession?: (sessionUuid: string) => Promise<DeviceSession | undefined>;
+  async getSession(sessionUuid: string): Promise<DeviceSession | undefined> {
+    return this.rows.get(sessionUuid);
+  }
 
   /** Mirrors the repository's claimed-row precondition: the incarnation and a re-issuable reason. */
   private matchesIncarnation(row: DeviceSession | undefined, expected: RecoverableRowIncarnation) {
@@ -144,12 +146,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
-    this.enableSessionLookup();
     return this.rows.get(record.sessionUuid)!.stable_identity_generation ?? 0;
-  }
-
-  private enableSessionLookup(): void {
-    this.getSession = (sessionUuid) => Promise.resolve(this.rows.get(sessionUuid));
   }
 
   async listRecoverableSessions(
@@ -241,7 +238,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     const row = this.rows.get(sessionUuid);
     if (!row || row.status !== "active") {
-      return;
+      throw new DeviceSessionNotActiveError(sessionUuid);
     }
     row.liveness_owner_token = ownerToken;
   }
@@ -330,6 +327,5 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
 
   seed(row: DeviceSession): void {
     this.rows.set(row.session_uuid, row);
-    this.enableSessionLookup();
   }
 }

@@ -152,7 +152,7 @@ describe("activity sequence orders writes independently of the wall clock", () =
         last_used_at_ms: timer.now(),
         expires_at_ms: timer.now() + WINDOW,
       });
-      const local = await persistence.getSession?.(SESSION);
+      const local = await persistence.getSession(SESSION);
       expect(local).toMatchObject({ last_used_at_ms: 11_000, expires_at_ms: 71_000 });
       expect(local!.expires_at_ms - 11_000).toBe(WINDOW);
     },

@@ -108,7 +108,6 @@ import dev.jasonpearson.automobile.protocol.FrameMetricsData
 import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
 import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
@@ -125,6 +124,19 @@ import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
+import dev.jasonpearson.automobile.protocol.RequestCommitText
+import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestGlobalAction
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestImeAction
+import dev.jasonpearson.automobile.protocol.RequestInsertText
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestScreenshot
+import dev.jasonpearson.automobile.protocol.RequestSetText
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
@@ -2528,16 +2540,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
-    extractHierarchyNow(disableAllFiltering, requestId = requestId)
+  override suspend fun requestHierarchy(request: RequestHierarchy) {
+    val disableAllFiltering = request.disableAllFiltering
+    val maxDepth = request.maxDepth
+    val maxNodes = request.maxNodes
+    val displayId = request.displayId
+    val requestId = request.requestId
 
-  override suspend fun requestHierarchy(
-    disableAllFiltering: Boolean,
-    maxDepth: Int?,
-    maxNodes: Int?,
-    displayId: Int?,
-    requestId: String?,
-  ) =
     extractHierarchyNow(
       disableAllFiltering,
       HierarchySnapshotOptions(
@@ -2547,6 +2556,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       ),
       requestId,
     )
+  }
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
     var extractionRequested = false
@@ -2573,13 +2583,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
 
-  override fun requestScreenshot(requestId: String?) = broadcastScreenshot(requestId)
+  override fun requestScreenshot(request: RequestScreenshot) {
+    val requestId = request.requestId
+    val displayId = request.displayId
+    val hidePrototypes = request.hidePrototypes
 
-  override fun requestScreenshot(requestId: String?, displayId: Int?) =
-    broadcastScreenshot(requestId, displayId)
-
-  override fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
     broadcastScreenshot(requestId, displayId, hidePrototypes)
+  }
 
   override fun requestDoubleTapCoordinates(
     requestId: String?,
@@ -2592,57 +2602,57 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performTapCoordinates(requestId, x, y, 50L, frameContext, displayId, doubleTap = true)
   }
 
-  override fun requestTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) {
+  override fun requestTapCoordinates(request: RequestTapCoordinates) {
+    val requestId = request.requestId
+    val x = request.x
+    val y = request.y
+    val duration = request.duration
+    val frameContext = request.frameContext
+    val displayId = request.displayId
+
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
     performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
   }
 
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) {
+  override fun requestSwipe(request: RequestSwipe) {
+    val requestId = request.requestId
+    val x1 = request.x1
+    val y1 = request.y1
+    val x2 = request.x2
+    val y2 = request.y2
+    val duration = request.duration
+    val frameContext = request.frameContext
+    val displayId = request.displayId
+
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
     performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
   }
 
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-    displayId: Int?,
-  ) {
+  override fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
+    val requestId = request.requestId
+    val x1 = request.x1
+    val y1 = request.y1
+    val x2 = request.x2
+    val y2 = request.y2
+    val duration = request.duration
+    val offset = request.offset
+    val displayId = request.displayId
+
     performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset, displayId)
   }
 
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String?,
-    displayId: Int?,
-  ) {
+  override fun requestDrag(request: RequestDrag) {
+    val requestId = request.requestId
+    val x1 = request.x1
+    val y1 = request.y1
+    val x2 = request.x2
+    val y2 = request.y2
+    val pressDurationMs = request.resolvedPressDurationMs
+    val dragDurationMs = request.resolvedDragDurationMs
+    val holdDurationMs = request.holdDurationMs
+    val frameContext = request.frameContext
+    val displayId = request.displayId
+
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
     performDrag(
       requestId,
@@ -2658,16 +2668,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-    displayId: Int?,
-  ) {
+  override fun requestPinch(request: RequestPinch) {
+    val requestId = request.requestId
+    val centerX = request.centerX
+    val centerY = request.centerY
+    val distanceStart = request.distanceStart
+    val distanceEnd = request.distanceEnd
+    val rotationDegrees = request.rotationDegrees
+    val duration = request.duration
+    val displayId = request.displayId
+
     performPinch(
       requestId,
       centerX,
@@ -2680,13 +2690,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override fun requestGestureStart(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    displayId: Int?,
-  ) {
+  override fun requestGestureStart(request: RequestGestureStart) {
+    val requestId = request.requestId
+    val gestureId = request.gestureId
+    val x = request.x
+    val y = request.y
+    val displayId = request.displayId
+
     rememberedInsert = null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
@@ -2701,25 +2711,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       CommandOriginContext.currentClient(),
     )
   }
-
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, null, null)
-
-  override fun requestSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String?,
-  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, frameContext, null)
 
   /**
    * The Android half of streaming gesture input: builds real `StrokeDescription`s and dispatches
@@ -2791,22 +2782,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
   }
 
-  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) {
-    rememberedInsert = null
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      // continueStroke is API 26+. Fail cleanly so the client falls back to an atomic swipe.
-      broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
-      return
-    }
-    gestureStreamRouter.start(
-      requestId,
-      gestureId,
-      x.toFloat(),
-      y.toFloat(),
-      owner = CommandOriginContext.currentClient(),
-    )
-  }
-
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {
     rememberedInsert = null
     gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
@@ -2834,74 +2809,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun broadcastGestureResult(requestId: String?, success: Boolean, error: String?) {
     launchRequestScope(requestId) { broadcastSwipeResult(requestId, success, error, 0L, null) }
   }
-
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
-    requestTapCoordinates(requestId, x, y, duration, null, null)
-
-  override fun requestTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long,
-    frameContext: String?,
-  ) = requestTapCoordinates(requestId, x, y, duration, frameContext, null)
-
-  override fun requestTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int,
-  ) = performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
-
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-  ) =
-    requestDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      null,
-      null,
-    )
-
-  override fun requestDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String?,
-  ) =
-    requestDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-      null,
-    )
 
   private enum class StaleFrameContextAction(val wireName: String) {
     TAP("tap"),
@@ -2963,39 +2870,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
     }
 
-  override fun requestPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-  ) =
-    performPinch(
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-    )
+  override suspend fun requestSetText(request: RequestSetText) {
+    val requestId = request.requestId
+    val text = request.text
+    val resourceId = request.resourceId
+    val dismissKeyboard = request.dismissKeyboard
+    val frameContext = request.frameContext
 
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-  ) = performSetText(requestId, text, resourceId, dismissKeyboard)
-
-  override suspend fun requestSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean,
-    frameContext: String?,
-  ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
@@ -3038,53 +2919,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
-  ) = performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
+  override fun requestInsertText(request: RequestInsertText) {
+    val requestId = request.requestId
+    val text = request.text
+    val expectedSuffix = request.expectedSuffix
+    val acceptsCaretNotPlaced = request.acceptsCaretNotPlaced
+    val precedingState = request.precedingState
 
-  override fun requestInsertText(requestId: String?, text: String) =
-    performInsertText(requestId, text, null, false)
+    performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
+  }
 
-  override fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
-    performInsertText(requestId, text, expectedSuffix, false)
+  override fun requestCommitText(request: RequestCommitText) {
+    val requestId = request.requestId
+    val text = request.text
+    val priorImeId = request.priorImeId
+    val delivery = request.delivery
+    val timeoutMs = request.timeoutMs
+    val trace = request.trace
 
-  override fun requestInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-  ) = performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced)
-
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
-    requestCommitText(requestId, text, priorImeId, ImeTextDelivery.COMMIT)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-  ) = requestCommitText(requestId, text, priorImeId, delivery, null)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-    timeoutMs: Long?,
-  ) = requestCommitText(requestId, text, priorImeId, delivery, timeoutMs, false)
-
-  override fun requestCommitText(
-    requestId: String?,
-    text: String,
-    priorImeId: String?,
-    delivery: ImeTextDelivery,
-    timeoutMs: Long?,
-    trace: Boolean,
-  ) {
     rememberedInsert = null
     val start = System.currentTimeMillis()
     val requestDeadlineMs =
@@ -3283,10 +3135,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun requestImeAction(requestId: String?, action: String) =
-    performImeAction(requestId, action)
+  override fun requestImeAction(request: RequestImeAction) {
+    val requestId = request.requestId
+    val action = request.action
+    val frameContext = request.frameContext
 
-  override fun requestImeAction(requestId: String?, action: String, frameContext: String?) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
     performImeAction(requestId, action)
   }
@@ -3360,10 +3213,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
     performRemoveCaCertificate(requestId, alias, certificate)
 
-  override fun requestGlobalAction(requestId: String?, action: String) =
-    performGlobalActionRequest(requestId, action)
+  override fun requestGlobalAction(request: RequestGlobalAction) {
+    val requestId = request.requestId
+    val action = request.action
+    val frameContext = request.frameContext
 
-  override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.GLOBAL_ACTION))
       return
     performGlobalActionRequest(requestId, action)

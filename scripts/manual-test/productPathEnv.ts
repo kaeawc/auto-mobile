@@ -107,7 +107,7 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     owner: "harness",
     // legacy: removed together with the product reads by the remove-device-slots lane
     reason:
-      "Read-only managed-slot config source (inline JSON or file path); explicitly unset by clients.",
+      "Read-only legacy config source (inline JSON or file path); explicitly unset by clients.",
   },
   {
     name: "AUTOMOBILE_SESSION_CONFIG",

@@ -27,7 +27,10 @@ export interface BrokerClientFiles {
   initial: SessionConfig;
   batchId: string;
 }
-export function readBrokerClients(batch: string | undefined, deps: BrokerClientFileDeps): string[] {
+export function readBrokerClients(
+  batch: string | undefined,
+  deps: Pick<BrokerClientFileDeps, "readFile">,
+): string[] {
   if (!batch) {
     throw new Error("--client/--all requires MT_BATCH from the batch wrapper.");
   }
@@ -38,7 +41,7 @@ export function readBrokerClients(batch: string | undefined, deps: BrokerClientF
 export function resolveBrokerClient(
   batch: string | undefined,
   name: string,
-  deps: BrokerClientFileDeps,
+  deps: Pick<BrokerClientFileDeps, "readFile">,
 ): BrokerClientFiles {
   if (!batch) {
     throw new Error("--client requires MT_BATCH from the batch wrapper.");
@@ -91,7 +94,7 @@ export function writeImmutableRequest(
 }
 export function readBrokerIdentity(
   client: BrokerClientFiles,
-  deps: BrokerClientFileDeps,
+  deps: Pick<BrokerClientFileDeps, "readFile">,
 ): {
   config: SessionConfig;
   token: string;

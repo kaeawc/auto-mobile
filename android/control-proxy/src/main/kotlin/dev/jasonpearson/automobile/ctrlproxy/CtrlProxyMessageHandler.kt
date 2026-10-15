@@ -91,11 +91,12 @@ import kotlinx.serialization.json.Json
  * hierarchy, so the compiler fails the build if a new request type is added without a branch here.
  *
  * The handler performs no Android I/O — it only decodes fields and calls [actions] — so it can be
- * unit-tested without Robolectric. Almost every command is fire-and-forget (the action broadcasts
- * its own response asynchronously), so [handleMessage] returns `null`. Gesture display validation
- * and the non-finite coordinate guard (see [firstNonFinite]) instead return synchronous per-command
- * error responses that [WebSocketServer] broadcasts to the client — the Android analog of iOS
- * `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
+ * unit-tested without Robolectric. The handler awaits each action; actions broadcast their own
+ * responses, with existing service jobs retaining asynchronous completion, so [handleMessage]
+ * normally returns `null`. Gesture display validation and the non-finite coordinate guard (see
+ * [firstNonFinite]) instead return synchronous per-command error responses that [WebSocketServer]
+ * broadcasts to the client — the Android analog of iOS `CommandHandler.requireFinite` (#2964,
+ * mirror of #2928 / PR #2957).
  *
  * @param actions the device actions to dispatch to (the [CtrlProxy] service in production, a fake
  *   in tests).

@@ -19,6 +19,9 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 
+// Dropdown controls need time to open before selection.
+export const DROPDOWN_OPEN_SETTLE_MS = 200;
+
 /**
  * Subscribes `listener` to extensions of the live transport deadline and
  * returns an unsubscribe function, or `undefined` when there is nothing to
@@ -1831,7 +1834,7 @@ export class SetUIState extends BaseVisualChange {
     }
 
     // Wait a bit for dropdown to open
-    await this.timer.sleep(200);
+    await this.timer.sleep(DROPDOWN_OPEN_SETTLE_MS);
 
     // Tap on the desired value
     const selectResult = await tapOnElement.execute(

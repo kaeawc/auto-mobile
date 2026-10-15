@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.BeforeClass
@@ -16,7 +17,7 @@ class FocusedInputClickTest {
   }
 
   @Test
-  fun `clicks the focused input and recycles it`() {
+  fun `clicks the focused input and recycles it`() = runTest {
     val node = Any()
     val events = mutableListOf<String>()
     val result =
@@ -38,7 +39,7 @@ class FocusedInputClickTest {
   }
 
   @Test
-  fun `missing focused input fails without clicking`() {
+  fun `missing focused input fails without clicking`() = runTest {
     val result =
       clickFocusedInput<Any>(
         findFocusedInput = { null },
@@ -49,7 +50,7 @@ class FocusedInputClickTest {
   }
 
   @Test
-  fun `refused click fails and recycles the node`() {
+  fun `refused click fails and recycles the node`() = runTest {
     var recycled = false
     val result =
       clickFocusedInput(

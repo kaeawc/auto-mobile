@@ -13,6 +13,9 @@ import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 
+// Two reads preserve the existing recent-app verification bound.
+export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
+
 const POST_NAVIGATION_VERIFY_READS = 2;
 const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
 
@@ -98,7 +101,7 @@ export class RecentApps extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<ObserveResult> {
     let observation: ObserveResult | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < RECENT_APPS_VERIFY_ATTEMPTS; attempt++) {
       const minTimestamp = await awaitWhileRequestIsLive(this.adb.getDeviceTimestampMs(), signal);
       observation = await awaitWhileRequestIsLive(
         this.observeScreen.execute({

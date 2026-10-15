@@ -16,6 +16,9 @@ import {
   type SavedPrototypeMirror,
 } from "./savedPrototypeMirror";
 
+// Restore polling uses a fixed half-second interval.
+const SAVED_PROTOTYPE_POLL_INTERVAL_MS = 500;
+
 export interface SavedPrototypeRestoreDevice {
   putAsset(upload: PrototypeAssetUpload): Promise<SavedPrototypeRestoreResult>;
   save(save: {
@@ -169,7 +172,7 @@ export class AndroidSavedPrototypeRestoreDevice implements SavedPrototypeRestore
                 ? { client }
                 : { failure: this.unsupported() };
             }
-            await this.timer.sleep(500);
+            await this.timer.sleep(SAVED_PROTOTYPE_POLL_INTERVAL_MS);
           }
           return { failure: this.unavailable() };
         },

@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestGestureEnd
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestSelectAll
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
@@ -57,6 +58,8 @@ class ConnectionCommandQueueTest {
     @JvmStatic
     fun warmScheduler() {
       runTest {} // Keep coroutine scheduler initialization outside per-test timing.
+      ConnectionCommandQueueTest()
+        .`typed actions retain origin and finish sequentially before queued replies`()
     }
 
     private fun client() =
@@ -113,7 +116,12 @@ class ConnectionCommandQueueTest {
     }
   }
 
-  private class Fixture(test: TestScope, delegate: WebSocketMessageHandler, capacity: Int = 2) {
+  private class Fixture(
+    test: TestScope,
+    delegate: WebSocketMessageHandler,
+    capacity: Int = 2,
+    beforeReply: suspend (WebSocketResponse) -> Unit = {},
+  ) {
     val replies = mutableListOf<WebSocketResponse>()
     val failures = mutableListOf<Throwable>()
     val warnings = mutableListOf<String>()
@@ -131,6 +139,7 @@ class ConnectionCommandQueueTest {
         dispatcher = StandardTestDispatcher(test.testScheduler),
         delegate = delegate,
         reply = { requestId, response, routing ->
+          beforeReply(response)
           if (routing != QueuedReplyRouting.OWNER || requestId in owners) {
             replies += response
             owners.remove(requestId)
@@ -145,6 +154,132 @@ class ConnectionCommandQueueTest {
     val handler = QueuedWebSocketMessageHandler(delegate, queue)
 
     fun connection() = ReadLoop(scope, handler, client()) { replies += it }
+  }
+
+  @Test
+  fun `cancelling a suspended typed action releases worker for next queued command`() = runTest {
+    var active: Job? = null
+    val events = mutableListOf<String>()
+    val handler =
+      CtrlProxyMessageHandler(
+        object : NoOpCtrlProxyActions() {
+          override suspend fun requestSelectAll(requestId: String?) {
+            events += "start $requestId"
+            if (requestId == "held") {
+              active = currentCoroutineContext().job
+              try {
+                awaitCancellation()
+              } finally {
+                events += "cancelled held"
+              }
+            }
+            events += "finish $requestId"
+          }
+        },
+      )
+    val fixture = Fixture(this, handler)
+    val connection = fixture.connection()
+    connection.send(RequestSelectAll(requestId = "held"))
+    connection.send(RequestSelectAll(requestId = "next"))
+    runCurrent()
+    assertEquals(listOf("start held"), events)
+    checkNotNull(active).cancel()
+    runCurrent()
+    assertEquals(listOf("start held", "cancelled held", "start next", "finish next"), events)
+    assertEquals(1, fixture.queue.connectionCount)
+    assertTrue(connection.job.isActive)
+    assertTrue(fixture.replies.isEmpty())
+    assertTrue(fixture.failures.isEmpty())
+  }
+
+  @Test
+  fun `cancelling suspended reply releases worker for next queued reply`() = runTest {
+    var sending: Job? = null
+    var cancelled = false
+    val delegate = FakeHandler { CorrelatedErrorReporter.frame(it.requestId, "done") }
+    val fixture =
+      Fixture(
+        this,
+        delegate,
+        beforeReply = { response ->
+          if ((response as ErrorResponse).requestId == "held") {
+            sending = currentCoroutineContext().job
+            try {
+              awaitCancellation()
+            } finally {
+              cancelled = true
+            }
+          }
+        },
+      )
+    val connection = fixture.connection()
+    connection.send(RequestHierarchy(requestId = "held"))
+    connection.send(RequestHierarchy(requestId = "next"))
+    runCurrent()
+    assertEquals(listOf("held"), delegate.calls)
+    assertTrue(fixture.replies.isEmpty())
+    checkNotNull(sending).cancel()
+    runCurrent()
+    assertTrue(cancelled)
+    assertEquals(listOf("held", "next"), delegate.calls)
+    assertEquals(listOf("next" to "done"), fixture.errorReplies)
+    assertEquals(1, fixture.queue.connectionCount)
+    assertTrue(connection.job.isActive)
+    assertTrue(fixture.failures.isEmpty())
+  }
+
+  @Test
+  fun `typed actions retain origin and finish sequentially before queued replies`() = runTest {
+    val release = CompletableDeferred<Unit>()
+    val events = mutableListOf<String>()
+    val clients = mutableListOf<WebSocketServer.ConnectedClient?>()
+    val handler =
+      CtrlProxyMessageHandler(
+        object : NoOpCtrlProxyActions() {
+          override suspend fun requestHierarchy(request: RequestHierarchy) {
+            clients += CommandOriginContext.currentClient()
+            assertSame(
+              currentCoroutineContext()[CommandOriginContext]?.origin?.client,
+              CommandOriginContext.currentClient(),
+            )
+            events += "start ${request.requestId}"
+            if (request.requestId == "first") release.await()
+            clients += CommandOriginContext.currentClient()
+            events += "finish ${request.requestId}"
+          }
+        },
+      )
+    val fixture =
+      Fixture(
+        this,
+        FakeHandler { request ->
+          handler.handleMessage(request)
+          events += "return ${request.requestId}"
+          CorrelatedErrorReporter.frame(request.requestId, "done")
+        },
+      )
+    val connection = fixture.connection()
+    connection.send(RequestHierarchy(requestId = "first"))
+    connection.send(RequestHierarchy(requestId = "second"))
+    runCurrent()
+    assertEquals(listOf("start first"), events)
+    assertTrue(fixture.replies.isEmpty())
+    release.complete(Unit)
+    runCurrent()
+    assertEquals(
+      listOf(
+        "start first",
+        "finish first",
+        "return first",
+        "start second",
+        "finish second",
+        "return second",
+      ),
+      events,
+    )
+    assertEquals(listOf("first" to "done", "second" to "done"), fixture.errorReplies)
+    assertEquals(List(4) { connection.client }, clients)
+    assertNull(CommandOriginContext.currentClient())
   }
 
   @Test

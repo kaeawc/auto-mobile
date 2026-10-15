@@ -11,6 +11,7 @@ import {
   createDeviceSnapshotConfigRepository,
   createVideoRecordingConfigRepository,
 } from "../../src/db/keyedJsonConfigRepository";
+import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../src/features/snapshot";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -226,14 +227,28 @@ describe("KeyedJsonConfigRepository", () => {
     }
   });
 
+  // The snapshot schema defaults every field (#12458), so a row missing fields
+  // reads back defaulted; only a wrong-TYPE field or a non-object row is invalid.
   const validationCases = [
-    { tableName: "appearance_configs", schema: appearanceConfigSchema },
-    { tableName: "device_snapshot_configs", schema: deviceSnapshotConfigSchema },
-    { tableName: "video_recording_configs", schema: videoRecordingConfigSchema },
+    {
+      tableName: "appearance_configs",
+      schema: appearanceConfigSchema,
+      invalid: ['{"defaultMode":42}', "42", "[]", "null", '"string"'],
+    },
+    {
+      tableName: "device_snapshot_configs",
+      schema: deviceSnapshotConfigSchema,
+      invalid: ['{"strictBackupMode":"yes"}', "42", "[]", "null", '"string"'],
+    },
+    {
+      tableName: "video_recording_configs",
+      schema: videoRecordingConfigSchema,
+      invalid: ['{"defaultMode":42}', "42", "[]", "null", '"string"'],
+    },
   ] as const;
 
-  for (const { tableName, schema } of validationCases) {
-    for (const json of ['{"defaultMode":42}', "42", "[]", "null", '"string"']) {
+  for (const { tableName, schema, invalid } of validationCases) {
+    for (const json of invalid) {
       test(`${tableName} rejects invalid config ${json}`, async () => {
         const log = new FakeLogger();
         const repo = new KeyedJsonConfigRepository<unknown>({ tableName, schema, db, logger: log });
@@ -254,6 +269,20 @@ describe("KeyedJsonConfigRepository", () => {
       });
     }
   }
+
+  test("device_snapshot_configs defaults a row with no recognised fields instead of resetting (#12458)", async () => {
+    await db
+      .insertInto("device_snapshot_configs")
+      .values({
+        key: "global",
+        config_json: '{"defaultMode":42}',
+        updated_at: new Date().toISOString(),
+      })
+      .execute();
+    expect(await createDeviceSnapshotConfigRepository(db).getConfig()).toEqual(
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG,
+    );
+  });
 
   test("reads a legacy snapshot config without VM retention fields", async () => {
     const legacy = {

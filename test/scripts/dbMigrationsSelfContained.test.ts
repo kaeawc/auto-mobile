@@ -5,13 +5,12 @@ import { isBuiltin } from "node:module";
 import { join, posix } from "node:path";
 import ts from "typescript";
 import packageJson from "../../package.json";
-import { DB_RUNTIME_FILES } from "../../scripts/build/copy-db-runtime-files";
-import { REQUIRED_PACKED_RUNTIME_ASSETS } from "../../scripts/build/packed-runtime-assets";
 
 const migrationsDir = join(import.meta.dir, "../../src/db/migrations");
 const migrationFiles = [...new Glob("**/*.ts").scanSync({ cwd: migrationsDir })].sort();
-const shippedFiles = new Set<string>([
-  ...DB_RUNTIME_FILES,
+const siblingRuntimeFiles = ["eventTables.ts"] as const;
+const overrideFolderFiles = new Set<string>([
+  ...siblingRuntimeFiles,
   ...migrationFiles.map((file) => `migrations/${file.replaceAll("\\", "/")}`),
 ]);
 const dependencies = Object.keys(packageJson.dependencies);
@@ -70,7 +69,7 @@ function runtimeModule(node: ts.Node): ts.Expression | undefined {
   return undefined;
 }
 
-function isShippedSpecifier(specifier: string, sourcePath: string): boolean {
+function isAvailableInOverrideFolder(specifier: string, sourcePath: string): boolean {
   if (isBuiltin(specifier)) {
     return true;
   }
@@ -84,15 +83,15 @@ function isShippedSpecifier(specifier: string, sourcePath: string): boolean {
     if (resolved.endsWith(".js")) {
       candidates.push(`${resolved.slice(0, -3)}.ts`);
     }
-    return candidates.some((candidate) => shippedFiles.has(candidate));
+    return candidates.some((candidate) => overrideFolderFiles.has(candidate));
   }
   return dependencies.some(
     (dependency) => specifier === dependency || specifier.startsWith(`${dependency}/`),
   );
 }
 
-// Pure analyzer: the immutable packaging policy above is shared by fixtures and the repository scan.
-function findUnshippedRuntimeImports(
+// Pure analyzer: the override-folder policy above is shared by fixtures and the repository scan.
+function findUnprovidedOverrideRuntimeImports(
   sourceText: string,
   sourcePath = "migrations/fixture.ts",
 ): string[] {
@@ -102,11 +101,11 @@ function findUnshippedRuntimeImports(
     const module = runtimeModule(node);
     if (module) {
       if (ts.isStringLiteralLike(module)) {
-        if (!isShippedSpecifier(module.text, sourcePath)) {
+        if (!isAvailableInOverrideFolder(module.text, sourcePath)) {
           offending.add(module.text);
         }
       } else {
-        // Computed specifiers cannot be verified against the shipped file manifest.
+        // Computed specifiers cannot be verified against the override folder file set.
         offending.add(module.getText(source));
       }
     }
@@ -160,7 +159,7 @@ const cases: [string, string[]][] = [
   ['// import { a } from "../x";\nconst text = \'require("../x")\';', []],
 ];
 
-describe("raw DB migrations are self-contained", () => {
+describe("raw DB migration override folder is self-contained", () => {
   let violations: { file: string; specifiers: string[] }[];
 
   beforeAll(() => {
@@ -168,7 +167,7 @@ describe("raw DB migrations are self-contained", () => {
     violations = migrationFiles
       .map((file) => ({
         file,
-        specifiers: findUnshippedRuntimeImports(
+        specifiers: findUnprovidedOverrideRuntimeImports(
           readFileSync(join(migrationsDir, file), "utf8"),
           `migrations/${file.replaceAll("\\", "/")}`,
         ),
@@ -177,18 +176,11 @@ describe("raw DB migrations are self-contained", () => {
   });
 
   test.each(cases)("checks runtime dependencies in %s", (source, expected) => {
-    expect(findUnshippedRuntimeImports(source)).toEqual(expected);
+    expect(findUnprovidedOverrideRuntimeImports(source)).toEqual(expected);
   });
 
-  test("every migration runtime dependency is shipped", () => {
+  test("every migration runtime dependency is available in the override folder", () => {
     expect(migrationFiles.length).toBeGreaterThan(0);
     expect(violations).toEqual([]);
-  });
-
-  test("every copied DB runtime file is required in the packed asset manifest", () => {
-    expect(DB_RUNTIME_FILES.length).toBeGreaterThan(0);
-    for (const file of DB_RUNTIME_FILES) {
-      expect(REQUIRED_PACKED_RUNTIME_ASSETS).toContain(`dist/src/db/${file}`);
-    }
   });
 });

@@ -17,6 +17,10 @@ import {
 import { withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
+import { parseIosMajorVersion } from "../../utils/ios-cmdline-tools/iosVersion";
+
+/** ORCHESTRATOR-CHOSEN: 27.0 is the only captured runtime showing this inference; 26.5 does not. */
+export const IMPLIED_ADD_ONLY_MIN_IOS_MAJOR = 27;
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
@@ -120,6 +124,22 @@ const PHOTOS_ACCESS_LEVELS = new Map<string, "readWrite" | "addOnly">([
   ["kTCCServicePhotosAdd", "addOnly"],
 ]);
 
+function hasImpliedPhotosAddGrant(
+  service: string,
+  state: IosSimulatorPermissionState["state"],
+  photosRow: TccPermissionRow | undefined,
+  iosMajor: number | null | undefined,
+): boolean {
+  return (
+    service === "kTCCServicePhotosAdd" &&
+    state !== "granted" &&
+    photosRow?.auth_value === 2 &&
+    iosMajor !== null &&
+    iosMajor !== undefined &&
+    iosMajor >= IMPLIED_ADD_ONLY_MIN_IOS_MAJOR
+  );
+}
+
 /**
  * Classify stored TCC state without claiming host verification of Photos access.
  * photosRow supplies the sibling kTCCServicePhotos row for add-only inference.
@@ -128,11 +148,12 @@ export function classifyIosSimulatorPermission(
   service: string,
   row?: TccPermissionRow,
   photosRow?: TccPermissionRow,
+  iosMajor?: number | null,
 ): Pick<IosSimulatorPermissionState, "state" | "verified" | "reason" | "accessLevel" | "evidence"> {
   const authValue = row?.auth_value ?? null;
   const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(row?.allowed);
   const accessLevel = PHOTOS_ACCESS_LEVELS.get(service);
-  if (service === "kTCCServicePhotosAdd" && state !== "granted" && photosRow?.auth_value === 2) {
+  if (hasImpliedPhotosAddGrant(service, state, photosRow, iosMajor)) {
     return {
       state: "granted",
       verified: false,
@@ -160,6 +181,7 @@ const PHOTOS_GRANT_UNVERIFIED_WARNING =
 
 export class IosSimulatorPermissions {
   private device: BootedDevice;
+  private readonly iosMajor: number | null;
   private readonly backend: IosPermissionsBackend;
   private tccReader: TccPermissionReader;
 
@@ -170,6 +192,7 @@ export class IosSimulatorPermissions {
     private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
   ) {
     this.device = device;
+    this.iosMajor = parseIosMajorVersion(device.iosVersion ?? device.osVersion);
     this.backend = resolveIosPermissionsBackend({
       deviceId: device.deviceId,
       simctl: simctl || new SimCtlClient(device),
@@ -371,6 +394,7 @@ export class IosSimulatorPermissions {
             service,
             row,
             rowByService.get("kTCCServicePhotos"),
+            this.iosMajor,
           );
           const authValueForResult = authValue ?? allowed;
           return {

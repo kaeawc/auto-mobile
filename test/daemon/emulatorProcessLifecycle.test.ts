@@ -13,6 +13,11 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
+import { recordEmulatorLaunchOutputSource } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
+import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+
 const deviceId = "emulator-5554";
 const booted = { deviceId, name: "Pixel", platform: "android" as const };
 
@@ -107,6 +112,7 @@ function harness() {
     },
   };
   return {
+    port,
     lifecycle: new EmulatorProcessLifecycle(port),
     timer,
     processes,
@@ -590,5 +596,71 @@ describe("EmulatorProcessLifecycle", () => {
     } finally {
       sessions.stopCleanupTimer();
     }
+  });
+});
+
+describe("launch output handoff", () => {
+  test("seeds the tail with redacted launch output before post-ready output", () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    recordEmulatorLaunchOutputSource(process, () => "GPU launch token=[REDACTED]\n");
+    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+    process.stdout!.emit("data", "post-ready token=private\n");
+    expect(tail.snapshot()).toBe("GPU launch token=[REDACTED]\npost-ready token=[REDACTED]\n");
+    expect(tail.snapshot()).not.toContain("private");
+  });
+
+  test("records launch and post-ready output with a later SIGSEGV incident", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const store = new InMemoryEmulatorLossIncidentStore(
+      h.timer,
+      new CountingIdGenerator("incident"),
+    );
+    const ledger = new EmulatorLossIncidentLedger(
+      {
+        getDevice: (id) => h.devices.get(id) ?? null,
+        getRecoveryPolicy: () => ({ onLoss: true, maxAttempts: 2 }),
+        getSessionForDevice: () => null,
+        getSession: () => null,
+        sessionClockToWall: (time) => time,
+        getProcessOutputTail: (id) => h.outputs.get(id),
+      },
+      store,
+      h.timer,
+      {
+        execute: async () => {
+          throw new Error("Unused");
+        },
+        executeOrThrow: async (operation) => operation(1),
+      },
+    );
+    h.port.recordEmulatorLossIncident = (id, path, exit) =>
+      ledger.recordEmulatorLossIncident(id, path, exit);
+    h.port.evictMissingPooledDevice = async () => {
+      h.calls.push("evict");
+    };
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    process.stderr = new EventEmitter() as ChildProcess["stderr"];
+    recordEmulatorLaunchOutputSource(process, () => "GPU renderer launch\n");
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    process.stdout!.emit("data", "post-ready token=private\n");
+    process.emit("exit", null, "SIGSEGV");
+    process.emit("close", null, "SIGSEGV");
+    await flushUntil(() => h.calls.includes("finish"));
+    const [incident] = await store.list();
+    expect(incident.detectionPath).toBe("watched-process-exit");
+    expect(incident.processExit).toEqual({ code: null, signal: "SIGSEGV" });
+    expect(incident.outputTail).toBe("GPU renderer launch\npost-ready token=[REDACTED]\n");
+    expect(incident.outputUnavailable).toBeUndefined();
+  });
+
+  test("an empty launch seed keeps an empty tail unavailable", async () => {
+    const process = child();
+    recordEmulatorLaunchOutputSource(process, () => "");
+    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+    expect(tail.snapshot()).toBeUndefined();
+    expect(await tail.finalize()).toBeUndefined();
   });
 });

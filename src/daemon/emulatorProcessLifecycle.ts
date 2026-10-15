@@ -3,7 +3,10 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
-import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  boundedEmulatorOutputTail,
+  emulatorLaunchOutputSnapshot,
+} from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice } from "../models";
 import type {
   DeviceAutolockChildProcess as ChildProcess,
@@ -60,6 +63,7 @@ export class EmulatorProcessOutputTail {
     childProcess: ChildProcess,
     private readonly timer: Timer,
   ) {
+    this.output = boundedEmulatorOutputTail(emulatorLaunchOutputSnapshot(childProcess) ?? "");
     const hasStreams =
       (childProcess.stdout !== null && childProcess.stdout !== undefined) ||
       (childProcess.stderr !== null && childProcess.stderr !== undefined);

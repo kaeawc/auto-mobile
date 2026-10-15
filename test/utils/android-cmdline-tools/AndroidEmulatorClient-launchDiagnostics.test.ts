@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { Readable } from "node:stream";
 import {
   AndroidEmulatorClient,
+  emulatorLaunchOutputSnapshot,
   EmulatorExitedDuringReadinessError,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -135,6 +136,21 @@ function emitFailure(
 }
 
 describe("AndroidEmulatorClient launch diagnostics", () => {
+  test("exposes redacted launch output after launch", async () => {
+    const child = createChild();
+    expect(emulatorLaunchOutputSnapshot(child)).toBeUndefined();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", "Detected GPU type: host token=private\n");
+    });
+    expect(await client.startEmulator(avdName)).toBe(child);
+    expect(emulatorLaunchOutputSnapshot(child)).toContain(
+      "Detected GPU type: host token=[REDACTED]",
+    );
+    expect(emulatorLaunchOutputSnapshot(child)).not.toContain("private");
+    child.stderr!.emit("data", "later crashpad line\n");
+    expect(emulatorLaunchOutputSnapshot(child)).toContain("later crashpad line");
+  });
+
   for (const path of ["monitor", "during-readiness", "before-readiness"] as const) {
     for (const exitCode of [0, 1, null]) {
       test(`readiness exit regression: ${path} code ${exitCode} rejects promptly`, async () => {

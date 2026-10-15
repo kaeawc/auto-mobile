@@ -282,6 +282,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.boundSessionUuidAt": {
+    writes: 1,
+    reason:
+      "Delegation: the setter forwards the caller's existing activity-clock value to " +
+      "ProxySessionState without reading the clock or changing when callers write it.",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
     writes: 1,
     reason:

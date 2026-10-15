@@ -21,14 +21,28 @@ import {
 import { homedir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
-  MANAGED_SLOT_CONFIG_FLAG,
-  MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY,
-  parseManagedSlotConfigSource,
-} from "../../src/models/managedSlotConfig";
+  SESSION_CONFIG_FLAG,
+  SESSION_EXPERIMENTAL_CAPABILITY,
+  parseSessionConfig,
+  parseSessionConfigSource,
+} from "../../src/models/sessionConfig";
+import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
+import type { BrokerDaemonClient } from "./brokerDaemonClient";
+import {
+  archiveBrokerAttempt,
+  nextBrokerRequest,
+  persistBrokerAttempt,
+  readBrokerClients,
+  readBrokerIdentity,
+  resolveBrokerClient,
+  type BrokerClientFiles,
+} from "./brokerClientFiles";
+import { logger } from "../../src/utils/logger";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { isProcessRunning } from "../../src/utils/processLiveness";
@@ -48,7 +62,14 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 export interface ProxySessionCommand {
   op: "up" | "serve" | "call" | "read" | "tools" | "resources" | "subscribe" | "status" | "close";
   dir: string;
-  config?: string;
+  client?: string;
+  resume?: boolean;
+  profile?: string;
+  request?: string;
+  expect?: string;
+  owner?: "driver" | "disposable";
+  allowForeignSession?: string;
+  all?: boolean;
   env: Record<string, string>;
   initTimeoutMs: number;
   timeoutMs: number;
@@ -89,6 +110,18 @@ export function parseProxySessionArgs(
       positional.push(flag);
       continue;
     }
+    if (["--resume", "--all"].includes(flag) && PROXY_SESSION_FLAGS[flag].ops.includes(op)) {
+      if (seen.has(flag)) {
+        return { error: `Duplicate flag ${flag}.` };
+      }
+      seen.add(flag);
+      if (flag === "--resume") {
+        command.resume = true;
+      } else {
+        command.all = true;
+      }
+      continue;
+    }
     if (flag === "--full" && PROXY_SESSION_FLAGS[flag].ops.includes(op)) {
       command.full = true;
       continue;
@@ -113,8 +146,24 @@ export function parseProxySessionArgs(
     seen.add(flag);
     if (flag === "--dir") {
       command.dir = resolve(value);
-    } else if (flag === "--config") {
-      command.config = value;
+    } else if (flag === "--client") {
+      command.client = value;
+    } else if (flag === "--profile") {
+      command.profile = value;
+    } else if (flag === "--request") {
+      command.request = value;
+    } else if (flag === "--expect") {
+      if (value !== "ready" && !/^failed:[a-z0-9_]+$/.test(value)) {
+        return { error: "--expect must be ready or failed:<code>." };
+      }
+      command.expect = value;
+    } else if (flag === "--owner") {
+      if (value !== "driver" && value !== "disposable") {
+        return { error: "--owner must be driver or disposable." };
+      }
+      command.owner = value;
+    } else if (flag === "--allow-foreign-session") {
+      command.allowForeignSession = value;
     } else if (flag === "--env") {
       const eq = value.indexOf("=");
       if (eq < 1) {
@@ -133,8 +182,9 @@ export function parseProxySessionArgs(
       }
     }
   }
-  if (!command.dir) {
-    return { error: "--dir is required." };
+  const invalid = commandRefusal(command);
+  if (invalid) {
+    return { error: invalid };
   }
   const count = op === "call" ? [1, 2] : ["read", "subscribe"].includes(op) ? [1] : [0];
   if (!count.includes(positional.length)) {
@@ -158,6 +208,7 @@ const requestSchema = z
     uri: z.string().min(1).optional(),
     timeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
     allowSelector: z.boolean().optional(),
+    allowForeignSession: z.string().optional(),
   })
   .superRefine((request, ctx) => {
     if (request.op === "call" && !request.tool) {
@@ -191,7 +242,11 @@ export interface ProxySessionDeps {
   ids: IdGenerator;
   exists(path: string): boolean;
   readFile(path: string): string;
-  writeFile(path: string, text: string): void;
+  writeFile(path: string, text: string, options?: { mode: number; flag: "wx" }): void;
+  rename(from: string, to: string): void;
+  spawnOwner(): number;
+  ownerStartIdentity(pid: number): string | undefined;
+  brokerDaemonClient?: BrokerDaemonClient;
   writeJson(path: string, value: unknown): void;
   appendFile(path: string, text: string): void;
   mkdir(path: string): void;
@@ -199,7 +254,9 @@ export interface ProxySessionDeps {
   isPidAlive(pid: number): boolean;
   createClient(options: {
     server: string;
-    config?: string;
+    sessionConfig?: string;
+    livenessOwnerToken?: string;
+    redact(text: string): string;
     env: Record<string, string>;
     stderrPath: string;
     onClose(): void;
@@ -264,10 +321,189 @@ async function startupRefusal(
     ? undefined
     : `${startFirst} ${probe.reason ?? "Control socket did not answer."}`;
 }
-function validateConfig(command: ProxySessionCommand, deps: ProxySessionDeps): void {
-  if (command.config !== undefined) {
-    parseManagedSlotConfigSource(command.config, deps.readFile);
+function commandRefusal(command: ProxySessionCommand): string | undefined {
+  if (command.all) {
+    if (command.op !== "status" || command.client || command.dir) {
+      return "--all is only for status and excludes --client/--dir.";
+    }
+  } else if (!!command.client === !!command.dir) {
+    return "Exactly one of --client or --dir is required.";
   }
+  if (command.profile && command.request) {
+    return "--profile and --request are mutually exclusive.";
+  }
+  if (command.resume && (command.profile || command.request || command.owner)) {
+    return "--resume cannot change profile, request or owner.";
+  }
+  if (command.client && command.allowSelector) {
+    return "--allow-selector is unavailable for broker clients.";
+  }
+  if (
+    !command.client &&
+    (command.profile ||
+      command.request ||
+      command.resume ||
+      command.owner ||
+      command.expect ||
+      command.allowForeignSession)
+  ) {
+    return "Broker flags require --client.";
+  }
+  return undefined;
+}
+function clientContext(
+  command: ProxySessionCommand,
+  deps: ProxySessionDeps,
+): BrokerClientFiles | undefined {
+  return command.client ? resolveBrokerClient(deps.env.MT_BATCH, command.client, deps) : undefined;
+}
+function redactBrokerDeps(
+  context: BrokerClientFiles | undefined,
+  deps: ProxySessionDeps,
+): ProxySessionDeps {
+  if (!context) {
+    return deps;
+  }
+  // Resolve at every write: up mints the token after this dependency wrapper is installed.
+  const redact = (text: string): string => {
+    const path = join(context.dir, "owner-token");
+    const token = deps.exists(path) ? deps.readFile(path) : "";
+    if (!token) {
+      return text;
+    }
+    return text
+      .replaceAll(token, "[REDACTED]")
+      .replaceAll(JSON.stringify(token).slice(1, -1), "[REDACTED]");
+  };
+  return {
+    ...deps,
+    log: (text) => deps.log(redact(text)),
+    flush: (text) => deps.flush(redact(text)),
+    writeJson: (path, value) => deps.writeJson(path, JSON.parse(redact(JSON.stringify(value)))),
+    appendFile: (path, text) => deps.appendFile(path, redact(text)),
+  };
+}
+function driverAlive(dir: string, deps: ProxySessionDeps): boolean {
+  const path = join(dir, "driver.pid");
+  const pid = deps.exists(path) ? Number(deps.readFile(path).trim()) : NaN;
+  return Number.isSafeInteger(pid) && pid > 0 && deps.isPidAlive(pid);
+}
+function brokerOutcome(init: Record<string, unknown>, expected: string | undefined): number {
+  const session = record(init.session);
+  const outcome = init.ok ? session?.outcome : undefined;
+  const label = outcome === "failed" ? `failed:${record(session?.failure)?.code}` : outcome;
+  return expected ? (expected === label ? 0 : 2) : outcome === "ready" ? 0 : 1;
+}
+function brokerRequestRefusal(
+  request: Pick<Request, "op" | "tool" | "args" | "uri" | "allowSelector" | "allowForeignSession">,
+  context: BrokerClientFiles,
+  session: Record<string, unknown> | undefined,
+  deps: ProxySessionDeps,
+): string | undefined {
+  if (
+    session?.outcome !== "ready" ||
+    typeof session.sessionUuid !== "string" ||
+    !session.sessionUuid ||
+    !driverAlive(context.dir, deps)
+  ) {
+    return "Broker client requires a ready session and live driver; no sessionless calls.";
+  }
+  if (request.allowSelector) {
+    return "--allow-selector is unavailable for broker clients.";
+  }
+  if (
+    request.op === "resources" ||
+    (["read", "subscribe"].includes(request.op) &&
+      (request.uri === "automobile:devices" || request.uri?.startsWith("automobile:devices/")))
+  ) {
+    return "Broker clients cannot access device inventory resources.";
+  }
+  if (
+    request.op === "call" &&
+    ["startDevice", "provisionDevice", "getAndroid", "getApple", "killDevice"].includes(
+      request.tool ?? "",
+    )
+  ) {
+    return `Broker clients refuse ${request.tool}.`;
+  }
+  let allowed = session.sessionUuid;
+  if (request.allowForeignSession) {
+    if (request.allowForeignSession === context.name) {
+      return "--allow-foreign-session must name another batch client.";
+    }
+    const foreign = resolveBrokerClient(context.batch, request.allowForeignSession, deps);
+    const grant = record(readJson(join(foreign.dir, "init.json"), deps)?.session);
+    if (grant?.outcome !== "ready" || typeof grant.sessionUuid !== "string") {
+      return "Foreign client has no ready grant.";
+    }
+    allowed = grant.sessionUuid;
+  }
+  const inspect = (value: unknown): boolean => {
+    if (Array.isArray(value)) {
+      return value.every(inspect);
+    }
+    const fields = record(value);
+    return (
+      !fields ||
+      Object.entries(fields).every(([key, entry]) =>
+        ["sessionUuid", "deviceId"].includes(key)
+          ? entry === session.sessionUuid || entry === allowed
+          : inspect(entry),
+      )
+    );
+  };
+  return inspect(request.args)
+    ? undefined
+    : "Explicit sessionUuid/deviceId must equal this client's grant (or the named foreign client's grant).";
+}
+function prepareBrokerClient(
+  command: ProxySessionCommand,
+  context: BrokerClientFiles,
+  deps: ProxySessionDeps,
+): void {
+  if (driverAlive(context.dir, deps)) {
+    throw new Error("Previous attempt driver is alive; close it before another up/serve.");
+  }
+  if (command.resume) {
+    readBrokerIdentity(context, deps);
+    archiveBrokerAttempt(context, true, deps);
+    return;
+  }
+  let config = nextBrokerRequest(context, deps);
+  if (command.request) {
+    config = {
+      ...parseSessionConfigSource(command.request, deps.readFile),
+      requestId: config.requestId,
+    };
+  }
+  if (command.profile) {
+    const device = command.profile.trim().startsWith("{")
+      ? JSON.parse(command.profile)
+      : { ...config.device, hardware: { kind: "archetype", archetype: command.profile } };
+    config = parseSessionConfig({ ...config, device });
+  }
+  config = parseSessionConfig(config);
+  if (config.executionOwnerPid !== undefined) {
+    throw new Error("Use --owner disposable; external execution owners are not harness-owned.");
+  }
+  archiveBrokerAttempt(context, false, deps);
+  deps.mkdir(context.dir);
+  if (command.owner === "disposable") {
+    const pid = deps.spawnOwner();
+    // Record ownership immediately, even if generation capture subsequently fails.
+    deps.writeFile(join(context.dir, "owner.pid"), `${pid}\n`);
+    const identity = deps.ownerStartIdentity(pid);
+    if (!identity) {
+      throw new Error("Cannot capture disposable owner's process start identity; see owner.pid.");
+    }
+    deps.writeFile(join(context.dir, "owner-identity"), identity);
+    config = parseSessionConfig({
+      ...config,
+      executionOwnerPid: pid,
+      executionOwnerStartIdentity: identity,
+    });
+  }
+  persistBrokerAttempt(context, config, deps);
 }
 export function renderResponse(response: Record<string, unknown>, full: boolean): string {
   if (full) {
@@ -283,8 +519,9 @@ export function renderResponse(response: Record<string, unknown>, full: boolean)
   } else if (typeof text === "string") {
     try {
       payload = JSON.parse(text);
-    } catch {
-      // Plain text is an expected MCP payload, not a failed request.
+    } catch (error) {
+      // Plain text is a valid MCP payload; retaining it does not hide a request failure.
+      logger.debug(`MCP payload is plain text: ${errorMessage(error)}`);
       payload = text;
     }
   }
@@ -294,7 +531,7 @@ export function renderResponse(response: Record<string, unknown>, full: boolean)
     2,
   );
 }
-export async function runServe(
+async function servePrepared(
   command: ProxySessionCommand,
   deps: ProxySessionDeps,
 ): Promise<number> {
@@ -303,10 +540,14 @@ export async function runServe(
     deps.log(refusal);
     return 2;
   }
-  validateConfig(command, deps);
+  const context = clientContext(command, deps);
+  const identity = context ? readBrokerIdentity(context, deps) : undefined;
   const dir = command.dir;
   for (const name of ["init.json", "driver.pid", "proxy.pid", "closed.json"]) {
-    if (deps.exists(join(dir, name))) {
+    if (
+      deps.exists(join(dir, name)) &&
+      !(context && name === "driver.pid" && Number(deps.readFile(join(dir, name))) === deps.pid)
+    ) {
       deps.log("Use a NEW --dir per proxy launch.");
       return 2;
     }
@@ -352,7 +593,9 @@ export async function runServe(
   const env = privateEnv(command, deps);
   const client = deps.createClient({
     server: env.MT_SERVER,
-    config: command.config,
+    sessionConfig: context ? join(dir, "request.json") : undefined,
+    livenessOwnerToken: identity?.token,
+    redact: (text) => (identity ? text.replaceAll(identity.token, "[REDACTED]") : text),
     env,
     stderrPath: join(dir, "proxy.stderr.log"),
     onClose: () => {
@@ -367,7 +610,7 @@ export async function runServe(
       ),
   });
   const startedAt = deps.timer.now();
-  event("spawn", { config: command.config ?? null });
+  event("spawn", { sessionConfig: context ? join(dir, "request.json") : null });
   const savePid = (): void => {
     const pid = client.pid();
     if (pid) {
@@ -406,15 +649,25 @@ export async function runServe(
       startedAt: new Date(startedAt).toISOString(),
       proxyPid: client.pid(),
       driverPid: deps.pid,
-      config: command.config ?? null,
       serverInfo: client.serverInfo(),
       capabilities,
-      managedSlots:
-        record(capabilities?.experimental)?.[MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY] ?? null,
+      session: record(capabilities?.experimental)?.[SESSION_EXPERIMENTAL_CAPABILITY] ?? null,
+      daemonSocketAlive: (await deps.probeDaemonSocket(env.AUTOMOBILE_DAEMON_SOCKET_PATH)).alive,
     });
     event("initialized");
     const handle = async (request: Request): Promise<unknown> => {
       const timeout = request.timeoutMs ?? command.timeoutMs;
+      if (context) {
+        const refusal = brokerRequestRefusal(
+          request,
+          context,
+          record(readJson(join(dir, "init.json"), deps)?.session),
+          deps,
+        );
+        if (refusal) {
+          throw new Error(refusal);
+        }
+      }
       switch (request.op) {
         case "call": {
           const error = deviceStartGuardRefusal(request.tool ?? "", request.args, {
@@ -560,22 +813,94 @@ export async function runServe(
     return finish("driver_failed", 1);
   }
 }
+/** Public serve entry point prepares direct launches; spawned serve reuses persisted identity. */
+export async function runServe(
+  command: ProxySessionCommand,
+  deps: ProxySessionDeps,
+): Promise<number> {
+  return runProxySessionCommand({ ...command, op: "serve" }, deps);
+}
+async function statusAll(command: ProxySessionCommand, deps: ProxySessionDeps): Promise<number> {
+  const rows = [
+    "client\toutcome\tsessionUuid\tfailure\tretryable\tcleanupPending\townerAlive\tdriverAlive\tdaemonSocketAlive\tprofile",
+  ];
+  const alive = (
+    await deps.probeDaemonSocket(privateEnv(command, deps).AUTOMOBILE_DAEMON_SOCKET_PATH)
+  ).alive;
+  for (const name of readBrokerClients(deps.env.MT_BATCH, deps)) {
+    const context = resolveBrokerClient(deps.env.MT_BATCH, name, deps);
+    deps = redactBrokerDeps(context, deps);
+    const session = record(readJson(join(context.dir, "init.json"), deps)?.session);
+    const ownerPath = join(context.dir, "owner.pid");
+    const ownerPid = deps.exists(ownerPath) ? Number(deps.readFile(ownerPath)) : undefined;
+    const driver = driverAlive(context.dir, deps);
+    rows.push(
+      [
+        name,
+        session?.outcome ?? "not_started",
+        session?.sessionUuid ?? "-",
+        record(session?.failure)?.code ?? "-",
+        record(session?.failure)?.retryable ?? "-",
+        session?.cleanupPending ?? "-",
+        ownerPid ? deps.isPidAlive(ownerPid) : driver,
+        driver,
+        alive,
+        JSON.stringify(session?.profile ?? null),
+      ].join("\t"),
+    );
+  }
+  await deps.flush(`${rows.join("\n")}\n`);
+  return 0;
+}
 export async function runProxySessionCommand(
   command: ProxySessionCommand,
   deps: ProxySessionDeps,
 ): Promise<number> {
   try {
+    const invalid = commandRefusal(command);
+    if (invalid) {
+      deps.log(invalid);
+      return 2;
+    }
+    if (command.all) {
+      const refusal = await startupRefusal(command, deps);
+      if (refusal) {
+        deps.log(refusal);
+        return 2;
+      }
+      return await statusAll(command, deps);
+    }
+    const context = clientContext(command, deps);
+    deps = redactBrokerDeps(context, deps);
+    if (context) {
+      command = { ...command, dir: context.dir };
+    }
     const refusal = await startupRefusal(command, deps);
     if (refusal) {
       deps.log(refusal);
       return 2;
     }
     if (command.op === "serve") {
-      return await runServe(command, deps);
+      if (context) {
+        const pidPath = join(context.dir, "driver.pid");
+        const ownLaunch = deps.exists(pidPath) && Number(deps.readFile(pidPath)) === deps.pid;
+        if (
+          deps.exists(join(context.dir, "request.json")) &&
+          (ownLaunch ||
+            (!deps.exists(pidPath) && !command.profile && !command.request && !command.owner))
+        ) {
+          readBrokerIdentity(context, deps);
+        } else {
+          prepareBrokerClient(command, context, deps);
+        }
+      }
+      return await servePrepared(command, deps);
     }
     const dir = command.dir;
     if (command.op === "up") {
-      validateConfig(command, deps);
+      if (context) {
+        prepareBrokerClient(command, context, deps);
+      }
       for (const name of ["init.json", "closed.json", "proxy.pid", "driver.pid"]) {
         if (deps.exists(join(dir, name))) {
           deps.log("Use a NEW --dir per proxy launch.");
@@ -584,11 +909,28 @@ export async function runProxySessionCommand(
       }
       deps.mkdir(dir);
       const pid = deps.spawnServe(command, privateEnv(command, deps));
+      if (context) {
+        deps.writeFile(join(dir, "driver.pid"), `${pid}\n`);
+      }
       const deadline = deps.timer.now() + command.initTimeoutMs + 5000;
       while (deps.timer.now() < deadline) {
         const init = readJson(join(dir, "init.json"), deps);
         if (init) {
           await deps.flush(`${JSON.stringify({ dir, ...init }, null, 2)}\n`);
+          if (context) {
+            const session = record(init.session);
+            if (session?.outcome !== "ready") {
+              deps.log(
+                String(
+                  record(session?.failure)?.code ??
+                    (session?.outcome === "pending"
+                      ? "session_status_unresolved"
+                      : "session_broker_unavailable"),
+                ),
+              );
+            }
+            return brokerOutcome(init, command.expect);
+          }
           return init.ok ? 0 : 1;
         }
         if (deps.exists(join(dir, "closed.json")) || !deps.isPidAlive(pid)) {
@@ -609,9 +951,11 @@ export async function runProxySessionCommand(
       const pid = (name: string): number | undefined =>
         deps.exists(join(dir, name)) ? Number(deps.readFile(join(dir, name)).trim()) : undefined;
       const proxyPid = pid("proxy.pid"),
-        driverPid = pid("driver.pid");
+        driverPid = pid("driver.pid"),
+        ownerPid = pid("owner.pid") ?? driverPid;
+      const session = record(readJson(join(dir, "init.json"), deps)?.session) ?? null;
       await deps.flush(
-        `${JSON.stringify({ dir, daemonSocketAlive: daemonSocket.alive, proxyPid, proxyAlive: !!proxyPid && deps.isPidAlive(proxyPid), driverPid, driverAlive: !!driverPid && deps.isPidAlive(driverPid), init: readJson(join(dir, "init.json"), deps), closed: readJson(join(dir, "closed.json"), deps) ?? null }, null, 2)}\n`,
+        `${JSON.stringify({ dir, session, ownerPid, ownerAlive: !!ownerPid && deps.isPidAlive(ownerPid), daemonSocketAlive: daemonSocket.alive, proxyPid, proxyAlive: !!proxyPid && deps.isPidAlive(proxyPid), driverPid, driverAlive: !!driverPid && deps.isPidAlive(driverPid), init: readJson(join(dir, "init.json"), deps), closed: readJson(join(dir, "closed.json"), deps) ?? null }, null, 2)}\n`,
       );
       return 0;
     }
@@ -622,9 +966,11 @@ export async function runProxySessionCommand(
           command.json.startsWith("@") ? deps.readFile(command.json.slice(1)) : command.json,
         );
       }
-      const error = deviceStartGuardRefusal(command.tool!, args, {
-        allowSelector: command.allowSelector,
-      });
+      const error = context
+        ? undefined
+        : deviceStartGuardRefusal(command.tool!, args, {
+            allowSelector: command.allowSelector,
+          });
       if (error) {
         deps.log(error);
         return 2;
@@ -635,8 +981,33 @@ export async function runProxySessionCommand(
       }
     }
     const init = readJson(join(dir, "init.json"), deps);
-    if (!init?.ok || deps.exists(join(dir, "closed.json"))) {
-      deps.log("No live initialized session; run up with a NEW --dir first.");
+    if (context && command.op !== "close") {
+      const refusal = brokerRequestRefusal(
+        {
+          op: command.op as Request["op"],
+          tool: command.tool,
+          args: record(args),
+          uri: command.uri,
+          allowSelector: command.allowSelector,
+          allowForeignSession: command.allowForeignSession,
+        },
+        context,
+        record(init?.session),
+        deps,
+      );
+      if (refusal) {
+        deps.log(refusal);
+        return 2;
+      }
+    }
+    if (
+      !init?.ok ||
+      deps.exists(join(dir, "closed.json")) ||
+      (context && !driverAlive(dir, deps))
+    ) {
+      deps.log(
+        "No live initialized session; use the batch wrapper: up --client NAME (or plain up with a NEW --dir).",
+      );
       return 2;
     }
     const id = deps.ids.next();
@@ -649,6 +1020,7 @@ export async function runProxySessionCommand(
       uri: command.uri,
       timeoutMs: command.op === "close" ? 30_000 : command.timeoutMs,
       allowSelector: command.allowSelector,
+      allowForeignSession: command.allowForeignSession,
     });
     const deadline =
       deps.timer.now() + (command.op === "close" ? 30_000 : command.timeoutMs) + 10_000;
@@ -702,7 +1074,20 @@ function realDeps(): ProxySessionDeps {
     ids: defaultIdGenerator,
     exists: existsSync,
     readFile: (path) => readFileSync(path, "utf8"),
-    writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
+    writeFile: (path, text, options) => writeFileSync(path, text, options ?? { mode: 0o600 }),
+    rename: renameSync,
+    ownerStartIdentity: (pid) => defaultLockOwnerGenerationProbe.current(pid),
+    spawnOwner: () => {
+      const child = spawn("sleep", ["86400"], { detached: true, stdio: "ignore" });
+      child.on("error", (error) =>
+        console.error(`Disposable owner failed: ${errorMessage(error)}`),
+      );
+      child.unref();
+      if (!child.pid) {
+        throw new Error("Disposable owner has no pid.");
+      }
+      return child.pid;
+    },
     writeJson,
     appendFile: (path, text) => appendFileSync(path, text, { mode: 0o600 }),
     mkdir: (path) => {
@@ -717,8 +1102,13 @@ function realDeps(): ProxySessionDeps {
     },
     createClient: (options) => {
       const args = [options.server];
-      if (options.config) {
-        args.push(MANAGED_SLOT_CONFIG_FLAG, options.config);
+      if (options.sessionConfig && options.livenessOwnerToken) {
+        args.push(
+          SESSION_CONFIG_FLAG,
+          options.sessionConfig,
+          "--liveness-owner-token",
+          options.livenessOwnerToken,
+        );
       }
       const transport = new StdioClientTransport({
         command: process.execPath,
@@ -726,7 +1116,21 @@ function realDeps(): ProxySessionDeps {
         env: options.env,
         stderr: "pipe",
       });
-      transport.stderr?.on("data", (chunk: Buffer) => appendFileSync(options.stderrPath, chunk));
+      // Buffer complete stderr lines so a token split across transport chunks cannot leak.
+      let stderrBuffer = "";
+      const stderrDecoder = new StringDecoder("utf8");
+      transport.stderr?.on("data", (chunk: Buffer) => {
+        stderrBuffer += stderrDecoder.write(chunk);
+        const end = stderrBuffer.lastIndexOf("\n");
+        if (end >= 0) {
+          appendFileSync(options.stderrPath, options.redact(stderrBuffer.slice(0, end + 1)));
+          stderrBuffer = stderrBuffer.slice(end + 1);
+        }
+      });
+      transport.stderr?.on("end", () => {
+        appendFileSync(options.stderrPath, options.redact(stderrBuffer + stderrDecoder.end()));
+        stderrBuffer = "";
+      });
       const client = new Client({ name: "manual-test-proxy-session", version: "1.0.0" });
       client.onclose = options.onClose;
       client.fallbackNotificationHandler = async (notification) => {
@@ -761,14 +1165,11 @@ function realDeps(): ProxySessionDeps {
       const args = [
         fileURLToPath(import.meta.url),
         "serve",
-        "--dir",
-        command.dir,
+        command.client ? "--client" : "--dir",
+        command.client ?? command.dir,
         "--init-timeout-ms",
         String(command.initTimeoutMs),
       ];
-      if (command.config) {
-        args.push("--config", command.config);
-      }
       for (const [key, value] of Object.entries(command.env)) {
         args.push("--env", `${key}=${value}`);
       }

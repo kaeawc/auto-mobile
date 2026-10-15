@@ -12,12 +12,35 @@ export const PROXY_SESSION_COMMANDS = [
 export const PROXY_SESSION_FLAGS: Record<string, { ops: readonly string[]; meaning: string }> = {
   "--dir": {
     ops: PROXY_SESSION_COMMANDS,
-    meaning: "Session evidence directory (required; NEW for up/serve).",
+    meaning: "Plain-proxy evidence directory (NEW for up/serve); exclusive with --client.",
   },
-  "--config": {
+  "--client": {
+    ops: PROXY_SESSION_COMMANDS,
+    meaning: "Batch client name from MT_BATCH/broker/clients.json.",
+  },
+  "--resume": { ops: ["up"], meaning: "Replay the same request.json and owner-token bytes." },
+  "--profile": {
     ops: ["up", "serve"],
-    meaning: "Managed-slot JSON or config path (default: plain proxy).",
+    meaning:
+      "One-off hardware archetype name or inline device requirement JSON; exclusive with --request.",
   },
+  "--request": {
+    ops: ["up", "serve"],
+    meaning: "SessionConfig inline JSON or file path; fresh batch attempt ID assigned.",
+  },
+  "--expect": {
+    ops: ["up"],
+    meaning: "ready or failed:<code>: expected outcome exits 0; mismatch exits 2.",
+  },
+  "--owner": {
+    ops: ["up", "serve"],
+    meaning: "driver (default) or disposable (harness-owned sleep process).",
+  },
+  "--allow-foreign-session": {
+    ops: ["call"],
+    meaning: "Allow explicit selectors for another named ready client in this batch.",
+  },
+  "--all": { ops: ["status"], meaning: "Print a status table for every batch client." },
   "--env": {
     ops: ["up", "serve"],
     meaning: "Repeatable K=V child environment override (default: none; private paths guarded).",
@@ -33,7 +56,7 @@ export const PROXY_SESSION_FLAGS: Record<string, { ops: readonly string[]; meani
   },
   "--allow-selector": {
     ops: ["call"],
-    meaning: "Permit selector-only device acquisition (default: refused).",
+    meaning: "Plain --dir only: permit selector-only device acquisition (default: refused).",
   },
   "--help": {
     ops: PROXY_SESSION_COMMANDS,
@@ -41,7 +64,7 @@ export const PROXY_SESSION_FLAGS: Record<string, { ops: readonly string[]; meani
   },
 };
 export function proxySessionHelp(): string {
-  return `Usage: proxy-session <command> --dir D [options]
+  return `Usage: proxy-session <command> (--client N | --dir D) [options]
 Commands:
   up                       Spawn the persistent driver and wait for initialize.
   serve                    Run the persistent driver as the proxy's parent.
@@ -50,10 +73,13 @@ Commands:
   tools                    List tools.
   resources                List resources and templates.
   subscribe <uri>          Subscribe; notifications stay in notifications.jsonl.
-  status                   Report proxy/driver pids, init, closed and daemonSocketAlive.
+  status                   Report session outcome, grant/profile/failure, owner liveness and daemonSocketAlive; --all prints all clients.
   close                    Close the proxy cleanly and release its execution.
 up/serve require BOTH a live private daemon pid and an answering control socket; start the private daemon first.
-Device sessionUuid is in the tool response/managedSlots printed by up and status.
+Broker sessionUuid/profile are in init.json.session printed by up and status.
+Broker calls require a ready grant and live driver. Broker clients refuse resources, device inventory reads, startDevice/provisionDevice/getAndroid/getApple/killDevice, and --allow-selector.
+Fresh up archives prior evidence; --resume preserves request/token bytes. Tokens are redacted.
+Pending/failed sessions never fall back to device acquisition; typed failure codes are printed.
 Options:
 ${Object.entries(PROXY_SESSION_FLAGS)
   .map(([flag, row]) => `  ${flag} (${row.ops.join("/")})  ${row.meaning}`)
@@ -61,6 +87,10 @@ ${Object.entries(PROXY_SESSION_FLAGS)
 Exit codes: 0 success/status, 1 refused/failed response, 2 usage/guard/wait deadline,
 3 serve transport closed, 4 serve initialize failed.
 Examples:
+  <batch>/bin/proxy1 up --client a-phone
+  <batch>/bin/proxy1 up --client a-phone --resume --expect failed:capacity_exhausted
+  <batch>/bin/proxy1 call --client a-phone observe '{}'
+  <batch>/bin/proxy1 status --all
   <batch>/bin/proxy1 up --dir /private/batch/sessions/plain
   <batch>/bin/proxy1 call --dir /private/batch/sessions/plain startDevice '{"platform":"android","avdName":"manual-test-avd"}'
   <batch>/bin/proxy1 read --dir /private/batch/sessions/plain automobile:devices/booted

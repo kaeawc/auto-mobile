@@ -1,19 +1,6 @@
 import UIKit
 import XCTest
 
-// On-device (simulator) integration test for the Swift-6 rewrite's `@MainActor` UI domain —
-// ported from the reference `CtrlProxyUITests` suite as part of the Phase-7 cutover. It launches
-// the host app in its snapshot-gap fixture mode, then drives the rewrite's `ElementLocator` +
-// `GesturePerformer` end-to-end: hierarchy extraction (incl. the typed-text-input path that the
-// XCUITest snapshot tree omits), a tap, text entry, and secure-field masking. This is exactly the
-// `#if canImport(XCTest) && os(iOS)` code that the macOS host gate could never exercise, so it is
-// the real observe→gesture→hierarchy validation of the rewrite.
-//
-// Two deltas from the reference: the class is `@MainActor` (the rewrite's `ElementLocator`/
-// `GesturePerformer` are main-actor-isolated), and `ElementLocator` is constructed with an
-// explicit `perf:` (the reference defaulted to the now-dropped `PerfProvider.instance` singleton).
-//
-// Fixture availability is required: launch failures must fail this integration gate.
 @MainActor
 final class HierarchyIntegrationTests: XCTestCase {
     override func setUpWithError() throws {

@@ -893,7 +893,7 @@ describe("CtrlProxyVoiceOver", function () {
         await waitForSentMessages(socket, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
-        // ios/control-proxy/Sources/CtrlProxyRewrite/CommandError.swift:28.
+        // ios/control-proxy/Sources/CtrlProxy/CommandError.swift:28.
         socket!.simulateMessage(
           JSON.stringify({
             type: "error",

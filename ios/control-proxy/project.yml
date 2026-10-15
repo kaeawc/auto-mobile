@@ -30,8 +30,7 @@ targets:
         INFOPLIST_FILE: AutoMobileTest/Info.plist
         CODE_SIGN_STYLE: Automatic
     dependencies:
-      # The reference `CtrlProxy` framework was retired in Phase 7E; the app is only the
-      # UI-test host and constructs nothing, so it needs no proxy framework embedded.
+      # The app is only the UI-test host and constructs nothing, so it needs no proxy framework embedded.
       - target: ObjCExceptionCatcher
         embed: true
 
@@ -50,24 +49,23 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
-  # The production XCUITest runner. It compiles the Swift-6 rewrite (`Sources/CtrlProxyRewrite`)
+  # The production XCUITest runner. It compiles the Swift-6 implementation (`Sources/CtrlProxy`)
   # directly. The target name, runner app (`CtrlProxyUITests-Runner.app`), xctest bundle, and
   # `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are the stable
-  # contract the TS MCP integration + scripts drive. (The reference `CtrlProxy` framework +
-  # `CtrlProxyTests` targets were retired in Phase 7E; `CtrlProxyRewrite` is the sole impl.)
+  # contract the TS MCP integration + scripts drive. `CtrlProxy` is the sole implementation target.
   CtrlProxyUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
       - path: Tests/CtrlProxyUITests
       # Share the self-contained SwiftPM loopback suite with the UI-test bundle.
-      - path: Tests/CtrlProxyRewriteTests/WebSocketServerLoopbackTests.swift
-      - path: Tests/CtrlProxyRewriteTests/WebSocketLoopbackClient.swift
+      - path: Tests/CtrlProxyTests/WebSocketServerLoopbackTests.swift
+      - path: Tests/CtrlProxyTests/WebSocketLoopbackClient.swift
       # Share the pure caret-move classifier with the UI-test bundle.
-      - path: Tests/CtrlProxyRewriteTests/CaretMovePressClassification.swift
-      # Compile the rewrite sources directly so XCTest/XCUIApplication are available to
+      - path: Tests/CtrlProxyTests/CaretMovePressClassification.swift
+      # Compile the implementation sources directly so XCTest/XCUIApplication are available to
       # the `@MainActor` UI domain (the `#if canImport(XCTest) && os(iOS)` bodies).
-      - path: Sources/CtrlProxyRewrite
+      - path: Sources/CtrlProxy
     dependencies:
       - target: AutoMobileTest
         # Note: We don't depend on a CtrlProxy framework - sources are compiled directly
@@ -84,9 +82,9 @@ targets:
         TEST_TARGET_NAME: AutoMobileTest
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
-        # Match the SPM CtrlProxyRewrite target's contract exactly: Swift 6 language
+        # Match the SPM CtrlProxy target's contract exactly: Swift 6 language
         # mode with complete strict-concurrency (the project base is Swift 5 /
-        # `targeted`), and the iOS 17 platform floor the rewrite is built against
+        # `targeted`), and the iOS 17 platform floor the implementation is built against
         # (`OSAllocatedUnfairLock` etc.) so `CLANG_WARN_UNGUARDED_AVAILABILITY`
         # doesn't flag 16/17-only APIs.
         SWIFT_VERSION: "6.0"

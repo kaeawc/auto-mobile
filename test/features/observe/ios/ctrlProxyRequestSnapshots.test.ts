@@ -6,7 +6,7 @@
  * `type` discriminator but NOT a renamed field *inside* a command payload: renaming
  * `disableAllFiltering` on the TS side compiles cleanly and only fails at runtime
  * on-device, when the typed Swift payload struct (under
- * `ios/control-proxy/Sources/CtrlProxyRewrite/Models/`) decodes the wrong field.
+ * `ios/control-proxy/Sources/CtrlProxy/Models/`) decodes the wrong field.
  *
  * This suite is one half of a two-sided guard around a shared JSON snapshot fixture,
  * `test/fixtures/ios-ctrlproxy-request-snapshots.json`:

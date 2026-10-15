@@ -160,6 +160,7 @@ struct NodeView: View {
     var inStackSlot = false
     /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
     var stackAxis: PrototypeAxis?
+    @FocusState private var controlFocused: Bool
     @Environment(\.pagerContext) private var pager
     @Environment(\.prototypePalette) private var palette
     @Environment(\.prototypeTypography) private var typography
@@ -178,7 +179,7 @@ struct NodeView: View {
             // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
             // its child at the size it measured, and a row re-laid out at exactly its ideal width
             // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-            styled(content).transition(transition.swiftUITransition)
+            validatedContent.transition(transition.swiftUITransition)
         } else {
             // Parents without that filter (a root, a scroll child, a pager page): the conditional
             // lives in a stable container so the insertion/removal has one whose animation is
@@ -187,10 +188,40 @@ struct NodeView: View {
             // The container passes its parent's proposal through, unlike a ZStack (see above).
             PrototypeLayeredLayout(alignment: .topLeading) {
                 if isVisible {
-                    styled(content).transition(transition.swiftUITransition)
+                    validatedContent.transition(transition.swiftUITransition)
                 }
             }
             .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
+        }
+    }
+
+    @ViewBuilder private var validatedContent: some View {
+        if node.checks?.isEmpty == false {
+            VStack(alignment: .leading, spacing: 4) {
+                checkedControl
+                if let message = model.shownError(node) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier(node.partIdentifier("error") ?? "")
+                }
+            }
+        } else {
+            styled(content).disabled(!model.isEnabled(node))
+        }
+    }
+
+    @ViewBuilder private var checkedControl: some View {
+        if node.type == "textField" {
+            // Text fields own focus while preserving drafts; their view reports the blur.
+            styled(content).disabled(!model.isEnabled(node))
+        } else {
+            styled(content)
+                .disabled(!model.isEnabled(node))
+                .focused($controlFocused)
+                .onChange(of: controlFocused) { oldValue, value in
+                    if oldValue, !value { model.blur(node) }
+                }
         }
     }
 
@@ -216,7 +247,7 @@ struct NodeView: View {
     }
 
     private var layoutSignature: [String] {
-        node.containerLayoutSignature(state: model.state) { model.holds($0) }
+        node.containerLayoutSignature(state: model.state, stacks: model.stacks) { model.holds($0) }
     }
 
     /// An anchored node is drawn by its window's anchor layer, never in its parent's slot.
@@ -233,7 +264,9 @@ struct NodeView: View {
     private var handlesOwnTap: Bool {
         [
             "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
-            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
+            "menu",
+            "select",
         ].contains(node.type)
     }
 
@@ -266,6 +299,22 @@ struct NodeView: View {
                 VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
                     .animation(sizeAnimation, value: layoutSignature)
             }
+        case "flow":
+            PrototypeFlowLayout(
+                spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing ?? 0, maxLines: node.maxLines
+            ) { children }
+                .clipped()
+                .animation(sizeAnimation, value: layoutSignature)
+        case "grid":
+            PrototypeGridLayout(
+                columns: node.columns ?? .fixed(1), spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing
+            ) {
+                ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    NodeView(node: entry.node, model: model, inStackSlot: true)
+                        .layoutValue(key: PrototypeGridSpanKey.self, value: entry.node.span ?? 1)
+                }
+            }
+            .animation(sizeAnimation, value: layoutSignature)
         case "text":
             textView
         case "image":
@@ -276,6 +325,8 @@ struct NodeView: View {
             iconView
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
+        case "searchBar":
+            PrototypeSearchBarView(node: node, model: model, style: style)
         case "textField":
             PrototypeTextFieldView(node: node, model: model)
         case "switch":
@@ -287,6 +338,15 @@ struct NodeView: View {
         case "scroll":
             ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
                 if let child = node.child { NodeView(node: child, model: model) }
+            }
+        case "stack":
+            if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
+                // Only the top view exists: inactive screens are absent from the native
+                // accessibility tree as well as from rendering. Navigation is instant.
+                NodeView(node: top, model: model)
+                    .id(screen)
+                    .transition(.identity)
+                    .animation(nil, value: screen)
             }
         case "pager":
             PagerView(node: node, model: model)
@@ -329,6 +389,10 @@ struct NodeView: View {
                 title: interpolated(node.title),
                 text: node.text.map(interpolated)
             )
+        case "menu":
+            PrototypeMenuView(node: node, model: model)
+        case "select":
+            PrototypeSelectView(node: node, model: model)
         case "snackbar":
             PrototypeSnackbarView(node: node, model: model, text: interpolated(node.text))
         default:
@@ -337,7 +401,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var children: some View {
-        ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+        ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
             NodeView(node: entry.node, model: model, inStackSlot: true)
         }
     }
@@ -348,14 +412,14 @@ struct NodeView: View {
     }
 
     private var hasWeightedChild: Bool {
-        node.drawnChildren(holds: model.holds).contains { weight(of: $0.node) != nil }
+        node.drawnChildren(holds: model.holds, stacks: model.stacks).contains { weight(of: $0.node) != nil }
     }
 
     /// A row or column whose children share the main axis by `weight` (Android's `Modifier.weight`):
     /// see `PrototypeWeightedStack`. It adds no arrangement spacers: a weight takes the free space.
     private func weightedStack(axis: PrototypeAxis) -> some View {
         PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
-            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                 NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
                     .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
             }
@@ -367,7 +431,7 @@ struct NodeView: View {
     /// wrap-sized row or column does not grow to fill its parent.
     @ViewBuilder
     private func arranged(horizontal _: Bool) -> some View {
-        let nodes = node.drawnChildren(holds: model.holds)
+        let nodes = node.drawnChildren(holds: model.holds, stacks: model.stacks)
         let mode = style?.arrangement ?? "start"
         let outer = mode == "spaceAround" || mode == "spaceEvenly"
         if outer { Spacer(minLength: 0) }
@@ -422,7 +486,7 @@ struct NodeView: View {
         return node.accessibilityLabel(
             state: model.state,
             pager: pagerPosition,
-            tappable: node.onTap != nil
+            tappable: node.isInteractive
         )
     }
 
@@ -457,18 +521,71 @@ struct NodeView: View {
         } else {
             font = .system(size: scaled, weight: weight, design: design)
         }
-        var text = Text(interpolatedText).font(font)
-        if style?.fontStyle == "italic" { text = text.italic() }
+        let runs = PrototypeRichText.runs(
+            node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text"
+        )
+        var text = (runs.map { Text(attributedText($0)) } ?? Text(interpolatedText)).font(font)
+        if runs == nil, style?.fontStyle == "italic" { text = text.italic() }
         let decoration = style?.textDecoration
-        if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
-        if decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        if runs == nil, decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
+        if runs == nil,
+           decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        if runs == nil { text = text.tracking(resolved.letterSpacing) }
         return text
-            .tracking(resolved.letterSpacing)
             .lineSpacing(max(0, (resolved.lineHeight.map { $0 * scaled / resolved.size } ?? scaled) - scaled))
             .foregroundColor(palette.color(style?.color) ?? contentColor)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
             .truncationMode(.tail)
+            .modifier(SpanLinksModifier(runs: runs, spans: node.spans, model: model))
+    }
+
+    /// The core supplies plain values; only this layer knows SwiftUI attribute types.
+    private func attributedText(_ runs: [PrototypeTextRun]) -> AttributedString {
+        let resolved = typography.resolve(style)
+        var result = AttributedString()
+        for run in runs {
+            let authored = run.style
+            var part = AttributedString(run.text)
+            // Explicit even for an unstyled link, so SwiftUI's link tint cannot replace the text colour.
+            part.foregroundColor = palette.color(authored?.color) ?? palette.color(style?.color) ?? contentColor
+            part.backgroundColor = palette.color(authored?.background)
+            let design: Font.Design = switch authored?.fontFamily {
+            case .keyword("serif")?: .serif
+            case .keyword("monospace")?: .monospaced
+            case .some: .default // Uploaded fonts fall back exactly like node text.
+            case nil:
+                switch resolved.design {
+                case .serif: .serif
+                case .monospaced: .monospaced
+                case .standard: .default
+                }
+            }
+            let weight: Font.Weight = switch authored?.fontWeight ?? resolved.weight {
+            case ..<200: .ultraLight
+            case ..<300: .thin
+            case ..<400: .light
+            case ..<500: .regular
+            case ..<600: .medium
+            case ..<700: .semibold
+            case ..<800: .bold
+            case ..<900: .heavy
+            default: .black
+            }
+            let size = UIFontMetrics.default.scaledValue(for: authored?.textSize ?? resolved.size)
+            var font = Font.system(size: size, weight: weight, design: design)
+            if (authored?.fontStyle ?? style?.fontStyle) == "italic" { font = font.italic() }
+            part.font = font
+            part.tracking = CGFloat(authored?.letterSpacing ?? resolved.letterSpacing)
+            let decoration = authored?.textDecoration ?? style?.textDecoration
+            part.underlineStyle = (decoration == "underline" || decoration == "underlineLineThrough") ? Text
+                .LineStyle(pattern: .solid) : nil
+            part.strikethroughStyle = (decoration == "lineThrough" || decoration == "underlineLineThrough") ? Text
+                .LineStyle(pattern: .solid) : nil
+            part.link = run.link
+            result.append(part)
+        }
+        return result
     }
 
     @ViewBuilder private var imageView: some View {
@@ -538,7 +655,7 @@ struct NodeView: View {
 
     /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
     @ViewBuilder private var buttonView: some View {
-        let button = Button { model.run(node.onTap ?? []) } label: {
+        let button = Button { model.activate(.node(node)) } label: {
             if let symbol = prototypeSymbol(node.icon) {
                 // The icon is decoration: a hidden glyph, so the button is one element named by
                 // its label rather than also exposing the icon's name (#10899).
@@ -693,9 +810,18 @@ struct NodeView: View {
             )
             .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
-            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
+            .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
+            .modifier(TapModifier(
+                actions: handlesOwnTap ? nil : node.onTap,
+                longPress: handlesOwnTap ? nil : node.onLongPress,
+                doubleTap: handlesOwnTap ? nil : node.onDoubleTap,
+                node: node,
+                model: model,
+                style: style
+            ))
             .modifier(IdentifierModifier(
-                identifier: node.testTag,
+                // The search bar's editable field owns the node identifier.
+                identifier: node.type == "searchBar" ? nil : node.testTag,
                 label: accessibilityLabelOverride,
                 grouping: grouping
             ))
@@ -704,7 +830,7 @@ struct NodeView: View {
     /// Containers get their own accessibility element so a testTag names the container instead of
     /// being copied onto every descendant. A tappable container reads as one button.
     private var grouping: AccessibilityGrouping {
-        prototypeAccessibilityGrouping(type: node.type, tappable: node.onTap != nil)
+        prototypeAccessibilityGrouping(type: node.type, tappable: node.isInteractive)
     }
 
     private var contentAlignment: Alignment {
@@ -715,7 +841,7 @@ struct NodeView: View {
             case "end": return .trailing
             default: return .leading
             }
-        case "column":
+        case "column", "flow", "grid":
             switch style?.arrangement {
             case "center": return .leading
             case "end": return .bottomLeading
@@ -735,6 +861,81 @@ struct NodeView: View {
             bottom: edges.contains("bottom") ? all.bottom : 0,
             right: edges.contains("end") ? all.right : 0
         )
+    }
+}
+
+private struct PrototypeGridSpanKey: LayoutValueKey {
+    static let defaultValue = 1
+}
+
+/// Thin SwiftUI adapters over Core's eager, device-free placement maths. Custom Layout placements
+/// mirror automatically in RTL, just like PrototypeWeightedStackLayout.
+private struct PrototypeFlowLayout: Layout {
+    let spacing: Double
+    let runSpacing: Double
+    let maxLines: Int?
+
+    private func frames(proposal: ProposedViewSize, subviews: Subviews) -> PrototypeFlowGridFrames {
+        let width = proposal.width.flatMap { $0.isFinite ? Double($0) : nil }
+        let sizes = subviews.map { child in
+            let size = child.sizeThatFits(ProposedViewSize(width: width.map { CGFloat($0) }, height: nil))
+            return (width: Double(size.width), height: Double(size.height))
+        }
+        return PrototypeFlowPlacement.frames(
+            sizes: sizes, available: width, spacing: spacing, runSpacing: runSpacing, maxLines: maxLines
+        )
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let result = frames(proposal: proposal, subviews: subviews)
+        return CGSize(width: result.width, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let result = frames(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for (index, child) in subviews.enumerated() {
+            let frame = result.children[index]
+            // Overflow remains placed below the clipped container, with its view and semantics
+            // intact. Never hide, omit or lazily instantiate a child to enforce maxLines.
+            child.place(
+                at: CGPoint(x: bounds.minX + frame.x, y: bounds.minY + frame.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+}
+
+private struct PrototypeGridLayout: Layout {
+    let columns: PrototypeGridColumns
+    let spacing: Double
+    let runSpacing: Double?
+
+    private func frames(proposal: ProposedViewSize, subviews: Subviews) -> PrototypeFlowGridFrames {
+        PrototypeGridPlacement.frames(
+            columns: columns,
+            available: proposal.width.flatMap { $0.isFinite ? Double($0) : nil },
+            spacing: spacing, runSpacing: runSpacing,
+            spans: subviews.map { $0[PrototypeGridSpanKey.self] }
+        ) { index, width in
+            let size = subviews[index].sizeThatFits(ProposedViewSize(width: width.map { CGFloat($0) }, height: nil))
+            return (Double(size.width), Double(size.height))
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let result = frames(proposal: proposal, subviews: subviews)
+        return CGSize(width: result.width, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let result = frames(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for (index, child) in subviews.enumerated() {
+            let frame = result.children[index]
+            child.place(
+                at: CGPoint(x: bounds.minX + frame.x, y: bounds.minY + frame.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
     }
 }
 
@@ -772,8 +973,33 @@ private struct SizeModifier: ViewModifier {
 }
 
 @MainActor
+private struct SpanLinksModifier: ViewModifier {
+    let runs: [PrototypeTextRun]?
+    let spans: [PrototypeTextSpan]?
+    let model: PrototypeModel
+
+    func body(content: Content) -> some View {
+        if let runs, let spans {
+            content.environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == PrototypeRichText.linkScheme,
+                      let index = runs.firstIndex(where: { $0.link == url }),
+                      spans.indices.contains(index), let actions = spans[index].onTap
+                else { return .discarded }
+                model.run(actions)
+                return .handled
+            })
+        } else {
+            content
+        }
+    }
+}
+
+@MainActor
 private struct TapModifier: ViewModifier {
     let actions: [PrototypeAction]?
+    let longPress: [PrototypeAction]?
+    let doubleTap: [PrototypeAction]?
+    let node: PrototypeNode
     let model: PrototypeModel
     let style: Style?
 
@@ -781,26 +1007,53 @@ private struct TapModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        if let actions {
+        if !plan.layers.isEmpty {
             let scale = style?.scale(pressed: pressed) ?? 1
             // Spec `motion: "none"` snaps like Reduce Motion (#10885).
             let spring = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                 .pressScaleDuration.map { Animation.spring(duration: $0) }
             // Whole padded frame is tappable, with a 44 pt minimum target (Android bug #10435).
-            content
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-                // Scales the drawn node only; motion off snaps instead of springing.
-                .scaleEffect(scale)
-                .animation(spring, value: scale)
-                .onTapGesture { model.run(actions) }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0, maximumDistance: 10)
-                        .updating($pressed) { _, state, _ in state = true }
-                )
-                .accessibilityAddTraits(.isButton)
+            tapped(
+                content
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                    // Scales the drawn node only; motion off snaps instead of springing.
+                    .scaleEffect(scale)
+                    .animation(spring, value: scale)
+            )
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0, maximumDistance: 10)
+                    .updating($pressed) { _, state, _ in state = true }
+            )
+            .accessibilityAddTraits(.isButton)
+            .disabled(!model.isEnabled(node))
         } else {
             content
+        }
+    }
+
+    private var plan: PrototypeGesturePlan {
+        PrototypeGesturePlan(onTap: actions, onLongPress: longPress, onDoubleTap: doubleTap)
+    }
+
+    private func tapped(_ content: some View) -> some View {
+        // SwiftUI resolves inner-first. A long press that fails to complete lets the ancestor's
+        // tap through. Gesture-only nodes must never install a single-tap handler.
+        plan.layers.reduce(AnyView(content)) { view, layer in
+            switch layer {
+            case .longPress:
+                AnyView(view.onLongPressGesture {
+                    guard model.isEnabled(node) else { return }
+                    model.run(longPress ?? [])
+                })
+            case .doubleTap:
+                AnyView(view.onTapGesture(count: 2) {
+                    guard model.isEnabled(node) else { return }
+                    model.run(doubleTap ?? [])
+                })
+            case .singleTap:
+                AnyView(view.onTapGesture { model.activate(.node(node)) })
+            }
         }
     }
 }
@@ -879,8 +1132,72 @@ struct PagerView: View {
         return false
     }
 
+    private var layout: PrototypePagerLayout { PrototypePagerLayout(node: node) }
+
+    /// A nil scroll position is a transient layout state, not a page change.
+    private var pageBinding: Binding<Int?> {
+        Binding(
+            get: { selection.wrappedValue },
+            set: { if let page = $0 { selection.wrappedValue = page } }
+        )
+    }
+
+    @ViewBuilder
+    private func optionPage(_ index: Int, _ page: PrototypeNode, visiblePages: [Int]) -> some View {
+        let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
+        let content = NodeView(node: page, model: model)
+            .environment(\.pagerContext, PagerContext(page: index, count: pages.count))
+            .accessibilityHidden(!visiblePages.contains(index))
+            .accessibilityAddTraits(index == selection.wrappedValue ? .isSelected : [])
+        switch layout.pageSize {
+        case .fill:
+            content.containerRelativeFrame(axes)
+        case let .fixed(points):
+            content.frame(
+                width: layout.vertical ? nil : CGFloat(points),
+                height: layout.vertical ? CGFloat(points) : nil
+            )
+        }
+    }
+
+    private var optionsPager: some View {
+        let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
+        return GeometryReader { proxy in
+            // Visibility follows settled selection; the incoming page during a drag is exposed once selection updates.
+            let visiblePages = layout.visiblePages(
+                selected: selection.wrappedValue, count: pages.count,
+                viewportExtent: Double(layout.vertical ? proxy.size.height : proxy.size.width)
+            )
+            ScrollView(axes) {
+                if layout.vertical {
+                    LazyVStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                } else {
+                    LazyHStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: pageBinding, anchor: layout.vertical ? .top : .leading)
+            .contentMargins(layout.vertical ? .top : .leading, CGFloat(layout.start), for: .scrollContent)
+            .contentMargins(layout.vertical ? .bottom : .trailing, CGFloat(layout.end), for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .animation(pageAnimation, value: selection.wrappedValue)
+        }
+    }
+
     var body: some View {
-        if fills {
+        if !layout.legacy {
+            optionsPager
+        } else if fills {
             let _: Int = model.refusedChanges
             TabView(selection: selection) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in

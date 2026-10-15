@@ -132,7 +132,7 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
  * How a bindable field is bound: `text` and `emitName` render to text, `operand` keeps a single
  * placeholder's type, and `key` renders to text that must then be a literal state key.
  */
-export type FieldKind = "text" | "operand" | "emitName" | "key";
+export type FieldKind = "text" | "operand" | "emitName" | "key" | "emitBinding" | "emitContext";
 
 /** Receives each bindable field's value and path; its result replaces the value. */
 export type FieldVisitor = (
@@ -174,8 +174,18 @@ function mapObject(
   }
 }
 
+function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): void {
+  const values = data[key];
+  if (Array.isArray(values)) {
+    data[key] = values.map((value, index) => visit(value, `${path}.${key}[${index}]`, "key"));
+  } else {
+    mapField(data, key, path, "key", visit);
+  }
+}
+
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
   mapField(condition, "key", path, "key", visit);
+  mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
     visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
   mapField(condition, "equals", path, "operand", operandVisit);
@@ -195,6 +205,24 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "emit":
       mapField(action, "name", path, "emitName", visit);
+      mapField(action, "context", path, "emitContext", visit);
+      if (record(action.context)) {
+        action.context = Object.fromEntries(
+          Object.entries(record(action.context)!).map(([name, value]) => {
+            const binding = record(value);
+            const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+              ? `${path}.context.${name}`
+              : `${path}.context[${JSON.stringify(name)}]`;
+            return [
+              name,
+              binding && Object.hasOwn(binding, "state")
+                ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
+                : visit(value, at, "emitBinding"),
+            ];
+          }),
+        );
+      }
+      mapKeyList(action, "requireValid", path, visit);
       break;
     case "toggle":
     case "increment":
@@ -208,7 +236,9 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 }
 
 function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
-  mapList(data, "onTap", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  for (const field of ["onTap", "onLongPress", "onDoubleTap"]) {
+    mapList(data, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
 }
 
 /** A `{label, onTap?}` part (dialog or snackbar button, app bar action): label and actions bind. */
@@ -232,11 +262,29 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapObject(node, "navigationIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "actions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  searchBar: (node, path, visit) => {
+    mapField(node, "placeholder", path, "text", visit);
+    mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
+    mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   dialog: (node, path, visit) => {
     mapField(node, "title", path, "text", visit);
     mapField(node, "text", path, "text", visit);
     mapObject(node, "confirm", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapObject(node, "dismiss", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
+  },
+  menu: (node, path, visit) => {
+    mapList(node, "items", path, (entry, entryPath) => {
+      mapField(entry, "trailingText", entryPath, "text", visit);
+      return mapPart(entry, entryPath, visit);
+    });
+  },
+  select: (node, path, visit) => {
+    mapField(node, "label", path, "text", visit);
+    mapList(node, "options", path, (entry, entryPath) => {
+      mapField(entry, "label", entryPath, "text", visit);
+      return entry;
+    });
   },
   snackbar: (node, path, visit) => {
     mapField(node, "text", path, "text", visit);
@@ -246,7 +294,7 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["stateKey", "hourKey", "minuteKey"]) {
+  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
     mapField(node, field, path, "key", visit);
   }
   for (const part of ["trailing", "openWhen"]) {
@@ -259,16 +307,26 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
 
 /**
  * Visits one node's own bindable fields (not its children) in a fixed order: `text`, component
- * fields, `visibleWhen`, `styleWhen`, `onTap`, then state-key fields. Returns a copy with each
+ * fields, `visibleWhen`, `styleWhen`, `onTap`, `onLongPress`, `onDoubleTap`, then state-key fields. Returns a copy with each
  * visited value replaced by the visitor's result.
  */
 export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor): Raw {
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
+    mapList(copy, "spans", path, (span, spanPath) => {
+      mapField(span, "text", spanPath, "text", visit);
+      mapActions(span, spanPath, visit);
+      return span;
+    });
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);
+  mapObject(copy, "enabledWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
+  mapList(copy, "checks", path, (entry, entryPath) => {
+    mapField(entry, "message", entryPath, "text", visit);
+    return entry;
+  });
   mapObject(copy, "visibleWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapList(copy, "styleWhen", path, (entry, entryPath) => {
     mapObject(entry, "when", entryPath, (condition, conditionPath) =>
@@ -284,6 +342,15 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
 /** Binds every bindable field of one node to an instance, the way the device binds a template. */
 export function bindNodeFields(node: Raw, path: string, instance: Instance): Raw {
   return mapBindableFields(node, path, (value, _path, kind) => {
+    if (kind === "emitBinding" && instance.binding.index) {
+      const binding = record(value);
+      if (typeof binding?.item === "string") {
+        return { value: instance.values[binding.item] };
+      }
+      if (binding?.index === true) {
+        return { value: instance.index };
+      }
+    }
     if (typeof value !== "string") {
       return value;
     }
@@ -293,9 +360,19 @@ export function bindNodeFields(node: Raw, path: string, instance: Instance): Raw
 
 /** The state-key values the validators type-check: node keys and an action's `key`. */
 export function checkedKeyValues(value: Raw): unknown[] {
+  const keys: unknown[] = [];
+  mapBindableFields(value, "", (field, _path, kind) => {
+    if (kind === "key") {
+      keys.push(field);
+    }
+    return field;
+  });
   return [
+    ...keys,
+    ...(Array.isArray(value.requireValid) ? value.requireValid : []),
     value.key,
     value.stateKey,
+    value.activeKey,
     value.hourKey,
     value.minuteKey,
     record(value.trailing)?.stateKey,
@@ -305,9 +382,16 @@ export function checkedKeyValues(value: Raw): unknown[] {
 
 /** Binds only the state-key fields the validators type-check: node keys and an action's `key`. */
 export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
-  const copy = { ...value };
+  const copy = mapBindableFields(value, "", (field, _path, kind) =>
+    kind === "key" && typeof field === "string" ? bindText(field, instance) : field,
+  );
+  if (Array.isArray(copy.requireValid)) {
+    copy.requireValid = copy.requireValid.map((key) =>
+      typeof key === "string" ? bindText(key, instance) : key,
+    );
+  }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "hourKey", "minuteKey"]) {
+  for (const field of ["key", "stateKey", "activeKey", "hourKey", "minuteKey"]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }

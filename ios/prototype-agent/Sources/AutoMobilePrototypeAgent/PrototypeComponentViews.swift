@@ -32,6 +32,8 @@ struct ComponentColors {
     var content: Color { role("onSurface", .primary) }
     var contentVariant: Color { role("onSurfaceVariant", .secondary) }
     var outline: Color { role("outlineVariant", Color(UIColor.separator)) }
+    var fieldOutline: Color { role("outline", Color(UIColor.separator)) }
+    var surfaceHighest: Color { role("surfaceContainerHighest", Color(UIColor.systemFill)) }
     var tonal: Color { role("secondaryContainer", Color.accentColor.opacity(0.18)) }
     var onTonal: Color { role("onSecondaryContainer", .accentColor) }
     var surface: Color { role("surface", Color(UIColor.systemBackground)) }
@@ -50,9 +52,13 @@ struct ComponentColors {
 /// editing ends or external stored changes restore the session's value (#12206).
 @MainActor
 struct PrototypeTextFieldView: View {
+    @Environment(\.prototypePalette) private var palette
+    private var colors: ComponentColors { ComponentColors(palette: palette) }
+    private var options: PrototypeTextFieldOptions { PrototypeTextFieldOptions(node: node) }
     let node: PrototypeNode
     let model: PrototypeModel
     @State private var draft: PrototypeTextDraft
+    @State private var clippingRevision = 0
     @FocusState private var focused: Bool
 
     init(node: PrototypeNode, model: PrototypeModel) {
@@ -61,36 +67,197 @@ struct PrototypeTextFieldView: View {
         _draft = State(initialValue: PrototypeTextDraft(stored: model.state[node.stateKey ?? ""]?.displayString ?? ""))
     }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        let _: Int = clippingRevision
+        if node.type == "searchBar" {
+            HStack(spacing: 8) {
+                if let symbol = prototypeSymbol(node.leadingIcon) { PrototypeGlyph(symbol: symbol) }
+                field
+                    .submitLabel(.search)
+                    .prototypeIdentifier(node.testTag ?? node.id)
+                    .simultaneousGesture(TapGesture().onEnded { model.activate(.node(node)) })
+                if !draft.text.isEmpty {
+                    Button { draft.type("") } label: {
+                        PrototypeGlyph(symbol: "xmark.circle.fill")
+                            .frame(width: 48, height: 48)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+                    .prototypeIdentifier(node.partIdentifier("clear"))
+                }
+                ForEach(Array((node.trailingActions ?? []).enumerated()), id: \.offset) { index, action in
+                    Button { model.activate(.appBarButton(action)) } label: {
+                        ZStack {
+                            if let symbol = prototypeSymbol(action.icon) { PrototypeGlyph(symbol: symbol) }
+                        }
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(action.label)
+                    .prototypeIdentifier(node.partIdentifier("actions.\(index)"))
+                }
+            }
+            .padding(.leading, 16)
+            .frame(minHeight: 56)
+        } else {
+            field
+        }
+    }
+
+    private var field: some View {
         let key = node.stateKey ?? ""
         let stored = model.state[key]?.displayString ?? ""
-        TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
-            .textFieldStyle(.roundedBorder)
-            .focused($focused)
-            .onChange(of: draft.text) { _, _ in
-                // Read live state: another callback may have changed the captured display value.
-                let stored = model.state[key]?.displayString ?? ""
-                if draft.needsCommit(stored: stored) {
-                    model.change(key: key, value: draft.text)
-                }
-                if !focused {
-                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                }
+        return Group {
+            if node.type == "searchBar" {
+                TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
+                    .focused($focused)
+            } else {
+                renderedField
             }
-            .onChange(of: focused) { _, value in
-                if !value {
-                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                }
+        }
+        .onChange(of: draft.text) { _, _ in
+            // Read live state: another callback may have changed the captured display value.
+            let stored = model.state[key]?.displayString ?? ""
+            if draft.needsCommit(stored: stored) {
+                model.change(key: key, value: draft.text)
             }
-            .onSubmit {
+            if !focused {
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
-            .onChange(of: stored) { _, value in
-                draft.storedChanged(to: value)
-            }
-            .onChange(of: model.showRevision) { _, _ in
+        }
+        .onChange(of: focused) { _, value in
+            if !value {
+                model.blur(node)
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
+        }
+        .onSubmit {
+            draft.endEditing(stored: model.state[key]?.displayString ?? "")
+            if node.type == "searchBar" { model.run(node.onSubmit ?? []) }
+        }
+        .onChange(of: stored) { _, value in
+            draft.storedChanged(to: value)
+        }
+        .onChange(of: model.showRevision) { _, _ in
+            draft.endEditing(stored: model.state[key]?.displayString ?? "")
+        }
+    }
+
+    private var textBinding: Binding<String> {
+        Binding(get: { options.clip(draft.text) }, set: { raw in
+            let clipped = options.clip(raw)
+            draft.type(clipped)
+            // Repaint even when overflow clips to the existing draft, without replacing the focused field.
+            if clipped != raw {
+                clippingRevision += 1
+            }
+        })
+    }
+
+    private var keyboardType: UIKeyboardType {
+        switch options.keyboard {
+        case .text: .default
+        case .number: .numberPad
+        case .decimal: .decimalPad
+        case .email: .emailAddress
+        case .phone: .phonePad
+        case .url: .URL
+        }
+    }
+
+    @ViewBuilder private var input: some View {
+        Group {
+            if options.isSecure {
+                SecureField(node.placeholder ?? "", text: textBinding)
+            } else if let lines = options.lineRange {
+                TextField(node.placeholder ?? "", text: textBinding, axis: .vertical)
+                    .lineLimit(lines)
+            } else {
+                TextField(node.placeholder ?? "", text: textBinding)
+            }
+        }
+        .focused($focused)
+        .keyboardType(keyboardType)
+    }
+
+    @ViewBuilder private var configuredInput: some View {
+        if options.keyboard == .email || options.keyboard == .url {
+            input.textInputAutocapitalization(.never).autocorrectionDisabled()
+        } else if options.isSecure {
+            input.autocorrectionDisabled()
+        } else {
+            input
+        }
+    }
+
+    @ViewBuilder private var accessibleInput: some View {
+        let hint = PrototypeTextFieldOptions.accessibilityHint(
+            supportingText: options.supportingAccessibilityValue,
+            count: options.clip(draft.text).utf16.count,
+            maxLength: options.maxLength
+        )
+        // Leave the native placeholder label intact when neither override is authored.
+        if let label = node.contentDescription ?? node.label {
+            configuredInput.accessibilityLabel(label)
+                .accessibilityHint(hint)
+        } else {
+            configuredInput.accessibilityHint(hint)
+        }
+    }
+
+    @ViewBuilder private var chromedInput: some View {
+        if node.variant == "outlined" {
+            accessibleInput.textFieldStyle(.plain)
+                .padding(12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(focused ? colors.primary : colors.fieldOutline, lineWidth: focused ? 2 : 1)
+                        .accessibilityHidden(true)
+                }
+        } else {
+            accessibleInput.textFieldStyle(.plain)
+                .padding(12)
+                .background {
+                    UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4)
+                        .fill(colors.surfaceHighest)
+                        .accessibilityHidden(true)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(focused ? colors.primary : colors.fieldOutline)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+        }
+    }
+
+    @ViewBuilder private var renderedField: some View {
+        if options.usesDrawnChrome {
+            VStack(alignment: .leading, spacing: 4) {
+                if let label = node.label {
+                    Text(label).font(.footnote).foregroundColor(colors.contentVariant)
+                        .accessibilityHidden(true)
+                }
+                chromedInput
+                if node.supportingText != nil || options.maxLength != nil {
+                    HStack(alignment: .top) {
+                        if let supporting = node.supportingText {
+                            Text(supporting).accessibilityHidden(true)
+                        }
+                        Spacer(minLength: 8)
+                        if let counter = options.counterText(for: draft.text) {
+                            Text(counter).accessibilityHidden(true)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundColor(colors.contentVariant)
+                    .accessibilityHidden(true)
+                }
+            }
+        } else {
+            accessibleInput.textFieldStyle(.roundedBorder)
+        }
     }
 }
 
@@ -187,7 +354,7 @@ struct PrototypeCardView: View {
             ? colors.surfaceHigh
             : colors.surface
         VStack(alignment: .leading, spacing: style?.spacing ?? 0) {
-            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                 NodeView(node: entry.node, model: model, inStackSlot: true)
             }
         }
@@ -772,10 +939,13 @@ struct PrototypeModalLayer: View {
     let model: PrototypeModel
 
     var body: some View {
-        let modals = model.spec?.root.openModals(state: model.state, pages: model.pages) ?? []
+        let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
         ZStack {
             ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
-                if node.type == "dialog" {
+                if node.type == "menu" {
+                    PrototypeMenuOverlay(node: node, model: model)
+                        .reportFrame(key: "modal.\(index)", model: model)
+                } else if node.type == "dialog" {
                     ZStack {
                         colors.scrim
                             .contentShape(Rectangle())
@@ -796,6 +966,7 @@ struct PrototypeModalLayer: View {
                         in: node.childEntries(path: "modal\(index)"),
                         state: model.state,
                         pages: model.pages,
+                        stacks: model.stacks,
                         retainExiting: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                             .enabled
                     ),
@@ -804,8 +975,18 @@ struct PrototypeModalLayer: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if let selected = model.expandedSelect,
+               model.spec?.root.visibleSelect(selected, state: model.state, pages: model.pages) == true
+            {
+                PrototypeSelectOverlay(node: selected, model: model)
+                    .reportFrame(key: "modal.select", model: model)
+            }
+        }
         .onChange(of: modals.dialogIdentities) { before, _ in
-            if prototypeModalChangeEndsEditing(from: before, to: modals) { model.endEditing() }
+            if prototypeModalChangeEndsEditing(
+                from: before, to: modals, state: model.state, pages: model.pages, stacks: model.stacks
+            ) { model.endEditing() }
         }
     }
 }

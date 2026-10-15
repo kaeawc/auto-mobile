@@ -14,6 +14,7 @@ export const FAKE_PROTOTYPE_AGENT_CAPABILITIES = [
   "get_prototype_status",
   "prototype_show_in_place_v1",
   "prototype_inspect_v1",
+  "prototype_text_field_options_v1",
 ];
 
 type Reply = Partial<Omit<PrototypeAgentResult, "type" | "requestId">> | Error;

@@ -1,0 +1,43 @@
+{
+  "name": "state-after-set",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "count": {
+              "state": "count"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {
+    "count": 1
+  },
+  "pages": {},
+  "data": {},
+  "precedingActions": [
+    {
+      "type": "setState",
+      "key": "count",
+      "value": 3
+    }
+  ],
+  "expected": {
+    "context": {
+      "count": 3
+    }
+  }
+}

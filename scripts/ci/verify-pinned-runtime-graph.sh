@@ -30,9 +30,29 @@ bun scripts/release/pin-runtime-deps.ts --check
 
 # 3. Pack the artifact exactly as `npm publish` would.
 pack_json="$(AUTOMOBILE_TRIM_BUNDLED_DEPS=true npm pack --json)"
-tarball="$(printf '%s' "$pack_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')"
+# Lifecycle scripts (prepack) may print to stdout ahead of the JSON array, so
+# parse from the first line-leading "[" that yields valid JSON instead of the
+# whole stream. Require exactly one tarball.
+tarball="$(printf '%s' "$pack_json" | node -e '
+let s = "";
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const starts = [...s.matchAll(/^\[/gm)].map((m) => m.index);
+  for (const i of starts) {
+    try {
+      const parsed = JSON.parse(s.slice(i));
+      if (Array.isArray(parsed) && parsed.length === 1 && parsed[0].filename) {
+        process.stdout.write(parsed[0].filename);
+      }
+      return;
+    } catch {
+      // not the JSON payload; try the next candidate
+    }
+  }
+});
+')"
 if [ -z "$tarball" ] || [ ! -f "$tarball" ]; then
-  echo "npm pack did not produce a tarball" >&2
+  echo "npm pack did not produce exactly one tarball; output was:" >&2
+  printf '%s\n' "$pack_json" >&2
   exit 1
 fi
 tarball_abs="$REPO_ROOT/$tarball"

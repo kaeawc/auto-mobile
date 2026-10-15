@@ -3,7 +3,17 @@ import XCTest
 
 final class PrototypeAccessibilityGroupingTests: XCTestCase {
     func testCompositeContainersPreserveChildIdentifiersEvenWhenTappable() {
-        for type in ["bottomSheet", "dialog", "snackbar", "radioGroup", "segmentedButton", "topAppBar"] {
+        for type in [
+            "menu",
+            "select",
+            "bottomSheet",
+            "dialog",
+            "snackbar",
+            "radioGroup",
+            "segmentedButton",
+            "topAppBar",
+            "searchBar",
+        ] {
             for tappable in [false, true] {
                 XCTAssertEqual(prototypeAccessibilityGrouping(type: type, tappable: tappable), .contain, type)
             }

@@ -11,8 +11,13 @@ final class PrototypeModel {
     private(set) var spec: PrototypeSpec?
     /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
     private(set) var showRevision = 0
+    /// Transient presentation only; never written to or reported as spec state.
+    var expandedSelect: PrototypeNode?
+    var menuBounds: [ObjectIdentifier: CGRect] = [:]
     private(set) var state: [String: JSONValue] = [:]
+    private(set) var shownErrors: Set<String> = []
     private(set) var pages: [String: Int] = [:]
+    private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
     private(set) var escapeRevealed = false
@@ -29,9 +34,21 @@ final class PrototypeModel {
         // of an unchanged (non-Equatable) spec merely by copying the session back.
         if replacingSpec || session.isShown != next.isShown { spec = next.spec }
         session = next
+        if let selected = expandedSelect {
+            let root = next.spec?.root
+            let blocker = root?.openModals(state: next.state, pages: next.pages)
+                .last { ["dialog", "menu"].contains($0.type) }
+            if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
+                (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
+            {
+                expandedSelect = nil
+            }
+        }
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
+        if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
         if pages != next.pages { pages = next.pages }
+        if stacks != next.stacks { stacks = next.stacks }
         if appearance != next.appearance { appearance = next.appearance }
         if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
     }
@@ -119,7 +136,8 @@ final class PrototypeModel {
 
     /// Re-arms snackbar timeouts against the snackbars the session now has open.
     private func syncSnackbarTimeouts() {
-        let open = session.spec?.root.openModals(state: session.state, pages: session.pages) ?? []
+        let open = session.spec?.root
+            .openModals(state: session.state, pages: session.pages, stacks: session.stacks) ?? []
         snackbarTimeouts.sync(openModals: open)
     }
 
@@ -158,6 +176,7 @@ final class PrototypeModel {
         var next = session
         next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
         publish(next, replacingSpec: true)
+        expandedSelect = nil
         showRevision += 1
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
@@ -190,6 +209,42 @@ final class PrototypeModel {
     }
 
     // MARK: Interactions
+
+    /// Reading stacks registers the SwiftUI dependency; the pop policy itself stays in core.
+    var stackPopTarget: String? {
+        _ = spec
+        _ = state
+        _ = pages
+        _ = stacks
+        return session.stackPopTarget
+    }
+
+    @discardableResult
+    func popTopmostStack() -> Bool {
+        guard stackPopTarget != nil else { return false }
+        apply { $0.popTopmostStack() }
+        return true
+    }
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        // Read the observed fields; the session itself is observation-ignored.
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    func blur(_ node: PrototypeNode) {
+        apply(activity: false) { session in
+            session.blur(node)
+            return []
+        }
+    }
 
     func run(_ actions: [PrototypeAction]) {
         apply { $0.run(actions) }
@@ -295,6 +350,7 @@ final class PrototypeModel {
             "shown": session.isShown,
             "id": spec?.id as Any? ?? NSNull(),
             "pages": pages,
+            "stacks": stacks.mapValues(\.wireObject),
             "state": JSONValue.object(state).foundationObject,
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,

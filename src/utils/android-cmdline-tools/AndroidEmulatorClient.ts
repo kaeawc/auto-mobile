@@ -378,6 +378,26 @@ function configuredAvdArchitecture(
   );
 }
 
+export interface EmulatorLaunchOutputSource {
+  snapshot(): string;
+  flush(): string;
+}
+
+const emulatorLaunchOutputSources = new WeakMap<ChildProcess, EmulatorLaunchOutputSource>();
+
+export function recordEmulatorLaunchOutputSource(
+  child: ChildProcess,
+  source: EmulatorLaunchOutputSource,
+): void {
+  emulatorLaunchOutputSources.set(child, source);
+}
+
+export function emulatorLaunchOutputSource(
+  child: ChildProcess,
+): EmulatorLaunchOutputSource | undefined {
+  return emulatorLaunchOutputSources.get(child);
+}
+
 /**
  * Interface for Android Emulator (AVD) management
  * Provides emulator lifecycle and control capabilities
@@ -3320,6 +3340,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         flushLaunchOutput,
         recordEarlyExitCategory,
       } = this.createLaunchOutputHandlers(state, stdoutRedactor, stderrRedactor);
+      recordEmulatorLaunchOutputSource(child, {
+        snapshot: currentLaunchOutput,
+        flush: flushLaunchOutput,
+      });
       const { beginPostValidationExit, finalizePostValidationExit } =
         this.createPostValidationExitHandlers({
           avdName,

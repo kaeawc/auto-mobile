@@ -99,3 +99,11 @@ not a supported interface and may break between runtimes.
 - Repeat the issue's grant matrix against the Playground and record `readWrite`/`addOnly` per sequence, plus a cold
   restart after the best sequence.
 - Try grant-after-launch and a raw TCC write (option D); record the Xcode and runtime versions.
+
+## Implied add-only readback (#12462)
+
+On iOS 27.0 simulators (manual-test batch 20261015a, captures in `test/fixtures/ios-tcc-photos/`),
+a stored full `kTCCServicePhotos` grant (`auth_value` 2) made PhotoKit report add-only `authorized`
+even when a stale `kTCCServicePhotosAdd` row (`auth_value` 0, left by a revoke) existed. The host therefore
+reports `photos-add` as `granted` with `evidence: "impliedByFullPhotosGrant"` and `verified: false` in that
+case. This inference was observed on iOS 27.0 only; the iOS 26.5 matrix above differs, so it stays unverified.

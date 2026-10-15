@@ -159,7 +159,7 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("hierarchy failure preserves the Swift runner error envelope", () => {
     // Built from WebSocketResponse.error in
-    // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+    // ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift; no data.
     const message = msg({
       type: "hierarchy_update",
       success: false,
@@ -992,7 +992,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     readFileSync(
       join(
         import.meta.dir,
-        "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift",
+        "../../../../ios/control-proxy/Sources/CtrlProxy/Models/WebSocketResponse.swift",
       ),
       "utf8",
     ),

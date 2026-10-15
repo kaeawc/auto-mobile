@@ -3,14 +3,14 @@
 setup() {
   project_dir="${BATS_TEST_TMPDIR}/control-proxy"
   script="${BATS_TEST_DIRNAME}/../../scripts/check-ctrl-proxy-project-sources.sh"
-  mkdir -p "${project_dir}/Sources/CtrlProxyRewrite" "${project_dir}/CtrlProxy.xcodeproj"
+  mkdir -p "${project_dir}/Sources/CtrlProxy" "${project_dir}/CtrlProxy.xcodeproj"
   cat > "${project_dir}/project.yml" <<'YAML'
 targets:
   CtrlProxyUITests:
     sources:
-      - path: Sources/CtrlProxyRewrite
+      - path: Sources/CtrlProxy
 YAML
-  printf '%s\n' 'struct Existing {}' > "${project_dir}/Sources/CtrlProxyRewrite/Existing.swift"
+  printf '%s\n' 'struct Existing {}' > "${project_dir}/Sources/CtrlProxy/Existing.swift"
   cat > "${project_dir}/CtrlProxy.xcodeproj/project.pbxproj" <<'PBX'
 /* Begin PBXFileReference section */
   AAA /* Existing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Existing.swift; sourceTree = "<group>"; };
@@ -49,7 +49,7 @@ PBX
 }
 
 @test "rejects a new Swift source missing from the checked-in Xcode project" {
-  printf '%s\n' 'struct AppSwitcherDetector {}' > "${project_dir}/Sources/CtrlProxyRewrite/AppSwitcherDetector.swift"
+  printf '%s\n' 'struct AppSwitcherDetector {}' > "${project_dir}/Sources/CtrlProxy/AppSwitcherDetector.swift"
   run env CTRL_PROXY_PROJECT_DIR="${project_dir}" bash "${script}"
   [ "${status}" -ne 0 ]
   [[ "${output}" == *"missing AppSwitcherDetector.swift: 0/1"* ]]
@@ -77,7 +77,7 @@ RUNNER
 #!/usr/bin/env bash
 case " $* " in
   *" --show-toplevel "*) echo "${PREPUSH_FIXTURE}" ;;
-  *" --name-only -z "*) printf '%s\0' 'ios/control-proxy/Sources/CtrlProxyRewrite/New.swift' ;;
+  *" --name-only -z "*) printf '%s\0' 'ios/control-proxy/Sources/CtrlProxy/New.swift' ;;
 esac
 GIT
   cat > "${mock_bin}/swiftformat" <<'FORMAT'

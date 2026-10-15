@@ -912,6 +912,16 @@
     {
       "name" : "clipboard_result",
       "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : true,
         "text" : "fixture text",
@@ -925,6 +935,16 @@
       "wire" : {
         "error" : "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
         "errorCode" : "deadline_completed_late",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -937,6 +957,16 @@
       "wire" : {
         "error" : "Command request_swipe exceeded deadline at 5000ms (gesture was not started)",
         "errorCode" : "deadline_not_started",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -949,6 +979,16 @@
       "wire" : {
         "error" : "Command request_swipe exceeded execution bound 4500ms in phase xcuitestGesture after 4502ms; XCUITest call is still executing and the runner stays busy until it returns",
         "errorCode" : "gesture_bound_exceeded",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -960,6 +1000,16 @@
       "name" : "error_query_bound_exceeded",
       "wire" : {
         "error" : "Command request_swipe exceeded execution bound 4500ms after 4502ms waiting on a live XCUITest query; the observed app is likely suspended or backgrounded (XCUIApplication.state can report foreground for several seconds after Home). Re-observe before acting. XCUITest call is still executing and the runner stays busy until it returns",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -972,6 +1022,16 @@
       "wire" : {
         "error" : "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: fixture reason",
         "errorCode" : "hierarchy_capture_failed",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -983,6 +1043,16 @@
       "name" : "error_unknown_command",
       "wire" : {
         "error" : "Unknown command type: fixture_command",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -994,6 +1064,16 @@
       "name" : "error_missing_parameter",
       "wire" : {
         "error" : "Missing required parameter: fixture_parameter",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -1005,6 +1085,16 @@
       "name" : "error_invalid_parameter",
       "wire" : {
         "error" : "Invalid value 'fixture_value' for parameter 'fixture_parameter'",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -1016,6 +1106,36 @@
       "name" : "error_execution_failed",
       "wire" : {
         "error" : "Command execution failed: fixture reason",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_success_false_without_error",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,
@@ -1028,6 +1148,16 @@
       "wire" : {
         "error" : "arrow key was not sent: XCUITest failed while finding the focused text input during fixture phase (fixture detail); the UI likely changed mid-query, so observe again and retry",
         "errorCode" : "focus_query_failed",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
         "requestId" : "fixture-request-id",
         "success" : false,
         "timestamp" : 1700000000000,

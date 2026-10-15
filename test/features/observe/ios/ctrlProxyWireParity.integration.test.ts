@@ -2,7 +2,7 @@
  * Cross-language wire-parity tripwire for the iOS control-proxy TS client ↔ Swift runner.
  *
  * The Swift runner locks its inbound command set with the `RequestType` enum
- * (`ios/control-proxy/Sources/CtrlProxyRewrite/Models/RequestType.swift`), but before #2857 nothing on
+ * (`ios/control-proxy/Sources/CtrlProxy/Models/RequestType.swift`), but before #2857 nothing on
  * the TS side asserted that the command `type` strings the iOS client *emits* stay a
  * subset of those rawValues. A new/renamed TS command compiled cleanly and only
  * failed at runtime on-device as an "Unknown command type: <type>" error — the exact
@@ -33,7 +33,7 @@ const SHARED_OBSERVE_DIR = resolve(REPO_ROOT, "src/features/observe/shared");
 const IOS_CLIENT_ENTRY = resolve(IOS_OBSERVE_DIR, "IOSCtrlProxyClient.ts");
 const REQUEST_TYPE_SWIFT = resolve(
   REPO_ROOT,
-  "ios/control-proxy/Sources/CtrlProxyRewrite/Models/RequestType.swift",
+  "ios/control-proxy/Sources/CtrlProxy/Models/RequestType.swift",
 );
 
 /**

@@ -101,6 +101,7 @@ androidComponents {
 
 dependencies {
   implementation(libs.androidx.core)
+  implementation(libs.androidx.window)
 
   // AutoMobile SDK for navigation event tracking
   implementation(projects.autoMobileSdk)

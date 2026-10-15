@@ -1,3 +1,6 @@
+import { Database } from "bun:sqlite";
+import { LegacySlotDeviceRetirement } from "../../../../src/daemon/sessionBroker/registry/legacySlotDeviceRetirement";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -44,6 +47,68 @@ async function readyScopeKey(registry: SqliteBindingRegistry): Promise<string> {
 
 describe("SqliteBindingRegistry on a shared file", () => {
   const getHarness = bindFileBackedDbHarness();
+
+  test(
+    "captured legacy file retires on open, closes and reopens at 008",
+    async () => {
+      const dbPath = join(await getHarness().makeTempDbDir("am-retirement-"), "slots.sqlite");
+      const raw = new Database(dbPath);
+      try {
+        raw.exec(
+          await Bun.file(
+            new URL("../../../fixtures/managed-slots/registry-schema-004.sql", import.meta.url),
+          ).text(),
+        );
+      } finally {
+        raw.close();
+      }
+      const inspected: unknown[] = [];
+      const legacyDeviceRetirement = new LegacySlotDeviceRetirement({
+        timer: new FakeTimer(),
+        isOwnerLive: () => false,
+        devices: {
+          inspect: async (target) => {
+            inspected.push(target);
+            return undefined;
+          },
+          stop: async () => {
+            throw new Error("absent devices must not be stopped");
+          },
+        },
+      });
+      const registry = await openSqliteBindingRegistry({ dbPath, legacyDeviceRetirement });
+      try {
+        expect(await registry.snapshotManagedDevices()).toEqual([]);
+      } finally {
+        await registry.close();
+      }
+      expect(inspected.length).toBeGreaterThan(0);
+      const count = inspected.length;
+      const reopened = await openSqliteBindingRegistry({ dbPath, legacyDeviceRetirement });
+      try {
+        expect(await reopened.snapshotManagedDevices()).toEqual([]);
+      } finally {
+        await reopened.close();
+      }
+      expect(inspected).toHaveLength(count);
+      const verify = new Database(dbPath, { readonly: true });
+      try {
+        expect(
+          verify
+            .query(
+              "SELECT name FROM kysely_migration WHERE name = '2026_10_16_008_retire_slot_features'",
+            )
+            .get(),
+        ).not.toBeNull();
+        expect(
+          verify.query("SELECT name FROM sqlite_master WHERE name = 'slot_free_devices'").get(),
+        ).toBeNull();
+      } finally {
+        verify.close();
+      }
+    },
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 
   test(
     "two connections migrate one fresh file concurrently and share one authority",

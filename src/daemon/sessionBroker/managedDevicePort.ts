@@ -25,7 +25,7 @@ import {
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 
-const BROKER_BINDING_ROLE = "session-broker-device";
+import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 
 type ManagedDevicePortRegistry = Pick<
   BindingRegistry,

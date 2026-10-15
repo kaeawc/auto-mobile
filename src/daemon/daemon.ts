@@ -324,6 +324,14 @@ import {
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import {
+  LegacySlotDeviceRetirement,
+  prepareBindingRegistryForStartup,
+} from "./sessionBroker/registry/legacySlotDeviceRetirement";
+import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
+import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
+import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
+import { PlatformLegacySlotDeviceStopper } from "./sessionBroker/registry/platformLegacySlotDeviceStopper";
 import { sessionDisposition } from "./sessionBroker/sessionDisposition";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import {
@@ -1101,14 +1109,7 @@ export class Daemon {
     this.sessionManager.setReleaseDeviceHold((id) =>
       this.managedExecutionReowner?.releaseDeviceHold(id),
     );
-    // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
-    // daemon first opens the registry (#11338), so a fresh host that creates it on its first
-    // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
-    if (process.env.NODE_ENV !== "test" && bindingRegistryFileExists()) {
-      void this.openBindingRegistry().catch((error: unknown) => {
-        logger.warn(`[Daemon] Binding journal redrive not started: ${errorMessage(error)}`, error);
-      });
-    }
+    // Registry retirement/recovery is awaited during startup before exposing the daemon socket.
   }
 
   private openBindingRegistry(): Promise<SqliteBindingRegistry> {
@@ -1118,6 +1119,31 @@ export class Daemon {
     const opening = openSqliteBindingRegistry({
       timer: this.timer,
       isExecOwnerLive: this.bindingOwnerLiveness(),
+      legacyDeviceRetirement: new LegacySlotDeviceRetirement({
+        timer: this.timer,
+        // Persisted legacy owners must be checked by process even before session rehydration.
+        isOwnerLive: defaultBindingExecOwnerLiveness,
+        devices: new PlatformLegacySlotDeviceStopper(new MultiPlatformDeviceManager(), {
+          processes: new ProcessTableReader(new DefaultHostCommandExecutor(), {
+            timer: this.timer,
+            processTableSupported: process.platform !== "win32",
+            procFs: process.platform === "linux" ? nodeProcFs : undefined,
+          }),
+          readStates: async (signal) => {
+            const adb = defaultAdbClientFactory.create(null);
+            const reader = adb.getDeviceStates;
+            if (!reader) {
+              throw new ActionableError(
+                "Android device-state discovery is unavailable for legacy retirement",
+              );
+            }
+            return reader.call(adb, {
+              signal,
+              throwOnMissingAdb: true,
+            });
+          },
+        }),
+      }),
     });
     this.bindingRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
@@ -1811,6 +1837,13 @@ export class Daemon {
           liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
         }),
       );
+
+      // Retire old ownership before discovery or rehydration can adopt a legacy runtime.
+      await prepareBindingRegistryForStartup({
+        brokerConfigured: this.sessionBrokerConfigPath !== undefined,
+        registryExists: bindingRegistryFileExists(),
+        open: () => this.openBindingRegistry(),
+      });
 
       await this.startHost.startHttpIngress();
 

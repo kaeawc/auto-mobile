@@ -4,6 +4,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { selectMigrationLock } from "../../../db/migrationLock";
 import { BindingRegistrySchemaUnsupportedError } from "../provisioning/refusal";
+import * as retireSlot008 from "./migrations/2026_10_16_008_retire_slot_features";
 import * as bindingRegistry000 from "./migrations/2026_10_09_000_binding_registry";
 import * as bindingRegistry001 from "./migrations/2026_10_09_001_binding_owner_fencing";
 import * as bindingJournal002 from "./migrations/2026_10_09_002_binding_journal";
@@ -27,6 +28,7 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_13_005_free_device_deletion_failed_deletes": freeDeviceDeletionFailedDeletes005,
   "2026_10_15_006_session_broker": sessionBroker006,
   "2026_10_15_007_session_broker_failure_retryable": sessionBrokerFailure007,
+  "2026_10_16_008_retire_slot_features": retireSlot008,
 };
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {
@@ -58,7 +60,11 @@ async function assertSupportedRegistrySchema<DB>(db: Kysely<DB>, dbPath: string)
  * Only pending work takes the cross-process file lock (no-op for `:memory:`); migrateToLatest
  * rechecks under that lock and the registry's transactional-DDL adapter keeps the changes atomic.
  */
-export async function migrateBindingRegistry<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+export async function migrateBindingRegistry<DB>(
+  db: Kysely<DB>,
+  dbPath: string,
+  beforeMigrate?: () => Promise<void>,
+): Promise<void> {
   await assertSupportedRegistrySchema(db, dbPath);
   const migrator = new Migrator({ db, provider: bindingRegistryMigrationProvider });
   if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
@@ -68,6 +74,14 @@ export async function migrateBindingRegistry<DB>(db: Kysely<DB>, dbPath: string)
   await lock.acquire();
   try {
     await assertSupportedRegistrySchema(db, dbPath);
+    const pending = (await migrator.getMigrations()).some(
+      (migration) =>
+        migration.name === "2026_10_16_008_retire_slot_features" &&
+        migration.executedAt === undefined,
+    );
+    if (pending) {
+      await beforeMigrate?.();
+    }
     const { error } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(

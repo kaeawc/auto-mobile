@@ -18,7 +18,7 @@ import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFi
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-const FUTURE = "2099_01_01_000_future_schema";
+const FUTURE = "2026_10_17_009_future_schema";
 const MIGRATION_004 = "2026_10_12_004_free_device_deletion";
 const MIGRATION_005 = "2026_10_13_005_free_device_deletion_failed_deletes";
 
@@ -75,16 +75,21 @@ describe("binding registry schema compatibility", () => {
       const result =
         target === "latest" ? await migrator.migrateToLatest() : await migrator.migrateTo(target);
       expect(result.error).toBeUndefined();
+      if (harness === known) {
+        continue;
+      }
       harness.sqlite.exec(`
         INSERT INTO slot_scopes (scope_key, managed_host_scope, runner_namespace, runner_incarnation,
           state, created_at_ms, last_acquired_at_ms) VALUES ('scope', 'host', 'runner', 'inc', 'valid', 1, 1);
         INSERT INTO slot_assignments (scope_key, slot_index, role, platform, generation,
           stable_device_id, requested_spec_json, state, updated_at_ms)
           VALUES ('scope', 0, 'app', 'android', 1, 'assigned', '{}', 'ready', 1);
-        INSERT INTO slot_free_devices (platform, stable_device_id, from_scope_key, freed_at_ms)
-          VALUES ('android', 'free', 'scope', 1);
+
       `);
     }
+    partial.sqlite.exec(
+      "INSERT INTO slot_free_devices (platform, stable_device_id, from_scope_key, freed_at_ms) VALUES ('android', 'free', 'scope', 1)",
+    );
     addFutureSchema(full.sqlite);
     addFutureSchema(partial.sqlite);
   });

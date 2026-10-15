@@ -94,7 +94,7 @@ function serialPort(serial: string): number | undefined {
 }
 
 /** ps has no quoting; only whitespace-free AVD names and explicit ports prove identity. */
-function processArguments(command: string): { avdName?: string; port?: number } {
+export function emulatorProcessArguments(command: string): { avdName?: string; port?: number } {
   const args = command.split(/\s+/);
   const avdIndex = args.indexOf("-avd");
   const avdName =
@@ -122,7 +122,7 @@ function candidatesForSerial(
         (row) =>
           isSafeEmulatorProcessPid(row.pid, ownPid) &&
           isSignalableEmulatorQemuProcess(row) &&
-          processArguments(row.command).port === port,
+          emulatorProcessArguments(row.command).port === port,
       );
 }
 
@@ -136,7 +136,7 @@ function identifyRows(
     return { kind: "absent" };
   }
   const row = candidates[0];
-  const { avdName, port } = processArguments(row.command);
+  const { avdName, port } = emulatorProcessArguments(row.command);
   if (candidates.length !== 1 || !avdName || port === undefined) {
     return {
       kind: "ambiguous",
@@ -157,7 +157,7 @@ export function emulatorProcessEscapeHint(
   if (candidates.length > 0) {
     const descriptions = candidates.map(({ pid, command }) => {
       const executable = command.match(/qemu-system-[^/\s]+/)?.[0] ?? "qemu-system-*";
-      const { avdName, port } = processArguments(command);
+      const { avdName, port } = emulatorProcessArguments(command);
       return `process ${pid} (\`${executable}${avdName ? ` -avd ${avdName}` : ""} -port ${port}\`); \`kill ${pid}\``;
     });
     return `Stop it by hand after checking its identity: ${descriptions.join("; ")} stops it even when the console does not answer (\`adb -s ${serial} emu kill\` goes through the same console).`;

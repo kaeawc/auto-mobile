@@ -17,6 +17,8 @@ import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
 import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
 import type { IdGenerator } from "../../../utils/IdGenerator";
+import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
+import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
 import { migrateBindingRegistry } from "./bindingRegistryMigrations";
 import {
   type BindingResourceSnapshot,
@@ -173,7 +175,6 @@ interface BindingJournalTable {
 }
 
 export interface BindingRegistryDatabase {
-  slot_free_devices: BindingFreeDevicesTable;
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
   slot_journal: BindingJournalTable;
@@ -279,7 +280,7 @@ function isBindingPlatform(value: unknown): value is BindingPlatform {
   return value === "android" || value === "ios";
 }
 
-function parseJournalTarget(json: string): BindingJournalTarget {
+export function parseJournalTarget(json: string): BindingJournalTarget {
   const parsed: unknown = JSON.parse(json);
   if (typeof parsed !== "object" || parsed === null) {
     throw new ActionableError("Binding journal target is not an object");
@@ -381,6 +382,7 @@ export interface SqliteBindingRegistryOptions {
 export interface OpenSqliteBindingRegistryOptions extends SqliteBindingRegistryOptions {
   /** Defaults to {@link defaultBindingRegistryPath}. `:memory:` gives a private in-memory registry. */
   dbPath?: string;
+  legacyDeviceRetirement?: Pick<LegacySlotDeviceRetirement, "retire">;
 }
 
 /**
@@ -476,7 +478,13 @@ export async function openSqliteBindingRegistry(
     }),
   });
   try {
-    await migrateBindingRegistry(db, dbPath);
+    await migrateBindingRegistry(
+      db,
+      dbPath,
+      () =>
+        options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
+        Promise.resolve(),
+    );
   } catch (error) {
     await db.destroy();
     if (classifySqliteError(error) === "retryable") {
@@ -1245,23 +1253,4 @@ export class SqliteBindingRegistry implements BindingRegistry {
       (execOwner === null || !this.isExecOwnerLive(execOwner))
     );
   }
-}
-
-interface BindingFreeDevicesTable {
-  platform: BindingPlatform;
-  stable_device_id: string;
-  spec_fingerprint: string | null;
-  from_scope_key: string;
-  freed_at_ms: number;
-  state: Generated<"free" | "stopping" | "stopped">;
-  stop_claimed_by: string | null;
-  stop_claimed_at_ms: number | null;
-  deletion_owner_daemon_id: string | null;
-  deletion_owner_pid: number | null;
-  deletion_owner_process_token: string | null;
-  deletion_started_at_ms: number | null;
-  deletion_attempts: number | null;
-  deletion_failed_deletes: number | null;
-  deletion_last_error: string | null;
-  deletion_next_attempt_at_ms: number | null;
 }

@@ -12,3 +12,6 @@ export function isProductBrokerDevice(name: string): boolean {
     (name.startsWith(BROKER_DEVICE_NAME_PREFIX) || name.startsWith(LEGACY_DEVICE_NAME_PREFIX))
   );
 }
+
+/** Durable role discriminating broker bindings from retired slot assignments. */
+export const BROKER_BINDING_ROLE = "session-broker-device";

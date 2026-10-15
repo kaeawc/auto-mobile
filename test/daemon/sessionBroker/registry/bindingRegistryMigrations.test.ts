@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
-import { Kysely, sql } from "kysely";
+import { Kysely, sql, type Generated } from "kysely";
 import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
 import * as freeStop003 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_10_003_free_device_stop_state";
@@ -12,9 +12,32 @@ import {
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import {
   SqliteBindingRegistry,
-  type BindingRegistryDatabase,
+  type BindingRegistryDatabase as CurrentBindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+
+type BindingRegistryDatabase = CurrentBindingRegistryDatabase & {
+  slot_free_devices: BindingFreeDevicesTable;
+};
+
+interface BindingFreeDevicesTable {
+  platform: "android" | "ios";
+  stable_device_id: string;
+  spec_fingerprint: string | null;
+  from_scope_key: string;
+  freed_at_ms: number;
+  state: Generated<"free" | "stopping" | "stopped">;
+  stop_claimed_by: string | null;
+  stop_claimed_at_ms: number | null;
+  deletion_owner_daemon_id: string | null;
+  deletion_owner_pid: number | null;
+  deletion_owner_process_token: string | null;
+  deletion_started_at_ms: number | null;
+  deletion_attempts: number | null;
+  deletion_failed_deletes: number | null;
+  deletion_last_error: string | null;
+  deletion_next_attempt_at_ms: number | null;
+}
 
 describe("binding registry migrations", () => {
   test("the public pending-migration probe never creates bookkeeping tables", async () => {
@@ -26,7 +49,7 @@ describe("binding registry migrations", () => {
         db,
         provider: bindingRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(8);
+      expect(migrations).toHaveLength(9);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateBindingRegistry(db, ":memory:");
@@ -115,7 +138,9 @@ describe("binding registry migrations", () => {
         VALUES ('android', 'amslot-legacy', 'scope', 12, 'free', 'old', 7, 12, 10, 'blocked', 99)`.execute(
         db,
       );
-      await migrateBindingRegistry(db, ":memory:");
+      expect(
+        (await migrator.migrateTo("2026_10_15_007_session_broker_failure_retryable")).error,
+      ).toBeUndefined();
       expect(
         (await historicalFreeRows(db)).filter((row) => row.deletion !== null)[0].deletion,
       ).toMatchObject({
@@ -144,7 +169,13 @@ describe("binding registry migrations", () => {
         VALUES ('android', 'avd-1', 'fp-1', 'scope-old', 11),
                ('ios', 'UDID-2', NULL, 'scope-old', 22)`.execute(db);
 
-      await migrateBindingRegistry(db, ":memory:");
+      expect(
+        (
+          await new Migrator({ db, provider: bindingRegistryMigrationProvider }).migrateTo(
+            "2026_10_15_007_session_broker_failure_retryable",
+          )
+        ).error,
+      ).toBeUndefined();
       expect(await historicalFreeRows(db)).toEqual([
         {
           platform: "android",
@@ -189,7 +220,13 @@ describe("binding registry migrations", () => {
         VALUES ('scope-1', 0, 'app', 'android', 3, 'avd-1', 'avd-1', '{}', 'ready', 'd', 7,
           's1', 1)`.execute(db);
 
-      await migrateBindingRegistry(db, ":memory:");
+      expect(
+        (
+          await new Migrator({ db, provider: bindingRegistryMigrationProvider }).migrateTo(
+            "2026_10_15_007_session_broker_failure_retryable",
+          )
+        ).error,
+      ).toBeUndefined();
 
       const registry = new SqliteBindingRegistry(db, {
         timer: new FakeTimer(),

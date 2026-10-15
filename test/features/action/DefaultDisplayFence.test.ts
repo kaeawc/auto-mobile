@@ -119,6 +119,9 @@ function harness(platform: "android" | "ios", mode: Mode) {
   watch(IOSCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
     ios.requestTapCoordinates.bind(ios),
   );
+  watch(IOSCtrlProxyClient.prototype, "requestDoubleTapCoordinates").mockImplementation(
+    ios.requestDoubleTapCoordinates.bind(ios),
+  );
   watch(IOSCtrlProxyClient.prototype, "requestMultiFingerSwipe").mockImplementation(
     ios.requestMultiFingerSwipe.bind(ios),
   );
@@ -194,7 +197,12 @@ function assertResult(result: BaseActionResult) {
 describe("default-display dispatch fences", () => {
   for (const platform of ["android", "ios"] as const) {
     for (const tool of ["tapOn", "tapAny"] as const) {
-      for (const site of ["preparation", "double-second", "double-unchanged"] as const) {
+      // iOS delivers a double tap as one runner request, so it has no second tap to fence.
+      const sites =
+        platform === "ios"
+          ? (["preparation", "double-unchanged"] as const)
+          : (["preparation", "double-second", "double-unchanged"] as const);
+      for (const site of sites) {
         test.each(modes)(`${tool} ${platform} ${site}: %s`, async (mode: Mode) => {
           const h = harness(platform, mode);
           const actionName = site === "preparation" ? "tap" : "doubleTap";
@@ -266,12 +274,17 @@ describe("default-display dispatch fences", () => {
             : actionName === "doubleTap"
               ? 2
               : 1;
-          expect(h.taps()).toHaveLength(count);
-          expect(h.taps().map(({ x, y }) => ({ x, y }))).toEqual(
-            Array.from({ length: count }, () =>
-              tool === "tapAny" ? { x: 20, y: 30 } : { x: 60, y: 80 },
-            ),
-          );
+          const point = tool === "tapAny" ? { x: 20, y: 30 } : { x: 60, y: 80 };
+          if (platform === "ios" && actionName === "doubleTap") {
+            // One runner-side double tap per delivered gesture, never two single taps.
+            expect(h.taps()).toEqual([]);
+            expect(h.ios.doubleTapHistory).toEqual(count > 0 ? [point] : []);
+          } else {
+            expect(h.taps()).toHaveLength(count);
+            expect(h.taps().map(({ x, y }) => ({ x, y }))).toEqual(
+              Array.from({ length: count }, () => point),
+            );
+          }
           expect(h.inputs()).toEqual([]);
         });
       }

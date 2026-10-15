@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  TREE_INPUT_HASH_ALGORITHM,
+  Clock,
   AttestationEnvelope,
   AttestationLane,
   AttestationPayload,
@@ -63,7 +65,7 @@ export class TreeEntriesInputHasher implements InputHasher {
       .join("");
     return {
       hash: createHash("sha256").update(content).digest("hex"),
-      algorithm: "tree-entries-sha256-v0-placeholder",
+      algorithm: TREE_INPUT_HASH_ALGORITHM,
     };
   }
 }
@@ -121,9 +123,6 @@ export class CompositeSink implements AttestationSink {
     }
   }
 }
-export interface Clock {
-  nowIso(): string;
-}
 export interface ProduceOptions {
   lanes: Array<{
     lane: AttestationLane;
@@ -180,7 +179,7 @@ export async function produceAttestations(opts: ProduceOptions): Promise<LaneOut
         gates: item.gates,
         overall: item.gates.some((gate) => gate.status === "fail") ? "fail" : "pass",
         environment: opts.environment,
-        producedAt: opts.clock.nowIso(),
+        producedAt: new Date(opts.clock.nowMs()).toISOString(),
       };
       const signature = await opts.signer.sign(canonicalizePayload(payload));
       const env: AttestationEnvelope = { envelopeVersion: 1, payload, signature };

@@ -148,6 +148,7 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

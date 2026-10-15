@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { arch, platform } from "node:os";
@@ -102,7 +103,7 @@ const exec: Exec = (cmd, args, cwd) =>
     });
   });
 if (import.meta.main) {
-  process.exitCode = await runCli(Bun.argv.slice(2), process.env, {
+  process.exitCode = await runCli(process.argv.slice(2), process.env, {
     log: (message) => console.log(message),
     warn: (message) => console.warn(message),
     async createOptions(outDir) {
@@ -115,8 +116,13 @@ if (import.meta.main) {
           [new LocalFileSink(outDir ?? join(resolveAutoMobileBaseDir(), "attestations"))],
           (message) => console.warn(message),
         ),
-        clock: { nowIso: () => new Date().toISOString() },
-        environment: { os: platform(), arch: arch(), bunVersion: Bun.version, toolVersions: {} },
+        clock: { nowMs: () => defaultTimer.now() },
+        environment: {
+          os: platform(),
+          arch: arch(),
+          bunVersion: process.versions.bun ?? null,
+          toolVersions: {},
+        },
         warn: (message) => console.warn(message),
       };
     },

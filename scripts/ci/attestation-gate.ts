@@ -1,15 +1,19 @@
+import type { AttestationTier } from "./attestation/attestationSchema";
+import { DefaultFileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
+import { ShadowStore } from "./attestation/shadow/recorder";
 import { appendFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { logger } from "../../src/utils/logger";
-import { runAttestationGate, sanitizeAttestationOutput } from "./attestationGate/gate";
+import { runAttestationGate, sanitizeAttestationOutput } from "./attestation/gate/gate";
 import {
-  failClosedValidators,
   gitTreeInputHasher,
   jsonlFileRecorder,
-  unconfiguredTransport,
-} from "./attestationGate/defaults";
+  configuredTransport,
+  configuredValidators,
+  shadowRecorderBridge,
+} from "./attestation/gate/defaults";
 
 export function resolveCliOptions(
   argv: string[],
@@ -25,7 +29,7 @@ export function resolveCliOptions(
     throw new Error("tier must be 1, 2 or 3");
   }
   return {
-    tier,
+    tier: tier as AttestationTier,
     record: values.record ?? join(env.RUNNER_TEMP ?? ".", "attestation-shadow.jsonl"),
     repo: env.GITHUB_REPOSITORY ?? "",
     commitSha: env.ATTESTATION_COMMIT_SHA ?? env.GITHUB_SHA ?? "",
@@ -36,11 +40,25 @@ export async function main(argv: string[]): Promise<void> {
   try {
     const { tier, record, repo, commitSha } = resolveCliOptions(argv, process.env);
     const entry = await runAttestationGate({
-      transport: unconfiguredTransport,
+      transport: configuredTransport(process.env),
       hasher: gitTreeInputHasher(),
-      validators: failClosedValidators,
-      recorder: jsonlFileRecorder(record),
-      clock: { now: () => new Date(defaultTimer.now()) },
+      validators: configuredValidators({ expectedBaseSha: process.env.ATTESTATION_BASE_SHA ?? "" }),
+      recorder: shadowRecorderBridge({
+        jsonl: jsonlFileRecorder(record),
+        store: new ShadowStore({
+          fs: new DefaultFileSystem(),
+          timer: defaultTimer,
+          dir: join(dirname(record), "attestation-shadow"),
+        }),
+        runId: process.env.GITHUB_RUN_ID ?? "",
+        ciResult:
+          process.env.ATTESTATION_CI_RESULT === "pass"
+            ? "pass"
+            : process.env.ATTESTATION_CI_RESULT === "fail"
+              ? "fail"
+              : "cancelled",
+      }),
+      clock: { nowMs: () => defaultTimer.now() },
       repo,
       commitSha,
       repoRoot: process.cwd(),

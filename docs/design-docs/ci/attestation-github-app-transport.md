@@ -47,7 +47,7 @@ and [installation token guide](https://docs.github.com/en/apps/creating-github-a
 ## CI configuration and secrets
 
 Add these GitHub Actions secrets with these exact names, then map them into the
-trusted attestation-gate job's environment. This change adds no workflow wiring.
+trusted attestation-gate job's environment. The shadow gate in `scripts/ci/attestation/gate/` composes this transport without granting it signature-verification authority.
 
 | Secret / environment variable            | Requirement                                                       |
 | ---------------------------------------- | ----------------------------------------------------------------- |
@@ -181,3 +181,19 @@ downgrades may force more work while present, but deleting them cannot create a
 service grant. Test the full 3×3 downgrade matrix and absent/invalid cache cases.
 Use only fakes, a fixed clock, and FakeTimer for unit verification; no network,
 devices, database, webhook, or GitHub-state read is required.
+
+## Canonical envelope lookup
+
+Implementation and offline tests now live in
+`scripts/ci/attestation/transport/` and `test/scripts/attestation/transport/`.
+`AttestationServiceClient.lookup()` uses the existing `POST /v1/decisions` query.
+A service may include an optional `envelope` beside `kind` and `reason`.
+`decide()` retains its original decision-only result and strips remote detail.
+The gate requires a strictly parsed v1 envelope for a found result, then verifies
+it independently. A decision-only success response is unavailable to the gate;
+`no-attestation` becomes not-found, and transport/authentication/invalid-response
+failures become unavailable. No remote verdict alone can authorize reuse.
+
+The wire value is `ServiceDecision`; the local policy verdict is
+`AttestationVerdict`, both defined once in `attestationSchema.ts`. The service
+verdict is an independent ceiling and cannot promote a local result.

@@ -1395,7 +1395,7 @@ jobs:
   # Attestation Gate (shadow, advisory) (#11984)
   # =============================================================================
   # Advisory, shadow-only, never skips anything (#11984, #11985).
-  # The composite action is the shared piece for merge.yml.
+  # The composite records excluded observations until an actual lane result is supplied.
   attestation-gate-shadow:
     name: "Attestation Gate (shadow, advisory)"
     runs-on: ubuntu-latest
@@ -1414,6 +1414,7 @@ jobs:
       - uses: ./.github/actions/attestation-gate
         with:
           commit-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
 
   # =============================================================================
   # Node Checks (#10894)

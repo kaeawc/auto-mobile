@@ -1,6 +1,54 @@
 import { createHash } from "node:crypto";
 
 export const ATTESTATION_ENVELOPE_VERSION = 1 as const;
+export const TREE_INPUT_HASH_ALGORITHM = "tree-entries-sha256-v0-placeholder";
+export type AttestationVerdict = "skip" | "advisory" | "ignore";
+/** Epoch milliseconds, adapted from the shared Timer at composition boundaries. */
+export interface Clock {
+  nowMs(): number;
+}
+export const decisionReasons = [
+  "verified-match",
+  "no-attestation",
+  "hash-mismatch",
+  "stale",
+  "env-mismatch",
+  "policy-tier",
+  "transport-unavailable",
+  "invalid-response",
+  "unauthenticated",
+] as const;
+
+export type ServiceDecisionReason = (typeof decisionReasons)[number];
+
+export interface ServiceDecision {
+  kind: AttestationVerdict;
+  reason: ServiceDecisionReason;
+  detail?: string;
+}
+
+export type IgnoreReason =
+  | "unknown-tier"
+  | "missing-field"
+  | "malformed-field"
+  | "unsupported-schema-version"
+  | "signature-unverified"
+  | "identity-mismatch"
+  | "key-unknown"
+  | "key-revoked"
+  | "key-not-valid-yet"
+  | "key-expired"
+  | "hash-mismatch"
+  | "stale-attestation"
+  | "attestation-from-future"
+  | "stale-base"
+  | "environment-mismatch"
+  | "result-not-success"
+  | "tier-disabled"
+  | "commit-mismatch"
+  | "partial-scope"
+  | "policy-invalid";
+
 export type AttestationTier = 1 | 2 | 3;
 export type AttestationLane = "node" | "android" | "ios";
 export const LANE_TIER: Record<AttestationLane, AttestationTier> = { node: 1, android: 2, ios: 3 };
@@ -187,5 +235,32 @@ export function parseEnvelope(raw: unknown): ParseResult {
   ) {
     return { ok: false, reason: "invalid signature" };
   }
-  return { ok: true, envelope: raw as AttestationEnvelope, signed: signature !== null };
+  return {
+    ok: true,
+    envelope: {
+      envelopeVersion: ATTESTATION_ENVELOPE_VERSION,
+      payload: {
+        payloadType: p.payloadType,
+        payloadVersion: p.payloadVersion,
+        tier: p.tier as AttestationTier,
+        lane: p.lane as AttestationLane,
+        inputHash: p.inputHash,
+        inputHashAlgorithm: p.inputHashAlgorithm,
+        commitId: p.commitId,
+        scope: p.scope,
+        scopeNote: p.scopeNote,
+        gates: p.gates as GateResult[],
+        overall: p.overall,
+        environment: {
+          os: e.os,
+          arch: e.arch,
+          bunVersion: e.bunVersion,
+          toolVersions: e.toolVersions as Record<string, string>,
+        },
+        producedAt: p.producedAt,
+      },
+      signature: signature as AttestationSignature | null,
+    },
+    signed: signature !== null,
+  };
 }

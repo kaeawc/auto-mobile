@@ -38,7 +38,7 @@ export class DatabaseHealthLateness {
       if (!(error instanceof DatabaseHealthProbeTimeoutError)) {
         return false;
       }
-      const probeGap = this.gap(started, this.readClock(), error.timeoutMs);
+      const probeGap = this.gap(started, this.readClock(), error.timeoutMs, error.startupMs ?? 0);
       const inconclusive = [
         tickGap.lateMs,
         tickGap.sleptMs,
@@ -61,10 +61,15 @@ export class DatabaseHealthLateness {
     return { wall: this.timer.now(), monotonic: this.timer.monotonicNow?.() ?? this.timer.now() };
   }
 
-  private gap(start: ClockReading, end: ClockReading, scheduledMs: number): ScheduleGap {
+  private gap(
+    start: ClockReading,
+    end: ClockReading,
+    scheduledMs: number,
+    startupMs = 0,
+  ): ScheduleGap {
     return splitScheduleGap({
-      wallElapsedMs: end.wall - start.wall,
-      monotonicElapsedMs: end.monotonic - start.monotonic,
+      wallElapsedMs: Math.max(0, end.wall - start.wall - startupMs),
+      monotonicElapsedMs: Math.max(0, end.monotonic - start.monotonic - startupMs),
       scheduledMs,
       monotonicIncludesHostSleep: this.timer.monotonicIncludesHostSleep,
       maxCredibleStallMs: MAX_CREDIBLE_DAEMON_STALL_MS,

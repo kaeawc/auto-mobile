@@ -17,6 +17,9 @@ public protocol GesturePerforming: Sendable {
 
     // MARK: - Tap Gestures
 
+    /// Deliver the complete double tap as one native coordinate gesture.
+    func doubleTap(x: Double, y: Double) throws
+
     /// Tap at coordinates with optional duration for long press
     func tap(x: Double, y: Double, duration: TimeInterval) throws
 
@@ -188,6 +191,10 @@ extension GesturePerforming {
         throws
     {
         try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+    }
+
+    public func doubleTap(x _: Double, y _: Double) throws {
+        throw CommandError.invalidParameter("doubleTap", "unsupported by this gesture performer")
     }
 
     public func tap(x: Double, y: Double, duration: TimeInterval, strategy _: String?) throws {

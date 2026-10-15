@@ -133,7 +133,7 @@ async function harness(withControlVeto = false) {
     expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
     expect(discovery.bootedDevices).toEqual([DEVICE]);
     expect(reasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
-    expect((await persistence.getSession?.(id))?.release_reason).toBe(
+    expect((await persistence.getSession(id))?.release_reason).toBe(
       OWNER_DISCONNECTED_RELEASE_REASON,
     );
     expect(manager.getTerminalReleaseSnapshot(id)).toMatchObject({

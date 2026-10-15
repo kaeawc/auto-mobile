@@ -42,6 +42,15 @@ export interface CoordinateTapClient<Dispatch = never> {
  * refusal, is acknowledged; a timeout or transport failure after the write is not.
  */
 export interface IosCoordinateTapClient {
+  requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    timeoutMs?: number,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>;
+
   requestTapCoordinates(
     x: number,
     y: number,
@@ -69,19 +78,6 @@ export function indeterminateTapError(error: string | undefined): ActionableErro
   return new IndeterminateTapError(
     `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
   );
-}
-
-/**
- * iOS double tap: the second tap is reached only after the first was confirmed, so an
- * unconfirmed second tap leaves one tap delivered. Other failures pass through unchanged.
- */
-export function withPartialIosDoubleTapNote(error: unknown): unknown {
-  return error instanceof IndeterminateTapError
-    ? new IndeterminateTapError(
-        `${error.message} Double tap partially applied: one tap was delivered; the second tap was not confirmed.`,
-        { cause: error },
-      )
-    : error;
 }
 
 /**
@@ -174,11 +170,13 @@ export async function dispatchAndroidCoordinateTap(
 }
 
 export interface IosCoordinateTapOptions {
-  failureLabel?: "tap" | "second tap";
+  failureLabel?: "tap" | "double tap";
   signal?: AbortSignal;
   /** Overrides the transport budget derived from the press duration (tapAny sizes its own). */
   timeoutMs?: number;
 }
+
+type InternalIosCoordinateTapOptions = IosCoordinateTapOptions & { doubleTap?: boolean };
 
 /**
  * Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure.
@@ -195,7 +193,37 @@ export async function dispatchIosCoordinateTap(
   frameContext?: string,
   options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  const { failureLabel = "tap", signal } = options;
+  return dispatchIosTap(client, x, y, durationMs, frameContext, options);
+}
+
+/** One runner command owns the full double tap; a missing reply proves no partial count. */
+export async function dispatchIosDoubleTap(
+  client: IosCoordinateTapClient,
+  x: number,
+  y: number,
+  durationMs: number = 50,
+  frameContext?: string,
+  options: IosCoordinateTapOptions = {},
+): Promise<void> {
+  return dispatchIosTap(client, x, y, durationMs, frameContext, {
+    ...options,
+    failureLabel: "double tap",
+    doubleTap: true,
+  });
+}
+
+async function dispatchIosTap(
+  client: IosCoordinateTapClient,
+  x: number,
+  y: number,
+  durationMs: number,
+  frameContext: string | undefined,
+  options: InternalIosCoordinateTapOptions,
+): Promise<void> {
+  const { failureLabel = "tap", signal, doubleTap = false } = options;
+  if (doubleTap) {
+    throwIfAborted(signal, true);
+  }
   const timeoutMs = options.timeoutMs ?? resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
   let dispatched = false;
   const onDispatch = () => {
@@ -203,16 +231,18 @@ export async function dispatchIosCoordinateTap(
   };
   let result: IosTapReply;
   try {
-    result = await client.requestTapCoordinates(
-      x,
-      y,
-      durationMs,
-      timeoutMs,
-      undefined,
-      frameContext,
-      signal,
-      onDispatch,
-    );
+    result = doubleTap
+      ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, frameContext, signal, onDispatch)
+      : await client.requestTapCoordinates(
+          x,
+          y,
+          durationMs,
+          timeoutMs,
+          undefined,
+          frameContext,
+          signal,
+          onDispatch,
+        );
   } catch (error) {
     if (isUnconfirmedIosTapThrow(error, dispatched, signal)) {
       logger.warn(`[coordinateTapDispatch] iOS ${failureLabel} transport failed`, error);
@@ -227,26 +257,6 @@ export async function dispatchIosCoordinateTap(
     throw indeterminateTapError(result.error);
   }
   throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
-}
-
-/**
- * Dispatch the second tap of an iOS double tap, which is reached only after the first was
- * confirmed: an unconfirmed second tap leaves one tap delivered and says so.
- */
-export async function dispatchIosSecondTap(
-  client: IosCoordinateTapClient,
-  point: { x: number; y: number },
-  durationMs: number,
-  options: Omit<IosCoordinateTapOptions, "failureLabel"> = {},
-): Promise<void> {
-  try {
-    await dispatchIosCoordinateTap(client, point.x, point.y, durationMs, undefined, {
-      ...options,
-      failureLabel: "second tap",
-    });
-  } catch (error) {
-    throw withPartialIosDoubleTapNote(error);
-  }
 }
 
 type IosTapReply = Awaited<ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>>;

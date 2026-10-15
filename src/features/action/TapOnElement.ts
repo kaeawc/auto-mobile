@@ -174,7 +174,7 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
-  dispatchIosSecondTap,
+  dispatchIosDoubleTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
@@ -5618,17 +5618,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
     if (action === "doubleTap") {
-      // Double tap - perform two taps
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
-      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-
-      await this.timer.sleep(IOS_DOUBLE_TAP_GAP_MS);
-
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await dispatchIosSecondTap(client, { x, y }, tapDuration, { signal });
+      await dispatchIosDoubleTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press

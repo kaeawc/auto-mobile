@@ -10,7 +10,8 @@ import type {
  * This module is the TypeScript mirror of the authoritative Kotlin wire contract in
  * `android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketRequest.kt`
  * (issue #2752 / PR #2771). Every interface here corresponds to a `@SerialName`'d data class
- * on the device; every field name/type/optionality is checked against that contract so the JSON
+ * on the device. AndroidWireContract.contract.test.ts checks field names and requiredness against
+ * the descriptor-generated test/fixtures/android-contract/android-wire-contract.json so the JSON
  * on the wire matches the device contract. Millisecond durations are rounded for its Long fields.
  *
  * Sends are constructed via the {@link ctrlProxyRequests} builders — each returns a typed
@@ -61,6 +62,7 @@ export interface RequestHierarchyMessage {
  * The device also accepts `disableAllFiltering` (default false); the TS client omits it.
  */
 export interface RequestHierarchyIfStaleMessage {
+  disableAllFiltering?: boolean;
   type: "request_hierarchy_if_stale";
   requestId: string;
   sinceTimestamp: number;
@@ -68,6 +70,7 @@ export interface RequestHierarchyIfStaleMessage {
 
 /** `@SerialName("set_hierarchy_interval")` -> `SetHierarchyInterval` */
 export interface SetHierarchyIntervalMessage {
+  requestId?: string;
   type: "set_hierarchy_interval";
   intervalMs: number | null;
 }
@@ -91,6 +94,7 @@ export interface RequestScreenshotMessage {
 
 /** `@SerialName("request_tap_coordinates")` → `RequestTapCoordinates` */
 export interface RequestTapCoordinatesMessage {
+  frameContext?: string;
   doubleTap?: boolean;
   type: "request_tap_coordinates";
   requestId: string;
@@ -102,6 +106,7 @@ export interface RequestTapCoordinatesMessage {
 
 /** `@SerialName("request_swipe")` → `RequestSwipe` */
 export interface RequestSwipeMessage {
+  frameContext?: string;
   type: "request_swipe";
   requestId: string;
   x1: number;
@@ -127,6 +132,9 @@ export interface RequestTwoFingerSwipeMessage {
 
 /** `@SerialName("request_drag")` → `RequestDrag` (legacy holdTime/duration fields not sent) */
 export interface RequestDragMessage {
+  frameContext?: string;
+  holdTime?: number;
+  duration?: number;
   type: "request_drag";
   requestId: string;
   x1: number;
@@ -286,6 +294,10 @@ export interface RequestSelectAllMessage {
  * `selector` is additive; `resourceId` remains for backwards compatibility.
  */
 export interface RequestActionMessage {
+  boundsLeft?: number;
+  boundsTop?: number;
+  boundsRight?: number;
+  boundsBottom?: number;
   type: "request_action";
   requestId: string;
   action: string;
@@ -808,6 +820,8 @@ export interface SubscribeStorageMessage {
  * `CtrlProxyStorage.test.ts` pins the TS wire shape and subscribe-to-unsubscribe id flow.
  */
 export interface UnsubscribeStorageMessage {
+  packageName?: string;
+  fileName?: string;
   type: "unsubscribe_storage";
   requestId: string;
   subscriptionId: string;
@@ -882,6 +896,7 @@ export interface SetRecompositionTrackingMessage {
 
 /** `@SerialName("set_accessibility_flags")` → `SetAccessibilityFlags` (sent without requestId) */
 export interface SetAccessibilityFlagsMessage {
+  requestId?: string;
   type: "set_accessibility_flags";
   includeNotImportantViews: boolean;
   reportViewIds: boolean;
@@ -902,6 +917,7 @@ export interface SetNetworkMockRulesMessage {
 
 /** `@SerialName("set_network_error_simulation")` → `SetNetworkErrorSimulation` (sent without requestId) */
 export interface SetNetworkErrorSimulationMessage {
+  requestId?: string;
   type: "set_network_error_simulation";
   enabled: boolean;
   errorType: string | null;
@@ -946,11 +962,13 @@ export interface RequestLaunchIntentMessage {
 
 /** `@SerialName("start_recording")` → `StartRecording` (sent without requestId) */
 export interface StartRecordingMessage {
+  requestId?: string;
   type: "start_recording";
 }
 
 /** `@SerialName("stop_recording")` → `StopRecording` (sent without requestId) */
 export interface StopRecordingMessage {
+  requestId?: string;
   type: "stop_recording";
 }
 
@@ -1303,17 +1321,9 @@ export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Every `@SerialName` accepted by `WebSocketRequest.kt`, transcribed by hand. The
- * `Record<CtrlProxyRequestType, true>` type forces this map to list exactly the union's
- * discriminators: adding a request type to the union without listing it here (or vice versa) is a
- * compile error, and a test asserts these keys equal the device's `@SerialName` set — read directly
- * from `WebSocketRequest.kt` (see ctrlProxyProtocol.test.ts), so a request type renamed/added on the
- * device fails the test rather than drifting silently.
- *
- * NOTE: this guards the request-type *set* (a type added/removed/renamed). It does NOT guard
- * per-field drift (a field renamed, or its optionality changed) — that fidelity is covered by the
- * byte-identical serialization assertions in ctrlProxyProtocol.test.ts. A future improvement is to
- * generate this contract from the Kotlin source so there is a single source of truth.
+ * Every request discriminator, exhaustively checked against the TS union.
+ * AndroidWireContract.contract.test.ts compares these keys and the field manifests with the
+ * descriptor-generated android-wire-contract.json; Kotlin verifies fixture freshness.
  */
 const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_hierarchy: true,

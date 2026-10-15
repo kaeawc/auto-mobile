@@ -10,7 +10,7 @@ const completeManifest = REQUIRED_PACKED_RUNTIME_ASSETS.map((entry) =>
   entry.endsWith("/") ? `${entry}2025_12_28_000_initial_schema.ts` : entry,
 );
 
-test("runtime manifest includes both entrypoints, disk schemas, migrations and vendor tools", () => {
+test("runtime manifest includes entrypoints, disk schemas and vendor tools", () => {
   expect(findPackedAssetViolations(completeManifest)).toEqual([]);
   for (const entry of completeManifest) {
     expect(
@@ -22,13 +22,16 @@ test("runtime manifest includes both entrypoints, disk schemas, migrations and v
   }
 });
 
+test("runtime manifest does not require raw DB files", () => {
+  expect(REQUIRED_PACKED_RUNTIME_ASSETS.some((entry) => entry.startsWith("dist/src/db/"))).toBe(
+    false,
+  );
+});
+
 test("directory prefixes require a file and do not match similarly named directories", () => {
   expect(
-    findMissingPackedAssets(
-      ["dist/src/db/migrations/", "dist/src/db/migrations-old/a.ts"],
-      ["dist/src/db/migrations/"],
-    ),
-  ).toEqual(["dist/src/db/migrations/"]);
+    findMissingPackedAssets(["assets/runtime/", "assets/runtime-old/a.ts"], ["assets/runtime/"]),
+  ).toEqual(["assets/runtime/"]);
   expect(findMissingPackedAssets([], [])).toEqual([]);
 });
 
@@ -42,4 +45,10 @@ test("reports missing and forbidden assets together with the offending paths", (
     "Forbidden packed asset: schemas/tool-definitions.json",
     "Forbidden packed asset: dist/schemas/tool-definitions.json",
   ]);
+});
+
+test("rejects a raw migrations folder packed beside the static bundle", () => {
+  expect(
+    findPackedAssetViolations([...completeManifest, "dist/src/db/migrations/2026_01_01_000.ts"]),
+  ).toEqual(["Forbidden packed asset: dist/src/db/migrations/2026_01_01_000.ts"]);
 });

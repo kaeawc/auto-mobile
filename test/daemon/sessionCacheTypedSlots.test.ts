@@ -1,3 +1,4 @@
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
@@ -40,14 +41,17 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
   // default file-backed DeviceSessionRepository is never resolved (unit guard).
   function makeRepo(): { repo: any; activity: string[] } {
     const activity: string[] = [];
-    const repo = {
+    const repo = Object.assign(new FakeDeviceSessionPersistence(), {
+      recordLivenessOwnership: async () => {},
+      replaceLivenessOwnership: async () => {},
+      claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
       async upsertActiveSession(): Promise<void> {},
       async recordActivity(sessionId: string): Promise<void> {
         activity.push(sessionId);
       },
       async markReleased(): Promise<void> {},
       async markStaleActiveSessionsExpired(): Promise<void> {},
-    };
+    } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>);
     return { repo, activity };
   }
 

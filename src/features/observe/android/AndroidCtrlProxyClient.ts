@@ -354,7 +354,7 @@ interface WsMessageBase {
  * Base fields for request/response messages that carry a requestId.
  */
 interface WsRequestBase extends WsMessageBase {
-  requestId: string;
+  requestId?: string | null;
   success: boolean;
   totalTimeMs: number;
   perfTiming?: AndroidPerfTiming[];
@@ -365,6 +365,7 @@ interface WsRequestBase extends WsMessageBase {
 // ---------------------------------------------------------------------------
 
 interface WsConnectedMessage extends WsMessageBase {
+  id?: number;
   type: "connected";
   supportedCommands?: string[];
 }
@@ -378,8 +379,10 @@ interface WsHierarchyUpdateMessage extends WsMessageBase {
 }
 
 interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetadata {
+  width?: number;
+  height?: number;
   type: "screenshot";
-  requestId: string;
+  requestId?: string | null;
   data: string;
   format?: string;
   frameContext?: string;
@@ -447,7 +450,7 @@ export function displayTransitionFromWire(value: unknown): AndroidDisplayTransit
 
 interface WsScreenshotErrorMessage extends WsMessageBase {
   type: "screenshot_error";
-  requestId: string;
+  requestId?: string | null;
   displayId?: number | null;
   panelUniqueId?: string | null;
 }
@@ -470,7 +473,7 @@ function screenshotPerformanceMetadataFrom(
  */
 interface WsErrorMessage extends WsMessageBase {
   type: "error";
-  requestId: string | null;
+  requestId?: string | null;
   success: false;
 }
 
@@ -480,6 +483,7 @@ interface WsSwipeResultMessage extends WsRequestBase {
 }
 
 interface WsTapCoordinatesResultMessage extends WsRequestBase {
+  gestureTimeMs?: number;
   type: "tap_coordinates_result";
 }
 
@@ -513,7 +517,7 @@ interface WsCancelImeCommitResultMessage extends WsRequestBase {
   committedUnits?: number;
 }
 
-interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
+interface WsSetKeyboardProfileResultMessage extends Omit<WsRequestBase, "totalTimeMs"> {
   type: "set_keyboard_profile_result";
   activeProfileId?: string;
   previousProfileId?: string;
@@ -521,7 +525,7 @@ interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
 
 interface WsSetNetworkMockRulesResultMessage extends WsMessageBase {
   type: "set_network_mock_rules_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   /** Absent: no app confirmed the rules. Present (even empty): the app compiled the list. */
   rejectedMockIds?: string[];
@@ -529,8 +533,9 @@ interface WsSetNetworkMockRulesResultMessage extends WsMessageBase {
 }
 
 interface WsKeyboardProfilesResultMessage extends WsMessageBase {
+  perfTiming?: AndroidPerfTiming[];
   type: "keyboard_profiles_result";
-  requestId: string;
+  requestId?: string | null;
   success: boolean;
   catalogId: string;
   catalogVersion?: number;
@@ -554,7 +559,7 @@ interface WsInsertTextResultMessage extends WsRequestBase {
 
 interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
-  action: string;
+  action?: string;
   approximated?: boolean;
 }
 
@@ -564,7 +569,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
-  action: string;
+  action?: string;
   alreadySatisfied?: boolean;
 }
 
@@ -619,16 +624,18 @@ interface WsPermissionResultMessage extends WsRequestBase {
 }
 
 interface WsCurrentFocusResultMessage extends WsMessageBase {
+  perfTiming?: AndroidPerfTiming[];
   type: "current_focus_result";
-  requestId: string;
+  requestId?: string | null;
   // Both the success broadcaster and currentFocusErrorFrame always emit this field.
   totalTimeMs: number;
   focusedElement?: AccessibilityNode | null;
 }
 
 interface WsTraversalOrderResultMessage extends WsMessageBase {
+  perfTiming?: AndroidPerfTiming[];
   type: "traversal_order_result";
-  requestId: string;
+  requestId?: string | null;
   // Both the success broadcaster and traversalOrderErrorFrame always emit this field.
   totalTimeMs: number;
   result?: {
@@ -639,21 +646,25 @@ interface WsTraversalOrderResultMessage extends WsMessageBase {
   };
 }
 
-interface WsPrototypeResultMessage extends PrototypeResult {
+interface WsPrototypeResultMessage extends Omit<PrototypeResult, "requestId"> {
+  pages?: Record<string, number>;
   type: "prototype_result";
-  requestId: string;
+  requestId?: string | null;
 }
-type WsPrototypeEventMessage = PrototypeEvent;
+type WsPrototypeEventMessage = Omit<PrototypeEvent, "name" | "payload"> & {
+  name?: PrototypeEvent["name"];
+  payload?: PrototypeEvent["payload"];
+};
 
 interface WsHighlightResponseMessage extends WsMessageBase {
   type: "highlight_response";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
 }
 
 interface WsGlobalActionResultMessage extends WsMessageBase {
   type: "global_action_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   action?: string;
   totalTimeMs?: number;
@@ -661,14 +672,14 @@ interface WsGlobalActionResultMessage extends WsMessageBase {
 
 interface WsFrameContextValidationResultMessage extends WsMessageBase {
   type: "frame_context_validation_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   totalTimeMs?: number;
 }
 
 interface WsDeviceInfoResultMessage extends WsMessageBase {
   type: "device_info_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   screenWidth?: number;
   screenHeight?: number;
@@ -684,27 +695,31 @@ interface WsDeviceInfoResultMessage extends WsMessageBase {
 
 interface WsKeystoreDiscoveryMessage extends WsMessageBase {
   type: "keystore_discovery";
-  requestId: string;
+  requestId?: string | null;
   state: unknown;
 }
 
 interface WsSdkCapabilitiesMessage extends WsMessageBase {
   type: "sdk_capabilities";
-  requestId: string;
+  requestId?: string | null;
   state: unknown;
 }
 
 interface WsPreferenceFilesMessage extends WsMessageBase {
+  packageName?: string;
   type: "preference_files";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   files?: PreferenceFile[];
   totalTimeMs?: number;
 }
 
 interface WsPreferencesMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
+  data?: string;
   type: "preferences";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   entries?: KeyValueEntry[];
   totalTimeMs?: number;
@@ -712,7 +727,7 @@ interface WsPreferencesMessage extends WsMessageBase {
 
 interface WsSubscribeStorageResultMessage extends WsMessageBase {
   type: "subscribe_storage_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   // The device sends the subscription as flat fields, not a nested `subscription` object.
   packageName?: string;
@@ -722,15 +737,19 @@ interface WsSubscribeStorageResultMessage extends WsMessageBase {
 }
 
 interface WsUnsubscribeStorageResultMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
   type: "unsubscribe_storage_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   totalTimeMs?: number;
 }
 
 interface WsGetPreferenceResultMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
   type: "get_preference_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   found?: boolean;
   key?: string;
@@ -740,29 +759,37 @@ interface WsGetPreferenceResultMessage extends WsMessageBase {
 }
 
 interface WsSetPreferenceResultMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
+  key?: string;
   type: "set_preference_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   totalTimeMs?: number;
 }
 
 interface WsRemovePreferenceResultMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
+  key?: string;
   type: "remove_preference_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   totalTimeMs?: number;
 }
 
 interface WsClearPreferencesResultMessage extends WsMessageBase {
+  packageName?: string;
+  fileName?: string;
   type: "clear_preferences_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   totalTimeMs?: number;
 }
 
 interface WsInstalledPackagesResultMessage extends WsMessageBase {
   type: "installed_packages_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   userId?: number;
   packages?: InstalledPackageRecord[];
@@ -771,7 +798,7 @@ interface WsInstalledPackagesResultMessage extends WsMessageBase {
 
 interface WsPackageInfoResultMessage extends WsMessageBase {
   type: "package_info_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   packageName?: string;
   isSystem?: boolean;
@@ -790,7 +817,7 @@ interface WsPackageInfoResultMessage extends WsMessageBase {
 
 interface WsLaunchIntentResultMessage extends WsMessageBase {
   type: "launch_intent_result";
-  requestId: string;
+  requestId?: string | null;
   success?: boolean;
   packageName?: string;
   componentName?: string;
@@ -909,6 +936,8 @@ interface WsLifecycleEventMessage extends WsMessageBase {
 }
 
 interface WsStorageChangedMessage extends WsMessageBase {
+  data?: string;
+  eventTimestamp?: number;
   type: "storage_changed";
   packageName?: string;
   fileName?: string;
@@ -1043,7 +1072,7 @@ export function parseCtrlProxyJson<T>(text: string): T {
  * Discriminated union of all WebSocket messages from the accessibility service.
  * The `type` field is the discriminant.
  */
-type WebSocketMessage =
+export type WebSocketMessage =
   | WsConnectedMessage
   | WsHierarchyUpdateMessage
   | WsScreenshotMessage
@@ -5998,12 +6027,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /** Resolve request responses only when the runner supplies a truthy request ID. */
-  private resolvePendingResponse<Message extends { requestId?: string }, Payload>(
+  private resolvePendingResponse<Message extends { requestId?: string | null }, Payload>(
     message: Message,
-    buildPayload: (message: Message) => Payload,
+    buildPayload: (message: Message & { requestId: string }) => Payload,
   ): void {
     if (message.requestId) {
-      this.requestManager.resolve<Payload>(message.requestId, buildPayload(message));
+      this.requestManager.resolve<Payload>(
+        message.requestId,
+        buildPayload(message as Message & { requestId: string }),
+      );
     }
   }
 

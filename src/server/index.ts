@@ -29,6 +29,7 @@ import { formatToolParamError } from "./toolParamError";
 import { stripUndeclaredSessionUuid } from "../utils/toolParams";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
 import { stringifyToolResponse } from "../utils/toolUtils";
+import { carryToolFailureMark } from "../utils/toolFailureSignal";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -268,12 +269,11 @@ async function enrichProvisionDeviceResult<
  * Merge server-computed session fields (`gatedTools`, `enabledTools`) into an
  * acquisition result, in both the text envelope and `structuredContent`.
  */
-function enrichAcquisitionResult<T extends { content: Array<{ type: string; text?: string }> }>(
-  result: T,
-  fields: Record<string, unknown>,
-): T {
+export function enrichAcquisitionResult<
+  T extends { content: Array<{ type: string; text?: string }> },
+>(result: T, fields: Record<string, unknown>): T {
   let enriched = false;
-  return {
+  return carryToolFailureMark(result, {
     ...result,
     content: result.content.map((item: { type: string; text?: string }) => {
       if (enriched || item.type !== "text" || typeof item.text !== "string") {
@@ -290,7 +290,7 @@ function enrichAcquisitionResult<T extends { content: Array<{ type: string; text
           },
         }
       : {}),
-  };
+  });
 }
 
 async function awaitWithCancellation<T>(

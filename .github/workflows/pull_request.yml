@@ -1392,6 +1392,31 @@ jobs:
         run: bash scripts/ci/mac-queue-watchdog.sh
 
   # =============================================================================
+  # Attestation Gate (shadow, advisory) (#11984)
+  # =============================================================================
+  # Advisory, shadow-only, never skips anything (#11984, #11985).
+  # The composite records excluded observations until an actual lane result is supplied.
+  attestation-gate-shadow:
+    name: "Attestation Gate (shadow, advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    needs: detect-changes
+    if: always() && !cancelled() && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: ./.github/actions/attestation-gate
+        with:
+          commit-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+
+  # =============================================================================
   # Node Checks (#10894)
   # =============================================================================
   # One runner slot for the small Node checks that each paid a checkout and an

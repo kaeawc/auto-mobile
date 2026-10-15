@@ -31,7 +31,7 @@ ARG KTFMT_SHA256=aba9753b6ab387926179ab7318ba8e0c33dad483ebc72f633e79522265b1521
 ARG LYCHEE_VERSION=0.19.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_PLATFORM_VERSION=37
-ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
+ARG ANDROID_BUILD_TOOLS_VERSION=37.0.0
 ARG ANDROID_INSTALL_EMULATOR=false
 ARG ANDROID_EMULATOR_API_LEVEL=36
 ARG ANDROID_SYSTEM_IMAGE_VARIANT=google_apis
@@ -150,7 +150,7 @@ RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
     && rm -rf /tmp/commandlinetools.zip /tmp/cmdline-tools
 
 # Accept Android SDK licenses and install components
-# Versions from android/gradle/libs.versions.toml (source of truth): compileSdk=37, buildTools=36.0.0, targetSdk=36.
+# Versions from android/gradle/libs.versions.toml (source of truth): compileSdk=37, buildTools=37.0.0, targetSdk=37.
 # Optional emulator/system image install controlled by ANDROID_INSTALL_EMULATOR
 RUN yes | sdkmanager --licenses || true \
     && sdkmanager --install \

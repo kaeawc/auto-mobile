@@ -202,6 +202,19 @@ class MediaPlayerViewModel : ViewModel() {
     }
   }
 
+  /** Playground scenarios are foreground-only; returning to the host does not auto-resume. */
+  fun onHostStopped() {
+    val player = _playerState.value ?: return
+    val playback =
+      object : HostPlayback {
+        override val playWhenReady: Boolean
+          get() = player.playWhenReady
+
+        override fun pause() = player.pause()
+      }
+    playback.onHostStopped()
+  }
+
   /** Seek to a specific position in the media. */
   fun seekTo(positionMs: Long) {
     _playerState.value?.seekTo(positionMs)
@@ -303,4 +316,18 @@ class MediaPlayerViewModel : ViewModel() {
     super.onCleared()
     releasePlayer()
   }
+}
+
+/** Minimal playback surface for the foreground-only host lifecycle policy. */
+internal interface HostPlayback {
+  val playWhenReady: Boolean
+
+  fun pause()
+}
+
+/**
+ * Clear play intent, including while buffering, leaving paused and uninitialized hosts untouched.
+ */
+internal fun HostPlayback?.onHostStopped() {
+  if (this?.playWhenReady == true) pause()
 }

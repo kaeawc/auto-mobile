@@ -179,10 +179,10 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
     "F-pre-dispatch",
     "F-fresh-retry",
     "F-second-android",
-    "F-second-ios",
+    "F-double-ios",
   ] as const) {
     test.each(cases)(`${site}: $label`, async (scenario) => {
-      const h = harness(scenario, site === "F-second-ios" ? "ios" : "android");
+      const h = harness(scenario, site === "F-double-ios" ? "ios" : "android");
       let dispatches = 0;
       const transition = () => {
         if (scenario.count) {
@@ -198,7 +198,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
       }
       const dispatch = async () => {
         dispatches++;
-        if (site.startsWith("F-second") && dispatches === 1) {
+        if ((site.startsWith("F-second") || site === "F-double-ios") && dispatches === 1) {
           transition();
         }
         if (site === "F-fresh-retry" && dispatches === 1) {
@@ -215,6 +215,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
         iosClient: client,
         dispatchAndroidCoordinateTap: dispatch,
         dispatchIosCoordinateTap: dispatch,
+        dispatchIosDoubleTap: dispatch,
         invalidateIosCache: () => {},
       });
       setFakeTapAtWindow(action);
@@ -237,10 +238,15 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
       const result = await action.execute({
         x: 20,
         y: 30,
-        ...(site.startsWith("F-second") ? { action: "doubleTap" as const } : {}),
+        ...(site.startsWith("F-second") || site === "F-double-ios"
+          ? { action: "doubleTap" as const }
+          : {}),
         ...(site === "F-pre-dispatch" ? { snapshotId: "fake-reference" } : {}),
       });
-      const fenced = scenario.count > 0 && (site !== "D" || scenario.prior);
+      // iOS delivers a double tap as ONE runner request, so a transition during that request
+      // lands after the gesture was already dispatched: there is no second tap left to fence.
+      const fenced =
+        site !== "F-double-ios" && scenario.count > 0 && (site !== "D" || scenario.prior);
       if (fenced) {
         assertResult(result, scenario.prior ? h.screen.display.generation : 7, 7 + scenario.count);
       } else {

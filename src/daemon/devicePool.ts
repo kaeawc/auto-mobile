@@ -1,4 +1,16 @@
 import {
+  deviceHold,
+  genericAvailabilityOf,
+  holdAllowsHealthRecovery,
+  holdAllowsObservationServiceStart,
+  holdBlocksAssignment,
+  poolBucketOf,
+  type DeviceHoldFacts,
+  type GenericAvailability,
+  type PoolStatusBucket,
+} from "./deviceHold";
+export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
+import {
   DeviceAllocation,
   type AllocationDiscoverySnapshots,
   type AssignableIdleDeviceSelection,
@@ -261,35 +273,6 @@ function resolveConsoleBusyRegistry(
   registry: EmulatorConsoleBusyRegistry | undefined,
 ): EmulatorConsoleBusyRegistry {
   return registry ?? defaultEmulatorConsoleBusyRegistry;
-}
-
-/**
- * Error class for device pool operations with retryability flag.
- */
-/**
- * Who, if anyone, keeps generic allocation off a pooled device: a managed slot, another AutoMobile
- * daemon, or a readiness/shutdown/recovery reservation. Every inventory surface derives its
- * "available" and `poolStatus` from this one answer.
- */
-export type GenericAvailability = "free" | "managed_slot" | "foreign_daemon" | "reserved";
-
-/** The three buckets `getStats()` and every per-device `poolStatus` partition the pool into. */
-export type PoolStatusBucket = "idle" | "assigned" | "error";
-
-/**
- * The one per-device classification behind `getStats()`, `getStatsForPlatform`, `listDevices`
- * and the booted resources: every device is in exactly one bucket. An errored device is `error`
- * whatever else holds it; a busy device, or an idle one allocation cannot lend (held by a slot,
- * another daemon, a reservation, or carrying a health marker), is `assigned`; the rest are `idle`.
- */
-export function classifyPoolStatus(
-  status: PooledDevice["status"],
-  unlendable: boolean,
-): PoolStatusBucket {
-  if (status === "error") {
-    return "error";
-  }
-  return status === "busy" || unlendable ? "assigned" : "idle";
 }
 
 /** A stop's daemon-confirmed stable identity; labels supplied by the caller are only hints. */
@@ -1322,11 +1305,9 @@ export class DevicePool {
       (id) => this.getDeviceIncarnation(id),
       (id) => {
         const device = this.devices.get(id);
-        return (
-          device?.status === "idle" &&
-          !device.sessionId &&
-          !this.sessionManager.hasDeviceCleanupInProgress(id)
-        );
+        return device
+          ? holdAllowsHealthRecovery(deviceHold(this.holdFactsFor(device, undefined, "health")))
+          : false;
       },
       backoff,
     );
@@ -6729,54 +6710,141 @@ export class DevicePool {
   /** Conservative, read-only admission for session-less hierarchy service setup. */
   isSafeForObservationServiceStart(deviceId: string): boolean {
     const device = this.devices.get(deviceId);
-    if (!device || device.sessionId || device.status !== "idle") {
-      return false;
-    }
-    const stableId = this.stableDeviceIdFor(device);
-    if (stableId === undefined) {
-      return false;
-    }
-    const recovery = this.getRecoveringAndroidTargets();
-    const blocked = [
-      this.assignmentMutex.isLocked(),
-      this.isReservedForAssignment(device),
-      this.deferredDeviceReleases.has(deviceId),
-      this.sessionManager.hasDeviceCleanupInProgress(deviceId),
-      this.sessionManager.getSessionForDevice(deviceId) !== null,
-      !!this.getDeviceHealthMarker(deviceId),
-      !!device.identityUnresolved,
-      !!device.identityReconcileOwner,
-      !!device.adbServerResetSessionId,
-      device.platform === "android" &&
-        this.adbServerResetQuarantine.isLeasedForAndroidStartup(stableId),
-      recovery.serials.has(deviceId),
-      recovery.names.has(device.name),
-      recovery.names.has(stableId),
-      Array.from(this.recoveringSessionLosses.values()).some(
-        (record) => record.deviceId === deviceId && record.state !== "finalized",
-      ),
-      Array.from(this.mcpSessionRecoveryDevices.values()).some((lease) => lease.device === device),
-      this.lifecycleCoordinator.isReserved({ kind: "stable", platform: device.platform, stableId }),
-      this.lifecycleCoordinator.isReserved({
-        kind: "selector",
-        platform: device.platform,
-        selector: device.name,
-      }),
-    ];
-    return !blocked.some(Boolean);
+    return device
+      ? holdAllowsObservationServiceStart(
+          deviceHold(this.holdFactsFor(device, undefined, "observation")),
+        )
+      : false;
   }
 
   /**
-   * `forSessionId` is the session the question is asked for: a restart-recovery reservation
-   * (#11294) holds the device against everyone but the row it was made for.
+   * Snapshot only the facts the named `consumer` read before #11803, then classify them with
+   * `deviceHold`. Each consumer keeps its old probe set and order: generic allocation never reads
+   * observation recovery targets, and held inventory never probes transport/health. Probes are
+   * called on this instance so injected test seams still work.
    */
+  private holdFactsFor(
+    device: PooledDevice,
+    forSessionId?: string,
+    consumer: "assignment" | "generic" | "bucket" | "observation" | "health" = "assignment",
+  ): DeviceHoldFacts {
+    const base: DeviceHoldFacts = { status: device.status, sessionId: device.sessionId };
+    const reservationFacts = (): DeviceHoldFacts => {
+      const ownReadiness = this.restartReadinessOwners(device, forSessionId);
+      if (this.isReservedForReadiness(device.id, ownReadiness)) {
+        return { ...base, readinessById: true };
+      }
+      if (this.hasReadinessNameReservation(device, ownReadiness)) {
+        return { ...base, readinessByName: true };
+      }
+      if (this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(device.id)) {
+        return { ...base, recoveryHandoff: true };
+      }
+      if (
+        this.isReservedForShutdown(device) ||
+        this.shutdownReservationCoordinator.isDeviceUnderShutdown(device.id)
+      ) {
+        return { ...base, shutdown: true };
+      }
+      const holder = this.rehydrationReservationHolder(device);
+      return { ...base, rehydrationHolder: holder !== forSessionId ? holder : undefined };
+    };
+    const observationFacts = (): DeviceHoldFacts => {
+      if (device.sessionId || device.status !== "idle") {
+        return base;
+      }
+      const stableId = this.stableDeviceIdFor(device);
+      if (stableId === undefined) {
+        return { ...base, stableIdentityMissing: true };
+      }
+      const recovery = this.getRecoveringAndroidTargets();
+      // The old observation array evaluated every term, even when an earlier term blocked it.
+      const assignmentMutexLocked = this.assignmentMutex.isLocked();
+      const reservations = this.holdFactsFor(device, forSessionId);
+      return {
+        ...reservations,
+        assignmentMutexLocked,
+        deferredRelease: this.deferredDeviceReleases.has(device.id),
+        cleanupInProgress: this.sessionManager.hasDeviceCleanupInProgress(device.id),
+        sessionForDevice: this.sessionManager.getSessionForDevice(device.id) ?? undefined,
+        healthMarker: !!this.getDeviceHealthMarker(device.id),
+        identityUnresolved: !!device.identityUnresolved,
+        identityReconcileOwner: device.identityReconcileOwner,
+        adbServerResetSessionId: device.adbServerResetSessionId,
+        adbStartupLease:
+          device.platform === "android" &&
+          this.adbServerResetQuarantine.isLeasedForAndroidStartup(stableId),
+        recoveringSerial: recovery.serials.has(device.id),
+        recoveringName: recovery.names.has(device.name),
+        recoveringStableId: recovery.names.has(stableId),
+        recoveringSessionLoss: Array.from(this.recoveringSessionLosses.values()).some(
+          (record) => record.deviceId === device.id && record.state !== "finalized",
+        ),
+        mcpSessionRecoveryLease: Array.from(this.mcpSessionRecoveryDevices.values()).some(
+          (lease) => lease.device === device,
+        ),
+        lifecycleStableReservation: this.lifecycleCoordinator.isReserved({
+          kind: "stable",
+          platform: device.platform,
+          stableId,
+        }),
+        lifecycleSelectorReservation: this.lifecycleCoordinator.isReserved({
+          kind: "selector",
+          platform: device.platform,
+          selector: device.name,
+        }),
+      };
+    };
+    const allocationFacts = (): DeviceHoldFacts => {
+      if (this.isManagedSlotDevice(device)) {
+        return { ...base, managedSlot: true };
+      }
+      if (this.isDrivenByForeignDaemon(device)) {
+        return { ...base, foreignDaemon: true };
+      }
+      const reservations = this.holdFactsFor(device, forSessionId);
+      if (consumer === "generic" || holdBlocksAssignment(deviceHold(reservations))) {
+        return reservations;
+      }
+      // isPotentialAllocationSupply's order: error, transport alias, then health marker.
+      const transportAliasUnassignable =
+        device.status !== "error" &&
+        !this.androidTransportAliases.isAssignable({
+          deviceId: device.id,
+          name: device.name,
+          platform: device.platform,
+        });
+      return {
+        ...reservations,
+        transportAliasUnassignable,
+        healthMarker:
+          device.status !== "error" &&
+          !transportAliasUnassignable &&
+          !!this.getDeviceHealthMarker(device.id),
+      };
+    };
+    switch (consumer) {
+      case "assignment":
+        return reservationFacts();
+      case "observation":
+        return observationFacts();
+      case "health":
+        return {
+          ...base,
+          cleanupInProgress:
+            device.status === "idle" &&
+            !device.sessionId &&
+            this.sessionManager.hasDeviceCleanupInProgress(device.id),
+        };
+      case "generic":
+      case "bucket":
+        return allocationFacts();
+    }
+  }
+
+  /** Requester-relative restart/readiness exemptions are gathered before classification. */
   private isReservedForAssignment(device: PooledDevice, forSessionId?: string): boolean {
-    const ownReadiness = this.restartReadinessOwners(device, forSessionId);
-    return (
-      this.isReservedForReadiness(device.id, ownReadiness) ||
-      this.hasReadinessNameReservation(device, ownReadiness) ||
-      this.isReservedOutsideReadiness(device, forSessionId)
-    );
+    return holdBlocksAssignment(deviceHold(this.holdFactsFor(device, forSessionId)));
   }
 
   private isReservedOutsideReadiness(device: PooledDevice, forSessionId?: string): boolean {
@@ -8336,16 +8404,9 @@ export class DevicePool {
    */
   genericAvailability(deviceId: string): GenericAvailability {
     const device = this.devices.get(deviceId);
-    if (!device) {
-      return "free";
-    }
-    if (this.isManagedSlotDevice(device)) {
-      return "managed_slot";
-    }
-    if (this.isDrivenByForeignDaemon(device)) {
-      return "foreign_daemon";
-    }
-    return this.isReservedForAssignment(device) ? "reserved" : "free";
+    return device
+      ? genericAvailabilityOf(deviceHold(this.holdFactsFor(device, undefined, "generic")))
+      : "free";
   }
 
   /** A managed slot or another daemon holds the device, so generic allocation never lends it. */
@@ -8769,11 +8830,7 @@ export class DevicePool {
 
   /** A device allocation cannot lend (#11387): held, reserved, or carrying a health marker. */
   private poolBucketFor(device: PooledDevice): PoolStatusBucket {
-    const unlendable =
-      this.isHeldOutsideGenericAllocation(device) ||
-      this.isReservedForAssignment(device) ||
-      !this.isPotentialAllocationSupply(device);
-    return classifyPoolStatus(device.status, unlendable);
+    return poolBucketOf(deviceHold(this.holdFactsFor(device, undefined, "bucket")));
   }
 
   /** The bucket {@link getStats} counts `deviceId` in, or null when the pool does not know it. */

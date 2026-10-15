@@ -18,6 +18,7 @@ class HingeFallbackPostureSourceTest {
 
   private class FakeSource : PostureSource {
     var listener: ((List<FoldPosture>) -> Unit)? = null
+    var initialPostures: List<FoldPosture>? = null
     var closes = 0
     var observeFailure: Throwable? = null
     var closeFailure: Throwable? = null
@@ -25,6 +26,7 @@ class HingeFallbackPostureSourceTest {
     override fun observe(onPostures: (List<FoldPosture>) -> Unit): AutoCloseable {
       listener = onPostures
       observeFailure?.let { throw it }
+      initialPostures?.let(onPostures)
       return AutoCloseable {
         closes++
         closeFailure?.let { throw it }
@@ -170,11 +172,18 @@ class HingeFallbackPostureSourceTest {
   fun `hinge registration failures warn and primary still delivers`() {
     for (failure in listOf(IllegalStateException("hinge"), NoClassDefFoundError("hinge"))) {
       val fixture = Fixture()
+      fixture.primary.initialPostures = emptyList()
       fixture.hinge.observeFailure = failure
       val registration = fixture.observe()
+      assertEquals(listOf(emptyList<FoldPosture>()), fixture.delivered)
+      fixture.primary.emit()
       fixture.primary.emit(flat)
+      fixture.primary.emit()
       fixture.primary.emit(halfOpened)
-      assertEquals(listOf(listOf(flat), listOf(halfOpened)), fixture.delivered)
+      assertEquals(
+        listOf(emptyList(), emptyList(), listOf(flat), emptyList(), listOf(halfOpened)),
+        fixture.delivered,
+      )
       assertEquals(
         listOf("fold-posture hinge-angle source failed; relying on WindowManager only" to failure),
         fixture.warnings,
@@ -188,9 +197,14 @@ class HingeFallbackPostureSourceTest {
   fun `missing hinge sensor logs once and primary still works`() {
     val fixture = Fixture()
     val registration = fixture.observe(HingeAngleSource { null })
+    fixture.primary.emit()
     fixture.primary.emit(flat)
+    fixture.primary.emit()
     fixture.primary.emit(halfOpened)
-    assertEquals(listOf(listOf(flat), listOf(halfOpened)), fixture.delivered)
+    assertEquals(
+      listOf(emptyList(), listOf(flat), emptyList(), listOf(halfOpened)),
+      fixture.delivered,
+    )
     assertEquals(
       1,
       fixture.infos.count {
@@ -200,6 +214,67 @@ class HingeFallbackPostureSourceTest {
     assertTrue(fixture.warnings.isEmpty())
     registration.close()
     assertEquals(1, fixture.primary.closes)
+  }
+
+  @Test
+  fun `missing hinge replays empty layout received during primary registration`() {
+    val fixture = Fixture()
+    fixture.primary.initialPostures = emptyList()
+    val registration = fixture.observe(HingeAngleSource { null })
+    assertEquals(listOf(emptyList<FoldPosture>()), fixture.delivered)
+    fixture.primary.emit()
+    fixture.primary.emit(flat)
+    assertEquals(listOf(emptyList(), emptyList(), listOf(flat)), fixture.delivered)
+    assertTrue(fixture.warnings.isEmpty())
+    registration.close()
+  }
+
+  @Test
+  fun `missing hinge does not replay pending empty once primary is active`() {
+    val fixture = Fixture()
+    fixture.primary.initialPostures = emptyList()
+    val registration =
+      fixture.observe(
+        HingeAngleSource {
+          fixture.primary.emit(flat)
+          null
+        },
+      )
+    assertEquals(listOf(listOf(flat)), fixture.delivered)
+    fixture.primary.emit()
+    assertEquals(listOf(listOf(flat), emptyList()), fixture.delivered)
+    registration.close()
+  }
+
+  @Test
+  fun `hinge listener failures warn without propagating or stopping deliveries`() {
+    val fixture = Fixture()
+    val failure = IllegalStateException("listener")
+    val registration =
+      fixture.source().observe {
+        fixture.delivered += it
+        if (it == listOf(flat)) throw failure
+      }
+    fixture.hinge.emit(180f)
+    fixture.hinge.emit(90f)
+    assertEquals(listOf(listOf(flat), listOf(halfOpened)), fixture.delivered)
+    assertEquals(listOf("fold-posture hinge-angle listener failed" to failure), fixture.warnings)
+    registration.close()
+  }
+
+  @Test
+  fun `hinge listener cancellation propagates without warning`() {
+    val fixture = Fixture()
+    val cancellation = CancellationException("listener cancelled")
+    val registration = fixture.source().observe { throw cancellation }
+    try {
+      fixture.hinge.emit(180f)
+      fail("Expected cancellation")
+    } catch (actual: CancellationException) {
+      assertSame(cancellation, actual)
+    }
+    assertTrue(fixture.warnings.isEmpty())
+    registration.close()
   }
 
   @Test

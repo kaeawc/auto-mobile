@@ -63,7 +63,10 @@ internal class HingeFallbackPostureSource(
 ) : PostureSource {
   override fun observe(onPostures: (List<FoldPosture>) -> Unit): AutoCloseable {
     val closed = AtomicBoolean(false)
+    // Once a folding feature activates primary, it stays active permanently.
     val primaryActive = AtomicBoolean(false)
+    val hingeUnavailable = AtomicBoolean(false)
+    val pendingEmpty = AtomicBoolean(false)
     val firstLayout = AtomicBoolean(true)
     val initialEmptyLogged = AtomicBoolean(false)
     val fallbackLogged = AtomicBoolean(false)
@@ -94,10 +97,22 @@ internal class HingeFallbackPostureSource(
               onPostures(postures)
             } else if (primaryActive.get()) {
               onPostures(postures)
-            } else if (initialEmptyLogged.compareAndSet(false, true)) {
-              info(
-                "WindowManager reported no folding feature (initial layout); hinge-angle fallback stays armed",
-              )
+            } else {
+              if (initialEmptyLogged.compareAndSet(false, true)) {
+                info(
+                  "WindowManager reported no folding feature (initial layout); hinge-angle fallback stays armed",
+                )
+              }
+              if (hingeUnavailable.get()) {
+                onPostures(postures)
+              } else {
+                pendingEmpty.set(true)
+                if (
+                  hingeUnavailable.get() && pendingEmpty.getAndSet(false) && !primaryActive.get()
+                ) {
+                  onPostures(emptyList())
+                }
+              }
             }
           }
         }
@@ -121,7 +136,13 @@ internal class HingeFallbackPostureSource(
                 if (fallbackLogged.compareAndSet(false, true)) {
                   info("WindowManager silent; using hinge-angle fallback (angle=$angle)")
                 }
-                onPostures(postures)
+                try {
+                  onPostures(postures)
+                } catch (e: CancellationException) {
+                  throw e
+                } catch (e: Exception) {
+                  warn("fold-posture hinge-angle listener failed", e)
+                }
               }
             }
           }
@@ -141,6 +162,13 @@ internal class HingeFallbackPostureSource(
         warn("fold-posture hinge-angle source failed; relying on WindowManager only", e)
         null
       }
+
+    if (hingeRegistration == null) {
+      hingeUnavailable.set(true)
+      if (pendingEmpty.getAndSet(false) && !primaryActive.get()) {
+        onPostures(emptyList())
+      }
+    }
 
     return AutoCloseable {
       if (closed.compareAndSet(false, true)) {

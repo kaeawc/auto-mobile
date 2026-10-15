@@ -133,7 +133,9 @@ class DeviceStateTransitionsRegistrationTest {
         Pre28FakeContext(manager),
         sdkInt = 31,
         loadClass = ::loadClass,
-      ) { states += it }
+      ) {
+        states += it
+      }
 
     assertNotNull(registration)
     shadowOf(Looper.getMainLooper()).idle()

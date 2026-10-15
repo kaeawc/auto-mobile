@@ -1,3 +1,4 @@
+import { DeviceReplacement } from "./deviceReplacement";
 import {
   MultiDeviceAllocationQueue,
   describeMultiDeviceAllocationAttempts,
@@ -1020,6 +1021,7 @@ export class DevicePool {
   private readonly connectionOwnership = this.createConnectionOwnership();
   private readonly deviceAutoStart = this.createDeviceAutoStart();
   private readonly deviceReservations = this.createDeviceReservations();
+  private readonly deviceReplacement = this.createDeviceReplacement();
 
   /** Kept under its pre-extraction name; owned by DeviceReservations (test internals read it). */
   private get restartReadiness(): ReadonlySet<unknown> {
@@ -1477,6 +1479,78 @@ export class DevicePool {
     return new ConnectionOwnership({
       foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
       getDevice: (deviceId) => this.devices.get(deviceId),
+    });
+  }
+
+  private createDeviceReplacement(): DeviceReplacement {
+    // Field initialization precedes dependency setup; defer reads until replacement use.
+    const pool = this;
+    return new DeviceReplacement({
+      get assignmentMutex() {
+        return pool.assignmentMutex;
+      },
+      isPooledEntryCurrent: (device) => this.isPooledEntryCurrent(device),
+      get runtimeIdentity() {
+        return pool.runtimeIdentity;
+      },
+      releaseCapturedDeviceForShutdown: (device) => this.releaseCapturedDeviceForShutdown(device),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice, options) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice, options),
+      get devices() {
+        return pool.devices;
+      },
+      get intentionalShutdowns() {
+        return pool.intentionalShutdowns;
+      },
+      addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
+        this.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
+      sourceImageForSameAndroidReplacement: (expectedDevice, replacement) =>
+        this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),
+      assertSystemUiAnrReplacement: (expectedDevice, replacement, sourceImage) =>
+        this.assertSystemUiAnrReplacement(expectedDevice, replacement, sourceImage),
+      systemUiAnrRecoverySession: (expectedDevice) =>
+        this.systemUiAnrRecoverySession(expectedDevice),
+      trackStartedDeviceProcess: (device, childProcess) =>
+        this.trackStartedDeviceProcess(device, childProcess),
+      cancelOldDeviceWorkForSystemUiAnr: (deviceId, excludeExecutionId) =>
+        this.cancelOldDeviceWorkForSystemUiAnr(deviceId, excludeExecutionId),
+      recordSourceAndroidAvd: (deviceId, sourceImage) =>
+        this.recordSourceAndroidAvd(deviceId, sourceImage),
+      get pooledSessionIdentities() {
+        return pool.pooledSessionIdentities;
+      },
+      nextLastUsedAt: () => this.nextLastUsedAt(),
+      rollbackSystemUiAnrRecoveryReplacement: (replacementDevice, preservedSession) =>
+        this.rollbackSystemUiAnrRecoveryReplacement(replacementDevice, preservedSession),
+      settleSystemUiAnrOriginalClaim: (originalDeviceId) =>
+        this.settleSystemUiAnrOriginalClaim(originalDeviceId),
+      transferMcpSessionRecoveryLeases: (previous, replacement) =>
+        this.transferMcpSessionRecoveryLeases(previous, replacement),
+      validateSystemUiAnrRecoverySession: (preservedSession, replacementDevice) =>
+        this.validateSystemUiAnrRecoverySession(preservedSession, replacementDevice),
+      releaseDeviceClaim: (deviceId) => this.releaseDeviceClaim(deviceId),
+      get sessionManager() {
+        return pool.sessionManager;
+      },
+      retrySessionRelease: (sessionId, deviceId, attempt) =>
+        this.retrySessionRelease(sessionId, deviceId, attempt),
+      get cancelDeviceSessionExecutions() {
+        return pool.cancelDeviceSessionExecutions;
+      },
+      foreignOwnershipFor: (platform) => this.foreignOwnershipFor(platform),
+      get connectionOwnership() {
+        return pool.connectionOwnership;
+      },
+      get criteriaMatcher() {
+        return pool.criteriaMatcher;
+      },
+      get lastReleasedDeviceId() {
+        return pool.lastReleasedDeviceId;
+      },
+      set lastReleasedDeviceId(value) {
+        pool.lastReleasedDeviceId = value;
+      },
+      notifyDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
     });
   }
 
@@ -6847,31 +6921,12 @@ export class DevicePool {
     beforeReplacementPublishes?: () => void,
     options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
   ): Promise<PooledDevice | undefined> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      if (!this.isPooledEntryCurrent(expectedDevice)) {
-        return undefined;
-      }
-      // A kill's same-serial successor must not inherit the old device's work.
-      // System UI recovery uses its separate session-preserving handoff.
-      await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
-      if (!this.isPooledEntryCurrent(expectedDevice)) {
-        return undefined;
-      }
-      this.releaseCapturedDeviceForShutdown(expectedDevice);
-      await this.removeDevice(expectedDevice.id, false, expectedDevice);
-      if (this.devices.has(expectedDevice.id)) {
-        return undefined;
-      }
-      this.intentionalShutdowns.delete(expectedDevice.id);
-      beforeReplacementPublishes?.();
-      await this.addDevice(
-        replacement,
-        this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),
-        false,
-        this.runtimeIdentity.identityEvidenceForBootedDevice(replacement),
-      );
-      return this.devices.get(replacement.deviceId);
-    });
+    return this.deviceReplacement.replaceDeviceForShutdown(
+      expectedDevice,
+      replacement,
+      beforeReplacementPublishes,
+      options,
+    );
   }
 
   /**
@@ -6887,76 +6942,14 @@ export class DevicePool {
     beforeReplacementPublishes?: () => void,
     excludeExecutionId?: string,
   ): Promise<SystemUiAnrRecoveryHandoff> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      // The caller's marker must cover the entire visible replacement
-      // lifecycle, including a replacement that another pool path has already
-      // discovered. It is moved before any session rebind or addDevice call.
-      beforeReplacementPublishes?.();
-      const currentExpectedDevice = this.devices.get(expectedDevice.id);
-      const existingReplacement = this.devices.get(replacement.deviceId);
-      if (
-        currentExpectedDevice !== expectedDevice &&
-        (existingReplacement === undefined || existingReplacement === expectedDevice)
-      ) {
-        throw new ActionableError(
-          `Device '${expectedDevice.id}' changed while System UI recovery was in progress.`,
-        );
-      }
-      this.assertSystemUiAnrReplacement(expectedDevice, replacement, sourceImage);
-
-      const preservedSession = this.systemUiAnrRecoverySession(expectedDevice);
-      const preservedSessionId = preservedSession?.sessionId;
-      const preservedAutolockSessionId = expectedDevice.autolockSessionId;
-      let replacementDevice: PooledDevice | undefined;
-      try {
-        replacementDevice = await this.replaceStoppedDeviceForSystemUiAnr(
-          expectedDevice,
-          replacement,
-          sourceImage,
-          beforeReplacementPublishes,
-          excludeExecutionId,
-        );
-        await this.trackStartedDeviceProcess(replacement, childProcess);
-        if (!this.isPooledEntryCurrent(replacementDevice)) {
-          throw new ActionableError(
-            `Replacement device '${replacementDevice.id}' exited before its recovery session was rebound.`,
-          );
-        }
-        await this.restoreSystemUiAnrRecoverySession(
-          preservedSession,
-          expectedDevice.id,
-          replacementDevice,
-          preservedAutolockSessionId,
-        );
-      } catch (error) {
-        // Once the handoff has detached the original incarnation, roll any
-        // replacement back and release the preserved session so caller cleanup
-        // cannot leave an idle device mapped to the stopped serial.
-        const originalWasDetached =
-          !this.isPooledEntryCurrent(expectedDevice) ||
-          (preservedSession !== undefined && expectedDevice.sessionId === null);
-        if (originalWasDetached) {
-          await this.rollbackSystemUiAnrRecoveryReplacement(replacementDevice, preservedSession);
-        }
-        throw error;
-      } finally {
-        this.settleSystemUiAnrOriginalClaim(expectedDevice.id);
-      }
-      if (!replacementDevice) {
-        throw new ActionableError(
-          `Replacement device '${replacement.deviceId}' was not retained by the device pool.`,
-        );
-      }
-      this.transferMcpSessionRecoveryLeases(expectedDevice, replacementDevice);
-      this.intentionalShutdowns.delete(expectedDevice.id);
-      return {
-        preservedSessionId,
-        replacementDevice,
-        validatePreservedSession: async () => {
-          await this.validateSystemUiAnrRecoverySession(preservedSession, replacementDevice);
-        },
-      };
-    });
+    return this.deviceReplacement.replaceDeviceForSystemUiAnrRecovery(
+      expectedDevice,
+      replacement,
+      sourceImage,
+      childProcess,
+      beforeReplacementPublishes,
+      excludeExecutionId,
+    );
   }
 
   /**
@@ -6967,56 +6960,27 @@ export class DevicePool {
    * give it up.
    */
   private settleSystemUiAnrOriginalClaim(originalDeviceId: string): void {
-    if (!this.devices.get(originalDeviceId)?.sessionId) {
-      this.releaseDeviceClaim(originalDeviceId);
-    }
+    return this.deviceReplacement.settleSystemUiAnrOriginalClaim(originalDeviceId);
   }
 
   private async validateSystemUiAnrRecoverySession(
     preservedSession: Session | undefined,
     replacementDevice: PooledDevice,
   ): Promise<void> {
-    if (!preservedSession) {
-      return;
-    }
-    await this.assignmentMutex.runExclusive(() => {
-      if (
-        !this.isPooledEntryCurrent(replacementDevice) ||
-        replacementDevice.sessionId !== preservedSession.sessionId ||
-        replacementDevice.status !== "busy" ||
-        this.sessionManager.getSession(preservedSession.sessionId) !== preservedSession ||
-        preservedSession.assignedDevice !== replacementDevice.id
-      ) {
-        throw new ActionableError(
-          `Session '${preservedSession.sessionId}' was released while System UI recovery was becoming ready.`,
-        );
-      }
-    });
+    return this.deviceReplacement.validateSystemUiAnrRecoverySession(
+      preservedSession,
+      replacementDevice,
+    );
   }
 
   private async rollbackSystemUiAnrRecoveryReplacement(
     replacementDevice: PooledDevice | undefined,
     preservedSession: Session | undefined,
   ): Promise<void> {
-    if (replacementDevice) {
-      await this.removeDevice(replacementDevice.id, false, replacementDevice);
-    }
-    if (
-      preservedSession &&
-      this.sessionManager.getSession(preservedSession.sessionId) === preservedSession
-    ) {
-      await this.retrySessionRelease(
-        preservedSession.sessionId,
-        preservedSession.assignedDevice,
-        () =>
-          this.sessionManager.releaseSessionIfOwned(
-            preservedSession.sessionId,
-            preservedSession,
-            preservedSession.assignedDevice,
-            deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
-          ),
-      );
-    }
+    return this.deviceReplacement.rollbackSystemUiAnrRecoveryReplacement(
+      replacementDevice,
+      preservedSession,
+    );
   }
 
   private assertSystemUiAnrReplacement(
@@ -7024,29 +6988,15 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
   ): void {
-    if (
-      expectedDevice.platform !== "android" ||
-      replacement.platform !== "android" ||
-      sourceImage.platform !== "android" ||
-      replacement.name !== sourceImage.name
-    ) {
-      throw new ActionableError(
-        `System UI recovery must replace Android AVD '${sourceImage.name}' with the same runtime.`,
-      );
-    }
+    return this.deviceReplacement.assertSystemUiAnrReplacement(
+      expectedDevice,
+      replacement,
+      sourceImage,
+    );
   }
 
   private systemUiAnrRecoverySession(expectedDevice: PooledDevice): Session | undefined {
-    const sessionId = expectedDevice.sessionId;
-    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
-    if (
-      session === null ||
-      session.assignedDevice !== expectedDevice.id ||
-      session.platform !== "android"
-    ) {
-      return undefined;
-    }
-    return session;
+    return this.deviceReplacement.systemUiAnrRecoverySession(expectedDevice);
   }
 
   private async replaceStoppedDeviceForSystemUiAnr(
@@ -7056,92 +7006,27 @@ export class DevicePool {
     beforeReplacementPublishes?: () => void,
     excludeExecutionId?: string,
   ): Promise<PooledDevice> {
-    const priorAssignmentCount = expectedDevice.assignmentCount;
-    const priorLastUsedAt = expectedDevice.lastUsedAt;
-    const existingReplacement = this.devices.get(replacement.deviceId);
-
-    if (existingReplacement && existingReplacement !== expectedDevice) {
-      this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
-      if (this.isPooledEntryCurrent(expectedDevice)) {
-        await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
-        this.releaseCapturedDeviceForShutdown(expectedDevice);
-        await this.removeDevice(expectedDevice.id, false, expectedDevice, {
-          keepDeviceClaim: true,
-        });
-      }
-      return await this.adoptSystemUiAnrReplacement(
-        existingReplacement,
-        sourceImage,
-        priorAssignmentCount,
-        priorLastUsedAt,
-      );
-    }
-
-    // removeDevice rejects busy entries, so detach pool ownership only after
-    // capturing any session that must be rebound below. The replacement remains
-    // unavailable through the caller's readiness reservation while this runs. The session's
-    // claim stays published across the removal; the caller settles it when the handoff ends.
-    await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
-    this.releaseCapturedDeviceForShutdown(expectedDevice);
-    await this.removeDevice(expectedDevice.id, false, expectedDevice, { keepDeviceClaim: true });
-    if (this.devices.has(replacement.deviceId)) {
-      throw new ActionableError(
-        `Replacement device '${replacement.deviceId}' was already added to the device pool.`,
-      );
-    }
-
-    await this.addDevice(
+    return this.deviceReplacement.replaceStoppedDeviceForSystemUiAnr(
+      expectedDevice,
       replacement,
       sourceImage,
-      false,
-      this.runtimeIdentity.identityEvidenceForBootedDevice(replacement),
+      beforeReplacementPublishes,
+      excludeExecutionId,
     );
-    const replacementDevice = this.devices.get(replacement.deviceId);
-    if (!replacementDevice) {
-      throw new ActionableError(
-        `Replacement device '${replacement.deviceId}' was not retained by the device pool.`,
-      );
-    }
-    replacementDevice.assignmentCount = priorAssignmentCount;
-    replacementDevice.lastUsedAt = priorLastUsedAt;
-    return replacementDevice;
   }
 
   private async cancelOldDeviceWorkForSystemUiAnr(
     deviceId: string,
     excludeExecutionId?: string,
   ): Promise<void> {
-    if (excludeExecutionId === undefined) {
-      logger.warn(
-        `[DevicePool] Left old-device work running for ${deviceId} because the System UI ANR recovery execution is unknown`,
-      );
-      return;
-    }
-    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
-      deviceId,
-      deviceLossCancellationReason(deviceId),
-      { excludeExecutionId },
-    );
+    return this.deviceReplacement.cancelOldDeviceWorkForSystemUiAnr(deviceId, excludeExecutionId);
   }
 
   private assertPooledSystemUiAnrReplacement(
     replacement: PooledDevice,
     sourceImage: DeviceInfo,
   ): void {
-    if (
-      replacement.platform !== "android" ||
-      sourceImage.platform !== "android" ||
-      replacement.name !== sourceImage.name
-    ) {
-      throw new ActionableError(
-        `System UI recovery replacement '${replacement.id}' does not match Android AVD '${sourceImage.name}'.`,
-      );
-    }
-    if (replacement.status !== "idle" || replacement.sessionId !== null) {
-      throw new ActionableError(
-        `System UI recovery replacement '${replacement.id}' is already assigned to a session.`,
-      );
-    }
+    return this.deviceReplacement.assertPooledSystemUiAnrReplacement(replacement, sourceImage);
   }
 
   private async adoptSystemUiAnrReplacement(
@@ -7150,10 +7035,12 @@ export class DevicePool {
     priorAssignmentCount: number,
     priorLastUsedAt: number,
   ): Promise<PooledDevice> {
-    this.recordSourceAndroidAvd(replacementDevice.id, sourceImage);
-    replacementDevice.assignmentCount = priorAssignmentCount;
-    replacementDevice.lastUsedAt = priorLastUsedAt;
-    return replacementDevice;
+    return this.deviceReplacement.adoptSystemUiAnrReplacement(
+      replacementDevice,
+      sourceImage,
+      priorAssignmentCount,
+      priorLastUsedAt,
+    );
   }
 
   private async restoreSystemUiAnrRecoverySession(
@@ -7162,45 +7049,12 @@ export class DevicePool {
     replacementDevice: PooledDevice,
     autolockSessionId: string | undefined,
   ): Promise<void> {
-    if (!session) {
-      return;
-    }
-    if (
-      this.sessionManager.getSession(session.sessionId) !== session ||
-      session.assignedDevice !== originalDeviceId
-    ) {
-      throw new ActionableError(
-        `Session '${session.sessionId}' was released while System UI recovery was in progress.`,
-      );
-    }
-    // Publish the claim before the session is bound to the replacement, so another daemon never
-    // sees a device this session drives as free. A refusal here fails the recovery through the
-    // caller's rollback, which removes the replacement and releases the session.
-    await this.claimSystemUiAnrReplacement(replacementDevice);
-    const reboundSession = await this.sessionManager.rebindSessionForTerminalReleaseRecovery(
+    return this.deviceReplacement.restoreSystemUiAnrRecoverySession(
       session,
-      replacementDevice.id,
-      replacementDevice.platform,
+      originalDeviceId,
+      replacementDevice,
+      autolockSessionId,
     );
-    if (
-      !this.isPooledEntryCurrent(replacementDevice) ||
-      reboundSession !== session ||
-      reboundSession.assignedDevice !== replacementDevice.id
-    ) {
-      throw new ActionableError(
-        `Replacement device '${replacementDevice.id}' disconnected while its recovery session was being rebound.`,
-      );
-    }
-    replacementDevice.sessionId = session.sessionId;
-    replacementDevice.status = "busy";
-    this.pooledSessionIdentities.set(replacementDevice, session);
-    // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
-    // reads as "unlocked" and would let any session drive the recovered device
-    // while the mcpSessionAutolockMap still points at the original. Carry the
-    // lock forward so the original session keeps exclusive access.
-    replacementDevice.autolockSessionId = autolockSessionId;
-    replacementDevice.lastUsedAt = this.nextLastUsedAt();
-    this.notifyDeviceStateChanged(replacementDevice);
   }
 
   /**
@@ -7209,48 +7063,18 @@ export class DevicePool {
    * failure. Throws the typed refusal when another live daemon holds the replacement.
    */
   private async claimSystemUiAnrReplacement(replacementDevice: PooledDevice): Promise<void> {
-    const ownership = this.foreignOwnershipFor(replacementDevice.platform);
-    if (!ownership) {
-      return;
-    }
-    if (await ownership.claim(replacementDevice.id)) {
-      this.connectionOwnership.recordClaim(replacementDevice.id, ownership);
-      return;
-    }
-    await ownership.refresh([replacementDevice.id]);
-    throw new DeviceOwnedByOtherDaemonError(
-      replacementDevice.id,
-      ownership.foreignOwnerPid(replacementDevice.id),
-    );
+    return this.deviceReplacement.claimSystemUiAnrReplacement(replacementDevice);
   }
 
   private sourceImageForSameAndroidReplacement(
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
   ): DeviceInfo | undefined {
-    if (
-      expectedDevice.platform !== "android" ||
-      replacement.platform !== "android" ||
-      !expectedDevice.avdName ||
-      !expectedDevice.androidImage ||
-      replacement.name !== expectedDevice.avdName ||
-      !this.criteriaMatcher.androidRediscoveryMatches(
-        replacement,
-        expectedDevice.id,
-        expectedDevice.avdName,
-      )
-    ) {
-      return undefined;
-    }
-    return expectedDevice.androidImage;
+    return this.deviceReplacement.sourceImageForSameAndroidReplacement(expectedDevice, replacement);
   }
 
   private releaseCapturedDeviceForShutdown(device: PooledDevice): void {
-    device.sessionId = null;
-    device.status = "idle";
-    device.errorCount = 0;
-    this.lastReleasedDeviceId = device.id;
-    this.notifyDeviceStateChanged(device);
+    return this.deviceReplacement.releaseCapturedDeviceForShutdown(device);
   }
 
   reserveDeviceForReadiness(

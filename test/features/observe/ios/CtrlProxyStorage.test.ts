@@ -14,8 +14,7 @@ import { ToolRegistry } from "../../../../src/server/toolRegistry";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
   registerStorageTools,
-  resetStorageToolsDependencies,
-  setStorageToolsDependenciesForTesting,
+  type StorageToolsDependencies,
 } from "../../../../src/server/storageTools";
 
 describe("CtrlProxyStorage (iOS)", function () {
@@ -503,8 +502,8 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(true);
-      registerStorageTools();
-      setStorageToolsDependenciesForTesting({ iosClientFactory: () => client });
+      registerStorageTools(deps);
+      useStorageToolsDependenciesForTesting({ iosClientFactory: () => client });
       try {
         iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
         const toolPromise = ToolRegistry.getTool(toolName)!.deviceAwareHandler!(testDevice, {
@@ -534,7 +533,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         );
       } finally {
         iosMutationTokens.clear(testDevice.deviceId, "com.example.app");
-        resetStorageToolsDependencies();
+        clearStorageToolsDependencies();
         serverConfig.setEmbeddedSdkEnabled(false);
         ToolRegistry.clearTools();
         await client.close();
@@ -683,6 +682,15 @@ import {
   type IosDelegateHarness,
 } from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyStorage } from "../../../../src/features/observe/ios/CtrlProxyStorage";
+
+let deps: Partial<StorageToolsDependencies> = {};
+function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {
+  deps = { ...deps, ...value };
+  registerStorageTools(deps);
+}
+function clearStorageToolsDependencies(): void {
+  deps = {};
+}
 
 describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));

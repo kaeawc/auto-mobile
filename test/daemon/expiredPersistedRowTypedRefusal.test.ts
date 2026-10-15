@@ -49,7 +49,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       deviceId: DEVICE,
       stableDeviceId: "Pixel_8_API_35",
       platform: "android",
-      daemonSessionId: "dead-daemon",
+      daemonSessionId: "peer-daemon",
       createdAtMs: 1_000,
       lastUsedAtMs: 1_000,
       expiresAtMs: 1_000 + sessionTimeoutMs,
@@ -517,7 +517,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       await seedRow(`device-restart:${DEVICE}`, idleWindow);
       timer.setCurrentTime(301_001);
       const before = await repo.getSession(SESSION);
-      expect(await repo.listRecoverableSessions(timer.now(), () => ["dead-daemon"])).toEqual([]);
+      expect(await repo.listRecoverableSessions(timer.now(), () => ["peer-daemon"])).toEqual([]);
       expect(await repo.getSession(SESSION)).toEqual(before);
     });
   }
@@ -527,7 +527,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     timer.setCurrentTime(301_001);
     const before = await repo.getSession(SESSION);
     const manager = restartedDaemon();
-    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "peer-daemon"]));
     let assigned = false;
     const pool = {
       async assignDeviceToSession() {
@@ -746,7 +746,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     const windowEnd = 1_000 + DEVICE_RESTART_RECOVERY_WINDOW_MS;
     timer.setCurrentTime(windowEnd - 1);
     const manager = restartedDaemon();
-    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "peer-daemon"]));
     manager.onRestartRecoveryActivity(() => timer.setCurrentTime(windowEnd));
     let assigned = false;
     await expect(
@@ -767,7 +767,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     expect(await repo.getSession(SESSION)).toMatchObject({
       status: "released",
       release_reason: `device-restart:${DEVICE}`,
-      daemon_session_id: "dead-daemon",
+      daemon_session_id: "peer-daemon",
       stable_identity_generation: 0,
     });
     expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
@@ -778,7 +778,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     await seedRow(`device-restart:${DEVICE}`, 300_000);
     timer.setCurrentTime(181_001);
     const manager = restartedDaemon();
-    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "peer-daemon"]));
     const before = await repo.getSession(SESSION);
     expect(await refusal(manager)).toBeUndefined();
     expect(await manager.getExpiredReleaseSnapshot(SESSION)).toBeUndefined();

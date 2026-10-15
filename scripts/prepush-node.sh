@@ -49,6 +49,20 @@ EOF
   shift
 done
 
+attestation_head=""
+if [[ -e "${ROOT}/.git" ]]; then
+  attestation_head="$(git -C "${ROOT}" rev-parse HEAD 2>/dev/null || true)"
+elif [[ -d "${ROOT}/.jj" ]]; then
+  attestation_head="$(cd "${ROOT}" && jj log -r @- --no-graph -T commit_id 2>/dev/null || true)"
+fi
+# Failure to capture initial cleanliness must suppress the attestation.
+attestation_start="$(bun "${ROOT}/scripts/ci/produce-attestations.ts" --print-dirty-at-start --lane node 2>/dev/null || true)"
+attestation_options=(--expected-head "$attestation_head")
+if [[ "$attestation_start" != clean ]]; then
+  attestation_options+=(--started-dirty)
+fi
+
+
 runner_os="${RUNNER_OS:-}"
 if [[ -z "$runner_os" ]]; then
   case "$(uname -s 2> /dev/null || true)" in
@@ -81,8 +95,10 @@ run_gate() {
 
   gate_started="$(date +%s)"
   echo "==> ${name}"
+  gate_skipped=0
   if "$@"; then
     status="PASS"
+    if [[ "$gate_skipped" -eq 1 ]]; then status="SKIP"; fi
   else
     status="FAIL"
   fi
@@ -90,7 +106,7 @@ run_gate() {
   gate_names+=("$name")
   gate_results+=("$status")
   gate_seconds+=("$elapsed")
-  if [[ "$status" != "PASS" ]]; then
+  if [[ "$status" == "FAIL" ]]; then
     print_summary
     exit 1
   fi
@@ -142,6 +158,7 @@ db_integration_fast_path() {
   if [[ "$paths_changed" == "yes" ]]; then
     env AUTOMOBILE_TEST_MODE=true bun test test/db/*.integration.test.ts
   else
+    gate_skipped=1
     echo "Skipping test/db integration fast path; no changes under src/daemon/, src/db/, src/server/, or test/db/."
   fi
 }
@@ -187,3 +204,15 @@ fi
 
 print_summary
 echo "Node pre-push validation passed."
+attestation_scope=full
+attestation_note=""
+if [[ "$changed_mode" -eq 1 ]]; then
+  attestation_scope=partial
+  attestation_note="changed-mode unit selection"
+fi
+attestation_args=()
+for index in "${!gate_names[@]}"; do
+  result="$(printf '%s' "${gate_results[$index]}" | tr '[:upper:]' '[:lower:]')"
+  attestation_args+=("${gate_names[$index]}=${result}:${gate_seconds[$index]}")
+done
+"${PREPUSH_ATTESTATION_RECORDER:-$ROOT/scripts/ci/record-attestations.sh}" node "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "${attestation_args[@]}" || true

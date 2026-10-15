@@ -69,15 +69,33 @@ describe("shared prototype patch fixtures", () => {
 
 describe("prototype patch direct contracts", () => {
   test("13 replacement ops with an 8000-deep child chain report rule 23 without throwing", () => {
-    let node: Record<string, unknown> = { type: "use", component: "deep" };
+    let leafTypeReads = 0;
+    let node: Record<string, unknown> = {
+      get type() {
+        leafTypeReads++;
+        return "use";
+      },
+      component: "deep",
+    };
     for (let i = 0; i < 8000; i++) {
       node = { type: "card", child: node };
     }
     node.id = "label";
-    const ops = Array(13).fill({ op: "replaceNode", id: "label", node });
-    const started = performance.now();
+    const op = { op: "replaceNode", id: "label", node };
+    const ops = Array(13).fill(op);
+    let laterOpReads = 0;
+    for (let i = 1; i < ops.length; i++) {
+      Object.defineProperty(ops, i, {
+        get() {
+          laterOpReads++;
+          return op;
+        },
+      });
+    }
     const result = applyPrototypePatch(base, ops);
-    expect(performance.now() - started).toBeLessThan(15);
+    // Count reads of ops[1..12] and the deep leaf's type to detect later-op validation and leaf re-walks.
+    expect(laterOpReads).toBe(0);
+    expect(leafTypeReads).toBe(1);
     expect(result).toEqual({
       success: false,
       error: {

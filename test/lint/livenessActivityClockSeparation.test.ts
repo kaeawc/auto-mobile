@@ -160,11 +160,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
   // #11162: the veto's start and bound are judged against session-clock request deadlines.
   "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
-  "src/daemon/devicePool.ts": [
-    "DevicePool.recoveryAssignmentError",
-    "DevicePool.recoveryNow",
+  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/deviceAllocation.ts": [
     // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
-    "DevicePool.assignmentRetryPolicy",
+    "DeviceAllocation.assignmentRetryPolicy",
   ],
 };
 
@@ -386,7 +385,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.claimSelectedDeviceForSession": {
+  "src/daemon/deviceAllocation.ts DeviceAllocation.claimSelectedDeviceForSession": {
     writes: 1,
     reason: "PooledDevice LRU order on assignment, not a session idle clock.",
   },

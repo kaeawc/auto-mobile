@@ -1,6 +1,7 @@
 /**
  * Byte-for-byte contract tests for the typed Android control-proxy request layer.
  *
+ * Kotlin descriptor fixture parity is guarded by AndroidWireContract.contract.test.ts.
  * Each builder must serialize to the exact JSON the device's Kotlin sealed hierarchy
  * (`android/protocol/.../WebSocketRequest.kt`) expects — the strings asserted here mirror the
  * pre-migration hand-built `JSON.stringify(...)` send sites, so a drift in field name, order,
@@ -8,8 +9,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
 import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
 import {
@@ -23,6 +24,14 @@ import {
   type CtrlProxyRequest,
   normalizeCtrlProxyMilliseconds,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+
+// Kotlin's serializer-generated contract; loaded once for all builder rows.
+const wireContract = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../../../fixtures/android-contract/android-wire-contract.json"),
+    "utf8",
+  ),
+) as { requests: { serialName: string; fields: { name: string; hasDefault: boolean }[] }[] };
 
 describe("IME commit budget serialization", () => {
   test("includes the optional budget and preserves legacy omission", () => {
@@ -170,114 +179,10 @@ test("Keystore discovery is an optional advertised Android capability", () => {
   expect(ANDROID_CAPABILITY_GATED_COMMANDS.has("discover_keystore")).toBe(true);
 });
 
-/**
- * Every `@SerialName` declared in WebSocketRequest.kt, transcribed by hand. Keep this in lockstep
- * with the Kotlin sealed hierarchy — this is the authoritative device contract the TS union mirrors.
- */
-const KOTLIN_SERIAL_NAMES = [
-  "show_prototype",
-  "dismiss_prototype",
-  "inspect_prototypes",
-  "patch_prototype",
-  "save_prototype",
-  "pin_saved_prototype",
-  "list_saved_prototypes",
-  "delete_saved_prototype",
-  "put_prototype_asset",
-  "remove_prototype_asset",
-  "request_hierarchy",
-  "request_hierarchy_if_stale",
-  "set_hierarchy_interval",
-  "request_screenshot",
-  "request_tap_coordinates",
-  "request_swipe",
-  "request_two_finger_swipe",
-  "request_drag",
-  "request_pinch",
-  "request_gesture_start",
-  "request_gesture_move",
-  "request_gesture_end",
-  "request_set_text",
-  "request_insert_text",
-  "request_insert_text_state",
-  "request_commit_text",
-  "request_cancel_ime_commit",
-  "request_set_keyboard_profile",
-  "request_list_keyboard_profiles",
-  "request_ime_action",
-  "request_select_all",
-  "request_action",
-  "request_click_focused_input",
-  "request_activate_accessibility_link",
-  "request_hit_test",
-  "request_clipboard",
-  "request_settings_get",
-  "request_settings_put",
-  "request_settings_list",
-  "install_ca_cert",
-  "install_ca_cert_from_path",
-  "remove_ca_cert",
-  "get_device_owner_status",
-  "get_permission",
-  "get_current_focus",
-  "get_traversal_order",
-  "add_highlight",
-  "list_preference_files",
-  "get_preferences",
-  "discover_keystore",
-  "get_sdk_capabilities",
-  "list_data_stores",
-  "get_data_store",
-  "subscribe_storage",
-  "unsubscribe_storage",
-  "get_preference",
-  "set_preference",
-  "remove_preference",
-  "clear_preferences",
-  "request_global_action",
-  "validate_frame_context",
-  "request_device_info",
-  "set_recomposition_tracking",
-  "set_accessibility_flags",
-  "set_network_mock_rules",
-  "set_network_error_simulation",
-  "request_installed_packages",
-  "request_package_info",
-  "request_launch_intent",
-  "start_recording",
-  "stop_recording",
-];
-
-describe("ctrlProxyProtocol — Kotlin contract coverage", () => {
-  test("KNOWN_REQUEST_TYPES matches the device @SerialName set exactly", () => {
-    expect([...KNOWN_REQUEST_TYPES].sort()).toEqual([...KOTLIN_SERIAL_NAMES].sort());
-  });
-
+describe("ctrlProxyProtocol — discriminator uniqueness", () => {
   test("no duplicate discriminators", () => {
     expect(new Set(KNOWN_REQUEST_TYPES).size).toBe(KNOWN_REQUEST_TYPES.length);
   });
-
-  // Authoritative cross-language guard: read the actual @SerialName set out of the Kotlin contract
-  // and assert it equals ours. Unlike the hand-maintained KOTLIN_SERIAL_NAMES list above, this
-  // catches a request type renamed/added/removed on the device — the drift the module exists to
-  // prevent — instead of trusting a transcription. Skipped only if the Kotlin file isn't reachable
-  // (e.g. running outside the monorepo), which never happens in CI.
-  const KOTLIN_CONTRACT_PATH = resolve(
-    import.meta.dir,
-    "../../../../android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketRequest.kt",
-  );
-
-  test.skipIf(!existsSync(KOTLIN_CONTRACT_PATH))(
-    "KNOWN_REQUEST_TYPES matches the @SerialName set read from WebSocketRequest.kt",
-    () => {
-      const source = readFileSync(KOTLIN_CONTRACT_PATH, "utf8");
-      const serialNames = [...source.matchAll(/@SerialName\("([^"]+)"\)/g)].map((m) => m[1]);
-      expect(serialNames.length).toBeGreaterThan(0);
-      expect([...new Set(serialNames)].sort()).toEqual([...KNOWN_REQUEST_TYPES].sort());
-      // The transcribed list must also match the source, so it can't rot independently.
-      expect([...new Set(serialNames)].sort()).toEqual([...KOTLIN_SERIAL_NAMES].sort());
-    },
-  );
 });
 
 /**
@@ -1119,6 +1024,25 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"stop_recording"}',
     },
   ];
+
+  test("every builder frame uses Kotlin fields and supplies all device-required fields", () => {
+    for (const { expected } of cases) {
+      const frame = JSON.parse(expected) as Record<string, unknown> & { type: string };
+      const contract = wireContract.requests.find(({ serialName }) => serialName === frame.type);
+      expect(contract).toBeDefined();
+      const fields = new Set(contract!.fields.map(({ name }) => name));
+      for (const name of Object.keys(frame)) {
+        if (name !== "type") {
+          expect(fields.has(name)).toBe(true);
+        }
+      }
+      for (const { name, hasDefault } of contract!.fields) {
+        if (!hasDefault) {
+          expect(name in frame).toBe(true);
+        }
+      }
+    }
+  });
 
   test.each(cases)("$builder — $name", ({ actual, expected }) => {
     expect(actual).toBe(expected);

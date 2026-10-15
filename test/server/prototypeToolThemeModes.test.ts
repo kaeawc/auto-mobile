@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  PROTOTYPE_FLOW_GRID_CAPABILITY,
+  PROTOTYPE_THEME_MODES_CAPABILITY,
+} from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { BootedDevice } from "../../src/models";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -76,6 +79,14 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });
   }
+  beforeAll(async () => {
+    const restoreWarmup = preserveToolRegistry();
+    register(FAKE_PROTOTYPE_AGENT_CAPABILITIES);
+    await call(android, plain);
+    await call(ios, plain);
+    unsubscribe();
+    restoreWarmup();
+  });
   beforeEach(() => {
     restore = preserveToolRegistry();
     register(FAKE_PROTOTYPE_AGENT_CAPABILITIES);
@@ -94,6 +105,93 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
     return prototypeOutputSchema.parse(response.structuredContent);
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
+  test.each([android, ios])(
+    "refuses stack navigation on $platform without capability",
+    async (device) => {
+      client.setSupportedCommands([]);
+      const payload = await call(device, {
+        ...plain,
+        root: { type: "stack", id: "nav", start: "home", screens: { home: plain.root } },
+      });
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain("prototype_stack_v1");
+      expect(payload.error).toContain("Nothing was shown");
+      expect(client.getPrototypeHistory()).toHaveLength(0);
+      expect(agentShows()).toHaveLength(0);
+    },
+  );
+
+  test.each(["flow", "grid"])(
+    "%s is refused without the wrapping capability and sent with it",
+    async (type) => {
+      const spec = {
+        ...plain,
+        root: { type, children: [plain.root], ...(type === "grid" ? { columns: 2 } : {}) },
+      };
+      client.setSupportedCommands([]);
+      for (const device of [android, ios]) {
+        const result = await call(device, spec);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(PROTOTYPE_FLOW_GRID_CAPABILITY);
+        expect(result.error).toContain("node at root");
+        expect(result.error).toContain(
+          device.platform === "android"
+            ? "Update the connected CtrlProxy"
+            : "launchApp prototype: true",
+        );
+      }
+      expect(client.getPrototypeHistory()).toEqual([]);
+      expect(agentShows()).toEqual([]);
+      client.setSupportedCommands([PROTOTYPE_FLOW_GRID_CAPABILITY]);
+      expect((await call(android, spec)).success).toBe(true);
+      unsubscribe();
+      register([...FAKE_PROTOTYPE_AGENT_CAPABILITIES, PROTOTYPE_FLOW_GRID_CAPABILITY]);
+      expect((await call(ios, spec)).success).toBe(true);
+      expect(agentShows()).toMatchObject([{ body: { spec } }]);
+    },
+  );
+
+  test.each([
+    ["root.style.runSpacing", { style: { runSpacing: 0 } }],
+    [
+      "root.styleWhen[0].style.runSpacing",
+      { styleWhen: [{ when: { key: "active", equals: true }, style: { runSpacing: 2 } }] },
+    ],
+  ])("ordinary row with %s requires flow/grid capability", async (field, styles) => {
+    const spec = {
+      ...plain,
+      state: { active: true },
+      root: { type: "row", children: [plain.root], ...styles },
+    };
+    client.setSupportedCommands([]);
+    for (const device of [android, ios]) {
+      const result = await call(device, spec);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(PROTOTYPE_FLOW_GRID_CAPABILITY);
+      expect(result.error).toContain(`runSpacing value at ${field}`);
+      expect(result.error).toContain("Nothing was shown.");
+    }
+    expect(client.getPrototypeHistory()).toEqual([]);
+    expect(agentShows()).toEqual([]);
+    client.setSupportedCommands([PROTOTYPE_FLOW_GRID_CAPABILITY]);
+    expect((await call(android, spec)).success).toBe(true);
+    unsubscribe();
+    register([...FAKE_PROTOTYPE_AGENT_CAPABILITIES, PROTOTYPE_FLOW_GRID_CAPABILITY]);
+    expect((await call(ios, spec)).success).toBe(true);
+    expect(agentShows()).toMatchObject([{ body: { spec } }]);
+  });
+
+  test("component flow is refused after expansion before any asset upload", async () => {
+    client.setSupportedCommands([]);
+    const result = await call(android, {
+      ...plain,
+      root: { type: "use", component: "wrap" },
+      components: { wrap: { root: { type: "flow", children: [plain.root] } } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("node at root");
+    expect(client.getPrototypeHistory()).toEqual([]);
+  });
 
   test("the fakes advertise no theme-modes capability by default, as both platforms do today", () => {
     expect(FAKE_PROTOTYPE_AGENT_CAPABILITIES).not.toContain(PROTOTYPE_THEME_MODES_CAPABILITY);

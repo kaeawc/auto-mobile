@@ -34,7 +34,7 @@ function collectTextFieldKeys(
   conflicts: Set<string>,
 ): void {
   if (
-    node.type !== "textField" ||
+    (node.type !== "textField" && node.type !== "searchBar") ||
     typeof node.stateKey !== "string" ||
     node.stateKey.includes("{")
   ) {

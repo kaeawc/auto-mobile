@@ -63,7 +63,7 @@ enum PlanParameterSubstitutor {
             if scalar.style == .folded {
                 for (key, replacement) in parameters {
                     if let token = placeholders.tokens["${\(key)}"], scalar.string.contains(token),
-                       replacement.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
+                       replacement.unicodeScalars.contains(where: { $0 == "\n" || $0 == "\r" })
                     {
                         throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
                             "Plan line \(scalar.mark?.line ?? 1): a parameter value with a line break cannot be substituted into a "

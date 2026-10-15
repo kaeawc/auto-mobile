@@ -1618,7 +1618,10 @@ final class PlanMetadataSecretParametersParsingTests: XCTestCase {
     }
 
     func testNoSecretParametersYieldsEmptySet() throws {
-        XCTAssertTrue(try PlanMetadataParser.parseSecretParameterKeys(from: "name: P\nsteps:\n  - tool: observe").isEmpty)
+        XCTAssertTrue(
+            try PlanMetadataParser.parseSecretParameterKeys(from: "name: P\nsteps:\n  - tool: observe")
+                .isEmpty
+        )
     }
 
     func testToleratesPlaceholderKeyAndUnrelatedPlaceholderLists() throws {
@@ -1664,8 +1667,8 @@ final class SecretRedactionTests: XCTestCase {
                 return XCTFail("expected invalidPlan, got \(error)")
             }
         }
-        let concreteValues = SecretRedaction.secretParameterValues(
-            declaredKeys: try PlanMetadataParser.parseSecretParameterKeys(from: plan), parameters: ["key": secret]
+        let concreteValues = try SecretRedaction.secretParameterValues(
+            declaredKeys: PlanMetadataParser.parseSecretParameterKeys(from: plan), parameters: ["key": secret]
         )
         XCTAssertEqual(
             SecretRedaction.redact(

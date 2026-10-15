@@ -18,7 +18,8 @@ enum SecretRedaction {
     /// Expand the executor-supplied concrete secret strings into the exact byte forms to scrub: each
     /// value and its folded line-break spelling in their NFC and NFD Unicode forms — so a decomposed
     /// on-screen/error occurrence still matches a composed value (and vice versa) — and, for each,
-    /// its JSON-string-escaped form, plus its YAML double-quoted form. The recovery loop's tool/observe results are JSON
+    /// its JSON-string-escaped form, plus its YAML double-quoted form. The recovery loop's tool/observe results are
+    /// JSON
     /// (issue #6094), so a secret containing a JSON-special character (`"`, `\`, newline, tab, CR)
     /// appears only in escaped form there and
     /// the literal `redact` would miss it. Blank inputs are dropped. Dedup is by UTF-16 code units,
@@ -28,7 +29,8 @@ enum SecretRedaction {
         var result: [String] = []
         var seen: Set<[UInt16]> = []
         for value in concreteValues where !value.isEmpty {
-            let spellings = value.unicodeScalars.contains { $0 == "\n" || $0 == "\r" } ? [value, foldedSpelling(value)] : [value]
+            let spellings = value.unicodeScalars
+                .contains { $0 == "\n" || $0 == "\r" } ? [value, foldedSpelling(value)] : [value]
             for form in spellings.flatMap({ normalizationForms(of: $0) }) where !form.isEmpty {
                 // Cover the raw value and its JSON-escaped forms through the transport-encoding depth
                 // the runners actually apply: iOS surfaces one encoding layer, and Android reserializes

@@ -5763,8 +5763,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       const handleProcessExit = (code: number | null) => {
         const stdoutTail = stdoutDecoder.end();
         const stderrTail = stderrDecoder.end();
-        if (stdoutTail) captureOutput(stdoutDecoder, stdoutTail);
-        if (stderrTail) captureOutput(stderrDecoder, stderrTail);
+        if (stdoutTail) {
+          captureOutput(stdoutDecoder, stdoutTail);
+        }
+        if (stderrTail) {
+          captureOutput(stderrDecoder, stderrTail);
+        }
         // Any exit before readiness is fatal unless another process owns the AVD.
         const combinedOutput = processOutput.join("");
         if (combinedOutput.includes("Running multiple emulators with the same AVD")) {

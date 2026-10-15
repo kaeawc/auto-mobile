@@ -63,7 +63,9 @@ describe("redactAndroidCommandOutput", () => {
       const bytes = Buffer.from(value);
       const split = new AndroidCommandOutputStreamRedactor();
       let roundTrip = "";
-      for (const byte of bytes) roundTrip += split.append(Buffer.from([byte]));
+      for (const byte of bytes) {
+        roundTrip += split.append(Buffer.from([byte]));
+      }
       roundTrip += split.flush();
       expect(roundTrip).toBe(value);
     }

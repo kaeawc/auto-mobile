@@ -96,8 +96,12 @@ class AndroidCommandRun {
     child.on("close", (code) => {
       const stdoutTail = this.stdoutDecoder.end();
       const stderrTail = this.stderrDecoder.end();
-      if (stdoutTail) this.capture("stdout", stdoutTail);
-      if (stderrTail) this.capture("stderr", stderrTail);
+      if (stdoutTail) {
+        this.capture("stdout", stdoutTail);
+      }
+      if (stderrTail) {
+        this.capture("stderr", stderrTail);
+      }
       this.settle(() => {
         if (this.terminationError) {
           this.reject(this.terminationError);

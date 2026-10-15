@@ -5293,7 +5293,7 @@ export class SessionManager {
    * claim's hand-back, and must not refuse the row as if a peer had taken it. A second miss is a
    * writer racing this one, and refuses.
    *
-   * Resolves undefined when the persistence cannot claim rows (the row is recovered as read).
+   * Resolves undefined when the daemon has no session id yet (the row is recovered as read).
    * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`), or
    * `TerminalSessionError` when the re-read finds the row terminal.
    */

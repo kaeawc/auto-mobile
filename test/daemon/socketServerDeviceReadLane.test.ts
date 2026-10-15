@@ -109,6 +109,12 @@ describe("UnixSocketServer device read lane (#10969)", () => {
       "http://localhost:0/mcp",
       fakeDaemonState(sessionDevices),
       new FakeTimer(),
+      null,
+      {},
+      undefined,
+      // The default lock's owner-generation probe costs ~250 ms on the first start in a
+      // process; these tests do not cover the lock.
+      { bindLock: { acquire: () => true, release: () => {} } },
     );
     server.deviceReadToolCallClassifier = (name) => READ_TOOLS.has(name);
     server.mcpClientFactory = async () => ({

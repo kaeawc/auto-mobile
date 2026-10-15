@@ -1021,6 +1021,11 @@ export class DevicePool {
   private readonly deviceAutoStart = this.createDeviceAutoStart();
   private readonly deviceReservations = this.createDeviceReservations();
 
+  /** Kept under its pre-extraction name; owned by DeviceReservations (test internals read it). */
+  private get restartReadiness(): ReadonlySet<unknown> {
+    return this.deviceReservations.restartReadiness;
+  }
+
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;

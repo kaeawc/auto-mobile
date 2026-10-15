@@ -106,7 +106,7 @@ export class DeviceReservations {
   private rehydrationReservationsStopped = false;
 
   // Permission is scoped to one admitted start's actual symbols, never every hold on R's target.
-  private readonly restartReadiness = new Set<{
+  readonly restartReadiness = new Set<{
     sessionId: string;
     deviceId: string;
     owners: Set<symbol>;

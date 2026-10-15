@@ -74,7 +74,7 @@ internal constructor(
   private var unsolicitedIntervalMs: Long = 250L,
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   private val beforeDebounceLock: () -> Unit = {},
-  private val beforeDebounceCompletion: () -> Unit = {},
+  private val beforeDebounceCompletion: suspend () -> Unit = {},
   private val onDiscardedHierarchy: (ViewHierarchy) -> Unit = {},
   private val extractHierarchy:
     (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
@@ -286,27 +286,6 @@ internal constructor(
    * @param maxWaitMs Maximum time to wait for quiescence (default 500ms)
    * @param pollIntervalMs How often to check for quiescence (default 10ms)
    * @return The extracted hierarchy, or null if extraction failed.
-   */
-  fun extractAfterQuiescence(
-    quiescenceMs: Long = HierarchyQuiescence.POLL_MS,
-    maxWaitMs: Long = HierarchyQuiescence.TIMEOUT_MS,
-    pollIntervalMs: Long = 10L,
-    initialEventWaitMs: Long = 200L, // Max time to wait for first event
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-  ): ViewHierarchy? {
-    return kotlinx.coroutines.runBlocking {
-      extractAfterQuiescenceSuspending(
-        quiescenceMs,
-        maxWaitMs,
-        pollIntervalMs,
-        initialEventWaitMs,
-        snapshotOptions,
-      )
-    }
-  }
-
-  /**
-   * Suspend core; suppression remains held across polling suspension and releases on cancellation.
    */
   suspend fun extractAfterQuiescenceSuspending(
     quiescenceMs: Long = HierarchyQuiescence.POLL_MS,

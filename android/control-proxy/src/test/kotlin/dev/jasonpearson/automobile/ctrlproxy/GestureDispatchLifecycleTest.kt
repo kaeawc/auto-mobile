@@ -1,9 +1,16 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.BeforeClass
 import org.junit.Test
 
 /**
@@ -12,9 +19,70 @@ import org.junit.Test
  * pins the branch behavior that used to be hand-copied across five gesture methods.
  */
 class GestureDispatchLifecycleTest {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun warmScheduler() {
+      GestureDispatchLifecycleTest()
+        .`suspended completion settles before closing perf and reporting result`()
+    }
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun `suspended completion settles before closing perf and reporting result`() = runTest {
+    val events = mutableListOf<String>()
+    val release = CompletableDeferred<Unit>()
+    val lifecycle = createLifecycle(events, MutableClock(100L))
+    lifecycle.startDispatch()
+    val completion = launch {
+      lifecycle.completed(
+        beforeResult = {
+          events += "settle"
+          release.await()
+          events += "settled"
+        },
+        onResult = { events += "result" },
+      )
+    }
+    runCurrent()
+    assertEquals(listOf("start:dispatchGesture", "endOperation:dispatchGesture", "settle"), events)
+    assertFalse(completion.isCompleted)
+    release.complete(Unit)
+    runCurrent()
+    assertEquals(
+      listOf(
+        "start:dispatchGesture",
+        "endOperation:dispatchGesture",
+        "settle",
+        "settled",
+        "end",
+        "result",
+      ),
+      events,
+    )
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun `cancelling suspended completion closes perf without a successful result`() = runTest {
+    val events = mutableListOf<String>()
+    val release = CompletableDeferred<Unit>()
+    val lifecycle = createLifecycle(events, MutableClock(100L))
+    lifecycle.startDispatch()
+    val completion = launch {
+      lifecycle.completed(
+        beforeResult = { release.await() },
+        onResult = { events += "result" },
+      )
+    }
+    runCurrent()
+    completion.cancelAndJoin()
+    assertEquals(listOf("start:dispatchGesture", "endOperation:dispatchGesture", "end"), events)
+  }
 
   @Test
-  fun `completed result includes gesture timing and closes perf in order`() {
+  fun `completed result includes gesture timing and closes perf in order`() = runTest {
     val events = mutableListOf<String>()
     val clock = MutableClock(100L)
     val lifecycle = createLifecycle(events, clock)
@@ -61,7 +129,7 @@ class GestureDispatchLifecycleTest {
   }
 
   @Test
-  fun `completed result captures time after pre-result work`() {
+  fun `completed result captures time after pre-result work`() = runTest {
     val events = mutableListOf<String>()
     val clock = MutableClock(100L)
     val lifecycle = createLifecycle(events, clock)
@@ -128,7 +196,7 @@ class GestureDispatchLifecycleTest {
     lifecycle.startDispatch()
     val thrown =
       assertThrows(RuntimeException::class.java) {
-        lifecycle.completed { throw RuntimeException("result failed") }
+        runTest { lifecycle.completed { throw RuntimeException("result failed") } }
       }
 
     assertEquals("result failed", thrown.message)

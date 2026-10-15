@@ -736,7 +736,10 @@ class WebSocketServer(
       startedServer = candidate
 
       // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
-      // failure is caught here, before this instance reports that it is listening.
+      // failure is caught here, before this instance reports that it is listening. This single
+      // bounded bridge preserves the start/stop lock's atomic publication of a live listener.
+      // start() launches on the injected scope (CtrlProxy's IO serviceScope), never inline in
+      // onServiceConnected on Main; tests inject their scheduler instead.
       runBlocking {
         withTimeout(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
       }
@@ -1119,11 +1122,13 @@ class WebSocketServer(
    * assign an available port. Returns null if server is not running.
    */
   @Suppress("UNCHECKED_CAST")
-  fun getActualPort(): Int? {
+  suspend fun getActualPort(): Int? {
     val srv = server ?: return null
     return try {
       val engine = (srv as EmbeddedServer<CIOApplicationEngine, *>).engine
-      runBlocking { engine.resolvedConnectors().firstOrNull()?.port ?: port }
+      engine.resolvedConnectors().firstOrNull()?.port ?: port
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.w(TAG, "Could not get actual port, returning configured port", e)
       port

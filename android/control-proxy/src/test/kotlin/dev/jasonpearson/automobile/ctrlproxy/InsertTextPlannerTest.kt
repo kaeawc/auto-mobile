@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -35,7 +36,7 @@ class InsertTextPlannerTest {
     }
   }
 
-  private fun placeSelection(
+  private suspend fun placeSelection(
     plan: InsertTextPlan,
     node: FakeNode,
     timer: FakeTimer,
@@ -49,7 +50,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `stale text converges before selection is attempted`() {
+  fun `stale text converges before selection is attempted`() = runTest {
     val plan = planInsertText("abc", false, 3, 3, "def")
     val stale = InsertTextSnapshot("abc", false, 3, 3)
     val node = FakeNode(listOf(stale, stale, stale.copy(text = "abcdef")))
@@ -64,7 +65,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `never converged text preserves warning and legacy failure within bound`() {
+  fun `never converged text preserves warning and legacy failure within bound`() = runTest {
     val plan = planInsertText("abc", false, 3, 3, "def")
     for (acceptsCaretNotPlaced in listOf(false, true)) {
       val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
@@ -80,7 +81,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `empty Compose field exposes selection action only after convergence`() {
+  fun `empty Compose field exposes selection action only after convergence`() = runTest {
     val plan = planInsertText("", false, -1, -1, "abc")
     val node =
       FakeNode(
@@ -97,7 +98,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `empty node never converges and preserves unattempted selection warning`() {
+  fun `empty node never converges and preserves unattempted selection warning`() = runTest {
     val plan = planInsertText("", false, -1, -1, "abc")
     val node = FakeNode(listOf(InsertTextSnapshot("", false, -1, -1)))
     val timer = FakeTimer()
@@ -110,7 +111,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `immediately converged node does not pause or refresh again`() {
+  fun `immediately converged node does not pause or refresh again`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
     val timer = FakeTimer()
@@ -123,7 +124,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `converged already correct caret accepts rejected selection`() {
+  fun `converged already correct caret accepts rejected selection`() = runTest {
     val plan = InsertTextPlan("abcdef", 6, false)
     val timer = FakeTimer()
     var reads = 0
@@ -143,7 +144,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `node lost during mutation polling stops without moving selection`() {
+  fun `node lost during mutation polling stops without moving selection`() = runTest {
     val timer = FakeTimer()
     var reads = 0
     assertEquals(
@@ -176,7 +177,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `refresh time counts toward deadline and final pause is clamped`() {
+  fun `refresh time counts toward deadline and final pause is clamped`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val stale = InsertTextSnapshot("", false, -1, -1)
     val timer = FakeTimer()
@@ -199,7 +200,7 @@ class InsertTextPlannerTest {
   }
 
   @Test
-  fun `text converging on final deadline refresh is accepted`() {
+  fun `text converging on final deadline refresh is accepted`() = runTest {
     val plan = InsertTextPlan("abc", 3, true)
     val node =
       FakeNode(

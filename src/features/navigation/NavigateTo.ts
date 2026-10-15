@@ -52,6 +52,9 @@ import {
   type ForegroundObserver,
 } from "./foregroundOverlay";
 
+// Back presses need time to update the screen before the next press.
+const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
+
 /**
  * Options for the navigateTo tool.
  */
@@ -978,7 +981,7 @@ export class NavigateTo {
 
       // Small delay between presses to allow screen transitions
       throwIfAborted(signal);
-      await awaitWhileRequestIsLive(this.timer.sleep(300), signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(NAVIGATION_BACK_PRESS_SETTLE_MS), signal);
     }
 
     // Wait for target screen

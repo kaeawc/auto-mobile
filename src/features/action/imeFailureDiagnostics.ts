@@ -12,6 +12,9 @@ import {
   imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
 
+// Three attempts preserve the existing diagnostic retry bound.
+export const IME_DIAGNOSTIC_ATTEMPTS = 3;
+
 export interface ImeFailureDiagnostic {
   stage:
     | "unsupportedCapability"
@@ -313,7 +316,7 @@ export async function confirmImeCommitAfterSyncLoss(
     return result;
   }
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < IME_DIAGNOSTIC_ATTEMPTS; attempt++) {
       verification.checkAbort();
       if (attempt > 0) {
         await verification.timer.sleep(verification.settleMs);
@@ -377,7 +380,7 @@ async function verifyImeCommitReadBack(
     text.endsWith("\n") &&
     observedText === "";
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < IME_DIAGNOSTIC_ATTEMPTS; attempt++) {
       verification.checkAbort();
       if (attempt > 0) {
         await verification.timer.sleep(verification.settleMs);
@@ -414,7 +417,7 @@ async function verifyImeCommitReadBack(
       if (suffixMatches !== false || imeCommitSubsequenceMatches(observedText, text)) {
         return result;
       }
-      if (attempt === 2) {
+      if (attempt === IME_DIAGNOSTIC_ATTEMPTS - 1) {
         return withImeFailure(
           {
             ...result,

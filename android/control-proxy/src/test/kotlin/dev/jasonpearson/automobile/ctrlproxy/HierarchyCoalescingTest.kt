@@ -245,7 +245,7 @@ class HierarchyCoalescingTest {
         stats = stats,
         beforeDebounceCompletion = {
           if (++completions == 1) {
-            debouncer.extractAfterQuiescence(
+            debouncer.extractAfterQuiescenceSuspending(
               quiescenceMs = 0,
               maxWaitMs = 1,
               initialEventWaitMs = 0,

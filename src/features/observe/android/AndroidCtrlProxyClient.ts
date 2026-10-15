@@ -18,6 +18,10 @@ import {
 } from "./foreignCtrlProxyForwardEvidence";
 import { isProcessRunning } from "../../../utils/processLiveness";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
+
+// Three attempts preserve the existing connection retry bound.
+export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
+
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
  *
@@ -5423,7 +5427,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     let currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
     if (currentAllocation === this.localPort) {
       const backoff = fixedBackoff(50);
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= CTRL_PROXY_CONNECT_ATTEMPTS; attempt++) {
         if (currentPortIsAvailable) {
           return;
         }
@@ -5433,7 +5437,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         throwIfAborted(signal);
         // adb tears down its listener asynchronously after --remove; this short busy window is expected and bounded.
         logger.debug(
-          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/3)`,
+          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/${CTRL_PROXY_CONNECT_ATTEMPTS})`,
         );
         await awaitWhileRequestIsLive(this.timer.sleep(backoff.delayForAttempt(attempt)), signal);
         if (this.closed) {

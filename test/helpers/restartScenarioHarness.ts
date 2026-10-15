@@ -67,6 +67,7 @@ export class RestartScenario {
   private constructor(readonly scenario: LivenessScenario) {}
 
   static async start(options: LivenessScenarioOptions = {}): Promise<RestartScenario> {
+    resetDbWriteBarrier();
     return new RestartScenario(await LivenessScenario.start(options));
   }
 

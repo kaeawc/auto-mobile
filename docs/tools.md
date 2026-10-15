@@ -301,7 +301,7 @@ is aligned automatically, and results report native `x` / `y`.
 
 Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
 Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
-`durationMs` is valid only for long press. Double tap uses two native taps
+`durationMs` is valid only for long press. On iOS, double tap uses one runner-side double tap. On Android, it uses two native taps
 200 ms apart. The result includes `action`. All variants accept `display`.
 
 `tapAt`, `tapOn`, `tapAny`, `swipeOn`, `dragAndDrop`, and `pinchOn` fence

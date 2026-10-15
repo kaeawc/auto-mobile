@@ -61,9 +61,14 @@ test.each(devices)(
       ).toMatchObject({ success: true, x: 20, y: 60, action });
     }
     const dispatched = device.platform === "android" ? androidDispatches : iosDispatches;
-    expect(dispatched.map(({ x, y }) => ({ x, y }))).toEqual(Array(4).fill({ x: 20, y: 60 }));
+    expect(dispatched.map(({ x, y }) => ({ x, y }))).toEqual(
+      Array(device.platform === "ios" ? 3 : 4).fill({ x: 20, y: 60 }),
+    );
+    if (device.platform === "ios") {
+      expect(iosDispatches.map(({ kind }) => kind)).toEqual(["tap", "tap", "double"]);
+    }
     expect(dispatched.map(({ duration }) => duration)).toEqual(
-      device.platform === "android" ? [10, 1000, 10, 10] : [50, 1000, 50, 50],
+      device.platform === "android" ? [10, 1000, 10, 10] : [50, 1000, 50],
     );
   },
 );

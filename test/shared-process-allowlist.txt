@@ -358,6 +358,7 @@ test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
 test/features/action/HandleIntentChooser.test.ts
 test/features/action/InstallApp.signingGuard.test.ts
+test/features/action/IosDoubleTap.test.ts
 test/features/action/IosLockScreenUnlocker.test.ts
 test/features/action/IosSdkTriggerReadiness.test.ts
 test/features/action/IosSelectionScreenSize.test.ts

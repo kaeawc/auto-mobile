@@ -177,6 +177,10 @@ import os
             }
         }
 
+        func doubleTap(_ coordinate: Coordinate) throws {
+            try catchingObjCException { coordinate.resolved.doubleTap() }
+        }
+
         func tap(_ coordinate: Coordinate, duration: TimeInterval) throws {
             try catchingObjCException {
                 if duration > 0 {

@@ -1,0 +1,39 @@
+{
+  "name": "missing-null",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "s": {
+              "state": "missing"
+            },
+            "d": {
+              "data": "/missing"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {},
+  "pages": {},
+  "data": {},
+  "precedingActions": [],
+  "expected": {
+    "context": {
+      "s": null,
+      "d": null
+    }
+  }
+}

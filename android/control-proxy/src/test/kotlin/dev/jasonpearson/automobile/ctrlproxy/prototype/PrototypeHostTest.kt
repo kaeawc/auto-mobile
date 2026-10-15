@@ -1238,6 +1238,27 @@ class PrototypeHostTest {
     )
 
   @Test
+  fun `stack Back takes key focus without IME focus and releases it at root`() = runTest {
+    var backs = 0
+    var dismissals = 0
+    host.show(PrototypeRequest(onHostDismiss = { dismissals++ }, onHostBack = { backs++ }))
+    val view = manager.view!!
+    assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertTrue(host.setStackBackEnabled(true))
+    assertSame(view, manager.view)
+    assertEquals(0, manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE)
+    assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+    assertTrue(manager.updated.last().flags and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+    assertEquals(0, backs)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(1, backs)
+    assertEquals(0, dismissals)
+    assertTrue(host.setStackBackEnabled(false))
+    assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+  }
+
+  @Test
   fun `back on a focusable prototype dismisses once on key up and swallows the key`() = runTest {
     var dismissals = 0
     host.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
@@ -1332,6 +1353,24 @@ class PrototypeHostTest {
       backScope = CoroutineScope(Dispatchers.Unconfined),
       backRegistrarFactory = { registrar },
     )
+
+  @Test
+  fun `on API 33 stack Back alone registers the callback and text focus remains independent`() =
+    runTest {
+      val api33 = hostOnApi(33)
+      var backs = 0
+      assertTrue(api33.show(PrototypeRequest(onHostBack = { backs++ })))
+      assertTrue(registrar.calls.isEmpty())
+      assertTrue(api33.setStackBackEnabled(true))
+      assertEquals(listOf("register"), registrar.calls)
+      registrar.callback!!()
+      assertEquals(1, backs)
+      assertTrue(api33.setTextFieldVisible(true))
+      assertTrue(api33.setStackBackEnabled(false))
+      assertEquals(listOf("register"), registrar.calls)
+      assertTrue(api33.setTextFieldVisible(false))
+      assertEquals(listOf("register", "unregister"), registrar.calls)
+    }
 
   @Test
   fun `on API 33 the back callback follows focusability and both back routes dismiss once`() =

@@ -9,6 +9,51 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 class PrototypeSpecTest {
+  @Test
+  fun `grid columns preserve untagged fixed and adaptive wire values`() {
+    val fixed = Json.decodeFromString<PrototypeGridColumns>("3e0")
+    assertEquals(PrototypeGridColumns.Fixed(3), fixed)
+    assertEquals("3", Json.encodeToString(PrototypeGridColumns.serializer(), fixed))
+    val adaptive = Json.decodeFromString<PrototypeGridColumns>("""{"minWidth":100.5}""")
+    assertEquals(PrototypeGridColumns.Adaptive(100.5), adaptive)
+    assertEquals(
+      """{"minWidth":100.5}""",
+      Json.encodeToString(PrototypeGridColumns.serializer(), adaptive),
+    )
+  }
+
+  @Test
+  fun `flow grid structural errors use shared contract rules`() {
+    val cases =
+      listOf(
+        Triple(
+          """{"type":"flow","children":[],"style":{"runSpacing":-1}}""",
+          "root.style.runSpacing",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[],"columns":13}""",
+          "root.columns",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[],"columns":{"minWidth":-1}}""",
+          "root.columns.minWidth",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[{"type":"text","text":"a","span":0}],"columns":2}""",
+          "root.children[0].span",
+          "Invalid number value",
+        ),
+      )
+    for ((root, path, message) in cases) {
+      val spec = """{"id":"test","window":{"placement":{"type":"fullscreen"}},"root":$root}"""
+      val result = PrototypeSpecValidator.validate(spec)
+      assertEquals(PrototypeSpecValidation.Failure(PrototypeSpecError(path, message)), result)
+    }
+  }
+
   @TestFactory
   fun validFixtures(): List<DynamicTest> = valid.map { file ->
     DynamicTest.dynamicTest("decode ${file.name}") {
@@ -34,6 +79,60 @@ class PrototypeSpecTest {
         assertEquals(expected.jsonPrimitive.content, result.error.message)
       }
     }
+  }
+
+  @Test
+  fun `text field options decode every new field`() {
+    val root = decoded("text-field-options.json").root as PrototypeColumnNode
+    val fields = root.children.filterIsInstance<PrototypeTextFieldNode>()
+    val name = fields[0]
+    assertEquals("Name", name.label)
+    assertEquals("outlined", name.variant)
+    assertEquals("Your full name", name.supportingText)
+    assertEquals("text", name.keyboardType)
+    assertEquals("filled", fields[1].variant)
+    assertEquals("number", fields[1].keyboardType)
+    assertEquals(4, fields[1].maxLength)
+    assertEquals("password", fields[2].keyboardType)
+    assertEquals(true, fields[2].secure)
+    assertEquals(true, fields[3].multiline)
+    assertEquals(2, fields[3].minLines)
+    assertEquals(5, fields[3].maxLines)
+    val legacy = PrototypeTextFieldNode(stateKey = "name")
+    assertNull(legacy.label)
+    assertNull(legacy.variant)
+    assertNull(legacy.supportingText)
+    assertNull(legacy.keyboardType)
+    assertNull(legacy.secure)
+    assertNull(legacy.multiline)
+    assertNull(legacy.minLines)
+    assertNull(legacy.maxLines)
+    assertNull(legacy.maxLength)
+  }
+
+  @Test
+  fun `text field relationships follow host precedence and count UTF-16 units`() {
+    fun error(options: String, stored: String = "Ada"): PrototypeSpecError {
+      val spec =
+        """{"id":"a","window":{"placement":{"type":"fullscreen"}},"state":{"k":"$stored"},"root":{"type":"textField","stateKey":"k",$options}}"""
+      return (PrototypeSpecValidator.validate(spec) as PrototypeSpecValidation.Failure).error
+    }
+    assertEquals(
+      PrototypeSpecError("root.minLines", "Requires multiline: true"),
+      error(""""minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.multiline", "Multiline text cannot be secure"),
+      error(""""multiline":true,"secure":true,"minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.minLines", "minLines cannot exceed maxLines"),
+      error(""""multiline":true,"minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.stateKey", "Text field value exceeds maxLength"),
+      error(""""maxLength":1""", "😀"),
+    )
   }
 
   @Test
@@ -75,6 +174,11 @@ class PrototypeSpecTest {
         node.serialName to ((0 until node.elementsCount).map(node::getElementName) + "type").toSet()
       }
     assertEquals(variants.keys, models.keys)
+    val gestureTypes = setOf("box", "row", "column", "text", "image", "icon", "card")
+    for ((type, fields) in models) {
+      assertEquals(type in gestureTypes, "onLongPress" in fields, type)
+      assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
+    }
     for ((type, variant) in variants) {
       assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
     }
@@ -111,9 +215,165 @@ class PrototypeSpecTest {
     )
   }
 
+  @Test
+  fun `stack fixture is loaded with every navigation action and invalid fixture path`() {
+    val stack = decoded("stack-navigation.json").root as PrototypeStackNode
+    assertEquals("nav", stack.id)
+    assertEquals("home", stack.start)
+    assertEquals(setOf("home", "detail", "third"), stack.screens.keys)
+    val actions =
+      (stack.screens.getValue("home") as PrototypeColumnNode).children.flatMap {
+        it.onTap.orEmpty()
+      }
+    assertEquals(
+      listOf(
+        PrototypePushAction("nav", "detail"),
+        PrototypePopAction("nav"),
+        PrototypePopToRootAction("nav"),
+        PrototypeReplaceAction("nav", "detail"),
+      ),
+      actions,
+    )
+    val expected =
+      mapOf(
+        "stack-unknown-start.json" to "root.start",
+        "stack-unknown-screen.json" to "root.screens[\"home\"].onTap[0].screen",
+        "dangling-stack.json" to "root.screens[\"home\"].onTap[0].stack",
+        "duplicate-stack.json" to "root.children[1].id",
+      )
+    assertTrue(invalid.map { it.name }.containsAll(expected.keys))
+    // invalidFixtures also loads every future stack-*.json and checks its declared error path.
+    for ((name, path) in expected) {
+      val file = invalid.single { it.name == name }
+      val result =
+        PrototypeSpecValidator.validate(invalidSpec.getValue(file))
+          as PrototypeSpecValidation.Failure
+      assertEquals(path, result.error.path, name)
+    }
+  }
+
+  @Test
+  fun `stack accepts common fields and arbitrary screen names and normalizes nested integers`() {
+    val input =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{
+      "type":"stack","id":"nav","start":"screen 0","testTag":"nav","contentDescription":"Navigation",
+      "style":{"width":{"dp":320}},"screens":{"screen 0":{"type":"text","text":"Home","style":{"fontWeight":400.0}},
+      "__proto__":{"type":"scroll","child":{"type":"text","text":"Hidden"}}}}}"""
+    val result = PrototypeSpecValidator.validate(input)
+    assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+    val stack = (result as PrototypeSpecValidation.Success).spec.root as PrototypeStackNode
+    assertEquals(400, stack.screens.getValue("screen 0").style?.fontWeight)
+    assertEquals("vertical", (stack.screens.getValue("__proto__") as PrototypeScrollNode).axis)
+  }
+
+  @Test
+  fun `stack screen count and repeat refusal match canonical paths`() {
+    fun spec(screens: String, start: String = "home") =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"stack","id":"nav","start":"$start","screens":$screens}}"""
+    for (count in listOf(0, 33)) {
+      val screens = (0 until count).joinToString(",", "{", "}") { "\"$it\":{\"type\":\"spacer\"}" }
+      val result = PrototypeSpecValidator.validate(spec(screens)) as PrototypeSpecValidation.Failure
+      assertEquals("root.screens", result.error.path)
+      assertEquals("Screen count out of range", result.error.message)
+    }
+    val screens = (0 until 32).joinToString(",", "{", "}") { "\"$it\":{\"type\":\"spacer\"}" }
+    assertTrue(
+      PrototypeSpecValidator.validate(spec(screens, "0")) is PrototypeSpecValidation.Success,
+    )
+    val empty =
+      PrototypeSpecValidator.validate(spec("""{"":{"type":"spacer"}}"""))
+        as PrototypeSpecValidation.Failure
+    assertEquals("root.screens[\"\"]", empty.error.path)
+    val repeat =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column",
+      "repeat":{"as":"item","items":[{"label":"x"}]},"children":[{"type":"stack","id":"nav",
+      "start":"home","screens":{"home":{"type":"spacer"}}}]}}"""
+    val result = PrototypeSpecValidator.validate(repeat) as PrototypeSpecValidation.Failure
+    assertEquals("root.children[0]", result.error.path)
+    assertEquals("Stack cannot appear inside a repeat template", result.error.message)
+  }
+
+  @Test
+  fun `hidden stack screens count toward tree depth and expanded node limits`() {
+    val encoder = Json { classDiscriminator = "type" }
+    fun rejected(hidden: PrototypeNode): PrototypeSpecError {
+      val root =
+        PrototypeStackNode(
+          "nav",
+          start = "home",
+          screens =
+            linkedMapOf(
+              "home" to PrototypeSpacerNode(),
+              "hidden" to hidden,
+            ),
+        )
+      val spec = PrototypeSpec("a", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
+      return (PrototypeSpecValidator.validate(
+          encoder.encodeToString(PrototypeSpec.serializer(), spec),
+        ) as PrototypeSpecValidation.Failure)
+        .error
+    }
+    var deep: PrototypeNode = PrototypeSpacerNode()
+    repeat(PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH) {
+      deep = PrototypeColumnNode(children = listOf(deep))
+    }
+    assertEquals("Tree depth limit exceeded", rejected(deep).message)
+    val wide =
+      PrototypeColumnNode(
+        children = List(16) { PrototypeSpacerNode() },
+        repeat = PrototypeRepeat(List(128) { mapOf("label" to PrototypeScalar.Text("x")) }, "item"),
+      )
+    assertTrue(rejected(wide).message.contains("node limit", ignoreCase = true))
+  }
+
   private fun decoded(name: String): PrototypeSpec {
     val json = validJson.entries.single { it.key.name == name }.value
     return (PrototypeSpecValidator.validate(json) as PrototypeSpecValidation.Success).spec
+  }
+
+  @Test
+  fun `pager options default to null`() {
+    val pager =
+      Json.decodeFromString(
+        PrototypePagerNode.serializer(),
+        """{"id":"pages","children":[]}""",
+      )
+    assertNull(pager.axis)
+    assertNull(pager.pageSpacing)
+    assertNull(pager.peek)
+    assertNull(pager.pageSize)
+  }
+
+  @Test
+  fun `pager options decode every field and MAX_PROTOTYPE_PAGER_DP boundaries`() {
+    assertEquals(10000, PrototypeSpecValidator.MAX_PROTOTYPE_PAGER_DP)
+    val children = (decoded("pager-options.json").root as PrototypeColumnNode).children
+    val peek = children[0] as PrototypePagerNode
+    assertEquals("horizontal", peek.axis)
+    assertEquals(8.0, peek.pageSpacing)
+    assertEquals(PrototypePagerPeek(12.0, 24.0), peek.peek)
+    assertEquals(PrototypePagerPageSize.Dp(180.0), peek.pageSize)
+    val all = children[2] as PrototypePagerNode
+    assertEquals("vertical", all.axis)
+    assertEquals(10000.0, all.pageSpacing)
+    assertEquals(PrototypePagerPeek(0.0, 10000.0), all.peek)
+    assertEquals(PrototypePagerPageSize.Dp(0.000001), all.pageSize)
+    val fill = children[4] as PrototypePagerNode
+    assertEquals(PrototypePagerPeek(), fill.peek)
+    assertEquals(PrototypePagerPageSize.Fill, fill.pageSize)
+  }
+
+  @Test
+  fun `pager page size uses the existing strict dp serializer shape`() {
+    for (size in listOf(PrototypePagerPageSize.Fill, PrototypePagerPageSize.Dp(120.5))) {
+      val encoded = Json.encodeToString(PrototypePagerPageSize.serializer(), size)
+      assertEquals(size, Json.decodeFromString(PrototypePagerPageSize.serializer(), encoded))
+    }
+    for (bad in listOf("\"wrap\"", """{"dp":0}""", """{"dp":10001}""", """{"dp":1,"extra":2}""")) {
+      assertThrows(kotlinx.serialization.SerializationException::class.java) {
+        Json.decodeFromString(PrototypePagerPageSize.serializer(), bad)
+      }
+    }
   }
 
   @Test

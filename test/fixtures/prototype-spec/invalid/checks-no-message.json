@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "checks": [
+        {
+          "required": true
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.checks[0].message"
+}

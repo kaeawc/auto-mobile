@@ -2,6 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
+  PROTOTYPE_RICH_TEXT_CAPABILITY,
+  PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   type PrototypeResult,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
@@ -144,6 +146,176 @@ describe("prototype patch host", () => {
       }
       expect(proxy.patchRequests).toEqual([]);
       expect(agent.requests).toEqual([]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform refuses rich text patch nodes without the capability and sends them with it",
+    async (device) => {
+      expect((await show(device)).success).toBe(true);
+      const ops = [
+        {
+          op: "replaceNode",
+          id: "label",
+          node: {
+            type: "text",
+            id: "label",
+            spans: [{ text: "Read " }, { text: "terms", onTap: [{ type: "emit", name: "terms" }] }],
+          },
+        },
+      ];
+      const refused = await patch(ops, {}, device);
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain("root.children[0].spans");
+      expect(refused.error).toContain(PROTOTYPE_RICH_TEXT_CAPABILITY);
+      expect(proxy.patchRequests).toEqual([]);
+      expect(agent.patchRequests).toEqual([]);
+      expect((await patch(replace, {}, device)).success).toBe(true);
+      proxy.setSupportedCommands([
+        PROTOTYPE_PATCH_CAPABILITY,
+        PROTOTYPE_DATA_MODEL_CAPABILITY,
+        PROTOTYPE_RICH_TEXT_CAPABILITY,
+      ]);
+      agent.handshake.capabilities.push(PROTOTYPE_RICH_TEXT_CAPABILITY);
+      expect((await patch(ops, {}, device)).success).toBe(true);
+      const requests = device === android ? proxy.patchRequests : agent.patchRequests;
+      expect(requests).toEqual([
+        { id: "orders", ops: replace },
+        { id: "orders", ops },
+      ]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform permits rich text shaped data values without the rich text capability",
+    async (device) => {
+      expect((await show(device)).success).toBe(true);
+      const ops = [
+        { op: "add", path: "/data/opaque", value: { type: "text", spans: [{ text: "terms" }] } },
+      ];
+      expect((await patch(ops, {}, device)).success).toBe(true);
+      const requests = device === android ? proxy.patchRequests : agent.patchRequests;
+      expect(requests).toEqual([{ id: "orders", ops }]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform show refuses emit context in a component before sending",
+    async (device) => {
+      const result = await call(
+        {
+          action: "show",
+          spec: {
+            ...spec,
+            components: {
+              row: {
+                root: {
+                  type: "button",
+                  label: "Pick",
+                  onTap: [{ type: "emit", name: "x", context: { a: { value: 1 } } }],
+                },
+              },
+            },
+            root: { type: "use", component: "row" },
+          },
+        },
+        device,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
+      expect(result.error).toContain("root.onTap[0].context");
+      expect(proxy.getPrototypeHistory()).toEqual([]);
+      expect(agent.requests).toEqual([]);
+    },
+  );
+
+  for (const nested of [false, true]) {
+    test.each([android, ios])(
+      `$platform patch refuses ${nested ? "nested" : "direct"} emit context atomically, then accepts a capable device`,
+      async (device) => {
+        expect((await show(device)).success).toBe(true);
+        const before = store.shownSpecs.read(device.deviceId, "orders");
+        const emitting = {
+          type: "button",
+          label: "Pick",
+          onTap: [{ type: "emit", name: "x", context: { a: { value: 1 } } }],
+        };
+        const ops = [
+          {
+            op: "replaceNode",
+            id: "label",
+            node: nested
+              ? { id: "label", type: "column", children: [emitting] }
+              : { id: "label", ...emitting },
+          },
+        ];
+        const requests = device === android ? proxy.patchRequests : agent.patchRequests;
+        const result = await patch(ops, {}, device);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
+        expect(result.error).toContain(
+          `root.children[0]${nested ? ".children[0]" : ""}.onTap[0].context`,
+        );
+        expect(result.error).toContain("Nothing was shown.");
+        expect(requests).toEqual([]);
+        expect(store.shownSpecs.read(device.deviceId, "orders")).toEqual(before);
+        proxy.setSupportedCommands([
+          PROTOTYPE_PATCH_CAPABILITY,
+          PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
+          "prototype_data_model_v1",
+        ]);
+        agent.handshake.capabilities.push(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
+        agent.handshake.capabilities.push("prototype_data_model_v1");
+        const accepted = await patch(ops, {}, device);
+        expect(accepted).toEqual({ success: true });
+        expect(requests).toEqual([{ id: "orders", ops }]);
+      },
+    );
+  }
+
+  test.each([android, ios])(
+    "$platform accepts a patch when a later replacement removes emit context",
+    async (device) => {
+      await show(device);
+      const result = await patch(
+        [
+          {
+            op: "replaceNode",
+            id: "label",
+            node: {
+              id: "label",
+              type: "button",
+              label: "Pick",
+              onTap: [{ type: "emit", name: "x", context: {} }],
+            },
+          },
+          { op: "replaceNode", id: "label", node: { id: "label", type: "text", text: "Hello" } },
+        ],
+        {},
+        device,
+      );
+      expect(result.success).toBe(true);
+      expect(proxy.patchRequests).toHaveLength(device === android ? 1 : 0);
+      expect(agent.patchRequests).toHaveLength(device === ios ? 1 : 0);
+    },
+  );
+
+  test.each([android, ios])(
+    "$platform patch refuses component uses before transport",
+    async (device) => {
+      await show(device);
+      const result = await patch(
+        [
+          {
+            op: "replaceNode",
+            id: "label",
+            node: { id: "label", type: "column", children: [{ type: "use", component: "row" }] },
+          },
+        ],
+        {},
+        device,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Components are not expanded in a patch");
+      expect(proxy.patchRequests).toEqual([]);
+      expect(agent.patchRequests).toEqual([]);
     },
   );
   test.each([android, ios])(

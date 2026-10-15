@@ -146,6 +146,88 @@ class PrototypeSemanticsNodeCountTest {
   }
 
   @Test
+  fun `rich text semantics preserve the tappable span link annotation`() {
+    val spec =
+      semanticsSpec(
+        PrototypeTextNode(
+          testTag = "rich-text",
+          spans =
+            listOf(
+              PrototypeTextSpan("Read "),
+              PrototypeTextSpan("terms", onTap = listOf(PrototypeEmitAction("open"))),
+            ),
+        ),
+      )
+    PrototypeSemanticsRender(spec).use { rendered ->
+      val node =
+        rendered.nodes.single {
+          it.config.getOrNull(SemanticsProperties.TestTag) == "rich-text"
+        }
+      val text = node.config[SemanticsProperties.Text].single()
+      assertEquals("Read terms", text.text)
+      val links = text.getLinkAnnotations(0, text.length)
+      assertEquals(1, links.size)
+      assertEquals(5, links.single().start)
+      assertEquals(10, links.single().end)
+    }
+  }
+
+  @Test
+  fun `tappable card preserves its untagged rich text child's link annotation`() {
+    val spec =
+      semanticsSpec(
+        PrototypeCardNode(
+          onTap = listOf(PrototypeEmitAction("card")),
+          children =
+            listOf(
+              PrototypeTextNode(
+                spans =
+                  listOf(
+                    PrototypeTextSpan("Read "),
+                    PrototypeTextSpan("terms", onTap = listOf(PrototypeEmitAction("terms"))),
+                  ),
+              ),
+            ),
+        ),
+      )
+    PrototypeSemanticsRender(spec).use { rendered ->
+      val card = rendered.nodes.single { it.config.getOrNull(PrototypeRole) == "card" }
+      assertTrue(card.config.contains(SemanticsActions.OnClick))
+      val node = card.accessibilityNodes().single { it.config.getOrNull(PrototypeRole) == "text" }
+      assertNull(node.config.getOrNull(SemanticsProperties.TestTag))
+      val text = node.config[SemanticsProperties.Text].single()
+      assertEquals("Read terms", text.text)
+      val links = text.getLinkAnnotations(0, text.length)
+      assertEquals(1, links.size)
+      assertEquals(5, links.single().start)
+      assertEquals(10, links.single().end)
+    }
+  }
+
+  @Test
+  fun `tappable card still merges rich text without tappable spans`() {
+    val spec =
+      semanticsSpec(
+        PrototypeCardNode(
+          onTap = listOf(PrototypeEmitAction("card")),
+          children =
+            listOf(
+              PrototypeTextNode(
+                spans = listOf(PrototypeTextSpan("Read "), PrototypeTextSpan("terms")),
+              ),
+            ),
+        ),
+      )
+    PrototypeSemanticsRender(spec).use { rendered ->
+      val card = rendered.nodes.single { it.config.getOrNull(PrototypeRole) == "card" }
+      assertEquals(listOf(card), card.accessibilityNodes())
+      assertEquals("Read terms", card.config[SemanticsProperties.Text].single().text)
+      assertEquals("Read terms", card.description())
+      assertTrue(card.config.contains(SemanticsActions.OnClick))
+    }
+  }
+
+  @Test
   fun `benchmark node counts and decorative images are pinned`() {
     PrototypeSemanticsRender(benchmarkSemanticsSpec()).use { rendered ->
       assertCounts(rendered, BENCHMARK_SEMANTICS_NODES, BENCHMARK_ROLE_NODES)

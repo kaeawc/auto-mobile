@@ -1,19 +1,25 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerScope
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,9 +31,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
@@ -36,11 +44,20 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -74,6 +91,52 @@ internal val LocalPrototypeRenderWorkProbe =
   staticCompositionLocalOf<((PrototypeRenderWork, String) -> Unit)?> { null }
 
 val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
+
+/** Font assets are remembered once per distinct authored family, outside the string builder. */
+@Composable
+private fun prototypeAnnotatedText(
+  spans: List<PrototypeRenderSpan>,
+  interact: (PrototypeInteraction) -> Unit,
+): AnnotatedString {
+  val families = mutableMapOf<PrototypeFontFamily, FontFamily>()
+  for (span in spans.distinctBy { it.style.source.fontFamily }) {
+    val family = span.style.source.fontFamily ?: continue
+    key(family) { families[family] = rememberPrototypeFontFamily(span.style) }
+  }
+  val styles = spans.map { span ->
+    val rendered = span.style
+    val source = rendered.source
+    SpanStyle(
+      color = prototypeThemedColor(rendered.color, source.color) ?: rendered.color,
+      background =
+        prototypeThemedColor(rendered.background, source.background) ?: Color.Unspecified,
+      fontSize = source.textSize?.toFloat()?.sp ?: TextUnit.Unspecified,
+      fontWeight = if (source.fontWeight != null) rendered.fontWeight else null,
+      fontStyle = if (source.fontStyle != null) rendered.fontStyle else null,
+      textDecoration = if (source.textDecoration != null) rendered.textDecoration else null,
+      letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+      fontFamily = source.fontFamily?.let { families[it] },
+    )
+  }
+  return buildAnnotatedString {
+    spans.forEachIndexed { index, span ->
+      val start = length
+      append(span.text)
+      addStyle(styles[index], start, length)
+      span.onTap?.let { actions ->
+        addLink(
+          LinkAnnotation.Clickable(
+            tag = "span-$index",
+            styles = null,
+            linkInteractionListener = { interact(PrototypeInteraction.Tap(actions)) },
+          ),
+          start,
+          length,
+        )
+      }
+    }
+  }
+}
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
@@ -127,17 +190,25 @@ fun PrototypeSpecContent(
 ) {
   PrototypeTheme(root, theme) {
     val anchorLocals = remember { PrototypeAnchorLocals() }
+    val menuLayers = remember { PrototypeMenuLayers() }
+    val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
+      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
+      LocalPrototypeMenuLayers provides menuLayers,
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
       val fillsWindow = LocalPrototypeFillsWindow.current
-      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      Box(
+        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+          .semantics { testTagsAsResourceId = true },
+      ) {
         val modals = remember(root) { modalPrototypeSheets(root) }
-        // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
+        // An open dialog or menu is modal: the page behind it leaves the accessibility tree, as it
+        // does
         // on iOS and as touches already do. A snackbar or sheet does not block the page.
-        val pageBlocked = modals.any { it.role == "dialog" }
+        val pageBlocked = modals.any { it.role == "dialog" || it.role == "menu" }
         // The page box takes the fill: it is the root's parent and must measure the window.
         Box(
           Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
@@ -148,13 +219,31 @@ fun PrototypeSpecContent(
         }
         modals.forEach { node ->
           key(node.identity) {
-            RenderPrototypeModal(node, interact)
+            if (node.role == "menu") {
+              val parent = menuParents[node.identity]
+              RenderPrototypeMenu(
+                node,
+                prototypeNodeModifier(node, interact),
+                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                interact,
+              )
+            } else RenderPrototypeModal(node, interact)
             PrototypeAnchorLayer(
               remember(node) { layeredPrototypeAnchorsIn(node.children) },
               interact,
             )
           }
         }
+        val expanded = menuLayers.expandedSelect
+        val select = expanded?.let { identity ->
+          visiblePrototypeSelect(root, identity)?.takeIf {
+            // A newly opened modal closes a dropdown on the page behind it.
+            modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+              modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+          }
+        }
+        if (select != null) RenderPrototypeSelectOptions(select, interact)
+        else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
       }
     }
   }
@@ -290,7 +379,11 @@ private fun RenderPrototypeModal(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
 ) {
-  val modifier = prototypeNodeModifier(node, interact)
+  val layers = LocalPrototypeMenuLayers.current
+  val boundsModifier =
+    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
+    else Modifier
+  val modifier = boundsModifier.then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
@@ -413,14 +506,41 @@ private fun RenderPrototypeNodeContent(
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
-  val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
-  // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
-  // Look through card/scroll/pager only; nested box/row/column own the animation their parent
+  val layers = LocalPrototypeMenuLayers.current
+  val boundsModifier =
+    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
+    else Modifier
+  val controlInteract: (PrototypeInteraction) -> Unit = { interaction ->
+    if (node.source?.enabledCondition() != null)
+      interact(PrototypeInteraction.Guarded(node.identity, interaction))
+    else interact(interaction)
+  }
+  var focused by remember(node.identity) { mutableStateOf(false) }
+  val focusModifier =
+    if (node.source?.checks().isNullOrEmpty()) Modifier
+    else
+      Modifier.onFocusChanged { focus ->
+        if (focused && !focus.hasFocus) {
+          controlInteract(PrototypeInteraction.Blur(node.source.checkedKeys()))
+        }
+        focused = focus.hasFocus
+      }
+  val modifier =
+    (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
+      .then(boundsModifier)
+      .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
+      .then(focusModifier)
+  // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.
+  // Look through card/scroll/pager only; nested layout containers own the animation their parent
   // follows.
   // Others neither spring for text/style/image-load changes nor clip children with motion.
   val animatesSize =
     LocalPrototypeMotion.current &&
-      (node.role == "box" || node.role == "row" || node.role == "column") &&
+      (node.role == "box" ||
+        node.role == "row" ||
+        node.role == "column" ||
+        node.role == "flow" ||
+        node.role == "grid") &&
       prototypeContainerAnimatesSize(node)
   val containerModifier = modifier.prototypeAnimateSize(animatesSize)
   if (animatesSize)
@@ -464,6 +584,26 @@ private fun RenderPrototypeNodeContent(
           }
         }
       }
+    "flow" ->
+      PrototypeFlowLayout(
+        containerModifier,
+        node.style.source,
+        (checkNotNull(node.source) as PrototypeFlowNode).maxLines,
+      ) {
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+      }
+    "grid" ->
+      PrototypeGridLayout(
+        containerModifier,
+        (checkNotNull(node.source) as PrototypeGridNode).columns,
+        node.style.source,
+      ) {
+        node.children.forEach {
+          key(it.identity) {
+            RenderPrototypeNode(it, interact, Modifier.prototypeGridSpan(it.source?.span ?: 1))
+          }
+        }
+      }
     "text" -> {
       val source = node.style.source
       val role = prototypeTextRole(MaterialTheme.typography, source.textStyle)
@@ -471,29 +611,61 @@ private fun RenderPrototypeNodeContent(
       val textColor =
         if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
         else prototypeThemedColor(node.style.color, source.color) ?: node.style.color
-      Text(
-        node.text,
-        modifier,
-        color = textColor,
-        // sp, so prototype text follows the system font scale like the app it prototypes (#10436).
-        // A `textStyle` role supplies size, weight and family; explicit style fields still win.
-        fontSize =
-          source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
-        fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        // Only an authored family overrides; otherwise the text inherits the theme's family through
-        // its role or the themed body style, as plain text in the prototyped app would (#10561).
-        fontFamily =
-          if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
-        // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
-        fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
-        letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
-        textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
-        textAlign = node.style.textAlign,
-        lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
-        overflow = node.style.overflow,
-        maxLines = source.maxLines ?: Int.MAX_VALUE,
-        style = role ?: LocalTextStyle.current,
-      )
+      if (node.spans == null) {
+        Text(
+          node.text,
+          modifier,
+          color = textColor,
+          // sp, so prototype text follows the system font scale like the app it prototypes
+          // (#10436).
+          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+          fontSize =
+            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+          fontWeight =
+            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+          // Only an authored family overrides; otherwise the text inherits the theme's family
+          // through
+          // its role or the themed body style, as plain text in the prototyped app would (#10561).
+          fontFamily =
+            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+          textAlign = node.style.textAlign,
+          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+          overflow = node.style.overflow,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+          style = role ?: LocalTextStyle.current,
+        )
+      } else {
+        Text(
+          prototypeAnnotatedText(node.spans, interact),
+          modifier,
+          color = textColor,
+          // sp, so prototype text follows the system font scale like the app it prototypes
+          // (#10436).
+          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+          fontSize =
+            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+          fontWeight =
+            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+          // Only an authored family overrides; otherwise the text inherits the theme's family
+          // through
+          // its role or the themed body style, as plain text in the prototyped app would (#10561).
+          fontFamily =
+            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+          textAlign = node.style.textAlign,
+          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+          overflow = node.style.overflow,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+          style = role ?: LocalTextStyle.current,
+        )
+      }
     }
     "icon" -> {
       val variant = (node.source as? PrototypeIconNode)?.variant
@@ -533,29 +705,64 @@ private fun RenderPrototypeNodeContent(
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
     }
+    "stack" ->
+      Box(modifier, contentAlignment = node.style.alignment) {
+        // Only the runtime's top screen exists here; navigation has no transition in this slice.
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+      }
     "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)
     "bottomSheet",
     "dialog",
+    "menu",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
-    "iconButton" -> RenderPrototypeIconButton(node, modifier, interact)
-    "fab" -> RenderPrototypeFab(node, modifier, interact)
+    "iconButton" -> RenderPrototypeIconButton(node, modifier, controlInteract)
+    "fab" -> RenderPrototypeFab(node, modifier, controlInteract)
     "segmentedButton" -> RenderPrototypeSegmentedButton(node, modifier, interact)
     "topAppBar" -> RenderPrototypeTopAppBar(node, modifier, interact)
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
-    "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
-    "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
-    "textField" -> RenderPrototypeTextField(node, modifier, interact)
+    "timePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeTimePicker(node, modifier, controlInteract)
+      }
+    "datePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeDatePicker(node, modifier, controlInteract)
+      }
+    "searchBar" ->
+      RenderPrototypeSearchBar(node, modifier, interact) {
+        node.children.forEach { child ->
+          key(child.identity) {
+            RenderPrototypeNode(
+              child,
+              interact,
+              columnWeight(child),
+              child.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
+        }
+      }
+    "textField" -> RenderPrototypeTextField(node, modifier, controlInteract)
     "switch",
-    "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
-    "button" -> RenderPrototypeButton(node, modifier, interact)
-    "radioGroup" -> RenderPrototypeRadioGroup(node, modifier, interact)
-    "listItem" -> RenderPrototypeListItem(node, modifier, interact)
-    "slider" -> RenderPrototypeSlider(node, modifier, interact)
-    "chip" -> RenderPrototypeChip(node, modifier, interact)
+    "checkbox" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeToggle(node, modifier, controlInteract)
+      }
+    "button" -> RenderPrototypeButton(node, modifier, controlInteract)
+    "radioGroup" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeRadioGroup(node, modifier, controlInteract)
+      }
+    "select" -> RenderPrototypeSelect(node, modifier)
+    "listItem" -> RenderPrototypeListItem(node, modifier, controlInteract)
+    "slider" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeSlider(node, modifier, controlInteract)
+      }
+    "chip" -> RenderPrototypeChip(node, modifier, controlInteract)
     "card" ->
       RenderPrototypeCard(node, modifier) {
         node.children.forEach {
@@ -582,13 +789,125 @@ private fun RenderPrototypeTextField(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeTextFieldNode ?: return
+  RenderPrototypeEditableField(node, source.stateKey, source.onTap.orEmpty(), modifier, interact) {
+    shown,
+    change,
+    fieldModifier,
+    presses ->
+    val onValueChange: (String) -> Unit = { value ->
+      change(prototypeTextFieldClip(value, source.maxLength))
+    }
+    val label: (@Composable () -> Unit)? = source.label?.let { text -> { Text(text) } }
+    val counter = prototypeTextFieldCounter(shown, source.maxLength)
+    val supportingText: (@Composable () -> Unit)? =
+      if (node.errorMessage != null) {
+        { PrototypeErrorCaption(node) }
+      } else if (source.supportingText != null || counter != null) {
+        {
+          Row(Modifier.fillMaxWidth()) {
+            Text(source.supportingText.orEmpty(), Modifier.weight(1f))
+            if (counter != null) Text(counter)
+          }
+        }
+      } else null
+    val keyboardOptions =
+      if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
+      else
+        KeyboardOptions(
+          keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
+        )
+    val visualTransformation =
+      if (prototypeTextFieldSecure(source.secure, source.keyboardType))
+        PasswordVisualTransformation()
+      else VisualTransformation.None
+    val multiline = source.multiline
+    // Omit line options for legacy fields: Compose's default is a growing field.
+    if (source.variant == "outlined") {
+      if (multiline == null) {
+        OutlinedTextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+        )
+      } else {
+        OutlinedTextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+          singleLine = !multiline,
+          minLines = source.minLines ?: 1,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+        )
+      }
+    } else {
+      if (multiline == null) {
+        TextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+        )
+      } else {
+        TextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+          singleLine = !multiline,
+          minLines = source.minLines ?: 1,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+        )
+      }
+    }
+  }
+}
+
+/** One edit/reconciliation and action path for every editable prototype field. */
+@Composable
+internal fun RenderPrototypeEditableField(
+  node: PrototypeRenderNode,
+  stateKey: String,
+  actions: List<PrototypeAction>,
+  modifier: Modifier,
+  interact: (PrototypeInteraction) -> Unit,
+  field: @Composable (String, (String) -> Unit, Modifier, MutableInteractionSource) -> Unit,
+) {
   val presses = remember { MutableInteractionSource() }
   val focus = remember { FocusRequester() }
-  val actions = source.onTap.orEmpty()
   // The shown value is local state, updated synchronously by the IME's own edits; the controller
   // is told afterwards. Binding it to node.text would show the controller's lagging echo, so fast
   // commitText input could be applied against a stale value.
-  val epoch = LocalPrototypeTextEpochs.current[source.stateKey] ?: 0
+  val epoch = LocalPrototypeTextEpochs.current[stateKey] ?: 0
   val sync = remember { PrototypeTextFieldSync(node.text, epoch) }
   var shown by remember { mutableStateOf(sync.text) }
   LaunchedEffect(node.text, epoch) { if (sync.observe(node.text, epoch)) shown = sync.text }
@@ -599,7 +918,7 @@ private fun RenderPrototypeTextField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
-  if (actions.isNotEmpty())
+  if (node.enabled && actions.isNotEmpty())
     fieldModifier = fieldModifier.semantics {
       onClick {
         focus.requestFocus()
@@ -607,22 +926,20 @@ private fun RenderPrototypeTextField(
         true
       }
     }
-  // Material's editable field supplies SetText semantics and the keyboard input connection.
-  TextField(
+  field(
     shown,
     { value ->
       if (sync.edit(value)) {
         shown = value
-        interact(PrototypeInteraction.TextChange(source.stateKey, value, sync.epoch))
+        interact(PrototypeInteraction.TextChange(stateKey, value, sync.epoch))
       }
     },
-    modifier = fieldModifier,
-    interactionSource = presses,
-    placeholder = { Text(source.placeholder.orEmpty()) },
+    fieldModifier,
+    presses,
   )
 }
 
-/** Keeps at most one page before and one after current, only with fill and bounded height. */
+/** Retains neighbours only when cross-axis filling and bounded height allow it. */
 @Composable
 private fun RenderPrototypePager(
   node: PrototypeRenderNode,
@@ -630,6 +947,10 @@ private fun RenderPrototypePager(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypePagerNode ?: return
+  val markSelectedPage =
+    (source.peek?.start ?: 0.0) > 0.0 ||
+      (source.peek?.end ?: 0.0) > 0.0 ||
+      source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalPrototypeMotion.current
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
@@ -646,7 +967,7 @@ private fun RenderPrototypePager(
         interact(PrototypeInteraction.PagerMotion(source.id, page, scrolling))
       }
   }
-  val fill = prototypePageFill(node.style.source)
+  val fill = prototypePageFill(node.style.source, source.axis, source.pageSize)
   val pageModifier =
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
@@ -656,24 +977,55 @@ private fun RenderPrototypePager(
     val placeable = measurable.measure(constraints)
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
   }
-  val keepNeighbours = fill.height && boundedHeight
-  HorizontalPager(
-    pager,
-    pagerModifier,
-    beyondViewportPageCount = if (keepNeighbours) 1 else 0,
-    key = { node.children[it].identity },
-  ) { page ->
+  // Preserve the horizontal pager's retention rule; vertical pages fill across the width.
+  val keepNeighbours =
+    if (source.axis == "vertical") fill.width && boundedHeight else fill.height && boundedHeight
+  val pageContent: @Composable PagerScope.(Int) -> Unit = { page ->
     val onScreen by
       remember(pager, page) {
         derivedStateOf {
-          page == pager.currentPage ||
-            (pager.currentPageOffsetFraction > 0f && page == pager.currentPage + 1) ||
-            (pager.currentPageOffsetFraction < 0f && page == pager.currentPage - 1)
+          pager.layoutInfo.visiblePagesInfo.any { it.index == page }
         }
       }
-    Box(pageModifier.then(if (onScreen) Modifier else Modifier.clearAndSetSemantics {})) {
+    Box(
+      pageModifier.then(
+        when {
+          !onScreen -> Modifier.clearAndSetSemantics {}
+          markSelectedPage -> Modifier.semantics { selected = page == pager.currentPage }
+          else -> Modifier
+        },
+      ),
+    ) {
       RenderPrototypeNode(node.children[page], interact)
     }
+  }
+  val padding = pagerContentPadding(source.axis, source.peek)
+  val size = pagerPageSize(source.pageSize)
+  val spacing = pagerPageSpacing(source.pageSpacing)
+  if (source.axis == "vertical") {
+    VerticalPager(
+      pager,
+      pagerModifier,
+      contentPadding = padding,
+      pageSize = size,
+      pageSpacing = spacing,
+      snapPosition = SnapPosition.Start,
+      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+      key = { node.children[it].identity },
+      pageContent = pageContent,
+    )
+  } else {
+    HorizontalPager(
+      pager,
+      pagerModifier,
+      contentPadding = padding,
+      pageSize = size,
+      pageSpacing = spacing,
+      snapPosition = SnapPosition.Start,
+      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+      key = { node.children[it].identity },
+      pageContent = pageContent,
+    )
   }
 }
 
@@ -817,6 +1169,7 @@ private fun RenderPrototypeSheet(
   }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun prototypeNodeModifier(
   node: PrototypeRenderNode,
@@ -831,7 +1184,7 @@ private fun prototypeNodeModifier(
     (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
-  var modifier: Modifier = Modifier
+  var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
   val anchor = node.source?.anchor as? PrototypeBoundsAnchor
@@ -875,10 +1228,44 @@ private fun prototypeNodeModifier(
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
+  val longPress = node.source?.onLongPress?.takeIf { it.isNotEmpty() }
+  val doubleTap = node.source?.onDoubleTap?.takeIf { it.isNotEmpty() }
+  val gestureTaps = LocalPrototypeGestureTaps.current
   if (tappable) {
     modifier =
-      modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
-        interact(PrototypeInteraction.Tap(actions))
+      if (actions.isEmpty()) {
+        modifier
+          .prototypeGestureObserver(
+            gestureTaps,
+            presses,
+            onLongPress = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+            onDoubleTap = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          )
+          .semantics {
+            if (longPress != null) {
+              onLongClick(label = null) {
+                interact(PrototypeInteraction.Tap(longPress))
+                true
+              }
+            }
+          }
+      } else if (longPress != null || doubleTap != null) {
+        modifier.combinedClickable(
+          enabled = node.enabled,
+          interactionSource = presses,
+          indication = LocalIndication.current,
+          onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
+          onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
+        )
+      } else {
+        modifier.clickable(
+          enabled = node.enabled,
+          interactionSource = presses,
+          indication = LocalIndication.current,
+        ) {
+          gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
+        }
       }
   }
   val description =
@@ -907,11 +1294,17 @@ private fun prototypeNodeModifier(
       node.testTag?.let { testTag = it }
     }
   } else if (
-    !isSemanticsFreeContainer(node, tappable, description, state) &&
+    node.role != "searchBar" &&
+      !isSemanticsFreeContainer(node, tappable, description, state) &&
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
     modifier = modifier.semantics {
-      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+      if (
+        node.role !in setOf("textField", "searchBar") &&
+          node.role !in SEMANTICS_FREE_CONTAINERS &&
+          !(node.role == "text" && node.spans != null)
+      ) {
+        // Rich text keeps Text's own AnnotatedString semantics, including its link annotations.
         text = AnnotatedString(node.text)
       }
       this[PrototypeRole] = node.role
@@ -964,7 +1357,19 @@ private fun prototypeNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "scroll", "pager", "spacer", "card", "divider")
+  setOf(
+    "box",
+    "row",
+    "column",
+    "flow",
+    "grid",
+    "scroll",
+    "pager",
+    "stack",
+    "spacer",
+    "card",
+    "divider",
+  )
 
 /**
  * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
@@ -999,7 +1404,7 @@ internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Bo
 
 private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
 
-private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "card")
+private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "flow", "grid", "card")
 
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {
@@ -1014,8 +1419,9 @@ internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolea
   fun visit(child: PrototypeRenderNode): Boolean {
     if (
       child.testTag != null ||
+        child.spans?.any { it.onTap != null } == true ||
         !child.contentDescription.isNullOrEmpty() ||
-        !child.source?.onTap.isNullOrEmpty() ||
+        prototypeNodeTappable(child) ||
         child.source?.visibleWhen != null ||
         child.source?.anchor != null
     )
@@ -1072,9 +1478,8 @@ private fun prototypeIconOnlyLabel(children: List<PrototypeRenderNode>): String?
   val only = children.filter { it.visible }.singleOrNull() ?: return null
   return when {
     only.role == "icon" -> only.iconName?.takeIf { it.isNotEmpty() }
-    only.role in SEMANTICS_FREE_CONTAINERS &&
-      only.text.isEmpty() &&
-      only.source?.onTap.isNullOrEmpty() -> prototypeIconOnlyLabel(only.children)
+    only.role in SEMANTICS_FREE_CONTAINERS && only.text.isEmpty() && !prototypeNodeTappable(only) ->
+      prototypeIconOnlyLabel(only.children)
     else -> null
   }
 }
@@ -1203,3 +1608,30 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient, palette: Prototy
         }
       }
   }
+
+/** Error captions remain separate semantic nodes so their tags are inspectable. */
+@Composable
+internal fun PrototypeErrorCaption(node: PrototypeRenderNode) {
+  node.errorMessage?.let { message ->
+    Text(
+      message,
+      Modifier.semantics { prototypePartTag(node.testTag, "error")?.let { testTag = it } },
+      color = MaterialTheme.colorScheme.error,
+      style = MaterialTheme.typography.bodySmall,
+    )
+  }
+}
+
+@Composable
+private fun PrototypeCheckedControl(
+  node: PrototypeRenderNode,
+  parentModifier: Modifier,
+  content: @Composable () -> Unit,
+) {
+  if (node.errorMessage == null) content()
+  else
+    Column(parentModifier) {
+      content()
+      PrototypeErrorCaption(node)
+    }
+}

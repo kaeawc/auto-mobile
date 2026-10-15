@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "checks": [
+        {
+          "minLength": 5,
+          "message": "Min"
+        },
+        {
+          "maxLength": 3,
+          "message": "Max"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.checks[1].maxLength"
+}

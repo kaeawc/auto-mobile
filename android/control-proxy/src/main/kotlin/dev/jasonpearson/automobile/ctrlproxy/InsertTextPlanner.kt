@@ -28,11 +28,11 @@ internal fun shouldPollInsertTextMutation(
     elapsedMs < INSERT_TEXT_MUTATION_TIMEOUT_MS
 
 /** Returns the latest snapshot even on timeout, preserving the existing caret outcome rules. */
-internal fun awaitInsertTextMutation(
+internal suspend fun awaitInsertTextMutation(
   plan: InsertTextPlan,
   readSnapshot: () -> InsertTextSnapshot?,
   nowMs: () -> Long,
-  pause: (Long) -> Unit,
+  pause: suspend (Long) -> Unit,
 ): InsertTextSnapshot? {
   val start = nowMs()
   while (true) {

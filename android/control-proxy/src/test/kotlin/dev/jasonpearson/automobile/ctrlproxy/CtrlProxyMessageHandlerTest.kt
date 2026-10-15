@@ -34,9 +34,11 @@ import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.websocket.CloseReason
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
@@ -91,6 +93,34 @@ class CtrlProxyMessageHandlerTest {
   private val actions = RecordingCtrlProxyActions()
   private val logs = mutableListOf<String>()
   private val handler = CtrlProxyMessageHandler(actions, log = { logs.add(it) })
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun `handler awaits action completion before returning`() = runTest {
+    val release = CompletableDeferred<Unit>()
+    val events = mutableListOf<String>()
+    val handler =
+      CtrlProxyMessageHandler(
+        object : NoOpCtrlProxyActions() {
+          override suspend fun requestHierarchy(request: RequestHierarchy) {
+            events += "action started"
+            release.await()
+            events += "action completed"
+          }
+        },
+      )
+    val dispatch = launch {
+      assertNull(handler.handleMessage(RequestHierarchy(requestId = "held")))
+      events += "handler returned"
+    }
+    runCurrent()
+    assertEquals(listOf("action started"), events)
+    assertFalse(dispatch.isCompleted)
+    release.complete(Unit)
+    runCurrent()
+    assertEquals(listOf("action started", "action completed", "handler returned"), events)
+    assertTrue(dispatch.isCompleted)
+  }
 
   private val calls: List<Pair<String, List<Any?>>>
     get() = actions.calls
@@ -158,7 +188,7 @@ class CtrlProxyMessageHandlerTest {
     val traceFlags = mutableListOf<Boolean>()
     val tracedActions =
       object : CtrlProxyActions by actions {
-        override fun requestCommitText(request: RequestCommitText) {
+        override suspend fun requestCommitText(request: RequestCommitText) {
           traceFlags.add(request.trace)
           actions.requestCommitText(request)
         }

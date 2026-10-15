@@ -8,6 +8,7 @@ import {
 import { AdbCommandTimeoutError } from "./AdbClient";
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
@@ -3467,7 +3468,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   ) {
     // Continue capturing redacted diagnostics after startup without classifying live output.
     const captureOutput = (data: Buffer, outputRedactor: AndroidCommandOutputStreamRedactor) => {
-      const redactedOutput = outputRedactor.append(data.toString());
+      const redactedOutput = outputRedactor.append(data);
       appendRedactedLaunchOutput(redactedOutput);
       if (redactedOutput.length > 0) {
         logger.debug(`Emulator output: ${redactedOutput}`);
@@ -3854,7 +3855,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       completeStartupValidation,
       resolve,
     } = context;
-    const output = data.toString();
+    const output = outputRedactor.decode(data);
     const safeChunk = redactAndroidCommandOutput(output);
     const redactedOutput = outputRedactor.append(output);
     appendRedactedLaunchOutput(redactedOutput);
@@ -5748,8 +5749,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   ): () => void {
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
-      const captureOutput = (data: any) => {
-        const output = data.toString();
+      const stdoutDecoder = new StringDecoder("utf8");
+      const stderrDecoder = new StringDecoder("utf8");
+      const captureOutput = (decoder: StringDecoder, data: Buffer | string) => {
+        const output = typeof data === "string" ? data : decoder.write(data);
         processOutput.push(output);
         this.captureLaunchTargetDeviceId(childProcess, output);
         // Keep buffer bounded
@@ -5758,6 +5761,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         }
       };
       const handleProcessExit = (code: number | null) => {
+        const stdoutTail = stdoutDecoder.end();
+        const stderrTail = stderrDecoder.end();
+        if (stdoutTail) captureOutput(stdoutDecoder, stdoutTail);
+        if (stderrTail) captureOutput(stderrDecoder, stderrTail);
         // Any exit before readiness is fatal unless another process owns the AVD.
         const combinedOutput = processOutput.join("");
         if (combinedOutput.includes("Running multiple emulators with the same AVD")) {
@@ -5799,12 +5806,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           `Emulator process exited during readiness wait: ${state.processExitError.message}`,
         );
       };
-      childProcess.stdout?.on("data", captureOutput);
-      childProcess.stderr?.on("data", captureOutput);
+      const stdoutCapture = (data: Buffer | string) => captureOutput(stdoutDecoder, data);
+      const stderrCapture = (data: Buffer | string) => captureOutput(stderrDecoder, data);
+      childProcess.stdout?.on("data", stdoutCapture);
+      childProcess.stderr?.on("data", stderrCapture);
       childProcess.on("exit", handleProcessExit);
       return () => {
-        childProcess.stdout?.off("data", captureOutput);
-        childProcess.stderr?.off("data", captureOutput);
+        childProcess.stdout?.off("data", stdoutCapture);
+        childProcess.stderr?.off("data", stderrCapture);
         childProcess.off("exit", handleProcessExit);
       };
     }

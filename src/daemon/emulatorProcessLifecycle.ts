@@ -102,11 +102,10 @@ export class EmulatorProcessOutputTail {
   }
 
   private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
-    const text = typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
-    if (!text) {
+    if (typeof value !== "string" && !Buffer.isBuffer(value)) {
       return;
     }
-    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
+    this.output = boundedEmulatorOutputTail(this.output + redactor.append(value));
   }
 
   private async waitForStreamClose(): Promise<void> {

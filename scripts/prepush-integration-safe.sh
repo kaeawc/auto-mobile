@@ -103,7 +103,7 @@ if [[ "$#" -gt 0 ]]; then
     fi
     requested_files+=("$requested")
   done
-  safe_files=("${requested_files[@]}")
+  safe_files=(${requested_files[@]+"${requested_files[@]}"})
 fi
 
 if [[ "${#safe_files[@]}" -eq 0 ]]; then

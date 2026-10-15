@@ -59,8 +59,13 @@ export function createTapAt(
     duration: number;
     frameContext?: string;
   }> = [];
-  const iosDispatches: Array<{ x: number; y: number; duration: number; frameContext?: string }> =
-    [];
+  const iosDispatches: Array<{
+    kind: "double" | "tap";
+    x: number;
+    y: number;
+    duration: number;
+    frameContext?: string;
+  }> = [];
   let iosDispatchCount = 0;
   const unusedClient: CoordinateTapClient = {
     requestTapCoordinates: async () => ({ success: true }),
@@ -76,8 +81,16 @@ export function createTapAt(
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, frameContext) => {
       androidDispatches.push({ x, y, duration, frameContext });
     },
+    dispatchIosDoubleTap: async (_client, x, y, _duration, frameContext) => {
+      iosDispatches.push({ kind: "double", x, y, duration: 50, frameContext });
+      iosDispatchCount++;
+      onIosDispatch?.(timer);
+      if (iosDispatchCount === rejectIosDispatchAt) {
+        throw new Error("Synthetic iOS tap rejection");
+      }
+    },
     dispatchIosCoordinateTap: async (_client, x, y, duration, frameContext) => {
-      iosDispatches.push({ x, y, duration, frameContext });
+      iosDispatches.push({ kind: "tap", x, y, duration, frameContext });
       iosDispatchCount++;
       onIosDispatch?.(timer);
       if (iosDispatchCount === rejectIosDispatchAt) {

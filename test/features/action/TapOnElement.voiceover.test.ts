@@ -143,8 +143,10 @@ describe("TapOnElement VoiceOver mode", () => {
       async (action) => {
         await wireCtrlProxy();
         const request = spyOn(fakeIosClient, "requestTapCoordinates");
+        const double = spyOn(fakeIosClient, "requestDoubleTapCoordinates");
         await tapOnElement["executeiOSTapWithCoordinates"](action, 50, 50, 500);
-        expect(request.mock.calls).toHaveLength(action === "doubleTap" ? 2 : 1);
+        expect(request.mock.calls).toHaveLength(action === "doubleTap" ? 0 : 1);
+        expect(double).toHaveBeenCalledTimes(action === "doubleTap" ? 1 : 0);
         for (const call of request.mock.calls) {
           expect(call[2]).toBe(action === "longPress" ? 500 : 50);
           expect(call[3]).toBe(

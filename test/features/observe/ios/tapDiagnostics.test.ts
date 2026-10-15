@@ -291,3 +291,17 @@ describe("iOS opt-in tap diagnostics", () => {
     }
   });
 });
+
+test("double tap adds only the optional doubleTap flag to the ordinary tap wire", async () => {
+  logger.setLogLevel(LogLevel.INFO);
+  const { gestures, sent } = gestureHarness();
+  await gestures.requestTapCoordinates(12.5, 24.25, 50);
+  await gestures.requestDoubleTapCoordinates(12.5, 24.25, 5000);
+  const single = JSON.parse(sent[0]!);
+  const double = JSON.parse(sent[1]!);
+  expect(single).not.toHaveProperty("doubleTap");
+  expect(double.doubleTap).toBe(true);
+  delete single.requestId;
+  delete double.requestId;
+  expect(double).toEqual({ ...single, doubleTap: true });
+});

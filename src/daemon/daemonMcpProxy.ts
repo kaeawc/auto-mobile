@@ -1532,7 +1532,7 @@ export class DaemonMcpProxy {
     if (!client) {
       throw new DaemonUnavailableError("Cannot release broker session without a daemon connection");
     }
-    return await raceWithDeadline(
+    return raceWithDeadline(
       () =>
         client.callDaemonMethod(
           DAEMON_RELEASE_BROKER_SESSION_METHOD,

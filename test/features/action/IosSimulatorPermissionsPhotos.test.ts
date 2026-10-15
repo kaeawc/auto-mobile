@@ -2,6 +2,7 @@ import {
   FixtureTccReader,
   loadPhotosTccCase,
   photosTccCases,
+  photosTccCases265,
 } from "../../helpers/iosTccPhotosFixtures";
 import { describe, expect, test } from "bun:test";
 import {
@@ -13,6 +14,7 @@ import type { TccPermissionRow } from "../../../src/utils/ios-cmdline-tools/Simu
 import { isDeviceReadinessLocked } from "../../../src/utils/deviceReadinessLock";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { parseIosMajorVersion } from "../../../src/utils/ios-cmdline-tools/iosVersion";
 
 const device: BootedDevice = {
   name: "iPhone 17",
@@ -20,6 +22,7 @@ const device: BootedDevice = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
 };
 const appId = "com.example.app";
+const device27: BootedDevice = { ...device, iosVersion: "27.0" };
 const photosRow = (await loadPhotosTccCase("full")).rows[0];
 const addOnlyRow = (await loadPhotosTccCase("addonly")).rows[0];
 const revokedRows = (await loadPhotosTccCase("revoked")).rows;
@@ -309,13 +312,36 @@ describe("captured Photos readback", () => {
     ).toEqual({ state: "unknown", accessLevel: "addOnly" });
   });
 
+  test.each([
+    ["27.0", true],
+    ["27.1", true],
+    ["28.0", true],
+    ["26.99", false],
+    ["26", false],
+    [undefined, false],
+    ["beta", false],
+  ] as const)("implied full Photos grant is gated by runtime %s", (version, inferred) => {
+    const result = classifyIosSimulatorPermission(
+      "kTCCServicePhotosAdd",
+      { service: "kTCCServicePhotosAdd", client: appId, auth_value: 0 },
+      photosRow,
+      parseIosMajorVersion(version),
+    );
+    expect(result.state).toBe(inferred ? "granted" : "denied");
+    if (inferred) {
+      expect(result.evidence).toBe("impliedByFullPhotosGrant");
+    } else {
+      expect(result).toEqual({ state: "denied", accessLevel: "addOnly" });
+    }
+  });
+
   test.each(
     [undefined, ["photos-add"], ["photos", "photos-add"], ["kTCCServicePhotosAdd"]].map(
       (query) => ({ query }),
     ),
   )("full2 overrides stale PhotosAdd for %j", async ({ query }) => {
     const reader = new FixtureTccReader("full2");
-    const permissions = new IosSimulatorPermissions(device, new FakeSimCtlClient(), reader);
+    const permissions = new IosSimulatorPermissions(device27, new FakeSimCtlClient(), reader);
     const result = await permissions.getPermissions(appId, query);
     const stored = (await loadPhotosTccCase("full2")).rows.find(
       (row) => row.service === "kTCCServicePhotosAdd",
@@ -346,7 +372,7 @@ describe("captured Photos readback", () => {
 
   test.each(photosTccCases)("native probe agrees with add-only readback: %s", async (name) => {
     const reader = new FixtureTccReader(name);
-    const permissions = new IosSimulatorPermissions(device, new FakeSimCtlClient(), reader);
+    const permissions = new IosSimulatorPermissions(device27, new FakeSimCtlClient(), reader);
     const { probe } = await loadPhotosTccCase(name);
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
     const [photos, add] = result.permissions;
@@ -360,6 +386,39 @@ describe("captured Photos readback", () => {
     } else {
       expect(add).not.toHaveProperty("evidence");
       expect(photos).not.toHaveProperty("evidence");
+    }
+  });
+});
+
+describe("iOS 26.5 Photos captures", () => {
+  test.each(photosTccCases265)("reports PhotoKit add-only probe for %s", async (name) => {
+    const reader = new FixtureTccReader(name, "ios26.5");
+    const permissions = new IosSimulatorPermissions(
+      { ...device, iosVersion: "26.5" },
+      new FakeSimCtlClient(),
+      reader,
+    );
+    const { probe, rows } = await loadPhotosTccCase(name, "ios26.5");
+    const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
+    const [photos, add] = result.permissions;
+    const nativeStates = { authorized: "granted", denied: "denied", notDetermined: "unknown" };
+    expect(add.state).toBe(nativeStates[probe.addOnly.name]);
+    expect(add).not.toHaveProperty("evidence");
+    expect(add).not.toHaveProperty("verified");
+    expect(add).not.toHaveProperty("reason");
+    expect(photos.state).toBe(name === "revoked" ? "denied" : "unknown");
+    if (rows.some((row) => row.service === "kTCCServicePhotos" && row.auth_value === 2)) {
+      expect(photos).toMatchObject({
+        state: "unknown",
+        verified: false,
+        evidence: "storedTccGrant",
+      });
+    }
+    if (name === "full") {
+      expect(add).toMatchObject({ state: "denied", authValue: 0 });
+    }
+    if (name === "fullclean") {
+      expect(add.state).toBe("unknown");
     }
   });
 });

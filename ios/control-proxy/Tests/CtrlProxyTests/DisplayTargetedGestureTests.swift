@@ -24,6 +24,19 @@ final class DisplayTargetedGestureTests: XCTestCase {
         return provider
     }
 
+    func testDoubleTapUsesOneCoordinateProviderCallWithoutSingleTouchSynthesis() throws {
+        for geometry in [folded, unfolded] {
+            let provider = provider(geometry: geometry)
+            let factory = try DisplayGestureFactory(provider: provider)
+            let result = try factory.deliver(start: point, press: 0.05, doubleTap: true)
+            XCTAssertNotNil(result.coordinate)
+            XCTAssertEqual(provider.doubleTaps, 1)
+            XCTAssertEqual(provider.selections.count, 1)
+            XCTAssertTrue(provider.tapDurations.isEmpty)
+            XCTAssertTrue(provider.touches.isEmpty)
+        }
+    }
+
     func testDisplayChoiceRules() {
         for (screens, app, isPhoneIdiom, expected) in [
             ([main, inner], UInt64(3), true, (UInt64(3), "appDisplay")),

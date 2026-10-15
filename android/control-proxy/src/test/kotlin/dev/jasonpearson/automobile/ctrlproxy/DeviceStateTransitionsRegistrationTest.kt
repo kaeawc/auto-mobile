@@ -76,7 +76,8 @@ class DeviceStateTransitionsRegistrationTest {
   fun `flat to half opened to absent emits opaque codes`() {
     val source = FakeSource()
     val states = mutableListOf<Int>()
-    val registration = DeviceStateTransitions.register(source, 37, { _, _ -> fail() }) { states += it }
+    val registration =
+      DeviceStateTransitions.register(source, 37, { _, _ -> fail() }) { states += it }
     source.emit(flat)
     source.emit(halfOpened)
     source.emit()
@@ -89,7 +90,8 @@ class DeviceStateTransitionsRegistrationTest {
   fun `close stops queued delivery and closes source once`() {
     val source = FakeSource()
     val states = mutableListOf<Int>()
-    val registration = DeviceStateTransitions.register(source, 30, { _, _ -> fail() }) { states += it }
+    val registration =
+      DeviceStateTransitions.register(source, 30, { _, _ -> fail() }) { states += it }
     source.emit(flat)
     registration!!.close()
     registration.close()
@@ -124,7 +126,9 @@ class DeviceStateTransitionsRegistrationTest {
     val failure = NoClassDefFoundError("window backend")
     val warnings = Warnings()
     assertNull(
-      DeviceStateTransitions.register(PostureSource { throw failure }, 30, warnings::warn) { fail() },
+      DeviceStateTransitions.register(PostureSource { throw failure }, 30, warnings::warn) {
+        fail()
+      },
     )
     warnings.assertLost(failure)
   }
@@ -134,7 +138,9 @@ class DeviceStateTransitionsRegistrationTest {
     val failure = CancellationException("closed")
     val warnings = Warnings()
     try {
-      DeviceStateTransitions.register(PostureSource { throw failure }, 30, warnings::warn) { fail() }
+      DeviceStateTransitions.register(PostureSource { throw failure }, 30, warnings::warn) {
+        fail()
+      }
       fail("cancellation must propagate")
     } catch (e: CancellationException) {
       assertSame(failure, e)
@@ -146,7 +152,11 @@ class DeviceStateTransitionsRegistrationTest {
   fun `pre 30 returns null and warns without starting source`() {
     val warnings = Warnings()
     assertNull(
-      DeviceStateTransitions.register(PostureSource { error("must not start") }, 29, warnings::warn) {
+      DeviceStateTransitions.register(
+        PostureSource { error("must not start") },
+        29,
+        warnings::warn,
+      ) {
         fail()
       },
     )
@@ -184,7 +194,11 @@ class DeviceStateTransitionsRegistrationTest {
     val warnings = Warnings()
     val test = TestScope()
     val source =
-      PostureFlowSource({ throw failure }, StandardTestDispatcher(test.testScheduler), warnings::warn)
+      PostureFlowSource(
+        { throw failure },
+        StandardTestDispatcher(test.testScheduler),
+        warnings::warn,
+      )
     assertNull(DeviceStateTransitions.register(source, 30, warnings::warn) { fail() })
     warnings.assertLost(failure)
   }

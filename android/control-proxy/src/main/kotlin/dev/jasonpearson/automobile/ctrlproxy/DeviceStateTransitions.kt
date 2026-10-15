@@ -18,8 +18,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Best-effort fold-posture notifications through Jetpack WindowManager; no hidden API is used.
- * The emitted integer is an opaque change key, not a platform device-state identifier.
+ * Best-effort fold-posture notifications through Jetpack WindowManager; no hidden API is used. The
+ * emitted integer is an opaque change key, not a platform device-state identifier.
  */
 internal object DeviceStateTransitions {
   internal enum class Kind {
@@ -60,7 +60,9 @@ internal object DeviceStateTransitions {
     fun observe(onPostures: (List<FoldPosture>) -> Unit): AutoCloseable
   }
 
-  /** Owns collection independently of the service's IO scope. The provider may fail synchronously. */
+  /**
+   * Owns collection independently of the service's IO scope. The provider may fail synchronously.
+   */
   internal class PostureFlowSource(
     private val postures: () -> Flow<List<FoldPosture>>,
     private val dispatcher: CoroutineDispatcher,

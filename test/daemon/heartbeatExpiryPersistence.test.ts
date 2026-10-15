@@ -42,7 +42,7 @@ test.each([[60_000, "monitor"]] as const)(
       // One grace window after the heartbeat: the 1 s lease has lapsed, the grace has 1 s left.
       await timer.advanceTimeAsync(SUSPECT_GRACE_MS);
 
-      expect(await persistence.getSession?.("heartbeat-expired")).toMatchObject({
+      expect(await persistence.getSession("heartbeat-expired")).toMatchObject({
         status: "active",
         release_reason: null,
       });
@@ -63,7 +63,7 @@ test.each([[60_000, "monitor"]] as const)(
       }
       await manager.waitForSessionRelease("heartbeat-expired");
 
-      expect(await persistence.getSession?.("heartbeat-expired")).toMatchObject({
+      expect(await persistence.getSession("heartbeat-expired")).toMatchObject({
         status: "expired",
         release_reason: "heartbeat-timeout",
       });
@@ -89,7 +89,7 @@ test("idle expiry before the heartbeat lease lapses keeps its idle diagnostic", 
     expect(manager.getSession("idle-expired")).toBeNull();
     await manager.waitForSessionRelease("idle-expired");
 
-    expect(await persistence.getSession?.("idle-expired")).toMatchObject({
+    expect(await persistence.getSession("idle-expired")).toMatchObject({
       status: "expired",
       release_reason: "cleanup-expired",
     });
@@ -114,7 +114,7 @@ test("an idle window as short as the lease releases at the idle deadline, withou
     expect(manager.getSession("idle-at-deadline")).toBeNull();
     await manager.waitForSessionRelease("idle-at-deadline");
 
-    expect(await persistence.getSession?.("idle-at-deadline")).toMatchObject({
+    expect(await persistence.getSession("idle-at-deadline")).toMatchObject({
       status: "expired",
       release_reason: "cleanup-expired",
     });
@@ -141,7 +141,7 @@ test.each(["lookup", "sweep"])(
       }
       await manager.waitForSessionRelease("lease-lapsed");
 
-      expect(await persistence.getSession?.("lease-lapsed")).toMatchObject({
+      expect(await persistence.getSession("lease-lapsed")).toMatchObject({
         status: "expired",
         release_reason: "heartbeat-timeout",
       });

@@ -53,12 +53,9 @@ export class EmulatorLossIncidentLedger {
       return undefined;
     }
     try {
-      // Capture the tail inside the try so a finalize()/snapshot() rejection
-      // degrades to no tail rather than blocking device-loss cleanup.
-      const outputTail =
-        detectionPath === "watched-process-exit"
-          ? await this.pool.getProcessOutputTail(deviceId)?.finalize()
-          : this.pool.getProcessOutputTail(deviceId)?.snapshot();
+      const tail = this.pool.getProcessOutputTail(deviceId);
+      const outputTail = await this.captureProcessOutputTail(deviceId, detectionPath, tail);
+      // "adopted" means no tracked output source: adopted, not yet tracked, or tracking dropped.
       const avdName = this.incidentAvdName(device, detectionPath);
       const incident = await this.emulatorLossIncidentStore.open({
         deviceId,
@@ -66,6 +63,7 @@ export class EmulatorLossIncidentLedger {
         detectionPath,
         ...(processExit ? { processExit } : {}),
         ...(outputTail ? { outputTail } : {}),
+        ...(tail === undefined ? { outputUnavailable: "adopted" as const } : {}),
         ...(lastAdbState ? { lastAdbState } : {}),
         ...this.captureEmulatorLossSessionFields(device),
         recoveryPolicy: this.pool.getRecoveryPolicy(),
@@ -79,6 +77,19 @@ export class EmulatorLossIncidentLedger {
         `[DevicePool] Failed to record emulator-loss incident for ${deviceId}: ${error}`,
         error,
       );
+      return undefined;
+    }
+  }
+
+  private async captureProcessOutputTail(
+    deviceId: string,
+    detectionPath: EmulatorLossDetectionPath,
+    tail: ReturnType<EmulatorLossIncidentPoolPort["getProcessOutputTail"]>,
+  ): Promise<string | undefined> {
+    try {
+      return detectionPath === "watched-process-exit" ? await tail?.finalize() : tail?.snapshot();
+    } catch (error) {
+      logger.warn(`[DevicePool] Failed to capture emulator output for ${deviceId}`, error);
       return undefined;
     }
   }

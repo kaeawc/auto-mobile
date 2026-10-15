@@ -118,7 +118,7 @@ describe("DevicePool autolock", () => {
         sessionId: "recovered-autolock",
         autolockSessionId: "recovered-autolock",
       });
-      expect(await persistence.getSession?.("recovered-autolock")).toMatchObject({
+      expect(await persistence.getSession("recovered-autolock")).toMatchObject({
         source: "autolock",
         autolock_enabled: 1,
         mcp_session_id: "previous-mcp-session",

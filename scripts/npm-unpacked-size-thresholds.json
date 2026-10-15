@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 22020096,
+    "unpackedBytes": 23592960,
     "warnHeadroomBytes": 1048576
   },
   "metadata": {
-    "generatedAt": "2026-10-05",
-    "description": "21 MiB NPM unpacked-size cap assumes trimming: measured 18,345,761 bytes plus 3 MiB, rounded up to a whole MiB; untrimmed reference 23,838,787 bytes (#9571)"
+    "generatedAt": "2026-10-15",
+    "description": "22.5 MiB NPM unpacked-size cap (raised from 21 MiB in #12457): the static migration bundle (#12449) adds about 0.2 MB net to index.js and its source map, so the trimmed pack measures 22,369,648 bytes once the raw migrations folder is no longer shipped beside it; the cap keeps just over 1 MiB of headroom and stays below the untrimmed reference of 23,838,787 bytes (#9571) so lost trimming still fails"
   }
 }

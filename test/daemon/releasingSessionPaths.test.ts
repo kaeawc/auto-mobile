@@ -299,7 +299,7 @@ describe("remaining paths during session release", () => {
       expect(h.manager.getSession(sessionId)).toBeNull();
       expect(h.manager.getSessionForDevice(deviceId)).toBeNull();
       expect(h.manager.getTerminalReleaseSnapshot(sessionId)).toBeUndefined();
-      expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
+      expect(await h.persistence.getSession(sessionId)).toMatchObject({
         status: "released",
         release_reason: PLAN_AUTO_RELEASE_REASON,
       });

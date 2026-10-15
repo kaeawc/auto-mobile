@@ -265,7 +265,7 @@ describe("a terminal non-device-loss release while it is still writing its row",
       gate.open();
       await release;
       await expectNotFoundWires(r, expected);
-      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(reason);
+      expect((await r.persistence.getSession(SESSION))?.release_reason).toBe(reason);
     });
   }
 });
@@ -313,13 +313,13 @@ describe("joined terminal releases never lose their named reason during row writ
       await expectNotFoundWires(r, expected);
       firstWrite.open();
       await settle();
-      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(first);
+      expect((await r.persistence.getSession(SESSION))?.release_reason).toBe(first);
       expect(writes).toBe(first === finalReason ? 1 : 2);
       await expectNotFoundWires(r, expected);
       secondWrite.open();
       await Promise.all([release, joined]);
       await expectNotFoundWires(r, expected);
-      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(finalReason);
+      expect((await r.persistence.getSession(SESSION))?.release_reason).toBe(finalReason);
     });
   }
 });
@@ -360,7 +360,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     gate.open();
     await Promise.all([release, joined]);
     await expectNotFoundWires(r, { ...bare, releaseReason: "device-killed" });
-    expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe("device-killed");
+    expect((await r.persistence.getSession(SESSION))?.release_reason).toBe("device-killed");
   });
 
   test("a commit fence superseded after the terminal fence never names the surviving session", async () => {
@@ -386,7 +386,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
     expect(r.manager.getSession(SESSION)).toBe(session);
     expect(await r.manager.getReleasedSessionReason(SESSION)).toBeUndefined();
-    expect((await r.persistence.getSession?.(SESSION))?.status).toBe("active");
+    expect((await r.persistence.getSession(SESSION))?.status).toBe("active");
     expect((await heartbeat(r)).success).toBe(true);
     expect((await r.request("daemon/sessionInfo", { sessionId: SESSION })).success).toBe(true);
   });

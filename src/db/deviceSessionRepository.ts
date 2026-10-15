@@ -299,6 +299,8 @@ export interface DeviceSessionRecord {
   daemonSessionId?: string | null;
   createdAtMs: number;
   lastUsedAtMs: number;
+  /** Monotonic activity order within this daemon/session; defaults to lastUsedAtMs. */
+  activitySeq?: number;
   expiresAtMs: number;
   sessionTimeoutMs: number;
   heartbeatTimeoutMs: number;
@@ -312,6 +314,8 @@ export interface DeviceSessionRecord {
 
 export interface DeviceSessionActivityUpdate {
   lastUsedAtMs: number;
+  /** Monotonic activity order within this daemon/session; defaults to lastUsedAtMs. */
+  activitySeq?: number;
   expiresAtMs: number;
   sessionTimeoutMs: number;
   heartbeatTimeoutMs: number;
@@ -396,13 +400,13 @@ export interface DeviceSessionPersistence {
     nowMs?: number,
     options?: UpsertActiveSessionOptions,
   ): Promise<number | void>;
-  getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
+  getSession(sessionUuid: string): Promise<DeviceSession | undefined>;
   /**
    * `nowMs` is on the clock the persisted stamps were written with: wall-clock epoch ms (#11162),
    * converted from the session clock by the session manager's `sessionClockPersistence.ts`.
    * Discover peers only when a window-first row needs terminalizing; ordinary listing stays local.
    */
-  listRecoverableSessions?(
+  listRecoverableSessions(
     nowMs?: number,
     livePeerDaemonSessionIds?: () => readonly string[],
   ): Promise<DeviceSession[]>;
@@ -412,7 +416,7 @@ export interface DeviceSessionPersistence {
    * is later (#10713), so tool activity during a device-restart recovery survives a daemon restart.
    * A row that is no longer device-restart-released (recovered, terminalized) is left untouched.
    */
-  recordRestartRecoveryActivity?(sessionUuid: string, activityAtMs: number): Promise<void>;
+  recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void>;
   /**
    * Take ownership of a recoverable row before recovering it (#11200): stamp `daemonSessionId` as
    * its owner and advance its `stable_identity_generation`, only while the row is still the
@@ -420,7 +424,7 @@ export interface DeviceSessionPersistence {
    * writer (a peer daemon recovering the same row) changed it first; the caller must then leave
    * the row alone. Status and release reason are untouched, so the row stays recoverable.
    */
-  claimRecoverableSession?(
+  claimRecoverableSession(
     sessionUuid: string,
     expected: RecoverableRowIncarnation,
     daemonSessionId: string,
@@ -434,13 +438,13 @@ export interface DeviceSessionPersistence {
    * claim was handed back; false when another writer (the recovery's own upsert, a terminal
    * release, a peer) changed the row first.
    */
-  releaseRecoverableSessionClaim?(
+  releaseRecoverableSessionClaim(
     sessionUuid: string,
     claimed: RecoverableRowIncarnation,
     previousOwner: string | null,
   ): Promise<boolean>;
-  recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
-  replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
@@ -512,15 +516,17 @@ function livenessColumnsFromRow(
 
 /**
  * SET value for an activity column that only an activity at least as recent as the row's may
- * overwrite (#11129). A BUSY-retried write can land after a later one; keying on
- * `last_used_at_ms` (which only tool activity advances) lets the older write leave the newer
- * lease alone while still matching the row, so a stale write is not mistaken for a missing row.
+ * overwrite (#11129). A BUSY-retried write can land after a later one; the process-local
+ * activity sequence orders writes even across wall-clock steps (#11497). The older write leaves
+ * the newer lease alone while still matching the row, so it is not mistaken for a missing row.
  * SQLite evaluates every SET expression against the pre-update row.
  */
 function activityColumnsUnlessStale(update: DeviceSessionActivityUpdate) {
-  const at = update.lastUsedAtMs;
+  const at = update.activitySeq ?? update.lastUsedAtMs;
   const liveness = livenessColumns(update);
   return {
+    activity_seq: sql<number>`max(activity_seq, ${at})`,
+    last_used_at_ms: unlessStale("last_used_at_ms", at, update.lastUsedAtMs),
     expires_at_ms: unlessStale("expires_at_ms", at, update.expiresAtMs),
     session_timeout_ms: unlessStale("session_timeout_ms", at, update.sessionTimeoutMs),
     heartbeat_timeout_ms: unlessStale("heartbeat_timeout_ms", at, update.heartbeatTimeoutMs),
@@ -553,8 +559,8 @@ function activityColumnsUnlessStale(update: DeviceSessionActivityUpdate) {
   };
 }
 
-function unlessStale<T>(column: string, lastUsedAtMs: number, value: T) {
-  return sql<T>`CASE WHEN last_used_at_ms > ${lastUsedAtMs} THEN ${sql.ref(column)} ELSE ${value} END`;
+function unlessStale<T>(column: string, activitySeq: number, value: T) {
+  return sql<T>`CASE WHEN activity_seq > ${activitySeq} THEN ${sql.ref(column)} ELSE ${value} END`;
 }
 
 /** The row an upsert of `record` inserts; `nowIso` stamps its audit columns. */
@@ -572,6 +578,7 @@ function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDe
     daemon_session_id: record.daemonSessionId ?? null,
     created_at_ms: record.createdAtMs,
     last_used_at_ms: record.lastUsedAtMs,
+    activity_seq: record.activitySeq ?? record.lastUsedAtMs,
     expires_at_ms: record.expiresAtMs,
     released_at_ms: null,
     release_reason: null,
@@ -583,7 +590,7 @@ function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDe
   };
 }
 
-export class DeviceSessionRepository {
+export class DeviceSessionRepository implements DeviceSessionPersistence {
   private db: Kysely<Database> | null;
 
   constructor(
@@ -641,6 +648,7 @@ export class DeviceSessionRepository {
             mcp_session_id: row.mcp_session_id,
             daemon_session_id: row.daemon_session_id,
             last_used_at_ms: row.last_used_at_ms,
+            activity_seq: row.activity_seq,
             expires_at_ms: row.expires_at_ms,
             released_at_ms: null,
             release_reason: null,
@@ -724,7 +732,6 @@ export class DeviceSessionRepository {
       const result = await db
         .updateTable("device_sessions")
         .set({
-          last_used_at_ms: sql<number>`max(last_used_at_ms, ${update.lastUsedAtMs})`,
           ...activityColumnsUnlessStale(update),
           // Mark every current liveness write. The forward-compatibility trigger
           // clears this contract only when an older binary updates legacy
@@ -860,6 +867,8 @@ export class DeviceSessionRepository {
       mcpSessionId?: string | null;
       daemonSessionId?: string | null;
       lastUsedAtMs: number;
+      /** Monotonic activity order within this daemon/session; defaults to lastUsedAtMs. */
+      activitySeq?: number;
       expiresAtMs: number;
     },
   ): Promise<void> {
@@ -873,10 +882,19 @@ export class DeviceSessionRepository {
           autolock_enabled: 1,
           mcp_session_id: input.mcpSessionId ?? null,
           daemon_session_id: input.daemonSessionId ?? null,
-          // Monotonic (#11129): the stamps come from a snapshot taken before this write was
-          // queued, so a newer activity write may already have landed.
-          last_used_at_ms: sql<number>`max(last_used_at_ms, ${input.lastUsedAtMs})`,
-          expires_at_ms: unlessStale("expires_at_ms", input.lastUsedAtMs, input.expiresAtMs),
+          // A newer activity snapshot may have landed while this write was queued (#11129).
+          // Order by the session clock, not by wall stamps that can step backward (#11497).
+          activity_seq: sql<number>`max(activity_seq, ${input.activitySeq ?? input.lastUsedAtMs})`,
+          last_used_at_ms: unlessStale(
+            "last_used_at_ms",
+            input.activitySeq ?? input.lastUsedAtMs,
+            input.lastUsedAtMs,
+          ),
+          expires_at_ms: unlessStale(
+            "expires_at_ms",
+            input.activitySeq ?? input.lastUsedAtMs,
+            input.expiresAtMs,
+          ),
           released_at_ms: null,
           release_reason: null,
           updated_at: this.nowIso(),

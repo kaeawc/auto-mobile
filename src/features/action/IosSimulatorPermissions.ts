@@ -51,7 +51,7 @@ export interface IosSimulatorPermissionState {
   verified?: boolean;
   reason?: string;
   accessLevel?: "readWrite" | "addOnly";
-  evidence?: "storedTccGrant";
+  evidence?: "storedTccGrant" | "impliedByFullPhotosGrant";
   authValue?: number;
   raw?: Record<string, string | number | null>;
 }
@@ -105,19 +105,43 @@ function stateFromAllowed(value: number | null | undefined): IosSimulatorPermiss
   return "unknown";
 }
 
-/** Classify stored TCC state without claiming host verification of Photos access. */
+/** photos-add readback also needs the sibling Photos row to detect an implied full grant. */
+function withSiblingPhotosRead(permissions: string[] | undefined): string[] | undefined {
+  const services = permissions?.map(tccServiceForPermission);
+  return permissions &&
+    services?.includes("kTCCServicePhotosAdd") &&
+    !services.includes("kTCCServicePhotos")
+    ? [...permissions, "photos"]
+    : permissions;
+}
+
+const PHOTOS_ACCESS_LEVELS = new Map<string, "readWrite" | "addOnly">([
+  ["kTCCServicePhotos", "readWrite"],
+  ["kTCCServicePhotosAdd", "addOnly"],
+]);
+
+/**
+ * Classify stored TCC state without claiming host verification of Photos access.
+ * photosRow supplies the sibling kTCCServicePhotos row for add-only inference.
+ */
 export function classifyIosSimulatorPermission(
   service: string,
   row?: TccPermissionRow,
+  photosRow?: TccPermissionRow,
 ): Pick<IosSimulatorPermissionState, "state" | "verified" | "reason" | "accessLevel" | "evidence"> {
   const authValue = row?.auth_value ?? null;
   const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(row?.allowed);
-  const accessLevel =
-    service === "kTCCServicePhotos"
-      ? "readWrite"
-      : service === "kTCCServicePhotosAdd"
-        ? "addOnly"
-        : undefined;
+  const accessLevel = PHOTOS_ACCESS_LEVELS.get(service);
+  if (service === "kTCCServicePhotosAdd" && state !== "granted" && photosRow?.auth_value === 2) {
+    return {
+      state: "granted",
+      verified: false,
+      accessLevel,
+      evidence: "impliedByFullPhotosGrant",
+      reason:
+        "add-only access is implied by the full kTCCServicePhotos grant; the stored kTCCServicePhotosAdd row, if present, is stale and not authoritative",
+    };
+  }
   if (service === "kTCCServicePhotos" && state === "granted") {
     return {
       state: "unknown",
@@ -325,7 +349,7 @@ export class IosSimulatorPermissions {
       const rows = await this.tccReader.readPermissions(
         this.device.deviceId,
         normalizedAppId,
-        normalizedPermissions,
+        withSiblingPhotosRead(normalizedPermissions),
       );
       const rowByService = new Map(rows.map((row) => [row.service, row]));
       const queriedServices =
@@ -343,7 +367,11 @@ export class IosSimulatorPermissions {
           const row = rowByService.get(service);
           const authValue = row?.auth_value ?? null;
           const allowed = row?.allowed ?? null;
-          const classification = classifyIosSimulatorPermission(service, row);
+          const classification = classifyIosSimulatorPermission(
+            service,
+            row,
+            rowByService.get("kTCCServicePhotos"),
+          );
           const authValueForResult = authValue ?? allowed;
           return {
             permission: permissionForTccService(service),

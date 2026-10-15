@@ -1,3 +1,4 @@
+import { loadPhotosTccCase } from "../../helpers/iosTccPhotosFixtures";
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import type { ExecResult } from "../../../src/models";
@@ -68,6 +69,24 @@ class FakeSqliteExecutor implements HostCommandExecutor {
 }
 
 describe("SimulatorTccSqliteClient", () => {
+  test("parses both full2 captured rows and ignores extra sqlite columns", async () => {
+    const { rows } = await loadPhotosTccCase("full2");
+    expect(rows).toEqual([
+      {
+        service: "kTCCServicePhotosAdd",
+        client: "dev.jasonpearson.automobile.Playground",
+        auth_version: 1,
+        auth_value: 0,
+      },
+      {
+        service: "kTCCServicePhotos",
+        client: "dev.jasonpearson.automobile.Playground",
+        auth_version: 2,
+        auth_value: 2,
+      },
+    ]);
+  });
+
   test("tccServiceForPermission and permissionForTccService are inverses on the canonical vocabulary (#6372 dedup)", () => {
     // These two functions - and IosSimulatorPermissions's grant/query paths -
     // all derive from the single TCC_SERVICE_BY_PERMISSION table in this

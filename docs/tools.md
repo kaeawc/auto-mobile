@@ -1664,7 +1664,12 @@ unavailable from the host without app instrumentation: launch the app and check
 insufficient. Results include `accessLevel` (`readWrite` for Photos and
 `addOnly` for photos-add); an unverified stored Photos grant includes
 `evidence: "storedTccGrant"`. Effective native status still requires app
-instrumentation. Physical-device permission limits are unchanged.
+instrumentation. A full stored Photos grant (`auth_value: 2`) implies add-only
+access: photos-add reports `granted` with `evidence: "impliedByFullPhotosGrant"`
+when its own row is missing or not granted. A stale PhotosAdd row remains in
+`raw` and `authValue` for transparency; an already granted PhotosAdd row is
+unchanged. Denied, limited, or unknown Photos rows do not imply add-only access.
+Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.

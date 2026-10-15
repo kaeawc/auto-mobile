@@ -32,7 +32,7 @@ describe("anonymous-acquisition creator kind (#11071)", () => {
       source,
     );
     const createdIsAnonymous = isAnonymousAcquisitionSession(created);
-    const persistedSource = (await persistence.getSession?.("cli-session"))?.source;
+    const persistedSource = (await persistence.getSession("cli-session"))?.source;
     await persistence.markReleased("cli-session", "expired", 1_000, "daemon-restart");
 
     // The restarted daemon rebinds the row without knowing who created it.

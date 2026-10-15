@@ -240,7 +240,19 @@ object PrototypePatch {
     (node["child"] as? JsonObject)?.let {
       yieldAll(tree(it, tokens + "child", "$path.child", repeated))
     }
-    val children = node["children"] as? JsonArray ?: return@sequence
+    for ((name, screen) in (node["screens"] as? JsonObject).orEmpty()) {
+      if (screen is JsonObject) {
+        yieldAll(
+          tree(
+            screen,
+            tokens + listOf("screens", name),
+            "$path.screens[${JsonPrimitive(name)}]",
+            repeated,
+          ),
+        )
+      }
+    }
+    val children = (node["children"] as? JsonArray).orEmpty()
     for ((index, child) in children.withIndex()) {
       if (child is JsonObject) {
         yieldAll(

@@ -55,6 +55,12 @@ final class PrototypeAppearanceTests: XCTestCase {
     func testTheAgentAdvertisesAppearance() {
         XCTAssertEqual(PrototypeAgentProtocol.appearanceCapability, "prototype_appearance_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_appearance_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_search_bar_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_rich_text_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_menus_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_stack_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_emit_context_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_checks_v1"))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_data_model_v1"))
         var gate = PrototypeConnectionGate(token: "0123456789abcdef-launch-token")
         let hello = try? JSONSerialization.data(withJSONObject: [

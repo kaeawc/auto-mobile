@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
@@ -99,6 +100,33 @@ object PrototypeRepeatTemplate {
       }
     }
 
+  /**
+   * CtrlProxy's repeat expander uses this typed binding operation; payload is never interpolated.
+   */
+  fun bindEmitContext(
+    context: Map<String, EmitContextBinding>,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): Map<String, EmitContextBinding> = context.mapValues { (_, binding) ->
+    when {
+      "item" in binding ->
+        JsonObject(
+          mapOf("value" to (item[binding.getValue("item").jsonPrimitive.content] ?: JsonNull)),
+        )
+      "index" in binding -> JsonObject(mapOf("value" to JsonPrimitive(index)))
+      "state" in binding ->
+        JsonObject(
+          binding +
+            ("state" to
+              JsonPrimitive(
+                bind(binding.getValue("state").jsonPrimitive.content, alias, item, index),
+              )),
+        )
+      else -> binding
+    }
+  }
+
   /** Integral numbers render without a decimal point or exponent at any magnitude. */
   fun rendered(value: JsonPrimitive): String {
     if (value.isString) return value.content
@@ -129,6 +157,7 @@ internal enum class PrototypeBindableKind {
   OPERAND,
   DATA_OPERAND,
   EMIT_NAME,
+  EMIT_BINDING,
   KEY,
 }
 
@@ -138,6 +167,8 @@ internal enum class PrototypeBindableKind {
  * state-key fields. Stops at the first non-null result of [visit].
  */
 internal object PrototypeBindableFields {
+  private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
   fun <T : Any> first(
     node: JsonObject,
     path: String,
@@ -158,9 +189,21 @@ internal object PrototypeBindableFields {
         (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
       }
 
+    fun keyList(data: JsonObject, key: String, path: String): T? {
+      val values = data[key]
+      return if (values is JsonArray)
+        values.withIndex().firstNotNullOfOrNull { (index, value) ->
+          visit(value, "$path.$key[$index]", PrototypeBindableKind.KEY)
+        }
+      else field(data, key, path, PrototypeBindableKind.KEY)
+    }
+
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      keyList(condition, "valid", path)?.let {
         return it
       }
       val operandKind =
@@ -190,17 +233,40 @@ internal object PrototypeBindableFields {
         "setState" ->
           field(action, "key", path, PrototypeBindableKind.KEY)
             ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
-        "emit" -> field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
+        "emit" ->
+          field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
+            ?: emitContext(action, path)
+            ?: keyList(action, "requireValid", path)
         "toggle",
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         else -> null
       }
 
-    fun actions(data: JsonObject, path: String): T? {
-      for ((action, actionPath) in objects(data, "onTap", path)) {
-        action(action, actionPath)?.let {
+    fun emitContext(action: JsonObject, path: String): T? {
+      val context = action["context"] as? JsonObject ?: return null
+      for ((name, value) in context) {
+        val at =
+          if (contextNamePattern.matches(name)) "$path.context.$name"
+          else "$path.context[" + JsonPrimitive(name).toString() + "]"
+        visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
           return it
+        }
+        (value as? JsonObject)?.let { binding ->
+          field(binding, "state", at, PrototypeBindableKind.KEY)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
+
+    fun actions(data: JsonObject, path: String): T? {
+      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+        for ((action, actionPath) in objects(data, field, path)) {
+          action(action, actionPath)?.let {
+            return it
+          }
         }
       }
       return null
@@ -216,6 +282,16 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> field(node, "label", path, PrototypeBindableKind.TEXT)
+        "menu" ->
+          objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
+            part(entry, entryPath)
+              ?: field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+          }
+        "select" ->
+          field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
+              field(option, "label", optionPath, PrototypeBindableKind.TEXT)
+            }
         "segmentedButton" ->
           objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
             field(option, "label", optionPath, PrototypeBindableKind.TEXT)
@@ -225,6 +301,14 @@ internal object PrototypeBindableFields {
             ?: part(node["navigationIcon"], "$path.navigationIcon")
             ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
               part(entry, entryPath)
+            }
+        "searchBar" ->
+          field(node, "placeholder", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "trailingActions", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              part(entry, entryPath)
+            }
+            ?: objects(node, "onSubmit", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              action(entry, entryPath)
             }
         "dialog" ->
           field(node, "title", path, PrototypeBindableKind.TEXT)
@@ -238,7 +322,7 @@ internal object PrototypeBindableFields {
       }
 
     fun keys(node: JsonObject, path: String): T? {
-      for (key in listOf("stateKey", "hourKey", "minuteKey")) {
+      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey")) {
         field(node, key, path, PrototypeBindableKind.KEY)?.let {
           return it
         }
@@ -258,8 +342,19 @@ internal object PrototypeBindableFields {
         field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
           return it
         }
+        for ((span, spanPath) in objects(node, "spans", path)) {
+          (field(span, "text", spanPath, PrototypeBindableKind.TEXT) ?: actions(span, spanPath))
+            ?.let {
+              return it
+            }
+        }
       }
       return component(node, path)
+        ?: condition(node["enabledWhen"], "$path.enabledWhen")
+        // Bind only the message as text; pattern source and other check operands stay literal.
+        ?: objects(node, "checks", path).firstNotNullOfOrNull { (entry, entryPath) ->
+          field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
+        }
         ?: condition(node["visibleWhen"], "$path.visibleWhen")
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           condition(entry["when"], "$entryPath.when")
@@ -424,6 +519,11 @@ internal object PrototypeRepeatValidator {
     scope: Scope,
     state: RepeatState,
   ): PrototypeSpecError? {
+    if (kind == PrototypeBindableKind.EMIT_BINDING) {
+      val field = (value as? JsonObject)?.text("item")
+      if (field != null && !scope.items.all { it.containsKey(field) })
+        return fail(path, "Unknown repeat field ${JsonPrimitive(field)}")
+    }
     val text = value.string() ?: return null
     val authored = PrototypeRepeatTemplate.segments(text, scope.alias)
     if (
@@ -474,7 +574,14 @@ internal object PrototypeRepeatValidator {
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       val text = value.string()
+      val binding = value as? JsonObject
       if (
+        kind == PrototypeBindableKind.EMIT_BINDING &&
+          binding != null &&
+          ("item" in binding || "index" in binding)
+      )
+        fail(fieldPath, "Emit item/index binding outside a repeat template")
+      else if (
         kind == PrototypeBindableKind.TEXT &&
           text != null &&
           state.data.text(text) { chargeText(state, it) } == null
@@ -488,6 +595,13 @@ internal object PrototypeRepeatValidator {
   private fun childrenOf(node: JsonObject, path: String): List<Child> {
     (node["child"] as? JsonObject)?.let {
       return listOf(Child(it, "$path.child"))
+    }
+    (node["screens"] as? JsonObject)?.let { screens ->
+      return screens.entries.mapNotNull { (name, value) ->
+        (value as? JsonObject)?.let {
+          Child(it, "$path.screens[${JsonPrimitive(name)}]")
+        }
+      }
     }
     return (node["children"] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { Child(it, "$path.children[$index]") }
@@ -560,6 +674,8 @@ internal object PrototypeRepeatValidator {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
         return fail(path, "Pager cannot appear inside a repeat template")
+      if (node.text("type") == "stack")
+        return fail(path, "Stack cannot appear inside a repeat template")
     }
     val own =
       if (scope != null) checkOwnFields(node, path, scope, state)
@@ -627,15 +743,23 @@ internal object PrototypeRepeatValidator {
     return scopes
   }
 
-  private val checkedKeyFields = listOf("key", "stateKey", "hourKey", "minuteKey")
+  private val checkedKeyFields = listOf("key", "stateKey", "activeKey", "hourKey", "minuteKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
-  private fun checkedKeys(value: JsonObject): List<String> =
-    checkedKeyFields.mapNotNull { value.text(it) } +
+  private fun checkedKeys(value: JsonObject): List<String> {
+    val keys = mutableListOf<String>()
+    PrototypeBindableFields.first<Boolean>(value, "") { field, _, kind ->
+      if (kind == PrototypeBindableKind.KEY) field.string()?.let(keys::add)
+      null
+    }
+    keys.addAll((value["requireValid"] as? JsonArray).orEmpty().mapNotNull { it.string() })
+    return keys +
+      checkedKeyFields.mapNotNull { value.text(it) } +
       listOfNotNull(
         (value["trailing"] as? JsonObject)?.text("stateKey"),
         (value["openWhen"] as? JsonObject)?.text("key"),
       )
+  }
 
   private fun bindKeys(value: JsonObject, scope: Scope, item: JsonObject, index: Int): JsonObject {
     fun JsonObject.bound(field: String): JsonObject {
@@ -645,7 +769,38 @@ internal object PrototypeRepeatValidator {
           (field to JsonPrimitive(PrototypeRepeatTemplate.bind(text, scope.alias, item, index))),
       )
     }
-    var bound = value
+    val replacements = mutableMapOf<String, JsonElement>()
+    PrototypeBindableFields.first<Boolean>(value, "") { field, path, kind ->
+      if (kind == PrototypeBindableKind.KEY)
+        field.string()?.let {
+          replacements[path] =
+            JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+        }
+      null
+    }
+    fun replace(element: JsonElement, path: String): JsonElement =
+      replacements[path]
+        ?: when (element) {
+          is JsonObject ->
+            JsonObject(element.mapValues { (key, child) -> replace(child, "$path.$key") })
+          is JsonArray -> JsonArray(element.mapIndexed { i, child -> replace(child, "$path[$i]") })
+          else -> element
+        }
+    var bound = replace(value, "") as JsonObject
+    (bound["requireValid"] as? JsonArray)?.let { keys ->
+      bound =
+        JsonObject(
+          bound +
+            ("requireValid" to
+              JsonArray(
+                keys.map { key ->
+                  key.string()?.let {
+                    JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+                  } ?: key
+                },
+              )),
+        )
+    }
     for (field in checkedKeyFields) bound = bound.bound(field)
     (bound["trailing"] as? JsonObject)?.let {
       bound = JsonObject(bound + ("trailing" to it.bound("stateKey")))

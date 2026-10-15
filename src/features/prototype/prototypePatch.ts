@@ -275,6 +275,19 @@ function* tree(entry: TreeNode): Generator<TreeNode> {
         });
       }
     }
+    const screens = record(own(current.node, "screens"));
+    for (const [key, value] of Object.entries(screens ?? {}).reverse()) {
+      const node = record(value);
+      if (node && screens) {
+        stack.push({
+          node,
+          path: `${current.path}.screens[${JSON.stringify(key)}]`,
+          parent: screens,
+          key,
+          insideRepeat,
+        });
+      }
+    }
     const child = record(own(current.node, "child"));
     if (child) {
       stack.push({

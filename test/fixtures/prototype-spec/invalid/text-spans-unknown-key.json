@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "rich",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "spans": [
+        {
+          "text": "x",
+          "id": "span"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.spans[0].id",
+  "expectedMessage": "Unknown property"
+}

@@ -22,10 +22,17 @@ struct PrototypeEvent: Equatable {
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
+    let stacks: [String: PrototypeStackSnapshot]
+    var resolvedContext: PrototypeResolvedEmitContext?
+    var keys: [String]?
+    var validity: [String: Bool]?
+
+    var context: [String: JSONValue]? { resolvedContext?.context }
+    var contextTruncated: Bool? { resolvedContext?.contextTruncated }
 
     /// The wire object, in the shape of `PrototypeEvent` in `ctrlProxyProtocol.ts`.
     func wireObject(timestamp: Int) -> [String: Any] {
-        [
+        var object: [String: Any] = [
             "type": "prototype_event",
             "timestamp": timestamp,
             "id": id,
@@ -35,7 +42,13 @@ struct PrototypeEvent: Equatable {
             "payload": payload.foundationObject,
             "state": JSONValue.object(state).foundationObject,
             "pages": pages,
+            "stacks": stacks.mapValues(\.wireObject),
         ]
+        if let context { object["context"] = JSONValue.object(context).foundationObject }
+        if contextTruncated == true { object["contextTruncated"] = true }
+        if let keys { object["keys"] = keys }
+        if let validity { object["validity"] = validity }
+        return object
     }
 }
 
@@ -59,7 +72,11 @@ struct PrototypeSession {
     private(set) var spec: PrototypeSpec?
     private(set) var state: [String: JSONValue] = [:]
     private(set) var pages: [String: Int] = [:]
+    private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
+    private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
+    /// Keys whose errors have been revealed by change, blur or a failed guard.
+    private(set) var shownErrors: Set<String> = []
     /// Agent-lifetime ledger, per prototype id and monotonic from 1: re-showing an id after a
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
@@ -90,8 +107,9 @@ struct PrototypeSession {
 
     /// A show of the prototype already on screen replaces it in place: its spec state is
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
-    /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
-    /// every pager on its first page. Event sequences are per id and never rewound either way.
+    /// new page count. Stack paths drop unknown screens and fall back to start when empty.
+    /// Any other show, or one with `reset`, starts fresh: the spec's own state, every pager on
+    /// its first page and every stack at start. Event sequences are per id and never rewound either way.
     /// `appearance` is the request's own: a show that carries none follows the device again.
     mutating func show(
         _ spec: PrototypeSpec,
@@ -103,11 +121,20 @@ struct PrototypeSession {
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
         nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
+        let previousStacks = !reset && self.spec?.id == spec.id ? stacks : [:]
+        stackNodes = [:]
+        spec.root.collectStacks(into: &stackNodes)
+        stacks = stackNodes.mapValues { node in
+            let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
+                .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
+            return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
             result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
         }
+        shownErrors = []
         state = spec.state ?? [:]
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
@@ -130,6 +157,7 @@ struct PrototypeSession {
             root: spec.root,
             state: state,
             pages: pages,
+            stacks: stacks,
             override: appearanceOverride,
             deviceDark: deviceDark
         )
@@ -176,7 +204,9 @@ struct PrototypeSession {
     /// validated against the controls bound to its key (`PrototypeStateValidator`) before anything
     /// runs, so one rejected write drops the whole tap with no write, page move or event.
     mutating func run(_ actions: [PrototypeAction]) -> [PrototypeEvent] {
-        guard isShown, let writes = plannedWrites(actions, from: state) else { return [] }
+        guard isShown else { return [] }
+        if let failed = requireValid(actions) { return failed }
+        guard let writes = plannedWrites(actions, from: state) else { return [] }
         return execute(actions, writes)
     }
 
@@ -187,6 +217,7 @@ struct PrototypeSession {
     /// first, when a value moved, then the action list.
     mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown else { return [] }
+        if let failed = requireValid(actions) { return failed }
         let (written, moved) = applying(own)
         if !moved.isEmpty, !accepts(written) { return [] }
         guard let writes = plannedWrites(actions, from: written) else { return [] }
@@ -248,7 +279,10 @@ struct PrototypeSession {
             guard isShown else { break }
             switch action.type {
             case "emit":
-                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null)
+                let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
+                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
+            case "push", "pop", "popToRoot", "replace":
+                events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
             case "dismiss":
@@ -299,6 +333,7 @@ struct PrototypeSession {
     /// event's `state` always carries the full final state.
     private mutating func emitStateChange(_ keys: [String]) -> [PrototypeEvent] {
         guard let first = keys.first else { return [] }
+        showChangeErrors(keys)
         let payload: JSONValue = if keys.count == 1 {
             .object(["key": .string(first), "value": state[first] ?? .null])
         } else {
@@ -323,7 +358,8 @@ struct PrototypeSession {
     /// runs its `onTap`.
     mutating func simulateTap(identifier: String) -> Result<[PrototypeEvent], PrototypeTapFailure> {
         guard isShown, let spec else { return .failure(.notShown) }
-        guard let target = spec.root.tapTarget(identifier: identifier, state: state) else {
+        guard let target = spec.root.tapTarget(identifier: identifier, state: state, pages: pages, stacks: stacks)
+        else {
             return .failure(.notFound)
         }
         guard let events = activate(target) else { return .failure(.notTappable) }
@@ -337,6 +373,60 @@ struct PrototypeSession {
         guard pages[pager] != clamped else { return [] }
         pages[pager] = clamped
         return emit(kind: "page_changed", name: pager, payload: .number(Double(clamped)))
+    }
+
+    /// The navigation fields shared by show and inspect/status results.
+    var navigationSnapshot: [String: Any] {
+        ["pages": pages, "stacks": stacks.mapValues(\.wireObject)]
+    }
+
+    var stackPopTarget: String? {
+        guard let spec else { return nil }
+        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
+    }
+
+    mutating func popTopmostStack() -> [PrototypeEvent] {
+        guard let id = stackPopTarget else { return [] }
+        return changeStack(id) { _, path in Array(path.dropLast()) }
+    }
+
+    private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let id = action.stack else { return [] }
+        return changeStack(id) { node, path in
+            switch action.type {
+            case "push":
+                guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
+                      node.screens?[screen] != nil else { return path }
+                return path + [screen]
+            case "pop":
+                return path.count > 1 ? Array(path.dropLast()) : path
+            case "popToRoot":
+                return [node.start ?? ""]
+            case "replace":
+                guard let screen = action.screen, node.screens?[screen] != nil else { return path }
+                return Array(path.dropLast()) + [screen]
+            default:
+                return path
+            }
+        }
+    }
+
+    private mutating func changeStack(
+        _ id: String, transform: (PrototypeNode, [String]) -> [String]
+    )
+        -> [PrototypeEvent]
+    {
+        guard isShown, let node = stackNodes[id], let before = stacks[id] else { return [] }
+        let path = transform(node, before.path)
+        guard path != before.path, let screen = path.last else { return [] }
+        let next = PrototypeStackSnapshot(path: path)
+        stacks[id] = next
+        // popToRoot can change a depth-one replacement back to start; repeated pushes of the
+        // same screen change depth. Both are real changes, just as on Android.
+        guard before.path.last != screen || before.depth != next.depth else { return [] }
+        return emit(kind: "screen_changed", name: id, payload: .object([
+            "screen": .string(screen), "depth": .number(Double(next.depth)),
+        ]))
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
@@ -368,6 +458,7 @@ struct PrototypeSession {
         guard let pager else {
             return control(own: key.map { [($0, .number(Double(index)))] } ?? [], then: actions)
         }
+        if let failed = requireValid(actions) { return failed }
         guard let writes = plannedWrites(actions, from: state) else { return [] }
         return setPage(pager, index) + execute(actions, writes)
     }
@@ -380,7 +471,11 @@ struct PrototypeSession {
         return events
     }
 
-    private mutating func emit(kind: String, name: String?, payload: JSONValue) -> [PrototypeEvent] {
+    private mutating func emit(
+        kind: String, name: String?, payload: JSONValue, context: PrototypeResolvedEmitContext? = nil
+    )
+        -> [PrototypeEvent]
+    {
         guard let id = spec?.id else { return [] }
         let sequence = (sequences[id] ?? 0) + 1
         sequences[id] = sequence
@@ -391,8 +486,60 @@ struct PrototypeSession {
             name: name,
             payload: payload,
             state: state,
-            pages: pages
+            pages: pages,
+            stacks: stacks,
+            resolvedContext: context,
+            validity: kind == "emit" && name == "change" && !validity.isEmpty ? validity : nil
         )]
+    }
+
+    var validity: [String: Bool] {
+        guard let spec else { return [:] }
+        return PrototypeChecks.validity(PrototypeChecks.bindings(root: spec.root), state: state)
+    }
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    mutating func blur(_ node: PrototypeNode) {
+        if (node.validateOn ?? .blur) == .blur { shownErrors.formUnion(node.checkedKeys) }
+    }
+
+    private mutating func showChangeErrors(_ keys: [String]) {
+        func visit(_ node: PrototypeNode) -> [String] {
+            let own = node.validateOn == .change ? node.checkedKeys.filter { keys.contains($0) } : []
+            return own + ((node.children ?? []) + [node.child].compactMap { $0 }).flatMap(visit)
+        }
+        if let root = spec?.root { shownErrors.formUnion(visit(root)) }
+    }
+
+    /// Every guard reads pre-interaction state. Failure aborts own writes, actions and pages.
+    private mutating func requireValid(_ actions: [PrototypeAction]) -> [PrototypeEvent]? {
+        let validity = validity
+        let failed = actions.prefix { $0.type != "dismiss" }.filter {
+            $0.type == "emit" && ($0.requireValid?.contains { validity[$0] != true } ?? false)
+        }
+        guard !failed.isEmpty else { return nil }
+        var events: [PrototypeEvent] = []
+        for action in failed {
+            let keys = action.requireValid ?? []
+            shownErrors.formUnion(keys)
+            var emitted = emit(kind: "validation_failed", name: action.name, payload: .null)
+            for index in emitted.indices {
+                emitted[index].keys = keys.filter { validity[$0] != true }
+            }
+            events += emitted
+        }
+        return events
     }
 
     // MARK: Status
@@ -451,4 +598,15 @@ enum PrototypeTestHooks {
         guard gatedRequestTypes.contains(requestType), !enabled else { return nil }
         return "\(requestType) is a test hook; launch the app with \(environmentKey)=1 to enable it"
     }
+}
+
+/// Value snapshots keep pure lookups independent of the session's mutation machinery.
+private struct EmitContextInputs: PrototypeEmitContextInputs {
+    let state: [String: JSONValue]
+    let pages: [String: Int]
+    let dataModel: [String: JSONValue]?
+
+    func state(_ key: String) -> JSONValue? { state[key] }
+    func page(_ id: String) -> Int? { pages[id] }
+    func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
 }

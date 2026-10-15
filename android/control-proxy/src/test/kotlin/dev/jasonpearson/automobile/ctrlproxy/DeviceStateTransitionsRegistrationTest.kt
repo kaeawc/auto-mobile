@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.content.ContextWrapper
+import android.os.Looper
 import android.util.Log
 import java.util.concurrent.Executor
 import org.junit.Assert.assertEquals
@@ -12,6 +13,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 
@@ -56,13 +58,17 @@ class DeviceStateTransitionsRegistrationTest {
     }
   }
 
-  private class FakeContext(private val service: Any?) : ContextWrapper(null) {
+  private open class FakeContext(private val service: Any?) : ContextWrapper(null) {
     override fun getSystemService(name: String): Any? {
       assertEquals("device_state", name)
       return service
     }
 
     override fun getMainExecutor(): Executor = Executor { it.run() }
+  }
+
+  private class Pre28FakeContext(service: Any?) : FakeContext(service) {
+    override fun getMainLooper(): Looper = Looper.getMainLooper()
   }
 
   @Before
@@ -115,6 +121,26 @@ class DeviceStateTransitionsRegistrationTest {
       assertSame(manager.registered, manager.unregistered)
     }
     assertTrue(ShadowLog.getLogsForTag("CtrlProxyDeviceState").isEmpty())
+  }
+
+  @Test
+  @Config(sdk = [24, 27])
+  fun `pre 28 context registers with main looper executor and unregisters`() {
+    val manager = FakeManager()
+    val states = mutableListOf<Int>()
+    val registration =
+      DeviceStateTransitions.register(
+        Pre28FakeContext(manager),
+        sdkInt = 31,
+        loadClass = ::loadClass,
+      ) { states += it }
+
+    assertNotNull(registration)
+    shadowOf(Looper.getMainLooper()).idle()
+    assertEquals(1, manager.registrations)
+    assertEquals(listOf(1), states)
+    registration!!.close()
+    assertSame(manager.registered, manager.unregistered)
   }
 
   @Test

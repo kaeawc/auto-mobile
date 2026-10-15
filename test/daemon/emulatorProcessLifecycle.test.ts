@@ -13,6 +13,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
+import { AndroidCommandOutputStreamRedactor } from "../../src/utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { recordEmulatorLaunchOutputSource } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
@@ -600,14 +601,75 @@ describe("EmulatorProcessLifecycle", () => {
 });
 
 describe("launch output handoff", () => {
-  test("seeds the tail with redacted launch output before post-ready output", () => {
+  function registerSource(process: ChildProcess) {
+    const redactor = new AndroidCommandOutputStreamRedactor();
+    let output = "";
+    const snapshot = () => output + redactor.snapshot();
+    const source = {
+      snapshot,
+      flush: () => (output += redactor.flush()),
+    };
+    process.stdout!.on("data", (value: string) => {
+      output += redactor.append(value);
+    });
+    recordEmulatorLaunchOutputSource(process, source);
+    return source;
+  }
+
+  for (const [launch, later] of [
+    ["auth token=abc", "defSECRET rest\n"],
+    ["auth tok", "en=SECRETVALUE rest\n"],
+  ]) {
+    test(`redacts a credential split at tracking: ${launch}`, async () => {
+      const process = child();
+      process.stdout = new EventEmitter() as ChildProcess["stdout"];
+      registerSource(process);
+      process.stdout!.emit("data", launch);
+      const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
+      process.stdout!.emit("data", later);
+      expect(tail.snapshot()).toBe("auth token=[REDACTED] rest\n");
+      process.emit("close");
+      expect(await tail.finalize()).toBe("auth token=[REDACTED] rest\n");
+    });
+  }
+
+  test("uses the live source without attaching data listeners", async () => {
     const process = child();
     process.stdout = new EventEmitter() as ChildProcess["stdout"];
-    recordEmulatorLaunchOutputSource(process, () => "GPU launch token=[REDACTED]\n");
-    const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
-    process.stdout!.emit("data", "post-ready token=private\n");
-    expect(tail.snapshot()).toBe("GPU launch token=[REDACTED]\npost-ready token=[REDACTED]\n");
-    expect(tail.snapshot()).not.toContain("private");
+    const source = registerSource(process);
+    process.stdout!.emit("data", "launch\n");
+    const listeners = process.stdout!.listenerCount("data");
+    const timer = new FakeTimer();
+    const tail = new EmulatorProcessOutputTail(process, timer);
+    expect(process.stdout!.listenerCount("data")).toBe(listeners);
+    process.stdout!.emit("data", "post-ready\n");
+    expect(tail.snapshot()).toBe(source.snapshot());
+    const finalized = tail.finalize();
+    process.stdout!.emit("data", "drained\n");
+    process.emit("close");
+    expect(await finalized).toBe("launch\npost-ready\ndrained\n");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("flushes the source after the fake stream-close deadline", async () => {
+    const process = child();
+    process.stdout = new EventEmitter() as ChildProcess["stdout"];
+    let flushed = false;
+    const snapshot = () => "";
+    recordEmulatorLaunchOutputSource(process, {
+      snapshot,
+      flush: () => {
+        flushed = true;
+        return "drained";
+      },
+    });
+    const timer = new FakeTimer();
+    const tail = new EmulatorProcessOutputTail(process, timer);
+    const finalized = tail.finalize();
+    expect(flushed).toBe(false);
+    await timer.advanceTimeAsync(1_000);
+    expect(await finalized).toBe("drained");
+    expect(flushed).toBe(true);
   });
 
   test("records launch and post-ready output with a later SIGSEGV incident", async () => {
@@ -643,7 +705,9 @@ describe("launch output handoff", () => {
     const process = child();
     process.stdout = new EventEmitter() as ChildProcess["stdout"];
     process.stderr = new EventEmitter() as ChildProcess["stderr"];
-    recordEmulatorLaunchOutputSource(process, () => "GPU renderer launch\n");
+    registerSource(process);
+    process.stdout!.emit("data", "GPU renderer launch\n");
+    process.stdout!.emit("data", "before tracking\n");
     await h.lifecycle.trackStartedDeviceProcess(booted, process);
     process.stdout!.emit("data", "post-ready token=private\n");
     process.emit("exit", null, "SIGSEGV");
@@ -652,13 +716,15 @@ describe("launch output handoff", () => {
     const [incident] = await store.list();
     expect(incident.detectionPath).toBe("watched-process-exit");
     expect(incident.processExit).toEqual({ code: null, signal: "SIGSEGV" });
-    expect(incident.outputTail).toBe("GPU renderer launch\npost-ready token=[REDACTED]\n");
+    expect(incident.outputTail).toBe(
+      "GPU renderer launch\nbefore tracking\npost-ready token=[REDACTED]\n",
+    );
     expect(incident.outputUnavailable).toBeUndefined();
   });
 
-  test("an empty launch seed keeps an empty tail unavailable", async () => {
+  test("an empty launch source returns no output", async () => {
     const process = child();
-    recordEmulatorLaunchOutputSource(process, () => "");
+    recordEmulatorLaunchOutputSource(process, { snapshot: () => "", flush: () => "" });
     const tail = new EmulatorProcessOutputTail(process, new FakeTimer());
     expect(tail.snapshot()).toBeUndefined();
     expect(await tail.finalize()).toBeUndefined();

@@ -226,6 +226,16 @@ describe("incident output availability", () => {
     });
   }
 
+  for (const path of ["watched-process-exit", "device-discovery-miss"] as const) {
+    test(`an empty tracked tail has neither output nor unavailable marker for ${path}`, async () => {
+      const { ledger, store, port } = createLedger();
+      port.tail = { snapshot: () => undefined, finalize: async () => undefined };
+      const id = (await ledger.recordEmulatorLossIncident("emulator-5554", path))!;
+      expect((await store.get(id))?.outputTail).toBeUndefined();
+      expect((await store.get(id))?.outputUnavailable).toBeUndefined();
+    });
+  }
+
   test("a finalize rejection still opens an incident without a tail", async () => {
     const { ledger, store, port } = createLedger();
     port.tail = {

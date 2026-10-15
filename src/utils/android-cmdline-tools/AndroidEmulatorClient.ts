@@ -378,14 +378,24 @@ function configuredAvdArchitecture(
   );
 }
 
-const emulatorLaunchOutputSources = new WeakMap<ChildProcess, () => string>();
+export interface EmulatorLaunchOutputSource {
+  snapshot(): string;
+  flush(): string;
+}
 
-export function recordEmulatorLaunchOutputSource(child: ChildProcess, source: () => string): void {
+const emulatorLaunchOutputSources = new WeakMap<ChildProcess, EmulatorLaunchOutputSource>();
+
+export function recordEmulatorLaunchOutputSource(
+  child: ChildProcess,
+  source: EmulatorLaunchOutputSource,
+): void {
   emulatorLaunchOutputSources.set(child, source);
 }
 
-export function emulatorLaunchOutputSnapshot(child: ChildProcess): string | undefined {
-  return emulatorLaunchOutputSources.get(child)?.();
+export function emulatorLaunchOutputSource(
+  child: ChildProcess,
+): EmulatorLaunchOutputSource | undefined {
+  return emulatorLaunchOutputSources.get(child);
 }
 
 /**
@@ -3330,7 +3340,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         flushLaunchOutput,
         recordEarlyExitCategory,
       } = this.createLaunchOutputHandlers(state, stdoutRedactor, stderrRedactor);
-      recordEmulatorLaunchOutputSource(child, currentLaunchOutput);
+      recordEmulatorLaunchOutputSource(child, {
+        snapshot: currentLaunchOutput,
+        flush: flushLaunchOutput,
+      });
       const { beginPostValidationExit, finalizePostValidationExit } =
         this.createPostValidationExitHandlers({
           avdName,

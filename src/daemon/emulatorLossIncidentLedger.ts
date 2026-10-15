@@ -55,7 +55,7 @@ export class EmulatorLossIncidentLedger {
     try {
       const tail = this.pool.getProcessOutputTail(deviceId);
       const outputTail = await this.captureProcessOutputTail(deviceId, detectionPath, tail);
-      // ORCHESTRATOR-CHOSEN: "adopted" is recorded when no daemon-launched output source exists.
+      // "adopted" means no tracked output source: adopted, not yet tracked, or tracking dropped.
       const avdName = this.incidentAvdName(device, detectionPath);
       const incident = await this.emulatorLossIncidentStore.open({
         deviceId,

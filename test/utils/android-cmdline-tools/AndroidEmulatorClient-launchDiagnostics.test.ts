@@ -1,3 +1,4 @@
+import { EmulatorProcessOutputTail } from "../../../src/daemon/emulatorProcessLifecycle";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -5,7 +6,7 @@ import { homedir } from "node:os";
 import { Readable } from "node:stream";
 import {
   AndroidEmulatorClient,
-  emulatorLaunchOutputSnapshot,
+  emulatorLaunchOutputSource,
   EmulatorExitedDuringReadinessError,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -138,17 +139,25 @@ function emitFailure(
 describe("AndroidEmulatorClient launch diagnostics", () => {
   test("exposes redacted launch output after launch", async () => {
     const child = createChild();
-    expect(emulatorLaunchOutputSnapshot(child)).toBeUndefined();
-    const { client } = createClient(child, () => {
+    expect(emulatorLaunchOutputSource(child)).toBeUndefined();
+    const { client, timer } = createClient(child, () => {
       child.stdout!.emit("data", "Detected GPU type: host token=private\n");
     });
     expect(await client.startEmulator(avdName)).toBe(child);
-    expect(emulatorLaunchOutputSnapshot(child)).toContain(
+    expect(emulatorLaunchOutputSource(child)?.snapshot()).toContain(
       "Detected GPU type: host token=[REDACTED]",
     );
-    expect(emulatorLaunchOutputSnapshot(child)).not.toContain("private");
+    expect(emulatorLaunchOutputSource(child)?.snapshot()).not.toContain("private");
     child.stderr!.emit("data", "later crashpad line\n");
-    expect(emulatorLaunchOutputSnapshot(child)).toContain("later crashpad line");
+    expect(emulatorLaunchOutputSource(child)?.snapshot()).toContain("later crashpad line");
+    const tail = new EmulatorProcessOutputTail(child, timer);
+    child.stdout!.emit("data", "post-track line\n");
+    child.emit("exit", null, "SIGSEGV");
+    child.emit("close", null, "SIGSEGV");
+    expect(await tail.finalize()).toBe(
+      "Detected GPU type: host token=[REDACTED]\npost-track line\nlater crashpad line\n",
+    );
+    expect(emulatorLaunchOutputSource(child)?.flush()).toBe(tail.snapshot());
   });
 
   for (const path of ["monitor", "during-readiness", "before-readiness"] as const) {

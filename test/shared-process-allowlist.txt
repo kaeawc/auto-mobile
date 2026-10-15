@@ -192,7 +192,13 @@ test/daemon/rehydrationReservationAutolock.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
+test/daemon/sessionBroker/admission.test.ts
 test/daemon/sessionBroker/connectionScope.test.ts
+test/daemon/sessionBroker/deviceNaming.test.ts
+test/daemon/sessionBroker/handlers.test.ts
+test/daemon/sessionBroker/hostConfig.test.ts
+test/daemon/sessionBroker/iosBaselineReset.test.ts
+test/daemon/sessionBroker/persistedIdentity.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetEnforcement.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetSinglePlatformHost.test.ts
 test/daemon/sessionBroker/provisioning/bindingLateRehydrationReown.test.ts
@@ -203,6 +209,7 @@ test/daemon/sessionBroker/provisioning/bindingsPlatformChangeSqliteJournal.test.
 test/daemon/sessionBroker/provisioning/bindingsRegistryAbsentThenUnreadable.test.ts
 test/daemon/sessionBroker/provisioning/bindingsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/sessionBroker/provisioning/capacityExternalDevices.test.ts
+test/daemon/sessionBroker/provisioning/daemonBindingBudgetWiring.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.ownDevice.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.redrive.test.ts
 test/daemon/sessionBroker/provisioning/deviceAcquisition.test.ts
@@ -223,8 +230,13 @@ test/daemon/sessionBroker/registry/bindingJournalHungDelete.test.ts
 test/daemon/sessionBroker/registry/bindingJournalRemovalNeverAdopted.test.ts
 test/daemon/sessionBroker/registry/bindingOwnerLiveness.test.ts
 test/daemon/sessionBroker/registry/bindingRegistryMigrations.test.ts
+test/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.test.ts
 test/daemon/sessionBroker/registry/registryUpgradeFromCapturedSchema.test.ts
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.test.ts
+test/daemon/sessionBroker/service.test.ts
+test/daemon/sessionBroker/sqliteStore.test.ts
+test/daemon/sessionBrokerProxyAcquisition.test.ts
+test/daemon/sessionBrokerProxyLifecycle.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
 test/daemon/sessionCacheTypedSlots.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
@@ -304,6 +316,11 @@ test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
+test/devices/sessionCatalog/androidCatalogAdapter.test.ts
+test/devices/sessionCatalog/iosCatalogAdapter.test.ts
+test/devices/sessionRequirements/matching.test.ts
+test/devices/sessionRequirements/parsing.test.ts
+test/devices/sessionRequirements/resolution.test.ts
 test/devices/waitForDeviceReadyOrCancel.test.ts
 test/docs/claudeMdToolReference.test.ts
 test/doctor/checks/daemonConnectivity.test.ts
@@ -346,6 +363,7 @@ test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
 test/features/action/HandleIntentChooser.test.ts
 test/features/action/InstallApp.signingGuard.test.ts
+test/features/action/IosDoubleTap.test.ts
 test/features/action/IosLockScreenUnlocker.test.ts
 test/features/action/IosSdkTriggerReadiness.test.ts
 test/features/action/IosSelectionScreenSize.test.ts
@@ -893,6 +911,7 @@ test/planUtils.test.ts
 test/release/runtimePins.test.ts
 test/release/runtimeRoots.test.ts
 test/runtime/bunRuntimeGuard.test.ts
+test/scripts/affectedTests.test.ts
 test/scripts/aggregateEgressBaseline.test.ts
 test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/attestation/attestationCli.test.ts
@@ -943,6 +962,14 @@ test/scripts/ipaInstallFanOut.test.ts
 test/scripts/junitTestcaseTimings.test.ts
 test/scripts/manualTestAdbHostQuery.test.ts
 test/scripts/manualTestBootGate.test.ts
+test/scripts/manualTestBrokerBatch.test.ts
+test/scripts/manualTestBrokerBatchOrchestrator.test.ts
+test/scripts/manualTestBrokerClientFiles.test.ts
+test/scripts/manualTestBrokerDaemonClient.test.ts
+test/scripts/manualTestBrokerDeviceLedger.test.ts
+test/scripts/manualTestBrokerDeviceScenarios.test.ts
+test/scripts/manualTestBrokerLiveAdapter.test.ts
+test/scripts/manualTestBrokerScenarios.test.ts
 test/scripts/manualTestControlSocketProbe.test.ts
 test/scripts/manualTestDeviceStartGuard.test.ts
 test/scripts/manualTestFrameWire.test.ts
@@ -1117,6 +1144,7 @@ test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts
 test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
+test/server/proxyServerSessionBroker.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
 test/server/resourceNotifySlowSibling.test.ts
@@ -1415,6 +1443,7 @@ test/utils/stableStringify.property.test.ts
 test/utils/stableStringify.test.ts
 test/utils/startupMaintenance.test.ts
 test/utils/throwIfAborted.test.ts
+test/utils/toolFailureSignal.rebuild.test.ts
 test/utils/toolFailureSignal.test.ts
 test/utils/toolUtils.compactJson.test.ts
 test/utils/toolUtils.property.test.ts

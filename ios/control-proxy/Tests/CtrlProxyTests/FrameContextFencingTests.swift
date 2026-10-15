@@ -86,6 +86,20 @@ final class FrameContextFencingTests: XCTestCase {
         XCTAssertEqual(calls(for: type, on: gestures), 1, file: file, line: line)
     }
 
+    func testDoubleTapContextIsCheckedBeforeDispatch() async throws {
+        for token in ["stale-token", "current"] {
+            let (response, gestures) = try await dispatch(
+                type: .requestTapCoordinates,
+                fields: ["x": 12.5, "y": 24.25, "doubleTap": true],
+                token: token
+            )
+            XCTAssertEqual(response.success, token == "current")
+            XCTAssertEqual(gestures.tapCalls, 0)
+            XCTAssertEqual(gestures.doubleTapPoints.count, token == "current" ? 1 : 0)
+            if token != "current" { XCTAssertTrue(response.error?.contains("Stale frame context") == true) }
+        }
+    }
+
     func testMultiFingerSwipeRejectsStaleContext() async throws {
         try await assertStale(.requestMultiFingerSwipe, fields: swipeFields)
     }

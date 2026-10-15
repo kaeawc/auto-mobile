@@ -37,14 +37,15 @@ internal object DeviceStateTransitions {
   )
 
   /**
-   * Zero means no folding feature. Codes 1..4 encode state and separation, independent of window
-   * rotation. For multiple features, select the smallest code, independent of feature ordering or
-   * duplicates.
+   * Zero means no fold feature. The bitmask encodes the four state and separation pairs,
+   * independent of orientation. The result is an opaque change key; duplicate pairs collapse.
    */
   internal fun postureCode(features: List<FoldPosture>): Int =
-    features.minOfOrNull {
-      1 + (if (it.state == Kind.HALF_OPENED) 2 else 0) + (if (it.isSeparating) 1 else 0)
-    } ?: 0
+    features.fold(0) { code, feature ->
+      val bitIndex =
+        (if (feature.state == Kind.HALF_OPENED) 2 else 0) + (if (feature.isSeparating) 1 else 0)
+      code or (1 shl bitIndex)
+    }
 
   internal class StateObserver(private val onChange: (Int) -> Unit) {
     private var lastState: Int? = null

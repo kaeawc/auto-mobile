@@ -247,6 +247,12 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
   },
   {
+    name: "request_tap_coordinates_double_tap",
+    builder: "CtrlProxyGestures.requestDoubleTapCoordinates",
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(120.5, 240.25, 5000),
+  },
+  {
     name: "request_swipe",
     builder: "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
     invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),

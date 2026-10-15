@@ -502,3 +502,38 @@ SCRIPT
   grep -qx ':source:compileKotlin' "${invocations_file}"
   grep -qx ':destination:compileKotlin' "${invocations_file}"
 }
+
+@test "attests Android partial scope and records tests without sources as skipped" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+  mkdir -p "${fixture_repo}/android/foo/src/main/kotlin" "${fixture_repo}/scripts/ci"
+  copy_prepush_fixture
+  printf '#!/bin/bash\nexit 0\n' > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh"
+  printf '#!/bin/bash\nexit 0\n' > "${fixture_repo}/android/gradlew"
+  cat > "${fixture_repo}/scripts/ci/record-attestations.sh" <<'SCRIPT'
+#!/bin/bash
+printf '%s\n' "$@" > "$ATTESTATION_ARGS_FILE"
+SCRIPT
+  chmod +x "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" "${fixture_repo}/android/gradlew" "${fixture_repo}/scripts/ci/record-attestations.sh"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/foo/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/foo/src/main/kotlin/X.kt"
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm initial
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' '// changed' >> android/foo/src/main/kotlin/X.kt
+  git add android/foo/src/main/kotlin/X.kt
+  git commit -qm change
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" ATTESTATION_ARGS_FILE="${invocations_file}" \
+    /bin/bash "${fixture_repo}/${SCRIPT}"
+  [ "$status" -eq 0 ]
+  grep -qx partial "${invocations_file}"
+  grep -Fx 'scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job' "${invocations_file}"
+  grep -Fx 'Android unit tests=skip:0' "${invocations_file}"
+}

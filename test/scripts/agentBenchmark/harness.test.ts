@@ -177,6 +177,7 @@ describe("agent benchmark harness", () => {
       AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-test",
       AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",
+      AUTOMOBILE_DATA_DIR: artifact("data"),
       AUTOMOBILE_DB_DIR: artifact("db"),
       AUTOMOBILE_LOG_DIR: artifact("logs"),
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
@@ -320,6 +321,7 @@ describe("agent benchmark harness", () => {
       expect(env.AUTOMOBILE_DAEMON_PID_FILE_PATH).toBeUndefined();
       expect(env.AUTO_MOBILE_DB_DIR).toBeUndefined();
       expect(env.AUTOMOBILE_DB_DIR).toBe(artifact("db"));
+      expect(env.AUTOMOBILE_DATA_DIR).toBe(artifact("data"));
       expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
       expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy-claims");
     }

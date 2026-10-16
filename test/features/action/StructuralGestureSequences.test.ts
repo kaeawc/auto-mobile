@@ -237,8 +237,7 @@ describe("gesture request sequences", () => {
       };
       const run = tap.execute(
         { action: "tap", searchUntil: { duration: mode === "expired" ? 100 : 500 } },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       const result = await run;
       if (mode === "immediate") {

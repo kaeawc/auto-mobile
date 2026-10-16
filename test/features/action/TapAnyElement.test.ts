@@ -869,9 +869,10 @@ describe("tapAny long press safety", () => {
     [60000, 120000],
   ])("budget admission accepts duration %s with remaining %s", async (duration, remaining) => {
     const h = setup();
-    const result = await h.action.execute({ action: "longPress", duration }, undefined, undefined, {
-      requestDeadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining,
-    });
+    const result = await h.action.execute(
+      { action: "longPress", duration },
+      { deadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining },
+    );
     expect(result.success).toBe(true);
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
@@ -888,9 +889,7 @@ describe("tapAny long press safety", () => {
       const observe = spyOn(h.action, "observedInteraction");
       const result = await h.action.execute(
         { action: "longPress", duration: 20000, display: "1" },
-        undefined,
-        undefined,
-        { requestDeadlineMs: h.timer.now() + remaining },
+        { deadlineMs: h.timer.now() + remaining },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -923,8 +922,7 @@ describe("tapAny long press safety", () => {
       try {
         const result = await h.action.execute(
           { action: "longPress", duration: 1500 },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         expect(result.success).toBe(false);
         expect(result.error).toContain("press may still be held on the device for up to 1500 ms");

@@ -289,8 +289,7 @@ describe("DragAndDrop - iOS", () => {
           source: { elementId: "source-id" },
           target: { elementId: "target-id" },
         },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(fakeTimer.now()).toBe(25);
@@ -320,8 +319,7 @@ describe("DragAndDrop - iOS", () => {
     });
     const pending = action.execute(
       { source: { elementId: "source-id" }, target: { elementId: "target-id" } },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     await ready.promise;
     expect(timer.getPendingTimeoutCount()).toBe(1);
@@ -342,8 +340,7 @@ describe("DragAndDrop - iOS", () => {
             source: { elementId: "source-id" },
             target: { elementId: "target-id" },
           },
-          undefined,
-          kind === "explicit" ? controller.signal : undefined,
+          { signal: kind === "explicit" ? controller.signal : undefined },
         );
       const pending =
         kind === "ambient" ? runWithAbortSignal(controller.signal, execute) : execute();
@@ -389,8 +386,7 @@ describe("DragAndDrop - iOS", () => {
               target: { elementId: "target-id" },
               display: "external",
             },
-            undefined,
-            kind === "explicit" ? controller.signal : undefined,
+            { signal: kind === "explicit" ? controller.signal : undefined },
           );
         const pending =
           kind === "ambient" ? runWithAbortSignal(controller.signal, execute) : execute();
@@ -421,8 +417,7 @@ describe("DragAndDrop - iOS", () => {
           source: { elementId: "source-id" },
           target: { elementId: "target-id" },
         },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       if (kind === "device loss") {
         await expect(pending).rejects.toBe(loss);
@@ -450,8 +445,7 @@ describe("DragAndDrop - iOS", () => {
           source: { elementId: "source-id" },
           target: { elementId: "target-id" },
         },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(runner).not.toHaveBeenCalled();
@@ -475,8 +469,7 @@ describe("DragAndDrop - iOS", () => {
           source: { elementId: "missing-source" },
           target: { elementId: "target-id" },
         },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(capture).toHaveBeenCalledTimes(1);
@@ -495,8 +488,7 @@ describe("DragAndDrop - iOS", () => {
           source: { elementId: "source-id" },
           target: { elementId: "target-id" },
         },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(observe).toHaveBeenCalledTimes(1);

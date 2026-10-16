@@ -83,6 +83,7 @@ import {
 } from "./lookForScroll";
 
 import type { AndroidSearchDragState } from "./androidSearchDrag";
+import { resolveActionCallWithPerf, type ActionCall } from "../ActionCall";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -258,12 +259,25 @@ export class ScrollUntilVisible {
     return element;
   }
 
+  async execute(options: SwipeOnResolvedOptions, call?: ActionCall): Promise<SwipeOnResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
+  ): Promise<SwipeOnResult>;
+  async execute(
+    options: SwipeOnResolvedOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    perfArg?: PerformanceTracker,
+    signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    const {
+      progress,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    } = resolveActionCallWithPerf(progressOrCall, perfArg, signalArg);
     return this.executeWithStrategy({ options, progress, perf, signal });
   }
 

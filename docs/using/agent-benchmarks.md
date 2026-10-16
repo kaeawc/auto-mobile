@@ -223,13 +223,13 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, effective screen
 size and density, font and animation scales, light or dark theme, enabled accessibility
-services such as TalkBack, navigation mode (gesture or buttons), Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
+services such as TalkBack, navigation mode (gesture or buttons), the active input method (keyboard), Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
 built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (a wrapper script by content), and a non-secret provider identity
-(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions and provider-specific region routing, adb server endpoint, and model-routing variables). A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

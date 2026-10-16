@@ -177,6 +177,12 @@ describe("agent benchmark suite config", () => {
     );
   });
 
+  test("baseline cost and wall-clock must be finite", () => {
+    for (const baseline of [{ costUsd: Infinity }, { wallClockSeconds: Infinity }]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, baseline }, "demo.yml")).toThrow();
+    }
+  });
+
   test("every committed suite loads and its name matches its file", () => {
     // The same predicate --all discovery uses, so a .yaml suite cannot skip this guard.
     const files = readdirSync(SUITES_DIR).filter((file) => /\.ya?ml$/.test(file));

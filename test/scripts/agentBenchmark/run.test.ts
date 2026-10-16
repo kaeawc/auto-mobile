@@ -6,9 +6,46 @@ import {
   bundleDigest,
   dryRunReport,
   importClosure,
+  killProcessTree,
   parseCliArgs,
   resolveSuitePath,
 } from "../../../scripts/agent-benchmark/run";
+
+describe("agent benchmark process tree kill", () => {
+  test("signals the whole POSIX process group, falling back to the process", () => {
+    const signals: Array<[number, string]> = [];
+    const taskkill: number[] = [];
+    killProcessTree(42, "SIGTERM", "linux", {
+      kill: (pid, signal) => signals.push([pid, signal]),
+      taskkill: (pid) => taskkill.push(pid),
+    });
+    expect(signals).toEqual([[-42, "SIGTERM"]]);
+    const fallback: Array<[number, string]> = [];
+    killProcessTree(42, "SIGKILL", "darwin", {
+      kill: (pid, signal) => {
+        fallback.push([pid, signal]);
+        if (pid < 0) {
+          throw new Error("ESRCH");
+        }
+      },
+      taskkill: (pid) => taskkill.push(pid),
+    });
+    expect(fallback).toEqual([
+      [-42, "SIGKILL"],
+      [42, "SIGKILL"],
+    ]);
+    expect(taskkill).toEqual([]);
+  });
+
+  test("walks the tree with taskkill on Windows", () => {
+    const taskkill: number[] = [];
+    killProcessTree(7, "SIGTERM", "win32", {
+      kill: () => undefined,
+      taskkill: (pid) => taskkill.push(pid),
+    });
+    expect(taskkill).toEqual([7]);
+  });
+});
 
 describe("agent benchmark adb client identity", () => {
   test("uses the SDK platform-tools adb the server prefers, and its version output", () => {

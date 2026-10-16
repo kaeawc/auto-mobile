@@ -115,11 +115,18 @@ function stumbleSection(result: BenchmarkResult): string[] {
   return ["", `Stumbles: ${comparison.stumbles}`, ...errors, ...patterns, ...denials];
 }
 
-function appBuildWarning(comparison: BenchmarkResult["comparison"]): string[] {
-  const build = comparison.appBuild;
-  return build && !build.matches
-    ? [`  ! baseline was recorded on ${build.baseline}; deltas compare different app builds`]
-    : [];
+function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
+  const { appBuild, suiteDigest } = comparison;
+  return [
+    ...(appBuild && !appBuild.matches
+      ? [`  ! baseline was recorded on ${appBuild.baseline}; deltas compare different app builds`]
+      : []),
+    ...(suiteDigest && !suiteDigest.matches
+      ? [
+          "  ! baseline was recorded with a different prompt or suite settings; deltas may not be comparable",
+        ]
+      : []),
+  ];
 }
 
 export function renderReport(result: BenchmarkResult): string {
@@ -130,7 +137,7 @@ export function renderReport(result: BenchmarkResult): string {
     `${comparison.verdict.toUpperCase()}  ${result.suite}  ${formatDuration(outcome.wallClockSeconds)}`,
     `  device    ${result.deviceSerial} (preflight ${formatDuration(result.preflight.durationSeconds)}, not measured)`,
     `  app       ${result.preflight.appBuild ?? "unknown"}`,
-    ...appBuildWarning(comparison),
+    ...baselineWarnings(comparison),
     `  claude    model=${model} version=${result.claude.version ?? "unknown"}`,
     `  artifacts ${result.runDirectory}`,
     "",
@@ -191,6 +198,7 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
   }
   baseline.tools = audit.toolCounts;
   baseline.appBuild = result.preflight.appBuild;
+  baseline.suiteDigest = result.suiteDigest;
   return dump(
     {
       baseline,

@@ -50,7 +50,30 @@ export interface Comparison {
   sequenceDiff?: { missing: number; extra: number; lines: SequenceDiffLine[] };
   stumbles: number;
   /** Set when the baseline records the app build it was measured against. */
-  appBuild?: { baseline: string; current: string; matches: boolean };
+  appBuild?: FingerprintCheck;
+  /** Set when the baseline records the suite definition it was measured with. */
+  suiteDigest?: FingerprintCheck;
+}
+
+export interface FingerprintCheck {
+  baseline: string;
+  current: string;
+  matches: boolean;
+}
+
+/** What this run was measured against, checked against the baseline's record of the same. */
+export interface RunFingerprints {
+  appBuild?: string;
+  suiteDigest?: string;
+}
+
+function fingerprintCheck(
+  baseline: string | undefined,
+  current: string | undefined,
+): FingerprintCheck | undefined {
+  return baseline
+    ? { baseline, current: current ?? "unknown", matches: baseline === current }
+    : undefined;
 }
 
 export interface VerifySpec {
@@ -198,7 +221,7 @@ export function compareRun(
   verify: VerifySpec,
   baseline?: SuiteBaseline,
   baselineToolSequence?: string[],
-  appBuild?: string,
+  fingerprints: RunFingerprints = {},
 ): Comparison {
   const lifecycle = processChecks(audit, outcome);
   const verification = verifyChecks(audit, outcome, verify);
@@ -223,12 +246,7 @@ export function compareRun(
       lines,
     },
     stumbles: audit.toolErrors + audit.patternMatches.length + audit.permissionDenials.length,
-    appBuild: baseline?.appBuild
-      ? {
-          baseline: baseline.appBuild,
-          current: appBuild ?? "unknown",
-          matches: baseline.appBuild === appBuild,
-        }
-      : undefined,
+    appBuild: fingerprintCheck(baseline?.appBuild, fingerprints.appBuild),
+    suiteDigest: fingerprintCheck(baseline?.suiteDigest, fingerprints.suiteDigest),
   };
 }

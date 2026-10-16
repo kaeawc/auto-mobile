@@ -61,19 +61,71 @@ function isAutoMobileVariable(key: string): boolean {
 }
 
 /**
- * Inherited Claude Code variables that change how a run behaves (turn caps, output and
- * thinking budgets, MCP startup and tool timeouts). They are dropped from the launch
- * environment so an operator's shell cannot skew results; auth and provider variables
- * are kept, so subscription, API-key, Bedrock, and Vertex sign-in all still work.
+ * Inherited Claude Code variables that change how a run behaves, taken from the
+ * behavior-affecting entries of Claude Code's environment-variable reference: effort and
+ * thinking, subagent model and limits, turn and output caps, context and compaction,
+ * Bash/MCP output limits and timeouts, retries, tool search, and extra CLAUDE.md
+ * directories. They are dropped from the launch environment so an operator's shell
+ * cannot skew results. This is a denylist on purpose: `CLAUDE_CODE_*` also carries auth,
+ * provider, proxy, and host plumbing, which must pass through for sign-in to work.
+ * Model-selection `ANTHROPIC_*` variables are kept (Bedrock/Vertex need them); the
+ * observed model is recorded in every result.
  */
 export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
+  // Effort and thinking
+  "CLAUDE_CODE_EFFORT_LEVEL",
+  "CLAUDE_EFFORT",
+  "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+  "CLAUDE_CODE_DISABLE_THINKING",
+  "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
+  "DISABLE_INTERLEAVED_THINKING",
+  "MAX_THINKING_TOKENS",
+  "CLAUDE_CODE_DISABLE_FAST_MODE",
+  "CLAUDE_CODE_DISABLE_ADVISOR_TOOL",
+  // Turns, output, and context
   "CLAUDE_CODE_MAX_TURNS",
   "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
-  "MAX_THINKING_TOKENS",
+  "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+  "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+  "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS",
+  "DISABLE_AUTO_COMPACT",
+  "DISABLE_COMPACT",
+  // Subagents and tools
+  "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+  "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+  "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
+  "CLAUDE_CODE_FORK_SUBAGENT",
+  "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS",
+  "CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS",
+  "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY",
+  "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",
+  "ENABLE_TOOL_SEARCH",
+  "SLASH_COMMAND_TOOL_CHAR_BUDGET",
+  "BASH_MAX_OUTPUT_LENGTH",
+  "BASH_DEFAULT_TIMEOUT_MS",
+  "BASH_MAX_TIMEOUT_MS",
+  "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
+  // MCP
+  "ENABLE_CLAUDEAI_MCP_SERVERS",
   "MAX_MCP_OUTPUT_TOKENS",
   "MCP_CONNECTION_NONBLOCKING",
+  "MCP_CONNECT_TIMEOUT_MS",
   "MCP_TIMEOUT",
   "MCP_TOOL_TIMEOUT",
+  "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT",
+  "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
+  "CLAUDE_CODE_MCP_STARTUP_WAIT_MS",
+  "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",
+  // Retries
+  "CLAUDE_CODE_MAX_RETRIES",
+  "CLAUDE_CODE_RETRY_WATCHDOG",
+  // Extra context sources
+  "CLAUDE_ADDITIONAL_DIRECTORIES",
+  "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
 ]);
 
 /** The launch environment for Claude: isolated server env without run-shaping Claude overrides. */
@@ -107,14 +159,36 @@ export function isolatedServerEnv(
   return { ...base, ...privateServerEnv(paths) };
 }
 
-export function buildMcpConfig(paths: ServerPaths): Record<string, unknown> {
+/**
+ * The MCP server's explicit `env`. It repeats the shared claim root: with
+ * `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`, Claude gives stdio servers only a safe default
+ * environment plus this block, and the private daemon must claim devices under the same
+ * root the harness checked.
+ */
+export function mcpServerEnv(
+  inherited: Record<string, string | undefined>,
+  paths: ServerPaths,
+): Record<string, string> {
+  const shared = Object.fromEntries(
+    [...SHARED_AUTOMOBILE_VARIABLES].flatMap((key) => {
+      const value = inherited[key];
+      return value === undefined ? [] : [[key, value]];
+    }),
+  );
+  return { ...shared, ...privateServerEnv(paths) };
+}
+
+export function buildMcpConfig(
+  paths: ServerPaths,
+  inherited: Record<string, string | undefined> = {},
+): Record<string, unknown> {
   return {
     mcpServers: {
       [MCP_SERVER_NAME]: {
         type: "stdio",
         command: paths.runtime,
         args: [paths.serverEntry],
-        env: privateServerEnv(paths),
+        env: mcpServerEnv(inherited, paths),
       },
     },
   };

@@ -73,19 +73,25 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   so your hooks and enabled plugins don't apply either. (`--bare` would do this too, but it
   requires API-key auth and would break subscription sign-in.) Two operators get comparable results
   for the same suite and model.
-- Inherited Claude Code variables that change run behavior (`CLAUDE_CODE_MAX_TURNS`,
-  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `MAX_THINKING_TOKENS`, `MAX_MCP_OUTPUT_TOKENS`,
-  `MCP_CONNECTION_NONBLOCKING`, `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`) are removed from Claude's
-  environment. Auth and provider variables (API keys, Bedrock/Vertex settings) are kept.
+- Inherited Claude Code variables that change run behavior are removed from Claude's
+  environment: effort and thinking, subagent model and limits, turn and output caps, context
+  and compaction, Bash and MCP limits and timeouts, retries, tool search, and extra `CLAUDE.md`
+  directories (for example `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL`,
+  `CLAUDE_CODE_MAX_TURNS`, `MCP_TOOL_TIMEOUT`). The full list is
+  `RUN_SHAPING_CLAUDE_VARIABLES` in `scripts/agent-benchmark/invocation.ts`. Auth, provider,
+  and proxy variables are kept, including `ANTHROPIC_MODEL`, which Bedrock and Vertex need; the
+  observed model is recorded in every result.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
   (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
   (`<run>/logs`). Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the
   legacy `AUTO_MOBILE_*` names) is removed first. Otherwise a state override such as
   `AUTOMOBILE_DB_PATH` would win over the run's values, and a setting such as
   `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
-  `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (and its legacy `AUTO_MOBILE_` spelling), kept so a resident daemon's device claims are still
-  respected. Before preflight touches the device, the harness checks that claim store and refuses a
-  device another AutoMobile session holds.
+  `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (and its legacy `AUTO_MOBILE_` spelling), kept so a
+  resident daemon's device claims are still respected. It is also written into the MCP config's
+  `env`, so it survives `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`. Before preflight touches the device,
+  the harness runs the same ownership check daemons use (forwarding lease, current and legacy
+  claims, unreadable claims) and refuses a device another AutoMobile session holds.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
@@ -176,8 +182,14 @@ failed run.
 
 The snippet also records the app build fingerprint (`baseline.appBuild`): `versionName`,
 `versionCode`, and either the installed `lastUpdateTime` or, when the suite sets `app.apkPath`, a
-SHA-256 prefix of the APK (preflight reinstalls it every run, which resets the install time). If a later run's
-installed app differs, the report flags that its deltas compare different app builds.
+SHA-256 prefix of the APK (preflight reinstalls it every run, which resets the install time). If a
+later run's installed app differs, the report flags that its deltas compare different app builds.
+With `app.apkPath`, preflight also checks that the installed base APK has the same SHA-256, so an
+APK built for a different package fails the run instead of benchmarking a stale app.
+
+It also records `baseline.suiteDigest`, a digest of the prompt, every suite setting other than
+the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
+patterns, or timeout change, the report flags that the baseline measured a different task.
 
 ## Artifacts
 

@@ -11,7 +11,6 @@
 2	test/daemon/manager.test.ts
 6	test/daemon/observationInitialFrame.test.ts
 8	test/daemon/performancePushSocketServer.test.ts
-1	test/daemon/sessionManager.test.ts
 4	test/daemon/socketServer/ConfigSocketServer.test.ts
 11	test/daemon/socketServer/PushSubscriptionSocketServer.test.ts
 6	test/daemon/socketServer/RequestResponseSocketServer.test.ts

@@ -29,8 +29,8 @@ test/daemon/rehydratedOwnerWindow.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionIdleWindowFromToolCallEnd.test.ts
-test/daemon/sessionManager.test.ts
 test/daemon/stuckReapHiddenByIdleDeadline.test.ts
 test/db/dbWriteBarrierReopenConsumers.integration.test.ts
+test/helpers/sessionManagerSuite.ts
 test/server/deviceTools.undeliveredAcquisition.test.ts
 test/server/planLabelSessionNotRehydratedAfterDaemonShutdown.test.ts

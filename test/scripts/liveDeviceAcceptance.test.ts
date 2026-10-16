@@ -3398,6 +3398,16 @@ describe("private broker acceptance lane", () => {
   beforeAll(async () => {
     const host = await createFakeBrokerDaemon();
     await host.close();
+    // Load the lane's lazily imported modules and warm the fake broker outside the timed tests.
+    const warm = await laneFixture();
+    try {
+      await runBrokerAcceptance(
+        brokerArgs(["--confirm-live", "--test-owned-devices"]),
+        warm.dependencies,
+      );
+    } finally {
+      await warm.close();
+    }
   });
   async function laneFixture() {
     const files = new Map<string, string>();

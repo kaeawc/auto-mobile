@@ -18,13 +18,32 @@ const device = {
   hardware: { kind: "archetype", archetype: "phone" },
   os: { kind: "omitted" },
 };
+/** Keys are slash-normalized so the fake tree behaves the same with Windows path separators. */
+class SlashPathMap extends Map<string, string> {
+  private static key(path: string): string {
+    return path.replaceAll("\\", "/");
+  }
+  override get(path: string) {
+    return super.get(SlashPathMap.key(path));
+  }
+  override has(path: string) {
+    return super.has(SlashPathMap.key(path));
+  }
+  override set(path: string, bytes: string) {
+    return super.set(SlashPathMap.key(path), bytes);
+  }
+  override delete(path: string) {
+    return super.delete(SlashPathMap.key(path));
+  }
+}
 function fixture() {
-  const files = new Map<string, string>();
+  const files = new SlashPathMap();
   const writes: Array<{ path: string; mode?: number; flag?: string }> = [];
   const deps: BrokerClientFileDeps = {
     ids: new FakeIdGenerator(["owner-secret", "replay-id"]),
     exists: (path) =>
-      files.has(path) || [...files.keys()].some((file) => file.startsWith(`${path}/`)),
+      files.has(path) ||
+      [...files.keys()].some((file) => file.startsWith(`${path.replaceAll("\\", "/")}/`)),
     readFile: (path) => {
       if (!files.has(path)) {
         throw new Error(`Missing fake file ${path}`);
@@ -39,7 +58,9 @@ function fixture() {
       writes.push({ path, ...options });
     },
     mkdir: () => {},
-    rename: (from, to) => {
+    rename: (fromPath, toPath) => {
+      const from = fromPath.replaceAll("\\", "/");
+      const to = toPath.replaceAll("\\", "/");
       for (const [path, bytes] of [...files]) {
         if (path === from || path.startsWith(`${from}/`)) {
           files.set(to + path.slice(from.length), bytes);

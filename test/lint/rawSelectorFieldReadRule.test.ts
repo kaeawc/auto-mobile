@@ -500,3 +500,15 @@ test("generic wrappers mark only raw-valued properties", () => {
     "interface Envelope<T> { node: T; metadata: { text: string } } function inspect(envelope: Envelope<ViewHierarchyNode>) { return [envelope.node.text, envelope.metadata.text]; }";
   expect(check(code)).toHaveLength(1);
 });
+
+test("the sanctioned accessor module is out of scope, and its callers read no raw field", () => {
+  const code = 'function read(props: Record<string, unknown>) { return props["resource-id"]; }';
+  expect(check(code, "src/features/utility/elementProperties.ts")).toEqual([]);
+  expect(check(code, "src/server/systemTrayHelpers.ts")).toHaveLength(1);
+  expect(
+    check(
+      "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
+      "src/server/systemTrayHelpers.ts",
+    ),
+  ).toEqual([]);
+});

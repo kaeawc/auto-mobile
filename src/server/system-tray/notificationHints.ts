@@ -8,6 +8,7 @@
  */
 import type { ViewHierarchyResult } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import { rawNodeString, rawResourceId } from "../../features/utility/elementProperties";
 import { SearchableHierarchy } from "../../features/utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
@@ -129,8 +130,7 @@ export const nodeIsSystemUi = (props: Record<string, any>): boolean => {
   if (packageName) {
     return packageName === SYSTEM_TRAY_PACKAGE;
   }
-  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
-  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
+  const resourceId = rawResourceId(props);
   return resourceId.startsWith(`${SYSTEM_TRAY_PACKAGE}:id/`);
 };
 
@@ -139,8 +139,7 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   if (!props) {
     return false;
   }
-  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
-  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
+  const resourceId = rawResourceId(props);
   const className = String(props.className ?? props.class ?? "");
   const isSystemUi = nodeIsSystemUi(props);
   if (!isSystemUi) {
@@ -159,10 +158,8 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
     return false;
   }
   const className = String(props.className ?? props.class ?? "");
-  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
-  const contentDesc = String(props["content-desc"] ?? props["ios-accessibility-label"] ?? "");
-  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
-  const identifier = String(props["resource-id"] ?? props.resourceId ?? props.identifier ?? "");
+  const contentDesc = rawNodeString(props, ["content-desc", "ios-accessibility-label"]);
+  const identifier = rawResourceId(props, ["identifier"]);
   return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
     (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
   );

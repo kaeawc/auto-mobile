@@ -1,0 +1,110 @@
+name: Linux Qualification
+on:
+  workflow_dispatch:
+    inputs:
+      load-seconds:
+        description: Load window in seconds (positive integer)
+        default: "300"
+        type: string
+      cycles:
+        description: Cycles per cell (positive integer)
+        default: "1"
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: linux-qualification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  proc-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          lfs: false
+      - run: bash scripts/ci/linux-qualification/capture-proc-fixtures.sh "$OUT_DIR"
+        env:
+          OUT_DIR: ${{ runner.temp }}/proc-fixtures
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: proc-fixtures
+          path: ${{ runner.temp }}/proc-fixtures/
+          if-no-files-found: error
+          retention-days: 30
+  emulator-sigsegv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [swangle, swiftshader_indirect, host, angle_indirect]
+        workload: [automobile, raw-adb-control, heartbeat-only]
+        include:
+          - gpu: swangle
+            gpu-args: '["-gpu","swangle","-feature","-Vulkan"]'
+          - gpu: swiftshader_indirect
+            gpu-args: '["-gpu","swiftshader_indirect"]'
+          - gpu: host
+            gpu-args: '["-gpu","host"]'
+          - gpu: angle_indirect
+            gpu-args: '["-gpu","angle_indirect"]'
+    env:
+      GPU: ${{ matrix.gpu }}
+      GPU_ARGS: ${{ matrix.gpu-args }}
+      WORKLOAD: ${{ matrix.workload }}
+      LOAD_SECONDS: ${{ inputs.load-seconds }}
+      CYCLES: ${{ inputs.cycles }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          lfs: false
+      - run: echo "CELL_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Free disk space for emulator
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          echo "Disk space after cleanup:"
+          df -h
+      - uses: ./.github/actions/enable-kvm
+      - run: bash scripts/android/ensure-emulator-sdk.sh
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+        if: matrix.workload == 'automobile'
+      - run: bash scripts/ci/linux-qualification/emulator-cell.sh
+        env:
+          CELL_DIR: ${{ runner.temp }}/qualification/${{ matrix.gpu }}-${{ matrix.workload }}
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: emulator-sigsegv-${{ matrix.gpu }}-${{ matrix.workload }}
+          path: ${{ runner.temp }}/qualification/${{ matrix.gpu }}-${{ matrix.workload }}/
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: warn
+          retention-days: 30
+  emulator-sigsegv-summary:
+    needs: emulator-sigsegv
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          lfs: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: emulator-sigsegv-*
+          merge-multiple: false
+          path: scratch/qualification-artifacts
+      - run: |
+          bash scripts/ci/linux-qualification/summarize.sh scratch/qualification-artifacts
+          cat scratch/qualification-artifacts/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: emulator-sigsegv-summary
+          path: |
+            scratch/qualification-artifacts/summary.md
+            scratch/qualification-artifacts/summary.json
+          if-no-files-found: error
+          retention-days: 30

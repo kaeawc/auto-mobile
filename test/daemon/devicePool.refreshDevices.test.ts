@@ -39,9 +39,11 @@ describe("DevicePool", () => {
   let fakeTimer: FakeTimer;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeDeviceManager: FakeDeviceManager;
-  const { initializeLiveDevices } = devicePoolSuiteActions(() => ({
+  const { initializeLiveDevices, makePool } = devicePoolSuiteActions(() => ({
     devicePool,
     sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
     fakeDeviceManager,
   }));
 
@@ -57,15 +59,7 @@ describe("DevicePool", () => {
   describe("device-ready notifications", () => {
     test("notifies when a boot-ready device reuses an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-        }),
-      );
+      devicePool = makePool({ onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId) });
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
 
       await devicePool.addDevice(createBootedDevice("emulator-5554"));
@@ -77,15 +71,7 @@ describe("DevicePool", () => {
 
     test("notifies when refresh rediscovers an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-        }),
-      );
+      devicePool = makePool({ onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId) });
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
       fakeDeviceManager.bootedDevices = [device];
@@ -98,15 +84,10 @@ describe("DevicePool", () => {
     test("notifies after binding discovery and before claiming an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
       const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: deferredDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: deferredDeviceManager,
+        onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
+      });
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
       deferredDeviceManager.bootedDevices = [device];
@@ -133,15 +114,7 @@ describe("DevicePool", () => {
           await finished.promise;
         },
       };
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          deviceSessionRepository: repository,
-        }),
-      );
+      devicePool = makePool({ deviceSessionRepository: repository });
       const device = createBootedDevice("emulator-5554");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
@@ -198,15 +171,7 @@ describe("DevicePool", () => {
           }
         },
       };
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          deviceSessionRepository: repository,
-        }),
-      );
+      devicePool = makePool({ deviceSessionRepository: repository });
       const first = createBootedDevice("emulator-5554");
       const second = createBootedDevice("emulator-5556");
       fakeDeviceManager.bootedDevices = [first, second];
@@ -256,15 +221,10 @@ describe("DevicePool", () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       const connectedDeviceIds: string[] = [];
       const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: deferredDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: deferredDeviceManager,
+        onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
+      });
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
       deferredDeviceManager.bootedDevices = [device];
@@ -309,15 +269,10 @@ describe("DevicePool", () => {
         const device = createBootedDevice(deviceId, platform, name);
         const manager = new GatedSnapshotDeviceManager([], [device]);
         const readyDeviceIds: string[] = [];
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
-          }),
-        );
+        devicePool = makePool({
+          deviceManager: manager,
+          onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
+        });
         await devicePool.addDevice(device);
         readyDeviceIds.length = 0;
         const captured = devicePool.getDevice(deviceId);
@@ -348,15 +303,10 @@ describe("DevicePool", () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const manager = new GatedSnapshotDeviceManager([], [device]);
       const readyDeviceIds: string[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
+      });
       await devicePool.addDevice(device);
       readyDeviceIds.length = 0;
       const captured = devicePool.getDevice(device.deviceId);
@@ -406,14 +356,7 @@ describe("DevicePool", () => {
           fakeSimctl,
           fakeEmulator,
         );
-        const pool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        const pool = makePool({ deviceManager: manager });
 
         const added = await pool.refreshDevices();
 
@@ -444,14 +387,7 @@ describe("DevicePool", () => {
           fakeSimctl,
           fakeEmulator,
         );
-        const pool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        const pool = makePool({ deviceManager: manager });
 
         const added = await pool.refreshDevices();
 
@@ -577,24 +513,18 @@ describe("DevicePool", () => {
 
       beforeEach(async () => {
         tracker = new ExecutionTracker(fakeTimer, new FakeIdGenerator(["ambient-execution"]));
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: fakeDeviceManager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            ambientExecutionIdReader: { getExecutionId: () => "ambient-execution" },
-            cancelDeviceSessionExecutions: Object.assign(
-              tracker.cancelDeviceSessionExecutions.bind(tracker),
-              { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
-            ),
-            releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason) => {
-              await tracker.cancelSessionUuidExecutions(sessionId, reason);
-              await sessionManager.releaseSession(sessionId, reason);
-              return true;
-            },
-          }),
-        );
+        devicePool = makePool({
+          ambientExecutionIdReader: { getExecutionId: () => "ambient-execution" },
+          cancelDeviceSessionExecutions: Object.assign(
+            tracker.cancelDeviceSessionExecutions.bind(tracker),
+            { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
+          ),
+          releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason) => {
+            await tracker.cancelSessionUuidExecutions(sessionId, reason);
+            await sessionManager.releaseSession(sessionId, reason);
+            return true;
+          },
+        });
         await initializeLiveDevices([device]);
         await devicePool.bindOrReuseDeviceSession(
           "owner-session",
@@ -1046,14 +976,7 @@ describe("DevicePool", () => {
       // replacement is the second, and it rejects here.
       sessionPersistence.createFailureOnAttempt = 2;
       sessionManager = new SessionManager(fakeTimer, sessionPersistence);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool();
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const sourceImage: DeviceInfo = {
         name: "Pixel 8",
@@ -1102,14 +1025,7 @@ describe("DevicePool", () => {
       const persistence = new DeferredDeviceSessionPersistence();
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const sourceImage: DeviceInfo = {
         name: "Pixel 8",
@@ -1168,14 +1084,7 @@ describe("DevicePool", () => {
       const manager = new FakeDeviceManagerWithStartedProcess();
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const sourceImage: DeviceInfo = {
         name: "Pixel 8",

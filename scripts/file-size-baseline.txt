@@ -29,7 +29,7 @@
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
-1284	src/features/action/BaseVisualChange.ts
+1285	src/features/action/BaseVisualChange.ts
 1107	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2253	src/features/action/LaunchApp.ts
@@ -78,7 +78,7 @@
 1273	src/server/deviceToolsShutdown.ts
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
-1642	src/server/finalizeToolResponse.ts
+1643	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
 3673	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts

@@ -1152,6 +1152,140 @@ describe("DualTrackRecorder", () => {
     }
   });
 
+  describe("swipes that no direction describes (#12533)", () => {
+    async function recordedSwipe(gesture: Record<string, unknown>) {
+      await recorder.start();
+      fakeGestures.emit({ type: "swipe", arrivedAt: 0, ...gesture } as never);
+      fakeTimer.advanceTime(MERGE_WINDOW_MS);
+      return (await recorder.stop()).steps;
+    }
+
+    test("a diagonal swipe exports swipeAt with both endpoints", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "right",
+          startX: 100,
+          startY: 900,
+          endX: 700,
+          endY: 300,
+        }),
+      ).toEqual([
+        { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 700, y: 300 } } },
+      ]);
+    });
+
+    test("a diagonal swipe keeps its fast speed", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "down",
+          speed: "fast",
+          startX: 800,
+          startY: 200,
+          endX: 200,
+          endY: 700,
+        }),
+      ).toEqual([
+        {
+          tool: "swipeAt",
+          params: { from: { x: 800, y: 200 }, to: { x: 200, y: 700 }, speed: "fast" },
+        },
+      ]);
+    });
+
+    test("a swipe at the diagonal threshold exports swipeAt", async () => {
+      // Off-axis travel is exactly half the on-axis travel (about 26.6 degrees).
+      const steps = await recordedSwipe({
+        direction: "up",
+        startX: 500,
+        startY: 1000,
+        endX: 700,
+        endY: 600,
+      });
+
+      expect(steps.map((step) => step.tool)).toEqual(["swipeAt"]);
+    });
+
+    test.each([
+      ["a slightly slanted vertical swipe", { direction: "up", endX: 590 }],
+      [
+        "a slightly slanted horizontal swipe",
+        { direction: "left", startX: 800, endX: 200, endY: 1190 },
+      ],
+    ])("%s stays a swipeOn direction", async (_label, overrides) => {
+      const steps = await recordedSwipe({
+        startX: 500,
+        startY: 1200,
+        endX: 500,
+        endY: 600,
+        ...overrides,
+      });
+
+      expect(steps.map((step) => step.tool)).toEqual(["swipeOn"]);
+    });
+
+    test("a diagonal swipe over a scrollable container is still swipeAt, without the container", async () => {
+      await recorder.start();
+      fakeGestures.emit({
+        type: "swipe",
+        arrivedAt: fakeTimer.now(),
+        direction: "right",
+        startX: 100,
+        startY: 900,
+        endX: 700,
+        endY: 300,
+      });
+      fakeA11y.emit({
+        type: "scroll",
+        timestamp: fakeTimer.now(),
+        element: {
+          "resource-id": "com.example:id/map",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        },
+        scrollDeltaX: 100,
+        scrollDeltaY: 100,
+      });
+
+      const { steps } = await recorder.stop();
+
+      expect(steps).toEqual([
+        { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 700, y: 300 } } },
+      ]);
+    });
+
+    test("a swipe with endpoints but no direction exports swipeAt instead of being dropped", async () => {
+      const warning = spyOn(logger, "warn");
+      try {
+        expect(await recordedSwipe({ startX: 100, startY: 900, endX: 100, endY: 300 })).toEqual([
+          { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 100, y: 300 } } },
+        ]);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("recorded swipeAt fallback"));
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test("a swipe with a start point only is still skipped", async () => {
+      expect(await recordedSwipe({ startX: 100, startY: 900 })).toEqual([]);
+    });
+
+    test("a zero-length drag is never exported as a swipe", async () => {
+      expect(await recordedSwipe({ startX: 100, startY: 900, endX: 100, endY: 900 })).toEqual([]);
+    });
+
+    test("unknown-axis swipes never invent coordinates", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "right",
+          unknownAxes: ["y"],
+          startX: 100,
+          startY: 900,
+          endX: 700,
+          endY: 300,
+        }),
+      ).toEqual([]);
+    });
+  });
+
   test("matching bounds without a selector still preserve the touch", async () => {
     await recorder.start();
     fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });

@@ -18,6 +18,7 @@ const fixedClasses = {
   keyboard: "inPlace",
   clipboard: "inPlace",
   swipeOn: "scroll",
+  swipeAt: "scroll",
   dragAndDrop: "scroll",
 } satisfies Record<string, ObservationActionClass>;
 
@@ -29,6 +30,7 @@ const advertisedClasses = {
   openLink: "navigation",
   selectAllText: "inPlace",
   swipeOn: "scroll",
+  swipeAt: "scroll",
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
   launchApp: "unknown",

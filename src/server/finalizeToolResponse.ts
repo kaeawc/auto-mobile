@@ -145,6 +145,7 @@ export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "pressButton",
   "systemTray",
   "swipeOn",
+  "swipeAt",
   "pinchOn",
   "openLink",
   "shake",

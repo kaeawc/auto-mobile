@@ -27,7 +27,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
 `sqlQuery`,
-`swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
+`swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
 `sessionUuid` selects a daemon device session. When an Android session first
@@ -53,7 +53,7 @@ These tools accept `raw` to return the raw hierarchy and `project` to choose
 
 `biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
-`shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
+`shake`, `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
 Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a
 selector. Use `sendKeys` or `keyboard` for keyboard input.
@@ -303,6 +303,44 @@ Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
 Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
 `durationMs` is valid only for long press. On iOS, double tap uses one runner-side double tap. On Android, it uses two native taps
 200 ms apart. The result includes `action`. All variants accept `display`.
+
+#### Swipe between two points
+
+`swipeAt({ from, to })` swipes from the point where the finger goes down to the point
+where it lifts, so it can draw diagonals that `swipeOn`'s four directions cannot. It is
+opt-in: enable it with `setToolEnabled`. Both points use the same native units as
+`tapAt`, and `coordinateSpace: "normalized"` (0 to 1) or `"percent"` (0 to 100)
+resolve them against the observed `screenSize`. Points outside the screen,
+non-finite values, and a `from` and `to` that resolve to the same point (which would
+be a tap, so use `tapAt`) are rejected before any input is sent. On Android both
+points are rounded to whole pixels first, so two distinct points that round to
+the same pixel are also rejected. The result reports the resolved native
+`x1`, `y1`, `x2`, `y2` and the `duration` in milliseconds.
+
+```ts
+swipeAt({ from: { x: 0.8, y: 0.2 }, to: { x: 0.2, y: 0.8 }, coordinateSpace: "normalized" });
+```
+
+For screenshot-derived points pass `image` with one shared source and a `from` and
+`to` in that image, as `tapAt.image` does for a single point:
+
+```ts
+swipeAt({
+  image: {
+    unit: "normalized",
+    source: { crop: observation.crop, rotation: observation.rotation },
+    from: { x: 0.2, y: 0.5 },
+    to: { x: 0.8, y: 0.25 },
+  },
+});
+```
+
+`image` is mutually exclusive with `from`, `to`, and `coordinateSpace`. Add
+`snapshotId` to reject the swipe when the screen geometry changed since that
+observation, or the reference expired. `speed` selects `slow`, `normal` (the
+default), or `fast` as in `swipeOn`. `layer` is checked at the `from` point, because touches go to the window under the
+finger-down point. `swipeAt` does not accept `display`; use `swipeOn` for a
+non-default display.
 
 `tapAt`, `tapOn`, `tapAny`, `swipeOn`, `dragAndDrop`, and `pinchOn` fence
 coordinates when the display transitions after the caller's observation or while
@@ -1181,6 +1219,7 @@ settled screenshot is eligible.
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals; opt-in with `setToolEnabled`.                                                                        |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
@@ -1299,7 +1338,7 @@ malformed recursive containers are rejected.
 #### Hierarchy layer
 
 `observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, `dragAndDrop`, `swipeOn`,
-`pinchOn`, `tapAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
+`pinchOn`, `tapAt`, `swipeAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
 (`"app"` or `"prototype"`) that scopes the call to one layer of the screen. `app`
 excludes AutoMobile's own prototype window; `prototype` keeps only prototype nodes and
 fails with an actionable error when no prototype is showing. Omit it to search both,
@@ -1322,9 +1361,9 @@ dismissing a prototype records no navigation.
 
 Touches go to the window under the point where a finger goes down, so gestures
 are checked there before dispatch: the tap point (`tapAt`, `tapOn`, `tapAny`), the
-swipe start (`swipeOn`), both finger start points (`pinchOn`), and both drag
+swipe start (`swipeOn`, `swipeAt`), both finger start points (`pinchOn`), and both drag
 endpoints (`dragAndDrop`). With `layer: "app"` a gesture whose point lies under an
-prototype window is refused. With `layer: "prototype"`, `tapAt`, `swipeOn`, and
+prototype window is refused. With `layer: "prototype"`, `tapAt`, `swipeOn`, `swipeAt`, and
 `pinchOn` also refuse a point outside every prototype window, because it would
 reach the app. There is no touch-through mode: hide or move the prototype to reach
 the app beneath it.

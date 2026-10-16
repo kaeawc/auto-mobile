@@ -421,6 +421,31 @@ describe("agent benchmark harness", () => {
     expect(runner.calls.filter((call) => call.args.includes("--daemon"))).toHaveLength(1);
   });
 
+  test("a reclaim that throws fails the screen check but still writes the result", async () => {
+    const { fs, claims, deps, options } = setup(PASSING);
+    const reserve = deps.deviceClaims.reserve;
+    deps.deviceClaims = {
+      reserve: async (serial) => {
+        const held = await reserve(serial);
+        return "refused" in held
+          ? held
+          : {
+              ...held,
+              reclaim: async () => {
+                throw new Error("claim dir unreadable");
+              },
+            };
+      },
+    };
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("failed");
+    expect(result.outcome.screenError).toBe(
+      "could not reclaim emulator-5554: claim dir unreadable",
+    );
+    expect(fs.exists(artifact("result.json"))).toBe(true);
+    expect(claims.at(-1)).toBe("release emulator-5554");
+  });
+
   test("a device taken by another session after the run fails the screen check unread", async () => {
     const { claims, runner, logs, deps, options } = setup(PASSING);
     const reserve = deps.deviceClaims.reserve;

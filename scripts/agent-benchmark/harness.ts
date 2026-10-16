@@ -190,7 +190,14 @@ async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: 
 async function screenAfterRun(deps: HarnessDeps, run: PreparedRun, packageName: string) {
   // The private daemon released its claim on stop; another session could take the device
   // before the dump, so the screen read must happen under the benchmark's own claim again.
-  const refused = await run.reservation.reclaim();
+  let refused: string | undefined;
+  try {
+    refused = await run.reservation.reclaim();
+  } catch (error) {
+    // The run is already paid for: fail the screen check closed but still write the result.
+    deps.log(`post-run screen dump skipped: reclaim failed: ${errorMessage(error)}`);
+    return { screenError: `could not reclaim ${run.serial}: ${errorMessage(error)}` };
+  }
   if (refused) {
     deps.log(`post-run screen dump skipped: ${run.serial} ${refused}`);
     return { screenError: `${run.serial} ${refused} after the run; the screen was not read` };

@@ -25,12 +25,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { VideoRecorderService } from "../../src/features/video";
-import {
-  registerVideoRecordingTools,
-  resetSegmentedSessions,
-  setRecordingRequesterResolverForTesting,
-  setVideoRecordingDeviceDetectorForTesting,
-} from "../../src/server/videoRecordingTools";
+import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
@@ -39,6 +34,9 @@ import {
 } from "../../src/server/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 
@@ -86,7 +84,7 @@ const outcome = (args: Record<string, unknown>, target: BootedDevice = device) =
 
 beforeAll(() => {
   if (!ToolRegistry.getTool("videoRecording")) {
-    registerVideoRecordingTools();
+    videoRecording.register();
   }
 });
 
@@ -102,7 +100,7 @@ beforeEach(async () => {
   ];
   sessions = new FakeDeviceSessionManager();
   sessions.setConnectedDevices([device]);
-  setVideoRecordingDeviceDetectorForTesting(sessions);
+  videoRecording.configure({ deviceDetector: sessions });
   service = new VideoRecorderService({
     backend,
     idGenerator: new FakeIdGenerator(["capture-a", "capture-b"]),
@@ -125,21 +123,23 @@ beforeEach(async () => {
   deviceHeld = true;
   owningConnection = undefined;
   // The owner's session still holds the device; no connection of the requester owns it.
-  setRecordingRequesterResolverForTesting({
-    baseSessionUuid: (uuid) => uuid.split(":")[0],
-    connectionOwnsDeviceSession: (connection, deviceId, ownerBase) =>
-      connection === owningConnection && deviceId === device.deviceId && ownerBase === OWNER,
-    isDeviceHeld: () => deviceHeld,
+  videoRecording.configure({
+    requesterResolver: {
+      baseSessionUuid: (uuid) => uuid.split(":")[0],
+      connectionOwnsDeviceSession: (connection, deviceId, ownerBase) =>
+        connection === owningConnection && deviceId === device.deviceId && ownerBase === OWNER,
+      isDeviceHeld: () => deviceHeld,
+    },
   });
 });
 
 afterEach(() => {
   videoManager.setStartupOrphanCaptures(undefined);
   expect(videoManager.getStartupOrphanCaptures()).toBeUndefined();
-  setRecordingRequesterResolverForTesting(undefined);
+  videoRecording.clear();
   resetVideoRecordingManagerDependencies();
   resetSegmentedSessions();
-  setVideoRecordingDeviceDetectorForTesting(undefined);
+  videoRecording.clear();
   expect(videoManager.listOwnedActiveVideoRecordingIds()).toEqual([]);
   timer.reset();
   for (const spy of spies) {

@@ -74,7 +74,7 @@ import type {
   WaitForWithSettled,
   WaitForConditionDsl,
   WaitForConditionKind,
-} from "./observeTools";
+} from "./observeWaitForSchemas";
 
 const WAIT_FOR_POLL_INTERVAL_MS = 100;
 

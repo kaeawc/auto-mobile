@@ -1,11 +1,4 @@
-import { MAX_WAIT_FOR_TIMEOUT_MS } from "../features/observe/waitForTimeout";
-import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
-import { iosAgentHidesPrototypeForCapture } from "../features/prototype/ios/iosCapturePrototypeHider";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
-import {
-  screenshotPathProtection,
-  type ScreenshotPathProtection,
-} from "../features/observe/ScreenshotPathProtection";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { displayWaitInventory } from "../utils/deviceMatcher";
@@ -14,30 +7,18 @@ import {
   screenshotOptionsSchema,
   type ObserveScreenshotOptions,
 } from "../features/observe/screenshot/screenshotOptions";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { ToolRegistry } from "./toolRegistry";
 import { stripInternalToolParams } from "./internalToolParams";
-import {
-  getToolSelectionContext,
-  isSessionlessDeviceRead,
-} from "../features/toolSelection/toolSelectionContext";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
-import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
-import { sessionlessDeviceReadFor, type DeviceObservationAccess } from "./deviceObservationAccess";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
+import { sessionlessDeviceReadFor } from "./deviceObservationAccess";
 import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  StructuredToolResponse,
-} from "../utils/toolUtils";
-import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
+import { createJSONToolResponse } from "../utils/toolUtils";
+import { BootedDevice, ObserveResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
@@ -46,24 +27,17 @@ import {
 } from "../features/observe/IdentifyInteractions";
 import {
   addDeviceTargetingToSchema,
-  JsonSchemaOverride,
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
+import { hierarchyLayerSchema, nestedElementContainerSchema } from "./elementSelectorSchemas";
 import {
-  hierarchyLayerSchema,
-  nestedElementContainerSchema,
-  resolverSelectionStrategySchema,
-} from "./elementSelectorSchemas";
-import {
-  hasOwnPrototype,
   scopeHierarchyForSelector,
   scopeObserveResultToLayer,
 } from "../features/observe/hierarchyLayer";
-import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { observeToolResultSchema } from "./toolOutputSchemas";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
@@ -71,21 +45,44 @@ import type { AccessibilityDetector } from "../features/accessibility/interfaces
 import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
-import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
+import { observeCropSchema } from "../features/observe/screenshot/observeCrop";
+import { waitForObservation } from "./observeWaitEvaluation";
+
 import {
-  createObserveCrop,
-  observeCropSchema,
-  type ObserveCropDependencies,
-} from "../features/observe/screenshot/observeCrop";
+  overrideWaitForJsonSchema,
+  refineWaitForArgs,
+  settledSchema,
+  waitForSchema,
+} from "./observeWaitForSchemas";
+
+// The waitFor / settled schemas live in ./observeWaitForSchemas (#11828); these names stay
+// importable from here.
+export {
+  assertActiveWindowWaitForSupportedOnPlatform,
+  overrideWaitForJsonSchema,
+  refineWaitForArgs,
+  settledSchema,
+  waitForSchema,
+  type ObserveWaitForOptions,
+  type SettledOptions,
+  type WaitForConditionDsl,
+  type WaitForConditionKind,
+  type WaitForWithSettled,
+} from "./observeWaitForSchemas";
+
 import {
-  applyObserveScopeExperiments,
-  buildObserveScopeConfig,
-} from "../features/observe/output/ObserveScopeExperiments";
-import {
-  hasElementPredicate,
-  waitForObservation,
-  type WaitForObservationOutcome,
-} from "./observeWaitEvaluation";
+  attachObserveCrop,
+  attachSnapshotReference,
+  createObserveResponse,
+  createObserveWaitResponse,
+  layerScopedObserveResult,
+  observeScreenshotOptions,
+  prepareObserveOptions,
+  recordObservationBackStack,
+  screenForObserve,
+  type ObserveResponse,
+  type ObserveToolDependencies,
+} from "./observeResponse";
 
 // The waitFor / settle evaluation lives in ./observeWaitEvaluation (#11828); these names stay
 // importable from here.
@@ -96,427 +93,6 @@ export {
   waitForObservation,
   type WaitForObservationOutcome,
 } from "./observeWaitEvaluation";
-
-// Schema definitions
-// waitFor accepts legacy selectors plus richer predicates. Element predicates are
-// evaluated against the same node unless matchType is explicitly "any".
-const waitForContainerField = nestedElementContainerSchema
-  .optional()
-  .describe(
-    "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
-  );
-
-const publicActiveWindowAppIdAliases = ["packageName", "bundleId"] as const;
-
-const appIdAliasShape = {
-  packageName: z.string().optional(),
-  bundleId: z.string().optional(),
-};
-
-const appIdPresenceBranches = [
-  z.object({ appId: z.string() }).passthrough(),
-  ...publicActiveWindowAppIdAliases.map((alias) => z.object({ [alias]: z.string() }).passthrough()),
-];
-
-const activeWindowWaitForBaseSchema = z
-  .object({
-    appId: z.string().optional().describe("Foreground app bundle ID / package name"),
-    ...appIdAliasShape,
-    activityName: z.string().optional().describe("Foreground Android activity name"),
-  })
-  .strict();
-
-const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(
-  z.union([...appIdPresenceBranches, z.object({ activityName: z.string() }).passthrough()]),
-);
-
-// Absence / negation predicate (issue #3490 §4). Same element-matching fields as
-// a positive predicate; the wait resolves only when NO element matches these.
-const absentPredicateBaseSchema = z
-  .object({
-    selectionStrategy: resolverSelectionStrategySchema.optional(),
-    elementId: z
-      .string()
-      .optional()
-      .describe("Resource ID / accessibility identifier that must be absent"),
-    text: z.string().optional().describe("Element text that must be absent (contains match)"),
-    className: z.string().optional().describe("Element class name that must be absent"),
-    contentDescription: z
-      .string()
-      .optional()
-      .describe("Content description / accessibility label that must be absent"),
-  })
-  .strict();
-
-const absentPredicatePresenceSchema = z.union([
-  z.object({ elementId: z.string() }).passthrough(),
-  z.object({ text: z.string() }).passthrough(),
-  z.object({ className: z.string() }).passthrough(),
-  z.object({ contentDescription: z.string() }).passthrough(),
-]);
-
-const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
-
-const POSTURE_WAIT_DESCRIPTION =
-  "Wait for the observed device posture. Single-panel inventory fails immediately; multi-panel or unavailable inventory keeps polling. Timeout diagnostics distinguish unobservable posture (no hierarchy captured), unavailable inventory, and the last observed posture.";
-
-const waitForCommonShape = {
-  posture: z
-    .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"])
-    .optional()
-    .describe(POSTURE_WAIT_DESCRIPTION),
-  activeDisplay: z.string().min(1).optional().describe("Wait for a panel key or role"),
-  activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
-  absent: absentPredicateSchema
-    .optional()
-    .describe("Wait until an element matching these fields is absent"),
-  timeout: z
-    .number()
-    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
-      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
-    })
-    .optional()
-    .describe("Wait timeout ms (default: 5000)"),
-  timeoutMs: z
-    .number()
-    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
-      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
-    })
-    .optional()
-    .describe("Alias for timeout"),
-  container: waitForContainerField,
-  selectionStrategy: resolverSelectionStrategySchema.optional(),
-};
-
-const validateWaitForTimeoutAliases = (
-  value: { timeout?: number; timeoutMs?: number },
-  ctx: z.RefinementCtx,
-): void => {
-  if (value.timeout !== undefined && value.timeoutMs !== undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "waitFor accepts either timeout or timeoutMs, not both",
-    });
-  }
-};
-
-// Stability / "settled" gate (issue #3490 §3). After the waitFor predicate first
-// matches, keep observing until the view hierarchy is unchanged for this long.
-export const settledSchema = z
-  .object({
-    quietPeriodMs: z
-      .number()
-      .int()
-      .positive()
-      .describe("Quiet-period ms (no hierarchy change) required after waitFor matches"),
-  })
-  .strict();
-
-const waitForTextAnySchema = z
-  .object({
-    for: z.never().optional(),
-    textAny: z
-      .array(z.string().min(1))
-      .min(1)
-      .describe("Ordered text variants; first visible match wins"),
-    elementId: z.never().optional(),
-    text: z.never().optional(),
-    className: z.never().optional(),
-    contentDescription: z.never().optional(),
-    matchType: z.never().optional(),
-    textMatch: z.never().optional(),
-    ...waitForCommonShape,
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    validateWaitForTimeoutAliases(value, ctx);
-    if (value.selectionStrategy !== undefined && value.absent === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "selectionStrategy requires an element or absent predicate",
-      });
-    }
-  });
-
-const waitForElementBaseSchema = z
-  .object({
-    for: z.never().optional(),
-    elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
-    text: z.string().optional().describe("Element text"),
-    textAny: z.never().optional(),
-    className: z.string().optional().describe("Element class name"),
-    contentDescription: z
-      .string()
-      .optional()
-      .describe("Element content description / accessibility label"),
-    matchType: z
-      .enum(["all", "any"])
-      .optional()
-      .describe("Whether element predicates must all match the same node or any one may match"),
-    textMatch: z
-      .enum(["exact", "contains", "regex"])
-      .optional()
-      .describe("How to match waitFor.text; does not affect contentDescription"),
-    ...waitForCommonShape,
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    validateWaitForTimeoutAliases(value, ctx);
-    if (
-      value.selectionStrategy !== undefined &&
-      !hasElementPredicate(value) &&
-      value.absent === undefined
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "selectionStrategy requires an element or absent predicate",
-      });
-    }
-
-    if (value.textMatch === "regex" && value.text !== undefined) {
-      try {
-        new RegExp(value.text);
-      } catch (error) {
-        // Invalid caller regexes are expected validation failures reported by the schema.
-        logger.debug(`waitFor regex validation failed: ${errorMessage(error)}`);
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "text must be a valid regular expression when textMatch is regex",
-        });
-      }
-    }
-  });
-
-const waitForPredicatePresenceSchema = z.union([
-  z.object({ posture: waitForCommonShape.posture.unwrap() }).passthrough(),
-  z.object({ activeDisplay: z.string().min(1) }).passthrough(),
-  z.object({ elementId: z.string() }).passthrough(),
-  z.object({ text: z.string() }).passthrough(),
-  z.object({ className: z.string() }).passthrough(),
-  z.object({ contentDescription: z.string() }).passthrough(),
-  z.object({ activeWindow: activeWindowWaitForSchema }).passthrough(),
-  z.object({ absent: absentPredicateSchema }).passthrough(),
-]);
-
-const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
-
-// Declarative predicate DSL (issue #4398): `for` selects a condition backed by a
-// #4389 primitive. Everything but `stable` is a WaitForCondition predicate; the
-// handler routes `stable` (whole-screen structural settle) to SettleObserve. The
-// legacy-only fields are declared `never` here so the inferred union stays
-// structurally compatible with the element/textAny arms (same pattern those arms
-// use to exclude each other), keeping the legacy handler's field access valid.
-const WAIT_FOR_CONDITION_KINDS = [
-  "appear",
-  "disappear",
-  "clickable",
-  "textEquals",
-  "countStable",
-] as const;
-const WAIT_FOR_DSL_KINDS = [...WAIT_FOR_CONDITION_KINDS, "stable"] as const;
-
-const waitForConditionDslSchema = z
-  .object({
-    for: z.enum(WAIT_FOR_DSL_KINDS).describe("Declarative condition to wait for"),
-    elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
-    text: z
-      .string()
-      .optional()
-      .describe(
-        "Element text; appear tries normalized exact then substring matching, while textEquals requires the exact value",
-      ),
-    pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
-    stableReads: z
-      .number()
-      .optional()
-      .describe("Consecutive stable reads for countStable/stable (default 2)"),
-    timeout: z
-      .number()
-      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
-        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
-      })
-      .optional()
-      .describe("Wait timeout ms (default 5000; stable default 2500)"),
-    timeoutMs: z
-      .number()
-      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
-        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
-      })
-      .optional()
-      .describe("Alias for timeout"),
-    container: waitForContainerField,
-    selectionStrategy: resolverSelectionStrategySchema.optional(),
-    textAny: z.never().optional(),
-    className: z.never().optional(),
-    contentDescription: z.never().optional(),
-    matchType: z.never().optional(),
-    textMatch: z.never().optional(),
-    activeWindow: z.never().optional(),
-    absent: z.never().optional(),
-    posture: z.never().optional(),
-    activeDisplay: z.never().optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    validateWaitForTimeoutAliases(value, ctx);
-    if (value.for === "stable") {
-      if (value.container !== undefined || value.selectionStrategy !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'waitFor "for: stable" does not support container or selectionStrategy',
-        });
-      }
-      return;
-    }
-    if (value.elementId === undefined && value.text === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `waitFor "for: ${value.for}" requires elementId or text`,
-      });
-    }
-    if (value.for === "textEquals" && value.text === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'waitFor "for: textEquals" requires text (the exact expected value)',
-      });
-    }
-  });
-
-export const waitForSchema = z.union([
-  waitForConditionDslSchema,
-  waitForTextAnySchema,
-  waitForElementSchema,
-]);
-
-// Compact advertised JSON schema for `waitFor` (issue: observe input schema
-// bloat). The runtime zod `waitForSchema` above stays the source of truth for
-// validation — its union/intersection/presence machinery expands to ~2k tokens
-// in `tools/list`, which the agent does not need. This flat object advertises
-// the same fields + guidance at ~1/4 the token cost; it is swapped in via the
-// observe json-schema override below and never used for validation.
-// Presence options shared by the two branches below.
-const ELEMENT_PREDICATE_REQUIRED = [
-  { required: ["elementId"] },
-  { required: ["text"] },
-  { required: ["className"] },
-  { required: ["contentDescription"] },
-];
-const WAIT_CONTAINER_ADVERTISED_SCHEMA = z.toJSONSchema(nestedElementContainerSchema, {
-  override: ({ jsonSchema }) => {
-    if (jsonSchema.$ref === "#") {
-      jsonSchema.$ref = "#waitForContainer";
-    }
-  },
-});
-const WAIT_SELECTION_ADVERTISED_SCHEMA = z.toJSONSchema(resolverSelectionStrategySchema);
-const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  description: "Wait until an element matching these fields is absent (text uses exact match)",
-  properties: {
-    selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
-    elementId: { type: "string" },
-    text: { type: "string" },
-    className: { type: "string" },
-    contentDescription: { type: "string" },
-  },
-  anyOf: [
-    { required: ["elementId"] },
-    { required: ["text"] },
-    { required: ["className"] },
-    { required: ["contentDescription"] },
-  ],
-};
-const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
-  $defs: { waitForContainer: { ...WAIT_CONTAINER_ADVERTISED_SCHEMA, $anchor: "waitForContainer" } },
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    for: {
-      type: "string",
-      enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
-    },
-    pollMs: { type: "number" },
-    stableReads: { type: "number" },
-    elementId: { type: "string" },
-    text: { type: "string" },
-    textAny: {
-      type: "array",
-      items: { type: "string" },
-    },
-    className: { type: "string" },
-    contentDescription: { type: "string" },
-    matchType: {
-      type: "string",
-      enum: ["all", "any"],
-    },
-    textMatch: {
-      type: "string",
-      enum: ["exact", "contains", "regex"],
-      description: "How to match waitFor.text; does not affect contentDescription",
-    },
-    activeWindow: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        appId: { type: "string" },
-        packageName: { type: "string" },
-        bundleId: { type: "string" },
-        activityName: { type: "string" },
-      },
-      anyOf: [
-        { required: ["appId"] },
-        { required: ["packageName"] },
-        { required: ["bundleId"] },
-        { required: ["activityName"] },
-      ],
-    },
-    posture: {
-      type: "string",
-      enum: ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"],
-      description: POSTURE_WAIT_DESCRIPTION,
-    },
-    activeDisplay: { type: "string", description: "Physical panel key or role" },
-    absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
-    container: { $ref: "#waitForContainer" },
-    selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
-    timeout: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
-    timeoutMs: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
-  },
-  // Enforce the same shape the runtime does: either the `for` DSL, or at least one
-  // legacy predicate with textAny mutually exclusive from the element predicates /
-  // matchType / textMatch. `absent` composes with everything (including textAny),
-  // so it is not part of the textAny exclusion set.
-  anyOf: [
-    {
-      properties: { for: { const: "stable" }, container: false, selectionStrategy: false },
-      required: ["for"],
-    },
-    {
-      properties: { for: { enum: WAIT_FOR_CONDITION_KINDS } },
-      required: ["for", "elementId"],
-    },
-    { properties: { for: { enum: WAIT_FOR_CONDITION_KINDS } }, required: ["for", "text"] },
-    {
-      properties: { for: false, selectionStrategy: false },
-      required: ["textAny"],
-    },
-    {
-      properties: { for: false },
-      anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["absent"] }],
-    },
-    {
-      properties: { for: false, selectionStrategy: false },
-      anyOf: [
-        ...ELEMENT_PREDICATE_REQUIRED,
-        { required: ["activeWindow"] },
-        { required: ["absent"] },
-        { required: ["posture"] },
-        { required: ["activeDisplay"] },
-      ],
-    },
-  ],
-};
 
 // Progressive-disclosure scoping of the returned hierarchy (issue #4344). The
 // agent picks where to zoom on THIS screen, so region/anchor are per-call inputs
@@ -586,75 +162,6 @@ const observeScopeSchema = z
     overview: z.boolean().optional().describe("Collapse to a container skeleton."),
   })
   .describe("Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)");
-
-// Cross-field validation shared by `observe` and `openLink` (both carry
-// platform + waitFor + settled): iOS rejects Android-only activityName, and
-// `settled` requires a `waitFor` predicate to settle after.
-export const refineWaitForArgs = (
-  value: { platform?: "android" | "ios"; waitFor?: ObserveWaitForOptions; settled?: unknown },
-  ctx: z.RefinementCtx,
-): void => {
-  const activeWindow = value.waitFor?.activeWindow;
-  if (
-    value.platform === "ios" &&
-    activeWindow?.activityName !== undefined &&
-    activeWindow.appId === undefined
-  ) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["waitFor", "activeWindow", "activityName"],
-      message: "activityName is Android-only; use appId/bundleId on iOS",
-    });
-  }
-  if (value.settled !== undefined && value.waitFor === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["settled"],
-      message: "settled requires waitFor",
-    });
-  }
-};
-
-/**
- * #6154 follow-up: `refineWaitForArgs`'s iOS-rejects-activityName check runs
- * at schema-parse time against the raw request `platform`, which is now
- * optional (resolved from deviceId/session). A caller that omits `platform`
- * on an iOS device would skip that check entirely at parse time, so both
- * `observe` and `openLink` re-run it here against the resolved
- * `device.platform` once ToolRegistry has determined it.
- */
-export function assertActiveWindowWaitForSupportedOnPlatform(
-  platform: "android" | "ios",
-  waitFor: ObserveWaitForOptions | undefined,
-): void {
-  const activeWindow = waitFor?.activeWindow;
-  if (
-    platform === "ios" &&
-    activeWindow?.activityName !== undefined &&
-    activeWindow.appId === undefined
-  ) {
-    throw new ActionableError("activityName is Android-only; use appId/bundleId on iOS");
-  }
-}
-
-// Shared advertised-JSON-schema override for `observe` and `openLink`: enforce
-// the iOS activityName rule, require waitFor whenever settled is present, and
-// swap the verbose generated `waitFor` schema for the compact advertised form.
-export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
-  // settled has no meaning without a waitFor predicate to settle after.
-  jsonSchema.dependentRequired = {
-    ...(jsonSchema.dependentRequired as Record<string, string[]> | undefined),
-    settled: ["waitFor"],
-  };
-
-  // Replace the verbose generated `waitFor` schema with the compact advertised
-  // form. Runtime validation still uses the full zod `waitForSchema`; this only
-  // shrinks what `tools/list` carries (~2064 -> ~473 tokens).
-  const props = jsonSchema.properties as Record<string, unknown> | undefined;
-  if (props && props.waitFor) {
-    props.waitFor = COMPACT_WAITFOR_ADVERTISED_SCHEMA;
-  }
-};
 
 const observeBaseSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -787,18 +294,7 @@ export const identifyInteractionsSchema = addDeviceTargetingToSchema(
     .strict(),
 );
 
-export type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
-export type SettledOptions = z.infer<typeof settledSchema>;
-/** waitFor options carrying the (top-level) settled gate, as threaded to {@link waitForObservation}. */
-export type WaitForWithSettled = ObserveWaitForOptions & {
-  settled?: SettledOptions;
-  /** Scope element predicates to the app or the AutoMobile prototype (issue #9305). */
-  layer?: HierarchyLayer;
-};
-type ObserveArgs = z.infer<typeof observeSchema>;
-export type WaitForConditionDsl = z.infer<typeof waitForConditionDslSchema>;
-export type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
-
+export type ObserveArgs = z.infer<typeof observeSchema>;
 interface AccessibilityReadinessActions {
   accessibilityDetector?: Pick<
     AccessibilityDetector,
@@ -843,312 +339,6 @@ export async function invalidateReadinessForDisabledAccessibility(
     actions.invalidateAutomationReadiness(sessionUuid, "accessibility service disabled");
   } else {
     logger.debug("[observe] No initialized daemon session to invalidate readiness for");
-  }
-}
-
-interface ObserveToolDependencies {
-  crop?: ObserveCropDependencies;
-  pathProtection?: ScreenshotPathProtection;
-  timer?: Timer;
-  createScreen?: (
-    device: BootedDevice,
-    display?: string,
-  ) => Pick<
-    RealObserveScreen,
-    "execute" | "executeDeviceRead" | "appendRawViewHierarchy" | "getMostRecentCachedObserveResult"
-  > &
-    Pick<ObserveScreen, "captureScreenshot">;
-  deviceReadAccess?: DeviceObservationAccess;
-  /** Whether the device can hide its own prototype for a capture (#9305); defaults to CtrlProxy's. */
-  hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
-}
-
-/**
- * An Android CtrlProxy or a connected iOS prototype agent advertising `screenshot_hide_prototype_v1`
- * (#9305). The iOS agent hides itself around the host's simulator screenshot.
- */
-async function ctrlProxyHidesPrototypeForScreenshot(device: BootedDevice): Promise<boolean> {
-  if (device.platform === "ios") {
-    return iosAgentHidesPrototypeForCapture(device.deviceId);
-  }
-  if (device.platform !== "android") {
-    return false;
-  }
-  try {
-    return await AndroidCtrlProxyClient.getInstance(device).supportsCommand(
-      SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
-    );
-  } catch (error) {
-    // Unknown capability keeps today's capture, which observe reports as including the prototype.
-    logger.debug(`[OBSERVE] Prototype-hiding capability unavailable: ${errorMessage(error)}`);
-    return false;
-  }
-}
-
-/**
- * The screenshot options observe captures with: the caller's encoding, plus `hidePrototypes` for a
- * `layer: "app"` capture on a device that hides its prototype device-side in the one request (#9305).
- * Device reads never use CtrlProxy for the capture, so they keep the prototype.
- */
-async function observeScreenshotOptions(
-  args: ObserveArgs,
-  device: BootedDevice,
-  deviceRead: boolean,
-  screenshotMode: ScreenshotMode | undefined,
-  dependencies: ObserveToolDependencies,
-): Promise<ObserveScreenshotOptions | undefined> {
-  if (args.layer !== "app" || deviceRead || screenshotMode === "none") {
-    return args.screenshotOptions;
-  }
-  const hides = await (
-    dependencies.hidesPrototypeForScreenshot ?? ctrlProxyHidesPrototypeForScreenshot
-  )(device);
-  return hides ? { ...args.screenshotOptions, hidePrototypes: true } : args.screenshotOptions;
-}
-
-function screenForObserve(
-  device: BootedDevice,
-  args: ObserveArgs,
-  dependencies: ObserveToolDependencies,
-): ObserveScreen & Pick<RealObserveScreen, "appendRawViewHierarchy" | "executeDeviceRead"> {
-  if (dependencies.createScreen) {
-    return dependencies.createScreen(device, args.display);
-  }
-  return new RealObserveScreen(device, undefined, {
-    display: args.display,
-    deviceReadOnly: getToolSelectionContext()?.explicitObserveDeviceRead === true,
-    onAvailabilityLost:
-      device.platform === "android"
-        ? (reason) => {
-            const daemonState = DaemonState.getInstance();
-            if (args.sessionUuid && daemonState.isInitialized()) {
-              daemonState
-                .getSessionManager()
-                .invalidateAutomationReadiness(args.sessionUuid, reason);
-            }
-          }
-        : undefined,
-  });
-}
-
-// Register tools (this will be called when this file is imported)
-async function withCapturedScreenshotImage(
-  result: ObserveToolPayload,
-  screenshotPath: string | undefined,
-  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse> {
-  const delivery = await inlineScreenshotImage(screenshotPath, result, options.signal);
-  await publishScreenshotPaths(result, options.protection);
-  const response = createStructuredToolResponse({
-    ...result,
-    screenshotImage: delivery.screenshotImage,
-  });
-  return {
-    ...response,
-    content: delivery.image ? [...response.content, delivery.image] : response.content,
-  };
-}
-
-type ObserveResponse = Omit<StructuredToolResponse<ObserveToolPayload>, "content"> & {
-  content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  >;
-};
-
-async function createObserveResponse(
-  result: ObserveToolPayload,
-  includeScreenshotImage: boolean | undefined,
-  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse> {
-  const { signal, protection = screenshotPathProtection } = options;
-  await publishScreenshotPaths(result, protection);
-  const response = includeScreenshotImage
-    ? await withCapturedScreenshotImage(result, result.screenshotPath, { signal, protection })
-    : createStructuredToolResponse(result);
-  await publishScreenshotPaths(result, protection, false);
-  return response;
-}
-
-function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined {
-  if (args.crop && args.screenshot && args.screenshot !== "settled") {
-    throw new ActionableError(
-      "observe crop requires screenshot: 'settled' (or omit screenshot); async and none cannot provide a completed crop. No capture was started.",
-    );
-  }
-  if (args.crop && args.display === "all") {
-    throw new ActionableError(
-      "observe crop requires one display; select a panel key, role, or active instead of all.",
-    );
-  }
-  if (args.includeScreenshotImage && args.screenshot && args.screenshot !== "settled") {
-    throw new ActionableError(
-      "includeScreenshotImage requires screenshot: 'settled' (or omit screenshot). No capture was started.",
-    );
-  }
-  return args.crop || args.includeScreenshotImage ? "settled" : args.screenshot;
-}
-
-function attachSnapshotReference(deviceId: string, result: ObserveResult): void {
-  const capture = snapshotReferences.capture(deviceId, result);
-  if (capture.status === "captured") {
-    result.snapshotReference = capture.reference;
-    delete result.snapshotReferenceUnavailable;
-  } else {
-    result.snapshotReference = undefined;
-    result.snapshotReferenceUnavailable = capture.missing;
-  }
-}
-
-function prepareObserveOptions(platform: BootedDevice["platform"], args: ObserveArgs) {
-  const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
-  if (args.display === "all") {
-    assertAllDisplayObserveSupported(platform, args);
-  }
-  if (deviceRead) {
-    if (args.waitFor !== undefined) {
-      throw new ActionableError(
-        "waitFor is not available on deviceId reads; use a session observe (pass sessionUuid).",
-      );
-    }
-    if (args.raw === true) {
-      // collectRaw uses the owner's client and invalidates its shared cache;
-      // project: "full" preserves the full filtered tree without that write.
-      throw new ActionableError(
-        'raw is not available on deviceId reads; use project: "full" for the full filtered hierarchy.',
-      );
-    }
-    if (args.skipBackStack === true) {
-      throw new ActionableError(
-        "skipBackStack is not available on deviceId reads; use a session observe (pass sessionUuid) with waitFor.",
-      );
-    }
-  }
-  assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
-  const screenshot = requestedScreenshotMode(args);
-  return {
-    deviceRead,
-    aggregate: args.display === "all",
-    timeoutMs: aggregateObserveTimeoutMs(args),
-    screenshotMode: deviceRead ? (screenshot ?? "settled") : screenshot,
-    encoding: args.screenshotOptions,
-  };
-}
-
-/** Leave a short serialization window before the enclosing observe request expires. */
-function aggregateObserveTimeoutMs(args: ObserveArgs): number | undefined {
-  if (args.display !== "all") {
-    return undefined;
-  }
-  const deadline = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-  return typeof deadline === "number" && Number.isFinite(deadline)
-    ? Math.max(0, deadline - defaultTimer.now() - 100)
-    : undefined;
-}
-
-function createObserveWaitResponse(
-  result: ObserveToolPayload,
-  waitOutcome: WaitForObservationOutcome,
-  includeScreenshotImage?: boolean,
-  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse> | ObserveResponse {
-  const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
-    awaitedElement: waitOutcome.awaitedElement,
-    awaitDuration: waitOutcome.awaitDuration,
-    awaitTimeout: waitOutcome.awaitTimeout,
-    matched: waitOutcome.matched,
-    settled: waitOutcome.settled,
-    timedOut: waitOutcome.timedOut,
-    polls: waitOutcome.polls,
-    waitMs: waitOutcome.waitMs,
-    matchedElement: waitOutcome.matchedElement,
-    candidates: waitOutcome.candidates,
-    ...(waitOutcome.containerFailure ? { containerFailure: waitOutcome.containerFailure } : {}),
-  };
-  return createObserveResponse(
-    { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
-    includeScreenshotImage,
-    options,
-  );
-}
-
-async function attachObserveCrop(
-  args: ObserveArgs,
-  result: ObserveResult,
-  device: BootedDevice,
-  dependencies?: ObserveCropDependencies,
-): Promise<void> {
-  if (!args.crop) {
-    return;
-  }
-  // Full projections expose the scoped hierarchy itself, so resolve over that same
-  // tree before raw append can replace it. The skeleton projection also applies
-  // FOCUS/REGION, but only as a row filter over the unscoped tree, so skeleton
-  // crops still resolve against the unscoped observation.
-  const selectorObservation =
-    args.project === "full" || (args.raw && args.project !== "skeleton")
-      ? applyObserveScopeExperiments(
-          result,
-          buildObserveScopeConfig({ focus: true, overview: true, region: true }, args.scope),
-        )
-      : result;
-  result.crop = await createObserveCrop(
-    args.crop,
-    { ...result, deviceId: device.deviceId },
-    device.platform,
-    dependencies,
-    selectorObservation,
-  );
-}
-
-/**
- * The observation `observe` serves for `layer` (issue #9305). A plain observe
- * that asks for the prototype while none is showing is an actionable error; a
- * waitFor observe returns the (empty) scoped capture so its timeout reports the miss.
- */
-function layerScopedObserveResult(
-  result: ObserveResult,
-  layer: HierarchyLayer | undefined,
-  platform: BootedDevice["platform"],
-  requirePrototype: boolean,
-): ObserveResult {
-  if (layer === undefined) {
-    return result;
-  }
-  if (requirePrototype && result.viewHierarchy) {
-    scopeHierarchyForSelector(result.viewHierarchy, layer);
-  }
-  const { screenshotIncludesPrototype: capturedWithoutPrototype, ...scoped } =
-    scopeObserveResultToLayer(result, layer, platform);
-  // A capture taken with the prototype hidden device-side is marked false by the capture itself;
-  // any other `layer: "app"` screenshot still shows the prototype, and observe says so.
-  return layer === "app" && carriesScreenshot(result) && hasOwnPrototype(result.viewHierarchy)
-    ? { ...scoped, screenshotIncludesPrototype: capturedWithoutPrototype !== false }
-    : scoped;
-}
-
-/**
- * Whether the observation carries a screenshot or crop, so `observe` can say whether a
- * `layer: "app"` image shows the prototype instead of implying an app-only image (issue #9305).
- */
-function carriesScreenshot(result: ObserveResult): boolean {
-  return (
-    result.screenshotCaptureAttempted === true ||
-    result.screenshotPath !== undefined ||
-    result.crop !== undefined
-  );
-}
-
-function recordObservationBackStack(result: ObserveResult, sessionUuid?: string): void {
-  if (result.backStack && result.activeWindow?.appId) {
-    const navGraph = sessionUuid
-      ? NavigationGraphManager.getInstanceForSession(sessionUuid)
-      : NavigationGraphManager.getInstance();
-    // Only record if we have a current app and screen
-    if (navGraph.getCurrentAppId() === result.activeWindow.appId && navGraph.getCurrentScreen()) {
-      navGraph.recordBackStack(result.backStack).catch((error) => {
-        logger.warn(`Failed to record observation back stack: ${errorMessage(error)}`, error);
-      });
-    }
   }
 }
 

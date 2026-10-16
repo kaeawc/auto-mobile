@@ -6,7 +6,7 @@
  * Uses the same wire protocol message types as the Android delegate.
  */
 
-import { sendCommand } from "../DeviceServiceUtils";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { mapStorageSdkError } from "../../../server/storageSdkErrors";
@@ -228,7 +228,7 @@ export class CtrlProxyStorage {
       params,
       timeoutMs,
       timeoutError,
-      notConnectedError: () => responseError("WebSocket not connected"),
+      notConnectedError: () => responseError(WEBSOCKET_NOT_CONNECTED_MESSAGE),
       unsupportedCommandError: (_type, error) => responseError(error),
       requireExistingConnection: true,
       cancelScreenshotBackoff: false,

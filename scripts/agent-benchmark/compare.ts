@@ -57,6 +57,8 @@ export interface Comparison {
   observedModel?: FingerprintCheck;
   /** Set when the baseline records the Claude Code version. */
   claudeCodeVersion?: FingerprintCheck;
+  /** Set when the baseline records the device environment. */
+  deviceFingerprint?: FingerprintCheck;
 }
 
 export interface FingerprintCheck {
@@ -70,6 +72,7 @@ export interface RunFingerprints {
   appBuild?: string;
   suiteDigest?: string;
   claudeCodeVersion?: string;
+  deviceFingerprint?: string;
 }
 
 function fingerprintCheck(
@@ -262,6 +265,10 @@ export function compareRun(
     claudeCodeVersion: fingerprintCheck(
       baseline?.claudeCodeVersion,
       fingerprints.claudeCodeVersion,
+    ),
+    deviceFingerprint: fingerprintCheck(
+      baseline?.deviceFingerprint,
+      fingerprints.deviceFingerprint,
     ),
   };
 }

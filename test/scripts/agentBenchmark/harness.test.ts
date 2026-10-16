@@ -417,6 +417,38 @@ describe("agent benchmark harness", () => {
     expect(result.outcome.wallClockSeconds).toBe(42);
   });
 
+  test("a suite's start-screen check stops the run before Claude when preflight lands elsewhere", async () => {
+    const { claims, launches, fs, runner, deps, options } = setup(PASSING);
+    runner.onAdb("exec-out cat", {
+      stdout: '<hierarchy><node package="dev.example" text="Welcome! Sign in"/></hierarchy>',
+    });
+    const suite = loadedSuite({
+      preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
+    });
+    await expect(runSuite(suite, options, deps)).rejects.toThrow(
+      /did not reach the expected start screen \(missing: Bug repro\)/,
+    );
+    expect(launches).toHaveLength(0);
+    expect(fs.exists(artifact("start-screen.xml"))).toBe(true);
+    expect(claims.at(-1)).toBe("release emulator-5554");
+  });
+
+  test("a matching start screen proceeds, and the device fingerprint is recorded", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    runner
+      .onAdb("exec-out cat", {
+        stdout: '<hierarchy><node package="dev.example" text="Bug repro"/></hierarchy>',
+      })
+      .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" });
+    const suite = loadedSuite({
+      preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
+      verify: { answerIncludes: ["COUNT: 3"] },
+    });
+    const result = await runSuite(suite, options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(result.preflight.device).toBe("sdk=36 model=pixel locale=en-US size=1x2 density=3");
+  });
+
   test("a failed preflight releases the device claim", async () => {
     const { claims, runner, deps, options } = setup(PASSING);
     runner.onAdb("pm clear", { stdout: "Failed\n" });

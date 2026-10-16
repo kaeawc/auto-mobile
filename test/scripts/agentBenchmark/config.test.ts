@@ -21,7 +21,17 @@ const MINIMAL = {
 describe("agent benchmark suite config", () => {
   test("a minimal suite gets safe defaults", () => {
     const suite = parseSuiteDefinition(MINIMAL, "demo.yml");
-    expect(suite.preflight).toEqual({ clearAppData: true, settleSeconds: 2 });
+    expect(suite.preflight).toEqual({
+      clearAppData: true,
+      settleSeconds: 2,
+      startScreenIncludes: [],
+    });
+    expect(suite.claude.disallowedTools).toEqual(["Bash"]);
+    // A suite's own denials add to the Bash ban instead of replacing it.
+    expect(
+      parseSuiteDefinition({ ...MINIMAL, claude: { disallowedTools: ["mcp__x__y"] } }, "x.yml")
+        .claude.disallowedTools,
+    ).toEqual(["Bash", "mcp__x__y"]);
     expect(suite.claude).toMatchObject({
       allowedTools: ["mcp__auto-mobile"],
       disallowedTools: ["Bash"],

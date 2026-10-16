@@ -147,11 +147,12 @@ preflight:
       onboarding_completed: true
   launchUri: automobile:playground/demos/bugs/repro
   settleSeconds: 2 # default 2
+  startScreenIncludes: [] # optional; text the app must show before Claude starts
 claude:
   model: claude-sonnet-5-5 # optional; --model overrides it
   appendSystemPrompt: "" # optional; {deviceSerial} {packageName} {runDirectory}
   allowedTools: [mcp__auto-mobile] # default
-  disallowedTools: [Bash] # default
+  disallowedTools: [] # Bash is always denied; entries here add to it
   maxBudgetUsd: 2 # optional hard spend cap per run
   timeoutSeconds: 600 # default 900
 verify:
@@ -173,6 +174,11 @@ integers. Fractions are stored as 32-bit floats, so a nonzero value too small fo
 Playground suites seed `onboarding_prefs` and `auth_prefs` after clearing data, because the app
 redirects every Demos deep link to onboarding until onboarding is complete and the user is signed
 in.
+
+`preflight.startScreenIncludes` checks the screen after settling, using the same app-only text
+match as `verify.screenIncludes`. If the expected text is missing (a changed preference
+contract, or a deep link that redirected to onboarding), the run stops before Claude starts and
+`<run>/start-screen.xml` shows where the app landed.
 
 ## Baselines
 
@@ -200,7 +206,8 @@ yourself and remove `app.apkPath` to run without the check.
 It also records `baseline.suiteDigest`, a digest of the prompt, every suite setting other than
 the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
 patterns, or timeout change, the report flags that the baseline measured a different task.
-It also records `baseline.claudeCodeVersion` (CLI releases change system prompts and
+It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
+size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling) and `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
 flagged too. A fingerprint that could not be read (`unknown`) is never written into a baseline

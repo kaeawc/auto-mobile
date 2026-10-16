@@ -51,6 +51,8 @@ const baselineSchema = z
     observedModel: z.string().min(1).optional(),
     /** `claude --version` the baseline was recorded with. */
     claudeCodeVersion: z.string().min(1).optional(),
+    /** SDK level, model, locale, screen size, and density of the device. */
+    deviceFingerprint: z.string().min(1).optional(),
   })
   .strict();
 
@@ -59,7 +61,12 @@ const claudeSchema = z
     model: z.string().min(1).optional(),
     appendSystemPrompt: z.string().optional(),
     allowedTools: z.array(z.string().min(1)).default([`mcp__${MCP_SERVER_NAME}`]),
-    disallowedTools: z.array(z.string().min(1)).default(["Bash"]),
+    // Bash is always denied: raw adb would bypass the MCP server being measured. A suite's
+    // own list adds to it rather than replacing it.
+    disallowedTools: z
+      .array(z.string().min(1))
+      .default([])
+      .transform((tools) => (tools.includes("Bash") ? tools : ["Bash", ...tools])),
     maxBudgetUsd: z.number().positive().optional(),
     timeoutSeconds: z.number().int().positive().default(DEFAULT_TIMEOUT_SECONDS),
     // No free-form extra flags: any Claude flag can undo run isolation (--settings,
@@ -112,6 +119,8 @@ const suiteSchema = z
           .optional(),
         launchUri: z.string().min(1).optional(),
         settleSeconds: z.number().nonnegative().default(2),
+        /** Text the app must show after settling; otherwise the run stops before Claude. */
+        startScreenIncludes: z.array(z.string().min(1)).default([]),
       })
       .strict()
       .default({}),

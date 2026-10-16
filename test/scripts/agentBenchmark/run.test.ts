@@ -29,6 +29,14 @@ describe("agent benchmark CLI arguments", () => {
     expect(parseCliArgs(["--all", "--output", "rel/dir"]).output).toBe(resolve("rel/dir"));
   });
 
+  test("a relative --claude path is resolved now; a bare name is left for PATH", () => {
+    // Claude runs from a temp cwd, where a relative path would no longer resolve.
+    expect(parseCliArgs(["--all", "--claude", "./node_modules/.bin/claude"]).claude).toBe(
+      resolve("./node_modules/.bin/claude"),
+    );
+    expect(parseCliArgs(["--all", "--claude", "claude-beta"]).claude).toBe("claude-beta");
+  });
+
   test("exactly one mode is required, and flags need values", () => {
     expect(() => parseCliArgs([])).toThrow(/Pass --suite\/--all to run/);
     expect(() => parseCliArgs(["--all", "--from-result", "x"])).toThrow(/not both/);

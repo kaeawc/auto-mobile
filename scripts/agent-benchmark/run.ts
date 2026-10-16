@@ -150,7 +150,9 @@ function applyValueFlag(options: CliOptions, flag: string, value: string): void 
       options.model = value;
       return;
     case "--claude":
-      options.claude = value;
+      // Claude runs from a temp cwd, so a relative path must be resolved here; a bare name
+      // is left for PATH lookup.
+      options.claude = /[\\/]/.test(value) ? resolve(value) : value;
       return;
     default:
       options.output = resolve(value);

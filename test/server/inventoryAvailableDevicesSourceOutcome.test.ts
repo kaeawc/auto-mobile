@@ -1,8 +1,8 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -12,14 +12,11 @@ import {
 } from "../../src/server/bootedDeviceResources";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract (#11643): every `available-devices` surface gives the same answer for the
 // same host state. The count is unknown (`discovery_incomplete`) exactly when a pooled device's
@@ -112,14 +109,10 @@ describe("available-devices gives one answer per pooled discovery-source outcome
     manager.setBootedDevices("ios", input.pooled);
     const activeSessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions = activeSessions;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(activeSessions, "available-devices-source-outcome", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(activeSessions, "available-devices-source-outcome", {
+      timer,
+      deviceManager: manager,
+    });
     await pool.initializeWithDevices(input.pooled);
 
     manager.setBootedDevices("ios", input.stillListed);

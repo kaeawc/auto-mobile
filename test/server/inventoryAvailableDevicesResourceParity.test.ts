@@ -1,6 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -10,12 +10,9 @@ import {
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract (#11643): for one host state the booted-devices resource's pool counts are
 // the pool's own (`getRefreshedStats`, which `daemon/availableDevices` and the in-daemon CLI
@@ -54,14 +51,10 @@ describe("the booted-devices resource counts the pool as the pool does", () => {
     manager.setBootedDevices("ios", []);
     const activeSessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions = activeSessions;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(activeSessions, "available-devices-resource-parity", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(activeSessions, "available-devices-resource-parity", {
+      timer,
+      deviceManager: manager,
+    });
     await pool.initializeWithDevices(pooled);
     DaemonState.getInstance().initialize(activeSessions, pool);
     setDeviceManager(manager);

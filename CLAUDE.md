@@ -202,7 +202,12 @@ pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `auto-mobile/catch-convention`,
 `auto-mobile/no-unknown-cast`,
 `auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
-(`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
+(`typescript/no-floating-promises`, `typescript/no-misused-promises`). Inline suppressions are ratcheted too: a
+comment scan of `src/` (`scripts/lib/oxlintDisableScan.ts`) adds
+`oxlint-disable(<rule>)` rows (and `oxlint-disable-no-reason(<rule>)` for
+directives lacking a `-- reason`) to the same baseline, so a new
+`oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs
+`--allow-grow`; always give new directives a `-- reason`. The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
 `oxlint --type-aware` (tsgolint) — which is why the initial oxlint stage does not,

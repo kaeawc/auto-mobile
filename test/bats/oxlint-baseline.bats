@@ -13,6 +13,9 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
   export OXLINT_BASELINE="$TEST_DIR/baseline.txt"
+  # The suppression comment scan reads this fixture tree, never the real src/.
+  export OXLINT_SCAN_ROOT="$TEST_DIR/scan"
+  mkdir -p "$OXLINT_SCAN_ROOT/src"
 
   # A canned oxlint JSON report: two ratcheted diagnostics in one file plus one
   # in another, and two error-level diagnostics that must be ignored entirely.
@@ -136,4 +139,80 @@ teardown() {
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"baseline missing"* ]]
+}
+
+# --- inline suppression ratchet (oxlint-disable comment scan) ---------------
+
+write_src() { # <name> <lines...>
+  local name="$1"
+  shift
+  printf '%s\n' "$@" > "$OXLINT_SCAN_ROOT/src/$name"
+}
+
+@test "baseline records oxlint-disable rows, normalising eslint/ and counting once per rule" {
+  write_src a.ts \
+    '// oxlint-disable-next-line max-params -- reason' \
+    '// eslint-disable-next-line eslint/complexity, max-depth -- reason' \
+    'const s = "// oxlint-disable-next-line max-params";'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qP '^1\tsrc/a.ts\toxlint-disable\(max-params\)$' "$OXLINT_BASELINE"
+  grep -qP '^1\tsrc/a.ts\toxlint-disable\(complexity\)$' "$OXLINT_BASELINE"
+  grep -qP '^1\tsrc/a.ts\toxlint-disable\(max-depth\)$' "$OXLINT_BASELINE"
+  ! grep -q 'eslint/complexity' "$OXLINT_BASELINE"
+  ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'no-reason'
+}
+
+@test "a NEW oxlint-disable fails the check like a new violation" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable(max-params)"* ]]
+
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to grow"* ]]
+
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update --allow-grow
+  [ "$status" -eq 0 ]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "removing an oxlint-disable passes and --update shrinks the baseline" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -q 'oxlint-disable(max-params)' "$OXLINT_BASELINE"
+  write_src a.ts 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'oxlint-disable'
+}
+
+@test "eslint/complexity and complexity share one key" {
+  write_src a.ts '// eslint-disable-next-line complexity -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line eslint/complexity -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "a NEW reason-less oxlint-disable fails even when it swaps for a reasoned one" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line max-params'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-no-reason(max-params)"* ]]
+}
+
+@test "an existing reason-less oxlint-disable stays tolerated once baselined" {
+  write_src a.ts '/* eslint-disable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -q 'oxlint-disable-no-reason(max-params)' "$OXLINT_BASELINE"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
 }

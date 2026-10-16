@@ -10,6 +10,8 @@ import {
   FakePrototypeAgentClient,
   FAKE_PROTOTYPE_AGENT_CAPABILITIES,
 } from "../fakes/FakePrototypeAgentClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -21,7 +23,9 @@ const base = {
   state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
-const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
+// `with` lists capabilities a fixture needs besides the one under test: a device-run request also
+// needs the network capability, so the device gate is exercised with that one already advertised.
+const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -94,6 +98,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
   }),
+  prototype_network_v1: fixture({
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
+  }),
+  prototype_network_device_v1: {
+    ...fixture({
+      ...label,
+      onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
+    }),
+    with: ["prototype_network_v1"],
+  },
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
@@ -139,6 +154,8 @@ function setup() {
     timer,
     clock: timer,
     cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+    // A via "device" request to localhost makes show run `adb reverse`; keep it off the real adb.
+    adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }
 async function call(device: BootedDevice, input: unknown) {
@@ -150,9 +167,9 @@ const patch = (device: BootedDevice, ops: unknown, extra = {}) =>
   call(device, { action: "patch", id: base.id, ops, ...extra });
 const requests = (device: BootedDevice) =>
   device.platform === "android" ? proxy.patchRequests : agent.patchRequests;
-function advertise(capability: string) {
-  proxy.setSupportedCommands(["prototype_patch_v1", capability]);
-  agent.handshake.capabilities.push(capability);
+function advertise(...capabilities: string[]) {
+  proxy.setSupportedCommands(["prototype_patch_v1", ...capabilities]);
+  agent.handshake.capabilities.push(...capabilities);
 }
 beforeAll(async () => {
   const undo = preserveToolRegistry();
@@ -184,7 +201,8 @@ test("every registered gate has exactly one parity fixture", () => {
 });
 test.each(cases)(
   "$device.platform refuses $capability identically on show and patch",
-  async ({ capability, minimalSpec, ops, device }) => {
+  async ({ capability, minimalSpec, ops, device, with: others }) => {
+    advertise(...(others ?? []));
     const refusedShow = await show(device, minimalSpec);
     expect(refusedShow.success).toBe(false);
     expect(refusedShow.error).toContain(capability);
@@ -212,8 +230,8 @@ test.each(cases)(
 );
 test.each(cases)(
   "$device.platform accepts $capability and state-only patches with it advertised",
-  async ({ capability, minimalSpec, ops, device }) => {
-    advertise(capability);
+  async ({ capability, minimalSpec, ops, device, with: others }) => {
+    advertise(capability, ...(others ?? []));
     expect((await show(device, minimalSpec)).success).toBe(true);
     expect(
       (

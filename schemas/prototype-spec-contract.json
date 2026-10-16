@@ -22,7 +22,12 @@
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
     "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096,
-    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144
+    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144,
+    "DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS": 10000,
+    "MAX_PROTOTYPE_REQUEST_TIMEOUT_MS": 30000,
+    "MAX_PROTOTYPE_RESPONSE_BYTES": 262144,
+    "MAX_PROTOTYPE_REQUESTS_IN_FLIGHT": 4,
+    "MAX_PROTOTYPE_ACTION_DEPTH": 4
   },
   "definitions": {
     "offset": {
@@ -1666,6 +1671,298 @@
                 "max": 261
               },
               "optional": false
+            }
+          }
+        },
+        "request": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["request"]
+              },
+              "optional": false
+            },
+            "method": {
+              "rule": {
+                "kind": "enum",
+                "values": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+              },
+              "optional": true
+            },
+            "url": {
+              "rule": {
+                "kind": "string",
+                "max": 2048
+              },
+              "optional": false
+            },
+            "headers": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "string",
+                      "empty": true,
+                      "max": 4096
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "state": {
+                          "rule": {
+                            "kind": "boundKey"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "item": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "index": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "rule": {
+                            "kind": "json",
+                            "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "optional": true
+            },
+            "query": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "string",
+                      "empty": true,
+                      "max": 4096
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "state": {
+                          "rule": {
+                            "kind": "boundKey"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "item": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "index": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "rule": {
+                            "kind": "json",
+                            "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "optional": true
+            },
+            "body": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "into": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": true
+            },
+            "statusKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "via": {
+              "rule": {
+                "kind": "enum",
+                "values": ["host", "device"]
+              },
+              "optional": true
+            },
+            "timeoutMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 30000
+              },
+              "optional": true
+            },
+            "onSuccess": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "onError": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
             }
           }
         }

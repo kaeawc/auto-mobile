@@ -4539,7 +4539,8 @@ export class Daemon {
     }
   }
 
-  private trackDeferredSessionRecoverySweep(sweep: Promise<void>): void {
+  /** Track a deferred session-recovery sweep that shutdown must wait for. Public so tests can register a sweep without a recovery run. */
+  trackDeferredSessionRecoverySweep(sweep: Promise<void>): void {
     this.deferredSessionRecoverySweeps.add(sweep);
     void sweep.then(
       () => this.deferredSessionRecoverySweeps.delete(sweep),
@@ -4765,7 +4766,8 @@ export class Daemon {
     });
   }
 
-  private async cancelAndReleaseSession(
+  /** Cancel a session's in-flight calls and release it. Public so tests can drive one release without a full lifecycle. */
+  async cancelAndReleaseSession(
     sessionId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
     allowExpired: boolean = false,
@@ -5013,8 +5015,10 @@ export class Daemon {
   /**
    * Initialize device pool with timeout
    * Waits for device discovery with configurable timeout
+   *
+   * Public so tests can exercise startup discovery directly.
    */
-  private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
+  async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
     const timedOut = Symbol("device pool initialization timeout");
     try {
       await raceWithDeadline(() => this.initializeDevicePool(), {
@@ -5044,8 +5048,10 @@ export class Daemon {
 
   /**
    * Initialize device pool with discovered devices
+   *
+   * Public so tests can exercise startup discovery directly.
    */
-  private async initializeDevicePool(): Promise<void> {
+  async initializeDevicePool(): Promise<void> {
     try {
       // Use the pool's refresh path instead of replacing entries directly. The
       // startup timeout does not cancel discovery, so this may run after a
@@ -5085,8 +5091,10 @@ export class Daemon {
   /**
    * Initialize iOS CtrlProxy iOS connections for discovered iOS devices
    * This establishes WebSocket connections early so first observe calls are fast
+   *
+   * Public so tests can exercise startup directly.
    */
-  private async initializeIosServices(): Promise<void> {
+  async initializeIosServices(): Promise<void> {
     // A live-acceptance daemon discovers a controlled target before it performs
     // any device mutation. Warming every already-booted simulator here would
     // launch CtrlProxy on unrelated devices before that authenticated selection.
@@ -5256,6 +5264,21 @@ export class Daemon {
     // NOT crash the shared singleton daemon and wedge every session (issue #3408).
     // Log-then-continue; the offending tool call already failed on its own chain.
     setFatalProcessHandler(createDaemonFatalProcessHandler(logger));
+  }
+
+  /** Test seam: the daemon-owned device pool, so tests can seed and inspect it without private-field casts. */
+  getDevicePoolForTesting(): DevicePool {
+    return this.devicePool;
+  }
+
+  /** Test seam: install (or clear) a socket server double whose members the shutdown path calls. */
+  setSocketServerForTesting(server: Partial<UnixSocketServer> | null): void {
+    this.socketServer = server as UnixSocketServer | null;
+  }
+
+  /** Test seam: behave as if shutdown had already started, without running it. */
+  markShutdownInProgressForTesting(): void {
+    this.shutdownInProgress = true;
   }
 
   /**

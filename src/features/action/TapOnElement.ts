@@ -1568,11 +1568,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.tapPoints.resolveTapPoint(...args);
   }
 
-  private isElementTapTargetOffScreen(
-    ...args: Parameters<TapPointPlanner["isElementTapTargetOffScreen"]>
-  ) {
-    return this.tapPoints.isElementTapTargetOffScreen(...args);
-  }
+  private readonly isElementTapTargetOffScreen: TapPointPlanner["isElementTapTargetOffScreen"] = (
+    ...args
+  ) => this.tapPoints.isElementTapTargetOffScreen(...args);
 
   private visibleTapBounds(...args: Parameters<TapPointPlanner["visibleTapBounds"]>) {
     return this.tapPoints.visibleTapBounds(...args);
@@ -1582,11 +1580,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.tapPoints.resolveVisibleTapPoint(...args);
   }
 
-  private getScreenSizeFromHierarchy(
-    ...args: Parameters<TapPointPlanner["getScreenSizeFromHierarchy"]>
-  ) {
-    return this.tapPoints.getScreenSizeFromHierarchy(...args);
-  }
+  private readonly getScreenSizeFromHierarchy: TapPointPlanner["getScreenSizeFromHierarchy"] = (
+    ...args
+  ) => this.tapPoints.getScreenSizeFromHierarchy(...args);
 
   private async verifyFocusAfterTap(
     result: TapOnElementResult,
@@ -3203,6 +3199,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let focusLabelText: string | undefined;
     let ensureCheckedTapTimestamp: number | undefined;
     let completedDisplayGesture = false;
+    let effectiveAction = requestedAction;
 
     try {
       throwIfAborted(signal);
@@ -3392,10 +3389,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               );
             }
 
-            // if not, change action to tap
             action = "tap";
-            options.action = "tap";
+            effectiveAction = "tap";
           }
+          const tapOptions: TapOnElementOptions = { ...options, action }; // dispatch sees the performed action
 
           // Preserve iOS detection at the original activation boundary.
           isAccessibilityServiceEnabled ??= await this.strategy.isAccessibilityServiceEnabled(
@@ -3413,7 +3410,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           if (this.strategy.shouldRunPreTapStability(options)) {
             const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
-              requestedAction === "focus" ? { ...options, action: "focus" as const } : options,
+              options,
               observeResult,
               action,
               requireResourceId,
@@ -3473,7 +3470,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
           const { tapPoint, warning: tapPointWarning } = this.tapPoints.planVisibleTapPoint({
-            options,
+            options: tapOptions,
             requestedAction,
             observeResult,
             viewHierarchy,
@@ -3515,7 +3512,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   tapElement,
                   signal,
                   {
-                    ...options,
+                    ...tapOptions,
                     displayFence: fence,
                     resolvedHierarchy: viewHierarchy,
                     onResolvedElement: (current, selection, hierarchy) => {
@@ -3564,7 +3561,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               action,
               longPressDuration,
               tapElement,
-              { ...this.withObservationScreenSize(options, observeResult), displayFence: fence },
+              { ...this.withObservationScreenSize(tapOptions, observeResult), displayFence: fence },
               isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
@@ -3614,7 +3611,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (options.display !== undefined && result.staleDisplay) {
         // Legacy/iOS display gestures must not finalize optional post-state
         // metadata or confirm focus/checked state from an invalidated capture.
-        return this.unverifiableDisplayPostState(result, { ...options, action: requestedAction });
+        return this.unverifiableDisplayPostState(result, options);
       }
 
       if (result.success && result.observation && result.element) {
@@ -3631,7 +3628,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
         await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
-          action: options.action,
+          action: effectiveAction,
           selectionState: selectionCapture,
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
@@ -3655,7 +3652,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
       });
 
-      if (options.action === "longPress") {
+      if (effectiveAction === "longPress") {
         const metadata = this.detectLongPressMetadata(previousObserveResult, result.observation);
         return {
           ...result,
@@ -3671,7 +3668,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       const failure = this.completedDisplayFailure(error, completedDisplayGesture);
       if (failure instanceof StaleDisplayError || failure instanceof DispatchedObservationError) {
-        return withStaleDisplay(this.createErrorResult(options.action, failure.message), failure);
+        return withStaleDisplay(this.createErrorResult(effectiveAction, failure.message), failure);
       }
 
       // Build debug context if debug mode is enabled
@@ -3684,7 +3681,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Return error result with debug info instead of throwing
       return this.readScopeFailureResult(
         requestedAction,
-        options.action,
+        effectiveAction,
         error,
         searchUntilStats,
         debugContext,
@@ -3797,7 +3794,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       result,
       (observation) =>
         this.verifyFocusedInputTarget(
-          { ...options, action: "focus" },
+          options,
           target,
           observation,
           focusLabelText,

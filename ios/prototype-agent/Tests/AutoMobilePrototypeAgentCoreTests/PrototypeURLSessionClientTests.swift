@@ -169,7 +169,23 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         StubProtocol.reset { _ in .respond(status: 404, headers: [:], chunks: [Data("missing".utf8)]) }
         let response = try await client().perform(call())
         XCTAssertEqual(response.status, 404)
-        XCTAssertEqual(response.body, Data("missing".utf8))
+        XCTAssertEqual(response.body, Data())
+    }
+
+    func testANon2xxBodyOverTheCapIsAnHttpErrorNotTooLarge() async throws {
+        StubProtocol.reset { _ in
+            .respond(
+                status: 500, headers: ["Content-Length": "100", "X-Id": "9"],
+                chunks: [Data(count: 60), Data(count: 40)]
+            )
+        }
+        let response = try await client().perform(call(maxBytes: 10))
+        XCTAssertEqual(response.status, 500)
+        XCTAssertEqual(response.headers["x-id"], "9")
+        XCTAssertEqual(response.body, Data())
+        let meta = PrototypeRequestMeta(response.requestResponse(for: .get))
+        XCTAssertEqual(meta.error, PrototypeRequestError(.httpError, "HTTP 500"))
+        XCTAssertEqual(meta.status, 500)
     }
 
     // MARK: Size cap

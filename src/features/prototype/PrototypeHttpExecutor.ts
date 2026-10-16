@@ -140,6 +140,19 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
 
     try {
       const response = await this.fetchImpl(request.url, this.requestInit(request, combined));
+      const headers = Object.fromEntries(response.headers.entries());
+      if (response.status < 200 || response.status > 299) {
+        // The status decides the outcome (`http_error`) and a non-2xx body is never used, so it is
+        // neither read nor capped: an oversized error page must not be reported as `too_large`.
+        await response.body?.cancel();
+        return {
+          ok: true,
+          status: response.status,
+          headers,
+          body: null,
+          durationMs: timer.now() - startedAt,
+        };
+      }
       const body = await this.readBody(response, request.method, combined);
       if (body === "too_large") {
         return fail("too_large", `Response body exceeds ${this.maxBytes} bytes.`);
@@ -147,7 +160,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
       return {
         ok: true,
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers,
         body,
         durationMs: timer.now() - startedAt,
       };
@@ -183,7 +196,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     return { method: request.method, headers, body, signal, redirect: "follow" };
   }
 
-  /** Reads incrementally and stops as soon as the cap is crossed. */
+  /** Reads a 2xx body incrementally and stops as soon as the cap is crossed. */
   private async readBody(
     response: Response,
     method: PrototypeRequestMethod,

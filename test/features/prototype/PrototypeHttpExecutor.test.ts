@@ -1,3 +1,4 @@
+import { applyPrototypeRequestOutcome } from "../../../src/features/prototype/prototypeRequestOutcome";
 import { describe, expect, test } from "bun:test";
 import {
   FetchPrototypeHttpExecutor,
@@ -125,6 +126,40 @@ describe("FetchPrototypeHttpExecutor", () => {
       100,
     );
     expect(failureCode(await executor.execute(request, signal()))).toBe("too_large");
+  });
+
+  test("a non-2xx status is an http outcome even when its body is over the cap", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(40));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const { executor } = executorFor(
+      async () =>
+        new Response(stream, {
+          status: 500,
+          headers: { "content-length": "1000", "x-id": "9" },
+        }),
+      new FakeTimer(),
+      100,
+    );
+    const outcome = await executor.execute(request, signal());
+    expect(outcome).toMatchObject({
+      ok: true,
+      status: 500,
+      headers: { "x-id": "9" },
+      body: null,
+    });
+    expect(cancelled).toBe(true);
+    const response = { type: "prototype_response" as const, requestId: "r", ...outcome };
+    expect(applyPrototypeRequestOutcome({}, "/data/feed", response).meta.error).toEqual({
+      code: "http_error",
+      message: "HTTP 500",
+    });
   });
 
   test("returns connection_refused as a typed error, not a throw", async () => {

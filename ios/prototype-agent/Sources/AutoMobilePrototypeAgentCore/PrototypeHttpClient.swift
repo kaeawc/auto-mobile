@@ -12,7 +12,8 @@ struct PrototypeHttpRequest: Equatable, Sendable {
     let body: Data?
     /// Total time the call may take.
     let timeoutMs: Int
-    /// The client stops reading, and fails with `too_large`, once the body crosses this.
+    /// The client stops reading, and fails with `too_large`, once a 2xx body crosses this. A non-2xx
+    /// body is never read, so the cap does not apply to it.
     let maxResponseBytes: Int
 
     /// The call a job describes. A string body is sent as is; any other JSON value is sent as JSON

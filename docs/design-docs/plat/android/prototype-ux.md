@@ -1197,7 +1197,9 @@ the native runtimes):
    depth, array or byte limit) the request is an error with `error.code` `invalid_response` and `into`
    is left alone.
 2. A non-2xx status leaves `into` untouched and is an error with `error.code` `http_error`
-   (`message` `HTTP <status>`). A transport failure is an error with the executor's code (`timeout`,
+   (`message` `HTTP <status>`). The status decides this before the body is consumed: a non-2xx body
+   is never read or capped (it is reported as `null`), so an oversized error page is `http_error`,
+   not `too_large`; the size cap applies to 2xx bodies only. A transport failure is an error with the executor's code (`timeout`,
    `too_large`, `connection_refused`, `cancelled`, `invalid_url`, `invalid_request`, `network`,
    `too_many_in_flight`).
 3. With `into`, the metadata is then written to **`<into>__meta`**: the same pointer with `__meta`

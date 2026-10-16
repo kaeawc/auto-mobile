@@ -593,8 +593,9 @@ deterministic:
 - **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library; the agent
   injects `PrototypeURLSessionClient`. It uses a dedicated ephemeral `URLSession` (never
   `URLSession.shared`, so the app's cookies, cache and credentials are untouched) with the contract's
-  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading and fails with `too_large` once
-  the body crosses 262144 bytes (or its `Content-Length` announces more), maps URLSession errors to the
+  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading a 2xx body and fails with `too_large` once
+  it crosses 262144 bytes (or its `Content-Length` announces more; a non-2xx body is never read, so it is
+  an `http_error` however large), maps URLSession errors to the
   contract's codes and reports the duration from the task metrics. Its tests run the real client over a
   `URLProtocol` stub.
 

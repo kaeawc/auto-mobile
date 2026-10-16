@@ -32,14 +32,17 @@ describe("extractDeviceLoopbackPorts", () => {
   });
 
   test("an implicit port reverses the scheme default", () => {
-    const spec = specOf(request("http://localhost/", "device"), request("https://localhost/", "device"));
+    const spec = specOf(
+      request("http://localhost/", "device"),
+      request("https://localhost/", "device"),
+    );
     expect(extractDeviceLoopbackPorts(spec).ports).toEqual([80, 443]);
   });
 
   test("an explicit default port is the same as an implicit one", () => {
-    expect(extractDeviceLoopbackPorts(specOf(request("http://localhost:80/", "device"))).ports).toEqual([
-      80,
-    ]);
+    expect(
+      extractDeviceLoopbackPorts(specOf(request("http://localhost:80/", "device"))).ports,
+    ).toEqual([80]);
   });
 
   test("via host, absent via and non-loopback hosts are ignored", () => {
@@ -89,7 +92,8 @@ describe("extractDeviceLoopbackPorts", () => {
 
   test("a binding only in the path of a loopback URL still reverses its port", () => {
     expect(
-      extractDeviceLoopbackPorts(specOf(request("http://localhost:8080/{data:/x}", "device"))).ports,
+      extractDeviceLoopbackPorts(specOf(request("http://localhost:8080/{data:/x}", "device")))
+        .ports,
     ).toEqual([8080]);
   });
 
@@ -120,7 +124,11 @@ describe("extractDeviceLoopbackPorts", () => {
       root: {
         type: "column",
         children: [
-          { type: "textField", stateKey: "q", onSubmit: [request("http://localhost:1/", "device")] },
+          {
+            type: "textField",
+            stateKey: "q",
+            onSubmit: [request("http://localhost:1/", "device")],
+          },
           {
             type: "scroll",
             refresh: { stateKey: "r", onRefresh: [request("http://localhost:2/", "device")] },

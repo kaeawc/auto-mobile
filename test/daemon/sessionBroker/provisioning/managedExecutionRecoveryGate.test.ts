@@ -71,16 +71,13 @@ describe("managed execution recovery is gated before publication", () => {
     return {
       async assignDeviceToSession(id, platform, target) {
         return (
-          await sessions.createSession(
-            id,
-            DEVICE,
-            platform ?? "ios",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          )
+          await sessions.createSession(id, DEVICE, platform ?? "ios", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          })
         ).assignedDevice;
       },
     };

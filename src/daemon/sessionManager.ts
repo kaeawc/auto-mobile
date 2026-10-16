@@ -189,6 +189,7 @@ import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
+  resolveReleaseReason,
   IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
@@ -1247,6 +1248,23 @@ function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRec
     candidate.terminalReleaseReason === `identity-recovery-${candidate.reason}` &&
     isSessionRecoveryTarget(candidate.target)
   );
+}
+
+function withCreateSessionDefaults(
+  options: CreateSessionOptions,
+): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
+  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
+}
+
+/** Optional inputs to {@link SessionManager.createSession}. */
+export interface CreateSessionOptions {
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  stableDeviceId?: string;
+  recoveredLiveness?: SessionRecoveryLiveness;
+  initialOwnership?: "owned" | "awaiting-owner";
+  /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
+  persistenceSource?: string;
 }
 
 export interface RebindSessionOptions {
@@ -3273,14 +3291,16 @@ export class SessionManager {
     sessionId: string,
     assignedDevice: string,
     platform: Platform,
-    timeoutMs?: number,
-    heartbeatTimeoutMs?: number,
-    stableDeviceId?: string,
-    recoveredLiveness?: SessionRecoveryLiveness,
-    initialOwnership: "owned" | "awaiting-owner" = "owned",
-    /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
-    persistenceSource?: string,
+    options: CreateSessionOptions = {},
   ): Promise<Session> {
+    const {
+      timeoutMs,
+      heartbeatTimeoutMs,
+      stableDeviceId,
+      recoveredLiveness,
+      initialOwnership,
+      persistenceSource,
+    } = withCreateSessionDefaults(options);
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new DaemonSessionCreationRejectedError(sessionId);
@@ -5639,14 +5659,9 @@ export class SessionManager {
     const existing = this.sessions.get(sessionId);
     this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
-      return await this.createSession(
-        sessionId,
-        assignedDevice,
-        platform,
-        undefined,
-        undefined,
-        options.stableDeviceId,
-      );
+      return await this.createSession(sessionId, assignedDevice, platform, {
+        stableDeviceId: options.stableDeviceId,
+      });
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {
       // Generation only: this no-op rebind retains the same serial, connection and incarnation.
@@ -8375,20 +8390,7 @@ export class SessionManager {
   }
 
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
-    if (candidate === "device-killed" && reason.value !== candidate) {
-      reason.value = candidate;
-      return;
-    }
-    if (reason.value === "device-killed") {
-      return;
-    }
-    if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(reason.value)) {
-      reason.value = candidate;
-      return;
-    }
-    if (outranksReleaseReason(candidate, reason.value)) {
-      reason.value = candidate;
-    }
+    reason.value = resolveReleaseReason(reason.value, candidate);
   }
 
   private createReleaseReasonState(sessionId: string, releaseReason: string): ReleaseReasonState {

@@ -71,16 +71,13 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
   function poolFor(manager: SessionManager): SessionDeviceAssigner {
     return {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await manager.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(id, DEVICE, "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };

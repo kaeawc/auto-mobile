@@ -123,7 +123,10 @@ async function deferredRebindHarness(
     restore.resolve();
     defaultDeviceClockRestoreRegistry.retire(android.deviceId);
   });
-  await h.manager.createSession("rebound", android.deviceId, "android", 600_000, 600_000);
+  await h.manager.createSession("rebound", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   h.manager.updateSessionCache("rebound", state);
   const pendingTimeouts = h.timer.getPendingTimeoutCount();
   let cleanup: DeferredRebindCleanup | undefined;
@@ -413,7 +416,10 @@ for (const [reason, forced] of [
   test(`terminal release enumeration partitions ${reason} and excludes it after ${forced ? "force" : "settlement"}`, async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const h = harness(persistence);
-    await h.manager.createSession("old", android.deviceId, "android", 600_000, 600_000);
+    await h.manager.createSession("old", android.deviceId, "android", {
+      timeoutMs: 600_000,
+      heartbeatTimeoutMs: 600_000,
+    });
     const gate = Promise.withResolvers<void>();
     const write = spyOn(persistence, "markReleased").mockImplementation(() => gate.promise);
     dispose.push(() => write.mockRestore());
@@ -1123,7 +1129,7 @@ test("a monitor reap joining after an execution veto still meets the advertised 
   }
   const persistence = new ParkedPersistence();
   const h = harness(persistence);
-  await h.manager.createSession("old", android.deviceId, "android", 600_000);
+  await h.manager.createSession("old", android.deviceId, "android", { timeoutMs: 600_000 });
   await h.timer.advanceTimeAsync(90_000, step);
   persistence.gate = new Promise<void>(() => {});
   void h.manager.rebindSession("old", "emulator-5556", "android");
@@ -1352,13 +1358,10 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   const h = harness(persistence);
   h.deviceManager.setBootedDevices("android", [android]);
   await h.pool.initializeWithDevices([android]);
-  const session = await h.manager.createSession(
-    "old",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("old", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   expect(await h.manager.claimLivenessOwnership("old", "live-owner")).toBe("claimed");
   persistence.gate = new Promise<void>(() => {});
   void h.manager.rebindSession("old", "emulator-5556", "android");
@@ -1438,13 +1441,10 @@ test("late screen-reader setup grows the stuck budget before its first restore",
       },
     }),
   });
-  const session = await h.manager.createSession(
-    "late",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("late", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   const setupGate = Promise.withResolvers<void>();
   const setup = h.manager.trackScreenReaderSessionSetup(session, async () => {
     await setupGate.promise;
@@ -1488,13 +1488,10 @@ test("late screen-reader setup grows the stuck budget before its first restore",
 test("declined final commit fence cannot force a parked live-row rewrite", async () => {
   const persistence = new FakeDeviceSessionPersistence();
   const h = harness(persistence);
-  const session = await h.manager.createSession(
-    "kept",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("kept", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   const rewrite = Promise.withResolvers<void>();
   const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(
     () => rewrite.promise,
@@ -1549,13 +1546,10 @@ test("an undecided commit fence still forces wedged teardown at its deadline", a
       },
     }),
   });
-  const session = await h.manager.createSession(
-    "wedged-fence",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("wedged-fence", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   h.manager.setScreenReader(session, { platform: "android", previousEnabled: false });
   // Simulate a lost first-attempt timeout callback: the monitor's independent stuck timer
   // must still fence a release that has not reached either commit check.

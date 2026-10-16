@@ -24,7 +24,7 @@ async function steppedDaemon() {
   timer.setCurrentTime(10_000_000);
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   manager.stopCleanupTimer();
-  await manager.createSession(SESSION, "emulator-5554", "android", 600_000);
+  await manager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 600_000 });
   timer.advanceTime(5_000);
   timer.stepWallClock(WALL_STEP_MS);
   const state: DaemonStateAccess = {
@@ -49,7 +49,7 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
       const base = manager.getSession(SESSION)!;
       const labelId = `${SESSION}:B`;
       const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
-        manager.createSession(labelId, "emulator-5556", "android", 600_000),
+        manager.createSession(labelId, "emulator-5556", "android", { timeoutMs: 600_000 }),
       );
       manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
       base.expiresAt = manager.sessionNow() + 1_000;
@@ -125,7 +125,7 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
     timer.setCurrentTime(10_000_000);
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager.stopCleanupTimer();
-    await manager.createSession(SESSION, "emulator-5554", "android", 600_000);
+    await manager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 600_000 });
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => manager,

@@ -97,13 +97,10 @@ describe("Daemon session-release signal wiring", () => {
     });
 
     try {
-      await sessionManager.createSession(
-        "heartbeat-expired",
-        "emulator-5554",
-        "android",
-        60_000,
-        leaseMs,
-      );
+      await sessionManager.createSession("heartbeat-expired", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: leaseMs,
+      });
       sessionManager.recordHeartbeat("heartbeat-expired");
       internals.startHeartbeatMonitor();
 

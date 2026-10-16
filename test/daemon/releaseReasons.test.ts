@@ -16,6 +16,7 @@ import {
   outranksReleaseReason,
   releaseReasonFamiliesWhere,
   releasedRowStatus,
+  resolveReleaseReason,
   sessionReleaseReasonFamily,
   sessionReleaseReasonTraits,
 } from "../../src/daemon/releaseReasons";
@@ -270,5 +271,26 @@ describe("re-issuable-by-name category (#11418)", () => {
     }
     expect(isReissuableByNameReleaseReason("device-restart:Pixel")).toBe(true);
     expect(isTerminalReleaseReason("plan-auto-release")).toBe(false);
+  });
+});
+
+describe("resolveReleaseReason precedence (#11800)", () => {
+  test("device-killed always wins and is never displaced", () => {
+    expect(resolveReleaseReason("explicit-release", "device-killed")).toBe("device-killed");
+    expect(resolveReleaseReason("device-killed", "heartbeat-timeout")).toBe("device-killed");
+    expect(resolveReleaseReason("device-killed", "daemon-shutdown")).toBe("device-killed");
+  });
+
+  test("daemon-shutdown replaces only non-terminal reasons", () => {
+    expect(resolveReleaseReason("not-a-reason", "daemon-shutdown")).toBe("daemon-shutdown");
+    expect(resolveReleaseReason("heartbeat-timeout", "daemon-shutdown")).toBe("heartbeat-timeout");
+  });
+
+  test("other candidates follow outranksReleaseReason", () => {
+    expect(resolveReleaseReason("not-a-reason", "explicit-release")).toBe(
+      outranksReleaseReason("explicit-release", "not-a-reason")
+        ? "explicit-release"
+        : "not-a-reason",
+    );
   });
 });

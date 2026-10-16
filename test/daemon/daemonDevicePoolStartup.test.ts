@@ -472,16 +472,13 @@ describe("Daemon startup device discovery", () => {
       const sessions = daemon.getSessionManager();
       const summary = await sessions.rehydratePersistedSessions({
         assignDeviceToSession: async (sessionId, _platform, target) => {
-          const session = await sessions.createSession(
-            sessionId,
-            "owned-simulator",
-            "ios",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          const session = await sessions.createSession(sessionId, "owned-simulator", "ios", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return session.assignedDevice;
         },
       });

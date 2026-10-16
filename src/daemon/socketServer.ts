@@ -6424,13 +6424,57 @@ export class UnixSocketServer {
     }
   }
 
+  /** When an `input/*` request entered the queue and the whole budget it was given. */
+  private inputRouteClock(
+    request: DaemonRequest,
+    input: InputRequestContext | undefined,
+  ): { queueEnterMs: number; totalTimeoutMs: number } {
+    return {
+      queueEnterMs: input?.receivedAtMs ?? this.timer.now(),
+      totalTimeoutMs: resolveMcpRequestTimeoutMs(request),
+    };
+  }
+
+  /**
+   * Time left in an input request's budget after its wait in the device queue; the one copy of the
+   * check every `input/*` route makes once it reaches the front of the queue (#11814).
+   */
+  private remainingInputBudgetMs(
+    toolName: string,
+    origin: string,
+    queueEnterMs: number,
+    totalTimeoutMs: number,
+  ): number {
+    const queueWaitMs = this.timer.now() - queueEnterMs;
+    const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+    if (remainingTimeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin,
+        detail: `spent ${queueWaitMs}ms waiting in queue`,
+      });
+    }
+    return remainingTimeoutMs;
+  }
+
+  /** An input attempt that reached the front of the queue still needs a live owner and frame. */
+  private requireLiveInputAttempt(
+    signal: AbortSignal | undefined,
+    deviceId: string,
+    frameContext: string | undefined,
+    label: string,
+  ): void {
+    assertSocketInputNotAborted(signal);
+    this.requireCurrentFrameContext(deviceId, frameContext, label);
+  }
+
   private async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputTapParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
       args.platform,
@@ -6444,18 +6488,13 @@ export class UnixSocketServer {
       request.method,
       targetDevice,
       async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputTap",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
+        this.requireLiveInputAttempt(signal, targetDevice.deviceId, args.frameContext, "input/tap");
+        const remainingTimeoutMs = this.remainingInputBudgetMs(
+          request.method,
+          "UnixSocketServer.handleInputTap",
+          queueEnterMs,
+          totalTimeoutMs,
+        );
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
@@ -6545,8 +6584,7 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputSwipeParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
       args.platform,
@@ -6560,18 +6598,18 @@ export class UnixSocketServer {
       request.method,
       targetDevice,
       async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputSwipe",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
+        this.requireLiveInputAttempt(
+          signal,
+          targetDevice.deviceId,
+          args.frameContext,
+          "input/swipe",
+        );
+        const remainingTimeoutMs = this.remainingInputBudgetMs(
+          request.method,
+          "UnixSocketServer.handleInputSwipe",
+          queueEnterMs,
+          totalTimeoutMs,
+        );
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
@@ -6671,8 +6709,7 @@ export class UnixSocketServer {
     input?: InputRequestContext,
   ): Promise<any | undefined> {
     const method = GESTURE_FRAME_METHODS[kind];
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputGestureParams(request.params, method);
     const targetDevice = await this.resolveInputTargetDevice(
       args.platform,
@@ -6694,16 +6731,12 @@ export class UnixSocketServer {
           targetDevice,
           async (signal, dispatching) => {
             assertSocketInputNotAborted(signal);
-            const queueWaitMs = this.timer.now() - queueEnterMs;
-            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-            if (remainingTimeoutMs <= 0) {
-              throw new McpTimeoutError({
-                toolName: method,
-                timeoutMs: totalTimeoutMs,
-                origin: "UnixSocketServer.handleInputGesture",
-                detail: `spent ${queueWaitMs}ms waiting in queue`,
-              });
-            }
+            const remainingTimeoutMs = this.remainingInputBudgetMs(
+              method,
+              "UnixSocketServer.handleInputGesture",
+              queueEnterMs,
+              totalTimeoutMs,
+            );
             // Before the start's admission is captured: it reads the session this frame uses.
             dispatching?.();
             const client = AndroidCtrlProxyClient.getInstance(
@@ -7018,8 +7051,7 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputTypeTextParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
       args.platform,
@@ -7053,16 +7085,12 @@ export class UnixSocketServer {
               )
             : targetDevice;
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputTypeText",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
+        const remainingTimeoutMs = this.remainingInputBudgetMs(
+          request.method,
+          "UnixSocketServer.handleInputTypeText",
+          queueEnterMs,
+          totalTimeoutMs,
+        );
 
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
         let dispatched = false;
@@ -7136,8 +7164,7 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputPressButtonParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
       args.platform,
@@ -7151,22 +7178,18 @@ export class UnixSocketServer {
       request.method,
       targetDevice,
       async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(
+        this.requireLiveInputAttempt(
+          signal,
           targetDevice.deviceId,
           args.frameContext,
           "input/pressButton",
         );
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputPressButton",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
+        const remainingTimeoutMs = this.remainingInputBudgetMs(
+          request.method,
+          "UnixSocketServer.handleInputPressButton",
+          queueEnterMs,
+          totalTimeoutMs,
+        );
 
         // Forward the execution tracker's abort signal (this bound-session path
         // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
@@ -7221,8 +7244,7 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
     const args = this.parseInputKeyParams(request.params);
     if (args.platform === "ios") {
       throw new Error(INPUT_KEY_IOS_UNSUPPORTED_ERROR);
@@ -7239,18 +7261,13 @@ export class UnixSocketServer {
       request.method,
       targetDevice,
       async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputKey",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
+        this.requireLiveInputAttempt(signal, targetDevice.deviceId, args.frameContext, "input/key");
+        const remainingTimeoutMs = this.remainingInputBudgetMs(
+          request.method,
+          "UnixSocketServer.handleInputKey",
+          queueEnterMs,
+          totalTimeoutMs,
+        );
 
         return await this.executeSocketInputKey(
           new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer),

@@ -427,7 +427,14 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
   `up` captures native info best-effort within 5 seconds after readiness; `info`
   saves the current native descriptor to `info.json` and feeds the ledger.
 - `close --client NAME` cleanly closes MCP/stdin and waits up to 240 seconds for
-  a released receipt. `status` shows initialize/live outcome, grant/profile,
+  a released receipt of a granted session. A refused or failed attempt (for example
+  `daemon_unavailable`, or an abandoned request) has no released receipt to wait for:
+  `close` returns at once with exit 0 and `release.outcome: "failed"` in `closed.json`
+  (`receiptMissing: true` when the daemon holds no receipt or is unreachable). After the
+  receipt settles, `close` also joins the driver's exit (5 s), including a driver resumed by
+  `up --resume`, so the next `up` never sees "Previous attempt driver is alive". A driver that
+  lingers is signalled only when its recorded start identity (`driver-identity`) still matches;
+  otherwise `close` exits 2 without signalling. `status` shows initialize/live outcome, grant/profile,
   typed failure, owner liveness and `daemonSocketAlive`; `--all` prints all clients.
 - `call` accepts inline JSON or `@file`, `--timeout-ms` (default 900000), and
   `--full`. It requires a ready grant and live driver. Explicit selectors must

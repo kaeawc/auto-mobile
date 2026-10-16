@@ -500,6 +500,9 @@ Use `{{ownSessionId}}`, `{{clientSessionId:<name>}}` for cross-client tests, and
 
 `--expect-refused` is send-mode only and requires every response to be an error
 with a product refusal code or message (success or unrelated errors exit 2).
+Product refusal codes are `device_outside_broker_grant` (labels and unbound devices),
+`device_outside_bound_session` (a bound connection naming another session or device, as in the
+`cross-client-isolation-live` probe) and `session_ownership_lost`.
 Lifecycle probes accept only `{}` or an object containing only the client's own `sessionUuid`; device names and selectors always refuse before sending.
 These constrained probes exercise the product gate. Resources/list, `automobile:devices/*` reads, and
 `--allow-selector` remain forbidden. `--token-of OTHER` changes only the user

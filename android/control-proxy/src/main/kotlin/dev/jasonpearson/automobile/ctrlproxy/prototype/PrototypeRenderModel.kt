@@ -250,7 +250,10 @@ internal class PrototypeNodeMapping(
         enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
         errorMessage = prototypeShownError(node, state, shownErrors),
         checked =
-          (prototypeToggleKey(node) ?: prototypeListItemToggleKey(node))?.let {
+          (prototypeToggleKey(node)
+              ?: prototypeListItemToggleKey(node)
+              ?: (node as? PrototypeScrollNode)?.refresh?.stateKey)
+            ?.let {
             state[it] == PrototypeScalar.BooleanValue(true)
           } ?: false,
         selectedValue =

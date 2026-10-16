@@ -149,6 +149,10 @@ private struct PrototypeSubstitutionGuard {
         if case let .object(part)? = fields["openWhen"] {
             try field(part, "key", path: "\(path).openWhen", scope: scope)
         }
+        if case let .object(refresh)? = fields["refresh"] {
+            try field(refresh, "stateKey", path: "\(path).refresh", scope: scope)
+            try actions(refresh, path: "\(path).refresh", scope: scope, list: "onRefresh")
+        }
     }
 
     private mutating func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
@@ -189,11 +193,13 @@ private struct PrototypeSubstitutionGuard {
         try actions(fields, path: path, scope: scope)
     }
 
-    private mutating func actions(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
-        guard case let .array(entries)? = fields["onTap"] else { return }
+    private mutating func actions(
+        _ fields: [String: JSONValue], path: String, scope: Scope?, list: String = "onTap"
+    ) throws {
+        guard case let .array(entries)? = fields[list] else { return }
         for (index, entry) in entries.enumerated() {
             guard case let .object(action) = entry else { continue }
-            let actionPath = "\(path).onTap[\(index)]"
+            let actionPath = "\(path).\(list)[\(index)]"
             switch action["type"]?.stringValue {
             case "setState":
                 try field(action, "key", path: actionPath, scope: scope)

@@ -5739,6 +5739,13 @@
               },
               "optional": true
             },
+            "refresh": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollRefresh"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -9586,6 +9593,30 @@
             "max": 32
           },
           "optional": true
+        }
+      }
+    },
+    "scrollRefresh": {
+      "kind": "object",
+      "fields": {
+        "stateKey": {
+          "rule": {
+            "kind": "boundKey"
+          },
+          "optional": false
+        },
+        "onRefresh": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": false
         }
       }
     },

@@ -78,6 +78,8 @@ export interface PreflightSpec {
   serial: string;
   packageName: string;
   apkPath?: string;
+  /** Content digest of `apkPath`; identifies the build without the install timestamp. */
+  apkDigest?: string;
   clearAppData: boolean;
   /** SharedPreferences files to seed (file name without `.xml` → key/value pairs). */
   sharedPreferences?: Record<string, Record<string, PreferenceValue>>;
@@ -169,13 +171,15 @@ async function launchDeepLink(
 /**
  * The installed build's fingerprint from `dumpsys package` (same fields as
  * GetAppMetadata), so results from different builds are never mistaken as comparable.
+ * With an APK digest, the digest replaces `lastUpdateTime`: preflight reinstalls the
+ * APK every run, which changes the install time even for a byte-identical build.
  */
-export function describeAppBuild(dumpsysOutput: string): string {
+export function describeAppBuild(dumpsysOutput: string, apkDigest?: string): string {
   const field = (pattern: RegExp) => dumpsysOutput.match(pattern)?.[1]?.trim();
   const parts = [
     ["versionName", field(/versionName=(\S+)/)],
     ["versionCode", field(/versionCode=(\d+)/)],
-    ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
+    apkDigest ? ["sha256", apkDigest] : ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
   ].filter((entry): entry is [string, string] => entry[1] !== undefined);
   return parts.length > 0 ? parts.map(([key, value]) => `${key}=${value}`).join(" ") : "unknown";
 }
@@ -203,7 +207,7 @@ export async function runPreflight(
     throw new Error(`${spec.packageName} is not installed on ${spec.serial}; set app.apkPath.`);
   }
   const dumpsys = await adb(runner, [...target, "shell", "dumpsys", "package", spec.packageName]);
-  const appBuild = describeAppBuild(dumpsys);
+  const appBuild = describeAppBuild(dumpsys, spec.apkDigest);
   log.push(`app build: ${appBuild}`);
   await adb(runner, [...target, "shell", "am", "force-stop", spec.packageName]);
   log.push(`force-stopped ${spec.packageName}`);

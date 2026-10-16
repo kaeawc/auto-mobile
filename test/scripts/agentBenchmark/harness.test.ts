@@ -48,6 +48,9 @@ class MemoryFs implements HarnessFs {
   remove(path: string) {
     this.removed.push(path);
   }
+  sha256(path: string) {
+    return `${path.length.toString(16).padStart(4, "0")}deadbeefcafef00d0123456789`;
+  }
 }
 
 function loadedSuite(overrides: Record<string, unknown> = {}): LoadedSuite {
@@ -193,6 +196,33 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(loadedSuite(), options, deps);
     expect(result.comparison.verdict).toBe("failed");
     expect(result.outcome.screenText).toBe("");
+  });
+
+  test("a pass that recovered from a stumble writes no baseline snippet", async () => {
+    const recovered = new TranscriptBuilder()
+      .init()
+      .mcp("tapOn", "Element not found", { isError: true })
+      .mcp("observe")
+      .mcp("tapOn")
+      .result({ finalText: "COUNT: 3" })
+      .build();
+    const { fs, logs, deps, options } = setup(recovered);
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(result.comparison.stumbles).toBe(1);
+    expect(fs.exists(artifact("baseline.yml"))).toBe(false);
+    expect(logs).toContain("[demo] passed with 1 stumble(s); no baseline.yml written");
+  });
+
+  test("an APK suite fingerprints the build by content, not install time", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    runner.onAdb("dumpsys package", {
+      stdout:
+        "versionCode=7 minSdk=26\n    versionName=1.0\n    lastUpdateTime=2026-10-16 10:00:00\n",
+    });
+    const suite = { ...loadedSuite(), apkPath: "/repo/app.apk" };
+    const result = await runSuite(suite, options, deps);
+    expect(result.preflight.appBuild).toBe("versionName=1.0 versionCode=7 sha256=000ddeadbeefcafe");
   });
 
   test("no screen dump is taken when the suite has no screen checks", async () => {

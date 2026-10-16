@@ -58,6 +58,8 @@ export interface HarnessFs {
   /** Create a short private temp directory outside the repository. */
   makeTempDir(prefix: string): string;
   remove(path: string): void;
+  /** Hex SHA-256 of a file's bytes. */
+  sha256(path: string): string;
 }
 
 /** The shared AutoMobile device-allocation claims (the same store every daemon uses). */
@@ -168,6 +170,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     serial,
     packageName: definition.app.packageName,
     apkPath: suite.apkPath,
+    apkDigest: suite.apkPath ? deps.fs.sha256(suite.apkPath).slice(0, 16) : undefined,
     clearAppData: definition.preflight.clearAppData,
     sharedPreferences: definition.preflight.sharedPreferences,
     launchUri: definition.preflight.launchUri,
@@ -305,8 +308,14 @@ export async function runSuite(
     join(prepared.runDirectory, "result.json"),
     `${JSON.stringify(result, null, 2)}\n`,
   );
-  if (result.comparison.verdict === "passed") {
+  // A run that recovered from stumbles still passes, but its error count and recovery
+  // calls would make a misleading baseline; only clean passes produce a snippet.
+  if (result.comparison.verdict === "passed" && result.comparison.stumbles === 0) {
     deps.fs.writeFile(join(prepared.runDirectory, "baseline.yml"), renderBaselineSnippet(result));
+  } else if (result.comparison.verdict === "passed") {
+    deps.log(
+      `[${definition.name}] passed with ${result.comparison.stumbles} stumble(s); no baseline.yml written`,
+    );
   }
   return result;
 }

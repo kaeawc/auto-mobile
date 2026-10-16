@@ -1,4 +1,5 @@
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -53,7 +54,7 @@ class HoldingAdb extends FakeAdbExecutor {
     if (args[0] !== this.commandToHold || this.releaseCommand) {
       return response;
     }
-    this.ownerSignal = args[4];
+    this.ownerSignal = executeCommandOptionsOf(args).signal;
     return new Promise<ExecResult>((resolve, reject) => {
       const onAbort = () => {
         this.ownerCancelled = true;

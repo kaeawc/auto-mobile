@@ -233,12 +233,10 @@ export class NotificationPolicy {
 
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
-      const result = await adb.executeCommand(
-        "shell dumpsys notification",
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
-      );
+      const result = await adb.executeCommand("shell dumpsys notification", {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
+      });
       const parsed = parsePolicyAccess(result.stdout);
       const user = parsed.kind === "providers" ? await resolveCurrentUser(adb) : {};
       const policyAccess: NotificationPolicyAccessState = {

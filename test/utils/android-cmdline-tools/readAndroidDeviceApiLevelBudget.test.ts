@@ -47,9 +47,12 @@ function budgetProbe(
       timer.advanceTime(primaryElapsedMs);
       return null;
     },
-    executeCommand: async (_command: string, timeoutMs?: number): Promise<ExecResult> => {
+    executeCommand: async (
+      _command: string,
+      options?: { timeoutMs?: number },
+    ): Promise<ExecResult> => {
       probe.fallbackCalls += 1;
-      probe.fallbackTimeoutMs = timeoutMs;
+      probe.fallbackTimeoutMs = options?.timeoutMs;
       return ok(fallbackStdout);
     },
   } as unknown as AdbExecutor;

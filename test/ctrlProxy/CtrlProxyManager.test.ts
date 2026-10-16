@@ -2555,7 +2555,7 @@ describe("CtrlProxyManager", function () {
         if (strippedCommand.includes("install -r -d")) {
           throw new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]");
         }
-        return localFakeAdb.executeCommand(strippedCommand, undefined, maxBuffer);
+        return localFakeAdb.executeCommand(strippedCommand, { maxBuffer });
       };
 
       // Create AdbClient with custom executor that throws on install, wrap in factory

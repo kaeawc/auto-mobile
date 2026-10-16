@@ -342,13 +342,7 @@ test.each(["active", "all"])(
     adb.hold(ownerCommand);
     adb.setCommandResponse(ownerCommand, { stdout: "owner result", stderr: "" });
     const controller = new AbortController();
-    const owner = adb.executeCommand(
-      ownerCommand,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const owner = adb.executeCommand(ownerCommand, { signal: controller.signal });
     await adb.started.get(ownerCommand)!.promise;
     const observerCommandsStart = adb.getExecutedCommands().length;
     try {

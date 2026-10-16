@@ -6,6 +6,7 @@ import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClie
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -48,7 +49,7 @@ class TerminatingAdb extends FakeAdbClient {
     if (command === PROCESSES && this.stoppedAt !== undefined) {
       this.events.push("process read");
       this.postProcessReads++;
-      this.onPostProcessRead?.(args[4]);
+      this.onPostProcessRead?.(executeCommandOptionsOf(args).signal);
       this.processAlive = this.timer.now() - this.stoppedAt < this.processDeathMs;
       this.setCommandResultSequence(PROCESSES, [
         this.processAlive ? RUNNING : this.remainingProcesses,

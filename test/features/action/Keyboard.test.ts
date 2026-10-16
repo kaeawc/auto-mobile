@@ -698,9 +698,12 @@ describe("Keyboard", () => {
           execute.mockRestore();
         }
 
-        // Waits for the aborted process to settle (sixth argument) instead of abandoning it.
+        // Waits for the aborted process to settle (`waitForProcessSettlementAfterAbort`) instead of abandoning it.
         expect(calls).toEqual([
-          ["shell input tap 110 70", undefined, undefined, undefined, controller.signal, true],
+          [
+            "shell input tap 110 70",
+            { signal: controller.signal, waitForProcessSettlementAfterAbort: true },
+          ],
         ]);
 
         expect(fakeHierarchy.getCallCount()).toBe(1);

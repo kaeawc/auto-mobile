@@ -411,9 +411,9 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
     };
     const pullTimeouts: number[] = [];
     const adb = {
-      executeCommand: async (command: string, timeoutMs?: number) => {
+      executeCommand: async (command: string, options?: { timeoutMs?: number }) => {
         if (command.startsWith("pull ")) {
-          pullTimeouts.push(timeoutMs ?? 0);
+          pullTimeouts.push(options?.timeoutMs ?? 0);
         }
         if (command.includes("pm path")) {
           return ok("package:/a/base.apk\npackage:/a/split.apk\n");

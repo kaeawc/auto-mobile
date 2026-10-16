@@ -2199,11 +2199,9 @@ export class DefaultAuditRunner implements AuditRunner {
   private async getForegroundPackageName(device: BootedDevice): Promise<string | null> {
     try {
       const adb = defaultAdbClientFactory.create(device);
-      const { stdout } = await adb.executeCommand(
-        "shell dumpsys window | grep mCurrentFocus",
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-      );
+      const { stdout } = await adb.executeCommand("shell dumpsys window | grep mCurrentFocus", {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      });
 
       const match = stdout.match(/\s+(\S+)\/\S+\}/);
       return match ? match[1] : null;

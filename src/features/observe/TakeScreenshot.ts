@@ -912,13 +912,7 @@ export class TakeScreenshot implements ScreenshotService {
       try {
         throwIfAborted(signal);
         captureDispatched = true;
-        const captured = await this.adb.executeCommand(
-          command,
-          undefined,
-          maxBuffer,
-          undefined,
-          signal,
-        );
+        const captured = await this.adb.executeCommand(command, { maxBuffer, signal });
         captureCompleted = true;
         return captured;
       } finally {
@@ -1006,10 +1000,7 @@ export class TakeScreenshot implements ScreenshotService {
       captureDispatched = true;
       const screencapResult = await this.adb.executeCommand(
         `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
+        { signal },
       );
       if (this.hasFailedScreencap(screencapResult.stdout, screencapResult.stderr)) {
         throw new Error(`Screencap failed: ${screencapResult.stderr}`);

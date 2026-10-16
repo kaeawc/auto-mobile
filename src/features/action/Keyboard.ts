@@ -624,13 +624,7 @@ export class Keyboard {
 
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(
-      this.adb.executeCommand(
-        "shell input keyevent KEYCODE_BACK",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
+      this.adb.executeCommand("shell input keyevent KEYCODE_BACK", { signal }),
       signal,
     );
 
@@ -863,14 +857,10 @@ export class Keyboard {
     try {
       // Do not stop waiting on abort: the adb process is terminated and awaited (bounded by
       // the adb client's grace period) so a started tap has settled before callers restore state.
-      await this.adb.executeCommand(
-        `shell input tap ${x} ${y}`,
-        undefined,
-        undefined,
-        undefined,
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, {
         signal,
-        true,
-      );
+        waitForProcessSettlementAfterAbort: true,
+      });
     } catch (error) {
       // The tap command had started, so it may have reached the device.
       if (signal?.aborted) {

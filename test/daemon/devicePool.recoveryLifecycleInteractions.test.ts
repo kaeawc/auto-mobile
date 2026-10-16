@@ -1,7 +1,7 @@
+import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
@@ -9,12 +9,9 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 /**
@@ -107,16 +104,12 @@ async function setup<M extends OfflineAwareManager>(manager: M) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const lifecycle = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      lifecycleCoordinator: lifecycle,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    lifecycleCoordinator: lifecycle,
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   return { timer, sessions, lifecycle, pool, manager };

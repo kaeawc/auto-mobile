@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -16,7 +17,6 @@ import {
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { SessionSlots } from "../../src/daemon/sessionSlots";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -128,20 +128,16 @@ test("same-serial emulator continuity is enabled when the recovery environment i
     const manager = new KillTrackingShutdownManager(original.deviceId);
     const releaseCancellation = Promise.withResolvers<void>();
     let cancellationCalls = 0;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        cancelDeviceSessionExecutions: async () => {
-          cancellationCalls++;
-          await releaseCancellation.promise;
-          return 0;
-        },
-      }),
-    );
+    const pool = makePool(sessions, "daemon", {
+      timer,
+      deviceManager: manager,
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      cancelDeviceSessionExecutions: async () => {
+        cancellationCalls++;
+        await releaseCancellation.promise;
+        return 0;
+      },
+    });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     await pool.bindOrReuseDeviceSession(
@@ -189,16 +185,12 @@ test("continuity releases an externally closed emulator without relaunch and reh
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager("emulator-5599");
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: true,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: true,
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   await pool.bindOrReuseDeviceSession(
@@ -266,16 +258,12 @@ test("a pool-allocated emulator without a recorded image still persists as devic
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: true,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: true,
+  });
   manager.bootedDevices = [original];
   // Discovery-only refresh -- no sourceImage, so unlike `addDevice(device, image)`
   // the pooled entry gets neither `avdName` nor `androidImage` (#7546's gap).
@@ -329,16 +317,12 @@ test("onLoss recovery does not actively relaunch a pool-allocated emulator witho
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: true,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: true,
+  });
   manager.bootedDevices = [original];
   await pool.refreshDevices();
   await sessions.getOrCreateSession("session", pool, "android");
@@ -371,16 +355,12 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: false,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: false,
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   await pool.bindOrReuseDeviceSession(
@@ -1004,17 +984,13 @@ async function setupProcessExitPool(
   const store = incidents ?? new InMemoryEmulatorLossIncidentStore(timer);
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   sessions.stopCleanupTimer();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      emulatorLossIncidentStore: store,
-      recoveryPolicy: { onLoss, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: continuity,
-      retryExecutor: new DefaultRetryExecutor(timer),
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: store,
+    recoveryPolicy: { onLoss, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: continuity,
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();

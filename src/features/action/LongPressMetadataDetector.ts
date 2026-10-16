@@ -1,3 +1,4 @@
+import { rawNodeString, rawResourceId } from "../utility/elementProperties";
 import type { ObserveResult, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { parseBounds } from "../../utils/bounds";
@@ -140,15 +141,13 @@ export class LongPressMetadataDetector {
 
   private getRootSignature(root: any): string {
     const props = this.elementParser.extractNodeProperties(root);
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
-    const resourceId = props["resource-id"] ?? props.resourceId ?? "";
+    const resourceId = rawResourceId(props);
     const className = props.class ?? props.className ?? "";
     const parsedBounds = parseBounds(nodeBounds(root));
     const bounds = parsedBounds
       ? `${parsedBounds.left},${parsedBounds.top},${parsedBounds.right},${parsedBounds.bottom}`
       : "";
-    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
-    const text = props.text ?? props["content-desc"] ?? "";
+    const text = rawNodeString(props, ["text", "content-desc"]);
     return `${resourceId}|${className}|${bounds}|${text}`;
   }
 
@@ -159,11 +158,9 @@ export class LongPressMetadataDetector {
         return;
       }
       const props = this.elementParser.extractNodeProperties(node);
-      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
-      const resourceId = (props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+      const resourceId = rawResourceId(props).toLowerCase();
       const className = (props.class ?? props.className ?? "").toLowerCase();
-      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
-      const text = (props.text ?? props["content-desc"] ?? "").toLowerCase();
+      const text = rawNodeString(props, ["text", "content-desc"]).toLowerCase();
       if (this.hasMenuIndicator(resourceId, className, text)) {
         found = true;
       }

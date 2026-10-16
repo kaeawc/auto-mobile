@@ -13,6 +13,9 @@ describe("ProxySessionState", () => {
     expect(state.boundSessionUuid).toBeUndefined();
     expect(state.boundSessionUuidAt).toBeUndefined();
     expect(state.terminalBoundSession).toBeUndefined();
+    expect(state.livenessOwnershipClaimSent).toBe(false);
+    expect(state.boundSessionFromResultMint).toBe(false);
+    expect(state.initialSessionBindingConfigured).toBe(false);
   });
 
   test("owns collections independently for each instance", () => {
@@ -32,6 +35,9 @@ describe("ProxySessionState", () => {
 
     reference.boundSessionUuid = "session";
     reference.boundSessionUuidAt = 123;
+    reference.livenessOwnershipClaimSent = true;
+    reference.boundSessionFromResultMint = true;
+    reference.initialSessionBindingConfigured = true;
     reference.terminalBoundSession = {
       sessionUuid: "session",
       reason: "released",
@@ -40,6 +46,9 @@ describe("ProxySessionState", () => {
 
     expect(state.boundSessionUuid).toBe("session");
     expect(state.boundSessionUuidAt).toBe(123);
+    expect(state.livenessOwnershipClaimSent).toBe(true);
+    expect(state.boundSessionFromResultMint).toBe(true);
+    expect(state.initialSessionBindingConfigured).toBe(true);
     expect(state.terminalBoundSession).toBe(reference.terminalBoundSession);
     expect(state.terminalBoundSession?.reason).toBe("released");
   });

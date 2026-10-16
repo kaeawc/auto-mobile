@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { ActionableError } from "../../src/models";
+import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { waitFor, withDeadline } from "../helpers/abortableWaitFor";
 import {
@@ -34,7 +35,12 @@ import {
   type SimulatorAppearanceClient,
 } from "../helpers/webrtcDeviceCaptureHelpers";
 import {
+  buildWhepChromeLaunchArgs,
+  stripChromeUpdaterNoise,
+} from "../helpers/whepChromeLaunchArgs";
+import {
   formatNavigationTimeoutError,
+  probePageStateAfterNavigateTimeout,
   probeWhepPageReachable,
 } from "../helpers/whepNavigationReadiness";
 import {
@@ -88,6 +94,7 @@ const IOS_APPEARANCE_MAX_ATTEMPTS = 2;
 const IOS_FALLBACK_DEFAULT_BUNDLE_ID = "com.apple.mobileslideshow"; // Photos — pairs with the "light"/default fixture state
 const IOS_FALLBACK_CHANGE_BUNDLE_ID = "com.apple.Preferences"; // Settings — pairs with the "dark"/changed fixture state
 const CDP_COMMAND_TIMEOUT_MS = REAL_IO_TIMEOUT_MS;
+const PAGE_STATE_PROBE_TIMEOUT_MS = 5_000;
 const DAEMON_START_RETRY_DELAY_MS = 2_000;
 
 interface ChromeTarget {
@@ -348,14 +355,6 @@ function chromeBinary(): string {
 }
 
 const CHROME_DEBUG_PORT = 9222;
-const CHROME_LAUNCH_ARGS = [
-  "--headless=new",
-  "--no-proxy-server",
-  "--autoplay-policy=no-user-gesture-required",
-  `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
-  "--no-first-run",
-  "about:blank",
-];
 
 /** The Chrome process exit status + a tail of its log, for diagnosing a
  * headless-startup flake (the log was empty and unsurfaced before #4409). */
@@ -364,7 +363,8 @@ function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: stri
   try {
     const contents = readFileSync(logFile, "utf8").trim();
     if (contents) {
-      tail = contents.slice(-1500);
+      const filtered = stripChromeUpdaterNoise(contents).trim();
+      tail = filtered ? filtered.slice(-1500) : "(updater output only)";
     }
   } catch {
     /* the log may not exist if the spawn itself failed */
@@ -389,7 +389,7 @@ async function launchChromeReader(
     const userDataDir = await mkdtemp(join(tmpdir(), "automobile-chrome-"));
     const chrome = start(
       chromeBinary(),
-      [...CHROME_LAUNCH_ARGS, `--user-data-dir=${userDataDir}`],
+      buildWhepChromeLaunchArgs({ debugPort: CHROME_DEBUG_PORT, userDataDir }),
       logFile,
     );
     onStarted(chrome);
@@ -470,6 +470,21 @@ async function subscribeReader(cdp: CdpClient, diagnostics: () => string): Promi
   try {
     await cdp.command("Page.navigate", { url });
   } catch (error) {
+    const pageState = await probePageStateAfterNavigateTimeout(async () => {
+      const response = await raceWithDeadline(
+        () =>
+          cdp.command("Runtime.evaluate", {
+            expression: "({readyState: document.readyState, href: location.href})",
+            returnByValue: true,
+          }),
+        {
+          timer: defaultTimer,
+          timeoutMs: PAGE_STATE_PROBE_TIMEOUT_MS,
+          label: "Chrome page state after navigation timeout",
+        },
+      );
+      return response.result?.result?.value;
+    });
     const chromeVersion = await (async (): Promise<string | undefined> => {
       const response = await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/version`, {
         signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS),
@@ -485,6 +500,7 @@ async function subscribeReader(cdp: CdpClient, diagnostics: () => string): Promi
       url,
       probe,
       chromeVersion,
+      pageState,
       chromeDiagnostics: diagnostics(),
     });
   }

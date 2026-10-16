@@ -15,7 +15,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
-`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
+`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
@@ -51,7 +51,7 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`biometricAuth`, `dragAndDrop`, `dragPath`, `homeScreen`, `launchApp`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
@@ -1226,6 +1226,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android).                                                    |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
@@ -1636,6 +1637,44 @@ tool, which changes screen orientation.
 ```
 
 </details>
+
+### dragPath
+
+`dragPath` is disabled by default; enable it with `setToolEnabled`. It drives one
+finger down, along a polyline, and up using the CtrlProxy streaming stroke
+protocol, so it covers signatures and drawing canvases, Android unlock patterns,
+dragging a slider thumb to a coordinate, and long press then drag (for example a
+text-selection handle). Android only for now; iOS fails with a platform error
+before any input is sent.
+
+- `points`: 2 to 100 `{ x, y, durationMs? }` vertices. `durationMs` (1 to 5000,
+  default 200) is the time spent moving from the previous point to this one and
+  is ignored on the first point. Long segments are sent as moves at most 50 ms
+  apart.
+- `holdMs` (0 to 3000, default 0): press and hold at the first point before
+  moving. `releaseHoldMs` (0 to 3000, default 0): keep the finger down at the last
+  point before lifting.
+- `coordinateSpace` (`absolute` default, `normalized`, `percent`), `snapshotId`,
+  `display` and `layer` behave as in `tapAt`. Every point must lie inside the
+  screen; the first bad point is named in the error and nothing is dispatched.
+- Total finger-down time (holds plus segments) is capped at 20 seconds and must
+  fit the remaining request budget with 2 seconds of headroom; otherwise the call
+  is rejected before any input.
+- An aborted, timed-out or failed call always lifts the finger with a cancelling
+  end. A failure after the finger went down reports that the stroke may have
+  partially run; observe before retrying.
+
+```json
+{
+  "points": [
+    { "x": 0.2, "y": 0.3 },
+    { "x": 0.2, "y": 0.7, "durationMs": 400 },
+    { "x": 0.8, "y": 0.7, "durationMs": 400 }
+  ],
+  "coordinateSpace": "normalized",
+  "holdMs": 100
+}
+```
 
 ### Semantic accessibility links
 

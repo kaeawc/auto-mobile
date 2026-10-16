@@ -30,6 +30,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "sendKeys",
   "pressButton",
   "dragAndDrop",
+  "dragPath",
   "pinchOn",
   "selectAllText",
   "clipboard",

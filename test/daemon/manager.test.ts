@@ -655,12 +655,7 @@ describe("DaemonManager restart", () => {
       startedAt: 100,
       socketPath,
     });
-    const startSpy = spyOn(
-      manager as unknown as {
-        startUnlocked(options: { strictPort: boolean }): Promise<"started">;
-      },
-      "startUnlocked",
-    ).mockImplementation(async () => {
+    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
       expect(contender.acquireLock()).toBe(false);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
@@ -856,12 +851,7 @@ describe("DaemonManager acceptance-session restart", () => {
       buildId: "acceptance-build",
       entryScript: "/acceptance/dist/src/index.js",
     });
-    const startSpy = spyOn(
-      manager as unknown as {
-        startUnlocked(options: { strictPort: boolean }): Promise<"started">;
-      },
-      "startUnlocked",
-    ).mockResolvedValue("started");
+    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
 
     try {
       await expect(
@@ -965,12 +955,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(
-      manager as unknown as {
-        startUnlocked(options: { strictPort: boolean }): Promise<"started">;
-      },
-      "startUnlocked",
-    ).mockImplementation(async () => {
+    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
       expect(existsSync(lockPath)).toBe(true);
       return "started";
     });
@@ -1077,10 +1062,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(
-      manager as unknown as { startUnlocked(options: { strictPort: boolean }): Promise<"started"> },
-      "startUnlocked",
-    ).mockResolvedValue("started");
+    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
 
     try {
       await expect(
@@ -1192,10 +1174,7 @@ describe("DaemonManager control-state recovery", () => {
       processGenerationToken: "old-generation",
       entryScript: "/old/dist/src/index.js",
     });
-    const startSpy = spyOn(
-      manager as unknown as { startUnlocked(options: DaemonOptions): Promise<"started"> },
-      "startUnlocked",
-    ).mockResolvedValue("started");
+    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
 
     try {
       await expect(manager.recoverControlState({}, async () => false)).resolves.toBe("restarted");
@@ -1558,15 +1537,7 @@ describe("DaemonManager stop", () => {
 
     try {
       await expect(
-        (
-          manager as unknown as {
-            waitForStop: (
-              targetPid: number,
-              timeout: number,
-              expected: DaemonProcessRecord,
-            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
-          }
-        ).waitForStop(pid, 100, {
+        manager.waitForStop(pid, 100, {
           ...replacement,
           startedAt: 1,
           processGenerationToken: "old-generation",
@@ -1607,17 +1578,10 @@ describe("DaemonManager stop", () => {
     );
 
     try {
-      await expect(
-        (
-          manager as unknown as {
-            waitForStop: (
-              targetPid: number,
-              timeout: number,
-              expected: DaemonProcessRecord,
-            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
-          }
-        ).waitForStop(pid, 100, expected),
-      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+      await expect(manager.waitForStop(pid, 100, expected)).resolves.toEqual({
+        stopped: false,
+        replacedByOtherGeneration: false,
+      });
       expect(timer.now()).toBe(100);
       expect(scans).toBe(1);
     } finally {
@@ -1651,17 +1615,10 @@ describe("DaemonManager stop", () => {
     );
 
     try {
-      await expect(
-        (
-          manager as unknown as {
-            waitForStop: (
-              targetPid: number,
-              timeout: number,
-              expected: DaemonProcessRecord,
-            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
-          }
-        ).waitForStop(pid, 100, expected),
-      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+      await expect(manager.waitForStop(pid, 100, expected)).resolves.toEqual({
+        stopped: false,
+        replacedByOtherGeneration: false,
+      });
       expect(timer.now()).toBe(100);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1697,15 +1654,7 @@ describe("DaemonManager stop", () => {
 
     try {
       await expect(
-        (
-          manager as unknown as {
-            waitForStop: (
-              targetPid: number,
-              timeout: number,
-              expected: DaemonProcessRecord,
-            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
-          }
-        ).waitForStop(pid, 100, {
+        manager.waitForStop(pid, 100, {
           ...replacement,
           startedAt: 1,
           processGenerationToken: "old-generation",
@@ -3437,22 +3386,19 @@ describe("Daemon manager process detection", () => {
     process.env.AUTOMOBILE_DATA_DIR = directory;
     const events: string[] = [];
     const { manager, status, timer } = managerStartingAgainstVersion(directory, "0.0.0", events);
-    const preparationSpy = spyOn(
-      manager as any,
-      "prepareDaemonForConditionalRestart",
-    ).mockImplementation(async (receivedStatus: DaemonStatus) => {
-      expect(receivedStatus).toBe(status);
-      events.push("admission");
-      return { accepted: true };
-    });
-    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockImplementation(
-      async () => {
-        events.push("stop");
+    const preparationSpy = spyOn(manager, "prepareDaemonForConditionalRestart").mockImplementation(
+      async (receivedStatus: DaemonStatus) => {
+        expect(receivedStatus).toBe(status);
+        events.push("admission");
+        return { accepted: true };
       },
     );
+    const stopRunningSpy = spyOn(manager, "stopRunningDaemon").mockImplementation(async () => {
+      events.push("stop");
+    });
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
     const survivorCheckSpy = spyOn(
-      manager as any,
+      manager,
       "assertNoSurvivingDaemonBeforeRestart",
     ).mockImplementation(async (options: DaemonOptions) => {
       expect(options).toEqual({ debug: true, port: 3131, strictPort: true });
@@ -3462,7 +3408,7 @@ describe("Daemon manager process detection", () => {
       expect(durationMs).toBe(DAEMON_RESTART_HANDOFF_DELAY_MS);
       events.push("sleep");
     });
-    const launchOptionsSpy = spyOn(manager as any, "withDaemonOptions");
+    const launchOptionsSpy = spyOn(manager, "withDaemonOptions");
 
     try {
       await expect(manager.start({ port: 3131, debug: undefined })).resolves.toBe("started");
@@ -3493,11 +3439,11 @@ describe("Daemon manager process detection", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-upgrade-active-test-"));
     const events: string[] = [];
     const { manager } = managerStartingAgainstVersion(directory, "0.0.0", events);
-    const preparationSpy = spyOn(
-      manager as any,
-      "prepareDaemonForConditionalRestart",
-    ).mockResolvedValue({ accepted: false, reason: "active_operations" });
-    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const preparationSpy = spyOn(manager, "prepareDaemonForConditionalRestart").mockResolvedValue({
+      accepted: false,
+      reason: "active_operations",
+    });
+    const stopRunningSpy = spyOn(manager, "stopRunningDaemon").mockResolvedValue(undefined);
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
 
     try {
@@ -3525,11 +3471,10 @@ describe("Daemon manager process detection", () => {
       now,
       startedAt: now - (DAEMON_VERSION_RESTART_COOLDOWN_MS - 1),
     });
-    const preparationSpy = spyOn(
-      manager as any,
-      "prepareDaemonForConditionalRestart",
-    ).mockResolvedValue({ accepted: true });
-    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const preparationSpy = spyOn(manager, "prepareDaemonForConditionalRestart").mockResolvedValue({
+      accepted: true,
+    });
+    const stopRunningSpy = spyOn(manager, "stopRunningDaemon").mockResolvedValue(undefined);
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
@@ -3561,18 +3506,13 @@ describe("Daemon manager process detection", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-protected-peer-test-"));
     const events: string[] = [];
     const { manager } = managerStartingAgainstVersion(directory, peerVersion, events);
-    const preparationSpy = spyOn(
-      manager as any,
-      "prepareDaemonForConditionalRestart",
-    ).mockResolvedValue({ accepted: true });
-    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const preparationSpy = spyOn(manager, "prepareDaemonForConditionalRestart").mockResolvedValue({
+      accepted: true,
+    });
+    const stopRunningSpy = spyOn(manager, "stopRunningDaemon").mockResolvedValue(undefined);
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
-    const stopUnrecordedSpy = spyOn(
-      manager as any,
-      "stopUnrecordedDaemonsForExplicitRestart",
-    ).mockResolvedValue(undefined);
     const survivorCheckSpy = spyOn(
-      manager as any,
+      manager,
       "assertNoSurvivingDaemonBeforeRestart",
     ).mockResolvedValue(undefined);
 
@@ -3582,12 +3522,10 @@ describe("Daemon manager process detection", () => {
       expect(preparationSpy).not.toHaveBeenCalled();
       expect(stopRunningSpy).not.toHaveBeenCalled();
       expect(stopSpy).not.toHaveBeenCalled();
-      expect(stopUnrecordedSpy).not.toHaveBeenCalled();
       expect(survivorCheckSpy).not.toHaveBeenCalled();
       expect(events).toEqual([]);
     } finally {
       survivorCheckSpy.mockRestore();
-      stopUnrecordedSpy.mockRestore();
       stopSpy.mockRestore();
       stopRunningSpy.mockRestore();
       preparationSpy.mockRestore();
@@ -3841,14 +3779,7 @@ describe("Daemon manager process detection", () => {
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
     try {
-      const findForStart = (
-        manager as unknown as {
-          findLiveDaemonProcessesForStart(
-            options: DaemonOptions,
-            startDeadline: number,
-          ): Promise<number[]>;
-        }
-      ).findLiveDaemonProcessesForStart.bind(manager);
+      const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
       await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([]);
       // Exactly the three bounded retry scans; socket attribution must not rescan
@@ -3954,14 +3885,7 @@ describe("Daemon manager process detection", () => {
     );
 
     try {
-      const findForStart = (
-        manager as unknown as {
-          findLiveDaemonProcessesForStart(
-            options: DaemonOptions,
-            startDeadline: number,
-          ): Promise<number[]>;
-        }
-      ).findLiveDaemonProcessesForStart.bind(manager);
+      const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
       await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([]);
       expect(processFinder.calls).toBe(3);
@@ -4011,14 +3935,7 @@ describe("Daemon manager process detection", () => {
       portChecker,
     );
 
-    const findForStart = (
-      manager as unknown as {
-        findLiveDaemonProcessesForStart(
-          options: DaemonOptions,
-          startDeadline: number,
-        ): Promise<number[]>;
-      }
-    ).findLiveDaemonProcessesForStart.bind(manager);
+    const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
     try {
       await expect(
@@ -4193,14 +4110,7 @@ describe("Daemon manager process detection", () => {
       portChecker,
     );
     try {
-      const findForStart = (
-        manager as unknown as {
-          findLiveDaemonProcessesForStart(
-            options: DaemonOptions,
-            startDeadline: number,
-          ): Promise<number[]>;
-        }
-      ).findLiveDaemonProcessesForStart.bind(manager);
+      const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
       const options: DaemonOptions = { host: "::1", port: 4567 };
       await expect(findForStart(options, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual(
@@ -4242,14 +4152,7 @@ describe("Daemon manager process detection", () => {
       portChecker,
     );
     try {
-      const findForStart = (
-        manager as unknown as {
-          findLiveDaemonProcessesForStart(
-            options: DaemonOptions,
-            startDeadline: number,
-          ): Promise<number[]>;
-        }
-      ).findLiveDaemonProcessesForStart.bind(manager);
+      const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
       const startDeadline = timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
       await expect(findForStart({ port: 4567 }, startDeadline)).resolves.toEqual([]);
@@ -4291,14 +4194,7 @@ describe("Daemon manager process detection", () => {
       undefined,
       portChecker,
     );
-    const findForStart = (
-      manager as unknown as {
-        findLiveDaemonProcessesForStart(
-          options: DaemonOptions,
-          startDeadline: number,
-        ): Promise<number[]>;
-      }
-    ).findLiveDaemonProcessesForStart.bind(manager);
+    const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
     // The scans alone consume the whole budget: the retry backoff (200 + 500 ms)
     // lands exactly on the deadline, leaving nothing for the port probes.
@@ -4405,10 +4301,7 @@ describe("Daemon manager process detection", () => {
       join(directory, "daemon.sock"),
       processFinder,
     );
-    const waitSpy = spyOn(
-      manager as unknown as { waitForExistingDaemon(timeout: number): Promise<boolean> },
-      "waitForExistingDaemon",
-    );
+    const waitSpy = spyOn(manager, "waitForExistingDaemon");
     try {
       await expect(manager.start()).resolves.toBe("started");
       expect(waitSpy).not.toHaveBeenCalled();

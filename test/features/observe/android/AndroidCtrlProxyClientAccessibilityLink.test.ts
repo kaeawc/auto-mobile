@@ -14,8 +14,10 @@ describe("Android semantic link activation outcomes", () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: "semantic-link", platform: "android", name: "Test Device", isEmulator: true },
       adb,
-      (url) => (socket = new FakeWebSocket(url, "none", 0, timer)),
-      timer,
+      {
+        webSocketFactory: (url) => (socket = new FakeWebSocket(url, "none", 0, timer)),
+        timer,
+      },
     );
     await client.ensureConnected();
     socket.simulateMessage(

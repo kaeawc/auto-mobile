@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   resolveActionCall,
   deadlineRequest,
+  isAbortSignal,
+  resolveSignalCall,
   resolveActionCallWithPerf,
   resolveDeadlineActionCall,
   resolveTapAtCall,
@@ -89,5 +91,22 @@ describe("tap call resolvers", () => {
   test("deadlineRequest only builds the legacy carrier when a deadline exists", () => {
     expect(deadlineRequest(undefined)).toBeUndefined();
     expect(deadlineRequest(5)).toEqual({ requestDeadlineMs: 5 });
+  });
+});
+
+describe("signal-only call resolution", () => {
+  test("tells an AbortSignal from an ActionCall", () => {
+    const signal = new AbortController().signal;
+    expect(isAbortSignal(signal)).toBe(true);
+    expect(isAbortSignal({ signal })).toBe(false);
+    expect(isAbortSignal(undefined)).toBe(false);
+  });
+
+  test("wraps a bare signal and passes a call context through", () => {
+    const signal = new AbortController().signal;
+    expect(resolveSignalCall(signal)).toEqual({ signal });
+    expect(resolveSignalCall(undefined)).toEqual({ signal: undefined });
+    const call = { signal };
+    expect(resolveSignalCall(call)).toBe(call);
   });
 });

@@ -233,10 +233,10 @@ src/utils/android-cmdline-tools/AvdManagerClient.ts	COMSPEC
 src/utils/android-cmdline-tools/AvdManagerClient.ts	ComSpec
 src/utils/android-cmdline-tools/AvdManagerClient.ts	HOME
 src/utils/android-cmdline-tools/AvdManagerClient.ts	USERPROFILE
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	AUTOMOBILE_EMULATOR_HEADLESS
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	DISPLAY
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	WAYLAND_DISPLAY
 src/utils/android-cmdline-tools/EmulatorLauncher.ts	AUTOMOBILE_EMULATOR_ARGS
-src/utils/android-cmdline-tools/EmulatorLauncher.ts	AUTOMOBILE_EMULATOR_HEADLESS
-src/utils/android-cmdline-tools/EmulatorLauncher.ts	DISPLAY
-src/utils/android-cmdline-tools/EmulatorLauncher.ts	WAYLAND_DISPLAY
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	LOGNAME
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	USER
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	XDG_RUNTIME_DIR

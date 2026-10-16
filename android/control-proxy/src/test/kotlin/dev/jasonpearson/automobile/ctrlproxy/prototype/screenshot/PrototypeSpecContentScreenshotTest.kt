@@ -58,6 +58,31 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  // Pending: #12071 carousel and pager indicator cases; no Linux baselines recorded yet.
+  @Test
+  fun carouselMultiBrowse() =
+    prototypeScreenshotTest(
+      "carousel_multi_browse",
+      validPrototypeFixture("carousel-multi-browse"),
+      pending = true,
+    )
+
+  @Test
+  fun carouselHeroRepeat() =
+    prototypeScreenshotTest(
+      "carousel_hero_repeat",
+      validPrototypeFixture("carousel-hero-repeat"),
+      pending = true,
+    )
+
+  @Test
+  fun pagerIndicatorDots() =
+    prototypeScreenshotTest(
+      "pager_indicator_dots",
+      validPrototypeFixture("pager-indicator-dots"),
+      pending = true,
+    )
+
   @Test
   fun flowBasic() =
     prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"), pending = true)

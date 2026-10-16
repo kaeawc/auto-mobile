@@ -609,6 +609,8 @@ private fun RenderPrototypeNodeContent(
           }
         }
       }
+    "carousel" ->
+      RenderPrototypeCarousel(node, containerModifier) { RenderPrototypeNode(it, interact) }
     "text" -> {
       val source = node.style.source
       val role = prototypeTextRole(MaterialTheme.typography, source.textStyle)
@@ -1015,11 +1017,18 @@ private fun RenderPrototypePager(
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   var boundedHeight by remember { mutableStateOf(false) }
-  val pagerModifier = modifier.layout { measurable, constraints ->
-    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
-    val placeable = measurable.measure(constraints)
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-  }
+  val pagerModifier =
+    modifier
+      .layout { measurable, constraints ->
+        if (boundedHeight != constraints.hasBoundedHeight)
+          boundedHeight = constraints.hasBoundedHeight
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+      }
+      .then(
+        if (source.indicator == "dots") Modifier.pagerIndicator(pager, source.axis == "vertical")
+        else Modifier,
+      )
   // Preserve the horizontal pager's retention rule; vertical pages fill across the width.
   val keepNeighbours =
     if (source.axis == "vertical") fill.width && boundedHeight else fill.height && boundedHeight
@@ -1406,6 +1415,7 @@ private val SEMANTICS_FREE_CONTAINERS =
     "column",
     "flow",
     "grid",
+    "carousel",
     "scroll",
     "pager",
     "stack",
@@ -1447,7 +1457,8 @@ internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Bo
 
 private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
 
-private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "flow", "grid", "card")
+private val MERGEABLE_TAP_CONTAINERS =
+  setOf("box", "row", "column", "flow", "grid", "carousel", "card")
 
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {

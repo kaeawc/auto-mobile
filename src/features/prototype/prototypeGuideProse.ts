@@ -190,7 +190,16 @@ Children are placed row-major; a span that does not fit the row starts a new row
 \`span\` is an integer >= 1 on any node shape, but is valid only on a direct grid child;
 it must not exceed fixed columns. Adaptive runtime spans are clamped to the resolved count.
 
-A \`box\`, \`row\`, \`column\`, \`flow\` or \`grid\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
+A \`carousel\` (\`prototype_carousel_v1\`) is a horizontally scrolling row of items, one per child
+(at least one), that snaps to items and may declare \`repeat\` like \`row\`. \`itemWidth\` (dp, > 0)
+is required. \`variant\` is \`multiBrowse\` (default; items change width as they scroll, Android
+Material), \`hero\` (centered large item) or \`uncontained\` (fixed-width items). \`itemSpacing\`
+is dp >= 0. iOS draws every variant as fixed-width snapping items. A pager may also declare
+\`indicator: "dots"\` (default \`none\`): page dots below the pages, with the current page filled;
+they need the same capability. A carousel has no page index, event or \`setPage\` target; use a
+\`pager\` when the page matters.
+
+A \`box\`, \`row\`, \`column\`, \`flow\`, \`grid\` or \`carousel\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
 are instantiated once per item, in order, as siblings inside the same container (the container
 itself is not repeated). A list is a \`column\` with \`repeat\` whose single child is the row template.
 

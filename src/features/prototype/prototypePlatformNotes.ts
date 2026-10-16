@@ -13,6 +13,7 @@ import type { PrototypeSpec } from "./prototypeSpec";
 export type PrototypePlatformNoteConstruct =
   | "rich-text-links"
   | "stack"
+  | "carousel"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
@@ -219,6 +220,14 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     detail:
       "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
     occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
+  },
+  {
+    construct: "carousel",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS has no Material carousel: every variant draws fixed-width items (itemWidth) in a snapping horizontal scroll, without the multiBrowse or hero size changes, and all items stay in the hierarchy. Android composes only the visible items.",
+    occurrencePath: ({ node, path }) => (node?.type === "carousel" ? path : undefined),
   },
 ];
 

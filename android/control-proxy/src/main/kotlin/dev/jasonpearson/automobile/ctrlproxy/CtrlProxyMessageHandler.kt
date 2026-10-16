@@ -190,6 +190,15 @@ class CtrlProxyMessageHandler(
             )
           }
         }
+        multiFingerCountError(request.fingerCount)?.let { error ->
+          return SwipeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = error,
+          )
+        }
         // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
         // so it cannot be non-finite and is not guarded.
         firstNonFinite(

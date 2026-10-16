@@ -196,24 +196,31 @@ private struct PrototypeSubstitutionGuard {
         try actions(fields, path: path, scope: scope)
     }
 
+    /// Every action list a node runs: a tap, a long press or a double tap binds the same way. A
+    /// caller may name one list instead (`refresh.onRefresh`).
     private mutating func actions(
-        _ fields: [String: JSONValue], path: String, scope: Scope?, list: String = "onTap"
+        _ fields: [String: JSONValue], path: String, scope: Scope?, list: String? = nil
     )
         throws
     {
-        guard case let .array(entries)? = fields[list] else { return }
-        for (index, entry) in entries.enumerated() {
-            guard case let .object(action) = entry else { continue }
-            let actionPath = "\(path).\(list)[\(index)]"
-            switch action["type"]?.stringValue {
-            case "setState":
-                try field(action, "key", path: actionPath, scope: scope)
-                try field(action, "value", path: actionPath, scope: scope)
-            case "emit": try field(action, "name", path: actionPath, scope: scope)
-            case "toggle", "increment", "decrement":
-                try field(action, "key", path: actionPath, scope: scope)
-            default: break
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap"] {
+            guard case let .array(entries)? = fields[name] else { continue }
+            for (index, entry) in entries.enumerated() {
+                guard case let .object(action) = entry else { continue }
+                try actionFields(action, path: "\(path).\(name)[\(index)]", scope: scope)
             }
+        }
+    }
+
+    private mutating func actionFields(_ action: [String: JSONValue], path: String, scope: Scope?) throws {
+        switch action["type"]?.stringValue {
+        case "setState":
+            try field(action, "key", path: path, scope: scope)
+            try field(action, "value", path: path, scope: scope)
+        case "emit": try field(action, "name", path: path, scope: scope)
+        case "toggle", "increment", "decrement":
+            try field(action, "key", path: path, scope: scope)
+        default: break
         }
     }
 

@@ -69,7 +69,7 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
   expect(timer.now()).toBe(committedAt + hint);
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
 });
 
 test("only the capped cleanup contributes a bound while an own-budget clock retry stays pending", async () => {
@@ -123,8 +123,8 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   await release;
 
   expect(manager.getSessionForDevice(deviceId)).toBeNull();
-  expect(manager["pendingDeviceCleanupWork"].get(deviceId)?.size).toBe(2);
-  expect(manager["pendingDeviceCleanupBounds"].get(deviceId)?.size).toBe(1);
+  expect(manager["deviceCleanupQuarantine"].workCount(deviceId)).toBe(2);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(1);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(
     SESSION_RELEASE_TEARDOWN_CAP_MS - 1_000,
   );
@@ -137,8 +137,8 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(true);
   expect(clockSignal).toBeDefined();
   expect(clockSignal?.aborted).toBe(false);
-  expect(manager["pendingDeviceCleanupWork"].get(deviceId)?.size).toBe(1);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].workCount(deviceId)).toBe(1);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
   clockRetry.resolve();
   await flush();
@@ -170,7 +170,7 @@ test("a release with no pending restores leaves no cleanup bound or timer", asyn
   expect(manager.getSessionForDevice(deviceId)).toBeNull();
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getPendingDeviceCleanup(deviceId)).toBeNull();
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(timer.getPendingSleepCount()).toBe(0);
   expect(timer.getPendingIntervalCount()).toBe(cleanupIntervals);
@@ -232,7 +232,7 @@ test("a bind refused while a released session's capped network restore is still 
   await flush();
   expect(manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
   expect(manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(1_000);
-  expect(manager["pendingDeviceCleanupBounds"].has(deviceId)).toBe(false);
+  expect(manager["deviceCleanupQuarantine"].boundCount(deviceId)).toBe(0);
 
   // Contract (#11360 / #12105): `retryAfterMs` is a time the device actually leaves quarantine
   // within. 9 s of the cap remained when the hint was read.

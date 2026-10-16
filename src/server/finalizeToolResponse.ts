@@ -147,6 +147,7 @@ export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "systemTray",
   "swipeOn",
   "pinchOn",
+  "multiTouch",
   "openLink",
   "shake",
   "recentApps",

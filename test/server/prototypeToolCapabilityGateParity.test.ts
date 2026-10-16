@@ -54,6 +54,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     onLongPress: [{ type: "emit", name: "long" }],
     onDoubleTap: [{ type: "emit", name: "double" }],
   }),
+  prototype_carousel_v1: fixture({
+    type: "carousel",
+    id: "label",
+    itemWidth: 120,
+    children: [{ type: "spacer" }],
+  }),
   prototype_refresh_v1: fixture({
     type: "scroll",
     id: "label",

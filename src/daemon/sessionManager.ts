@@ -1,3 +1,6 @@
+import { createLegacyLifecycleView } from "./legacyLifecycleView";
+import { isLegacySessionIdKnown, type LegacyLifecycleView } from "./sessionSlots";
+import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
 import {
   RecorderTeardownRetries,
   RECORDER_TEARDOWN_RECHECK_MS,
@@ -3649,6 +3652,7 @@ export class SessionManager {
     );
     settleRecovery(creation.promise);
     this.pendingSessionCreations.set(sessionId, creation);
+    this.slotShadowProbe.check(sessionId, "creation-start");
     try {
       const created = await this.withinCreateDeadline(
         sessionId,
@@ -3665,6 +3669,7 @@ export class SessionManager {
     } finally {
       if (this.pendingSessionCreations.get(sessionId) === creation) {
         this.pendingSessionCreations.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "creation-end");
       }
     }
   }
@@ -3849,6 +3854,7 @@ export class SessionManager {
       this.runningPlanLabelSessions.add(session.sessionId);
     }
     this.sessions.set(session.sessionId, session);
+    this.slotShadowProbe.check(session.sessionId, "published");
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
     this.cancelSessionlessUseOnAcquisition(session.assignedDevice, session.sessionId);
@@ -4939,9 +4945,11 @@ export class SessionManager {
       if (this.pendingSessionAssignments.get(sessionId) === assignment) {
         this.pendingSessionAssignments.delete(sessionId);
         this.sharedSessionAssignments.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "assignment-end");
       }
     });
     this.pendingSessionAssignments.set(sessionId, assignment);
+    this.slotShadowProbe.check(sessionId, "assignment-start");
     return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs);
   }
 
@@ -5946,6 +5954,7 @@ export class SessionManager {
     );
     const rebind = { session: existing, promise };
     this.pendingSessionRebinds.set(sessionId, rebind);
+    this.slotShadowProbe.check(sessionId, "rebind-start");
     try {
       return await promise;
     } catch (error) {
@@ -5956,6 +5965,7 @@ export class SessionManager {
     } finally {
       if (this.pendingSessionRebinds.get(sessionId) === rebind) {
         this.pendingSessionRebinds.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "rebind-end");
       }
     }
   }
@@ -6564,6 +6574,45 @@ export class SessionManager {
     );
   }
 
+  /** Read-only shadow adapter; its maps reflect subsequent lifecycle mutations. */
+  getLegacyLifecycleView(): LegacyLifecycleView<Session> {
+    return createLegacyLifecycleView(
+      {
+        sessions: this.sessions,
+        pendingAssignments: this.pendingSessionAssignments,
+        pendingCreations: this.pendingSessionCreations,
+        pendingReleases: this.pendingSessionReleases,
+        pendingRebinds: this.pendingSessionRebinds,
+        releaseOps: this.releasePromises,
+        terminalSnapshots: this.terminalReleaseSnapshots,
+        recoveredTerminalIntents: this.recoveredTerminalReleaseIntents,
+        latestFinalizedIdentities: this.latestFinalizedSessionIdentities,
+      },
+      this.releasingSessions,
+    );
+  }
+
+  private readonly slotShadowProbe = new SessionSlotShadowProbe(
+    () => this.getLegacyLifecycleView(),
+    {
+      isCurrentSession: (session) => this.isCurrentSession(session),
+      isAdmittedForAutomation: (session) => this.isAdmittedForAutomation(session),
+      isLatestSessionIdentity: (session) => this.isLatestSessionIdentity(session),
+      isSessionBeingRecreated: (uuid) => this.isSessionBeingRecreated(uuid),
+      isKnownSessionId: (uuid) => isLegacySessionIdKnown(this.getLegacyLifecycleView(), uuid),
+    },
+    logger,
+  );
+
+  setSlotShadowProbeMode(mode: SlotShadowProbeMode): void {
+    this.slotShadowProbe.mode = mode;
+  }
+
+  /** Explicit checks also cover retained older incarnations in agreement tests. */
+  checkSlotShadowAgreement(uuid: string, event: string, identities: readonly Session[] = []): void {
+    this.slotShadowProbe.check(uuid, event, identities);
+  }
+
   isCurrentSession(session: Session): boolean {
     return (
       this.sessions.get(session.sessionId) === session &&
@@ -6697,6 +6746,7 @@ export class SessionManager {
 
     const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
+    this.slotShadowProbe.check(sessionId, "release-start");
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
@@ -6735,6 +6785,7 @@ export class SessionManager {
       this.activeReleasePromises.delete(release);
       if (this.releasePromises.get(sessionId) === release) {
         this.releasePromises.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "release-end");
       }
     }
   }
@@ -13318,6 +13369,7 @@ export class SessionManager {
       this.deviceSessionMap.delete(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
+    this.slotShadowProbe.check(sessionId, "unpublished");
     this.endedLabelBases.delete(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);

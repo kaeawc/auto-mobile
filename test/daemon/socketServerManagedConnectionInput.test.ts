@@ -1,8 +1,8 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ManagedConnectionBinding } from "../../src/daemon/managedSlots/managedConnectionScope";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -70,7 +70,12 @@ function useServer(): void {
       },
     }),
   };
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
+  const server = createTestUnixSocketServer(
+    "unused",
+    "http://localhost:0/mcp",
+    state,
+    new FakeTimer(),
+  );
   internals = server as unknown as Internals;
   internals.acceptingRequests = true;
 }
@@ -203,7 +208,12 @@ describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () =
         },
       }),
     };
-    const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
+    const server = createTestUnixSocketServer(
+      "unused",
+      "http://localhost:0/mcp",
+      state,
+      new FakeTimer(),
+    );
     internals = server as unknown as Internals;
     internals.acceptingRequests = true;
     const socket = connect();

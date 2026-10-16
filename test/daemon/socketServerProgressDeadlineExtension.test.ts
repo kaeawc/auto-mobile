@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { describe, expect, mock, test } from "bun:test";
@@ -5,7 +6,7 @@ import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/p
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
@@ -44,7 +45,7 @@ function createFakeDaemonState() {
 }
 
 function createServer(fakeTimer: FakeTimer): UnixSocketServer {
-  return new UnixSocketServer(
+  return createTestUnixSocketServer(
     join(tmpdir(), `progress-deadline-${randomUUID()}.sock`),
     "http://localhost:0/mcp",
     createFakeDaemonState(),
@@ -704,7 +705,7 @@ describe("pushProgressNotification is independent of the general notification su
     sessionId: string;
     writes: string[];
   } {
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       join(tmpdir(), `progress-subscription-${randomUUID()}.sock`),
       "http://localhost:0/mcp",
       { isInitialized: () => false },

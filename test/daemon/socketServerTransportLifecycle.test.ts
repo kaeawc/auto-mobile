@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import {
   ResourceUpdatedBroadcaster,
   type ResourceUpdateTargets,
@@ -9,7 +10,6 @@ import * as securePermissions from "../../src/utils/filesystem/securePermissions
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse, DaemonNotification } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -52,7 +52,7 @@ describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetToolCallRecordingState());
 
   test("ide/status advertises structured session-not-found errors", async () => {
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -71,7 +71,12 @@ describe("daemon socket transport lifecycle", () => {
 
   test("codes a missing socket session without changing its message", async () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer("/fake/socket", "http://127.0.0.1:1/mcp", undefined, timer);
+    const server = createTestUnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+    );
     const internals = server as unknown as ServerInternals;
     await expect(
       internals.handleRequest(
@@ -97,7 +102,7 @@ describe("daemon socket transport lifecycle", () => {
   for (const event of ["close", "error"]) {
     test(`socket ${event} drops only that socket's recording`, () => {
       const timer = new FakeTimer();
-      const server = new UnixSocketServer(
+      const server = createTestUnixSocketServer(
         "/fake/socket",
         "http://127.0.0.1:1/mcp",
         undefined,
@@ -121,7 +126,12 @@ describe("daemon socket transport lifecycle", () => {
 
   test("a stale socket release preserves the newer incarnation's recording", () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer("/fake/socket", "http://127.0.0.1:1/mcp", undefined, timer);
+    const server = createTestUnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+    );
     const internals = server as unknown as ServerInternals;
     const oldSocket = new RpcSocket() as unknown as Socket;
     const newSocket = new RpcSocket() as unknown as Socket;
@@ -134,7 +144,7 @@ describe("daemon socket transport lifecycle", () => {
   });
 
   test("reset sends HTTP DELETE before closing the loopback MCP client", async () => {
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -165,7 +175,12 @@ describe("daemon socket transport lifecycle", () => {
 
   test("a stalled HTTP DELETE cannot block client close indefinitely", async () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer("/fake/socket", "http://127.0.0.1:1/mcp", undefined, timer);
+    const server = createTestUnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+    );
     const internals = server as unknown as ServerInternals;
     let closed = false;
     const transport = Object.create(
@@ -189,7 +204,7 @@ describe("daemon socket transport lifecycle", () => {
   });
 
   test("daemon RPC reader preserves UTF-8 split across socket events", async () => {
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -244,7 +259,7 @@ describe("daemon socket resource subscription routing", () => {
     const mkdir = spyOn(securePermissions, "ensureSecureDir").mockResolvedValue();
     const chmod = spyOn(securePermissions, "secureFile").mockResolvedValue();
     const timer = new FakeTimer();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/resource-lifecycle/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -298,7 +313,7 @@ describe("daemon socket resource subscription routing", () => {
 
   test("accepts an unknown subscription URI without sending updates for registered resources", async () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -350,7 +365,7 @@ describe("daemon socket resource subscription routing", () => {
 
   test("routes registered updates to exact socket subscriptions, preserves pages and cleans disconnects", async () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,
@@ -436,7 +451,7 @@ describe("daemon socket resource subscription routing", () => {
 
   test("rejects a malformed subscription instead of retaining it", async () => {
     const timer = new FakeTimer();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
       undefined,

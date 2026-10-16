@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
@@ -13,7 +14,6 @@ import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
 } from "../../../src/daemon/toolCallActivity";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { BootedDevice } from "../../../src/models";
 import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
@@ -177,7 +177,7 @@ class DaemonUnderTest {
       timer,
     );
     this.monitor.start();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       DaemonState.getInstance(),

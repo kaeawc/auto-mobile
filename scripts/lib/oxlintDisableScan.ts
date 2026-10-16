@@ -9,7 +9,8 @@
 // literals, or on a later line of a block comment, is never a directive.
 //
 // Output is sorted "<count>\t<file>\t<key>" rows (the ratchet's row format), with
-// four key shapes: "oxlint-disable(<rule>)" for each -next-line/-line directive,
+// five key shapes: "oxlint-disable(<rule>)" for each -next-line directive,
+// "oxlint-disable-line(<rule>)" for each -line directive,
 // "oxlint-disable-block(<rule>)" for an unbounded disable a later enable closes,
 // "oxlint-disable-file(<rule>)" for one that runs to the end of the file (separate
 // keys, so widening a suppression, or dropping its closing enable, is a new row), and
@@ -38,8 +39,8 @@ const SCAN_EXTENSIONS = /\.(?:[cm]?ts|tsx)$/;
 export interface Directive {
   rules: string[];
   hasReason: boolean;
-  /** "line" for the -next-line/-line forms; "file" for the unbounded form, which covers the rest of the file. */
-  scope: "line" | "file";
+  /** "next-line" or "line" for those forms; "file" for the unbounded form, which covers the rest of the file. */
+  scope: "next-line" | "line" | "file";
   /**
    * For an unbounded disable: the rules a later enable directive closes. Each is
    * counted under its own key, so deleting or moving that closer (which extends the
@@ -79,7 +80,7 @@ export function parseDirective(commentBody: string): Directive | null {
   if (!m) {
     return null;
   }
-  const scope = m[1] ? "line" : "file";
+  const scope = m[1] === "-next-line" ? "next-line" : m[1] === "-line" ? "line" : "file";
   const rest = m[2];
   // ESLint's description separator: whitespace, then two or more dashes. A
   // no-space "--reason" still starts the reason rather than polluting a rule key.
@@ -158,8 +159,12 @@ export function findDirectives(source: string, fileName = "input.tsx"): Directiv
 }
 
 function keyFor(d: Directive, rule: string): string {
-  if (d.scope === "line") {
+  // -line and -next-line cover different lines, so swapping one for the other is a new row.
+  if (d.scope === "next-line") {
     return "oxlint-disable";
+  }
+  if (d.scope === "line") {
+    return "oxlint-disable-line";
   }
   return d.closed?.includes(rule) ? "oxlint-disable-block" : "oxlint-disable-file";
 }
@@ -183,7 +188,13 @@ export function countRows(file: string, source: string, counts: Map<string, numb
 const IGNORE_CONFIG = ".oxlintrc.json";
 
 /** The oxlint `ignorePatterns` of <root>/.oxlintrc.json (JSONC), as globs. */
-export function readIgnoreGlobs(root: string): Bun.Glob[] {
+/** One ignorePatterns entry; a leading `!` re-includes what earlier entries ignored. */
+export interface IgnoreRule {
+  glob: Bun.Glob;
+  negate: boolean;
+}
+
+export function readIgnoreGlobs(root: string): IgnoreRule[] {
   let text: string;
   try {
     text = readFileSync(join(root, IGNORE_CONFIG), "utf8");
@@ -200,7 +211,16 @@ export function readIgnoreGlobs(root: string): Bun.Glob[] {
     throw new Error(`oxlint-disable scan: cannot parse ${IGNORE_CONFIG}`);
   }
   const patterns: unknown = parsed.config?.ignorePatterns ?? [];
-  return (Array.isArray(patterns) ? patterns : []).map((p) => new Bun.Glob(String(p)));
+  return (Array.isArray(patterns) ? patterns : []).map((p) => {
+    const text = String(p);
+    const negate = text.startsWith("!");
+    return { glob: new Bun.Glob(negate ? text.slice(1) : text), negate };
+  });
+}
+
+/** gitignore-style ordered matching: the last matching entry decides. */
+export function isIgnored(file: string, rules: IgnoreRule[]): boolean {
+  return rules.reduce((ignored, rule) => (rule.glob.match(file) ? !rule.negate : ignored), false);
 }
 
 /** Lists candidate files under root, or null when root is not a git work tree (walk instead). */
@@ -248,7 +268,7 @@ export function listLintedFiles(root: string, lister: FileLister = gitFiles): st
   const ignores = readIgnoreGlobs(root);
   return all
     .filter((f) => SCAN_EXTENSIONS.test(f))
-    .filter((f) => !ignores.some((g) => g.match(f)))
+    .filter((f) => !isIgnored(f, ignores))
     .filter((f) => {
       try {
         return statSync(join(root, f)).isFile();

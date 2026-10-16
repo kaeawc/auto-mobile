@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { countRows, findDirectives, scanRepo } from "../../scripts/lib/oxlintDisableScan";
+import {
+  countRows,
+  findDirectives,
+  isIgnored,
+  scanRepo,
+} from "../../scripts/lib/oxlintDisableScan";
 
 const rulesOf = (src: string) => findDirectives(src).map((d) => d.rules);
 
@@ -109,6 +114,30 @@ describe("oxlintDisableScan", () => {
     expect(keys("/* oxlint-enable a */\n/* oxlint-disable a -- r */\nfoo();\n")).toEqual([
       "src/a.ts\toxlint-disable-file(a)",
     ]);
+  });
+
+  test("-line and -next-line get distinct keys, so swapping one for the other is a new row", () => {
+    const keys = (src: string) => {
+      const counts = new Map<string, number>();
+      countRows("src/a.ts", src, counts);
+      return [...counts.keys()];
+    };
+    expect(keys("foo(); // oxlint-disable-line a -- r\n")).toEqual([
+      "src/a.ts\toxlint-disable-line(a)",
+    ]);
+    expect(keys("// oxlint-disable-next-line a -- r\nfoo();\n")).toEqual([
+      "src/a.ts\toxlint-disable(a)",
+    ]);
+  });
+
+  test("ignorePatterns apply in order, so a later negation re-includes a file", () => {
+    const rules = [
+      { glob: new Bun.Glob("build/**/*"), negate: false },
+      { glob: new Bun.Glob("build/keep.ts"), negate: true },
+    ];
+    expect(isIgnored("build/drop.ts", rules)).toBe(true);
+    expect(isIgnored("build/keep.ts", rules)).toBe(false);
+    expect(isIgnored("src/a.ts", rules)).toBe(false);
   });
 
   test("countRows emits a no-reason row only for reason-less directives", () => {

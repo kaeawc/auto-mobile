@@ -31,7 +31,8 @@
 # the .oxlintrc.json ignorePatterns; it fails closed when none are found) with the
 # TypeScript scanner, and this script merges its rows into the same baseline and
 # the same new_or_increased compare:
-#   <count>  <file>  oxlint-disable(<rule>)            every -next-line/-line directive, per rule
+#   <count>  <file>  oxlint-disable(<rule>)            every -next-line directive, per rule
+#   <count>  <file>  oxlint-disable-line(<rule>)       every -line directive, per rule
 #   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
 #   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`

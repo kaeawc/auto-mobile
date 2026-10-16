@@ -241,12 +241,6 @@ describe("agent benchmark harness", () => {
     expect(result.preflight.log).toContain("verified dev.example is /repo/app.apk");
   });
 
-  test("no screen dump is taken when the suite has no screen checks", async () => {
-    const { runner, deps, options } = setup(PASSING);
-    await runSuite(loadedSuite({ verify: { answerIncludes: ["COUNT: 3"] } }), options, deps);
-    expect(runner.adbCalls().some((call) => call.includes("uiautomator"))).toBe(false);
-  });
-
   test("a launch failure still stops the private daemon and removes the socket dir", async () => {
     const { fs, runner, deps, options } = setup(PASSING);
     deps.launcher = {
@@ -446,7 +440,7 @@ describe("agent benchmark harness", () => {
       .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" });
     const suite = loadedSuite({
       preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
-      verify: { answerIncludes: ["COUNT: 3"] },
+      verify: { answerIncludes: ["COUNT: 3"], screenIncludes: ["Bug repro"] },
     });
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");

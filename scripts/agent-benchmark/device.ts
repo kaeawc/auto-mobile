@@ -89,11 +89,16 @@ export interface PreflightSpec {
 }
 
 function escapeXml(text: string): string {
+  // Tab, LF, and CR as character references: XML parsers normalize the literal characters
+  // (to spaces in attributes, CR to LF in text), so a key "a\tb" would load as "a b".
   return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("\t", "&#9;")
+    .replaceAll("\n", "&#10;")
+    .replaceAll("\r", "&#13;");
 }
 
 /** Render a SharedPreferences XML document in Android's on-disk format. */

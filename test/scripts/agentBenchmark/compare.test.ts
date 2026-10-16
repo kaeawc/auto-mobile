@@ -229,6 +229,11 @@ describe("verification text matching", () => {
     expect(containsBounded("不成功", "成功")).toBe(false);
     expect(containsBounded("Café", "Caf")).toBe(false);
     expect(containsBounded("状態: 完了。", "完了")).toBe(true);
+    // A decimal or grouped continuation is a different number; sentence punctuation is not.
+    expect(containsBounded("EXPECTED_COUNT: 3.5", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3,000", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3.", "EXPECTED_COUNT: 3")).toBe(true);
+    expect(containsBounded("EXPECTED_COUNT: 3, then 4", "EXPECTED_COUNT: 3")).toBe(true);
   });
 
   test("an over-tapped run fails both the answer and the screen check", () => {

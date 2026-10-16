@@ -24,7 +24,7 @@ function suite(claude: Record<string, unknown> = {}) {
       platform: "android",
       prompt: "p.md",
       app: { packageName: "dev.example" },
-      verify: { answerIncludes: ["DONE"] },
+      verify: { answerIncludes: ["DONE"], screenIncludes: ["Done"] },
       claude,
     },
     "demo.yml",

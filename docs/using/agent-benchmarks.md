@@ -117,10 +117,10 @@ A run's verdict comes only from hard signals; baselines never change it.
 | `failed`     | The run completed, but a check failed: Claude made no successful auto-mobile tool call, or the final answer or the device screen did not show the expected text.                                   |
 | `incomplete` | The process timed out or exited non-zero, the MCP server did not connect, the `result` event is missing or an error (for example `error_max_budget_usd`), or the transcript has unparseable lines. |
 
-Every suite must have at least one `verify` check; otherwise a run could pass without doing the
-task. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
+Every suite must have at least one `verify.screenIncludes` entry: the device screen is the oracle,
+since an answer alone can be produced without touching the app. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
 must stand alone: it can't run on into a letter or digit in any script, so `EXPECTED_COUNT: 3`
-doesn't match `EXPECTED_COUNT: 30` and `完了` doesn't match inside `未完了`. A run must also make at
+doesn't match `EXPECTED_COUNT: 30` (or `3.5`, or `3,000`) and `完了` doesn't match inside `未完了`. A run must also make at
 least one auto-mobile tool call that returned a non-error result; an answer produced without
 touching the device fails. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
 `uiautomator` dump taken after Claude exits. It matches only the `text` and `content-desc` of the

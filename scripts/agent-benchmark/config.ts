@@ -138,10 +138,12 @@ const suiteSchema = z
     baselineToolSequence: z.array(z.string().min(1)).optional(),
   })
   .strict()
-  .refine((suite) => suite.verify.answerIncludes.length + suite.verify.screenIncludes.length > 0, {
+  // The device screen is the oracle: an answer alone can be produced without ever touching
+  // the app (or after only an inventory call such as listDevices).
+  .refine((suite) => suite.verify.screenIncludes.length > 0, {
     message:
-      "verify needs at least one answerIncludes or screenIncludes entry; without one a run passes without doing the task",
-    path: ["verify"],
+      "verify.screenIncludes needs at least one entry; without a device-backed check a run can pass without doing the task",
+    path: ["verify", "screenIncludes"],
   });
 
 export type SuiteBaseline = z.infer<typeof baselineSchema>;

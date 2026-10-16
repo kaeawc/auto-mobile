@@ -15,7 +15,7 @@ const MINIMAL = {
   platform: "android",
   prompt: "../prompts/demo.md",
   app: { packageName: "com.example" },
-  verify: { answerIncludes: ["DONE"] },
+  verify: { answerIncludes: ["DONE"], screenIncludes: ["Done"] },
 };
 
 describe("agent benchmark suite config", () => {
@@ -37,7 +37,7 @@ describe("agent benchmark suite config", () => {
       disallowedTools: ["Bash"],
       timeoutSeconds: 900,
     });
-    expect(suite.verify).toEqual({ answerIncludes: ["DONE"], screenIncludes: [] });
+    expect(suite.verify).toEqual({ answerIncludes: ["DONE"], screenIncludes: ["Done"] });
     expect(suite.failurePatterns).toEqual([]);
   });
 
@@ -78,7 +78,7 @@ describe("agent benchmark suite config", () => {
     const promptPath = join(root, "benchmark", "agent", "prompts", "demo.md");
     const files: Record<string, string> = {
       [suitePath]:
-        "name: demo\nplatform: android\nprompt: ../prompts/demo.md\napp:\n  packageName: com.example\n  apkPath: build/app.apk\nverify:\n  answerIncludes: [DONE]\n",
+        "name: demo\nplatform: android\nprompt: ../prompts/demo.md\napp:\n  packageName: com.example\n  apkPath: build/app.apk\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n",
       [promptPath]: "Do the thing.\n",
     };
     const fs = { readFile: (path: string) => files[path] ?? "" };
@@ -140,17 +140,17 @@ describe("agent benchmark suite config", () => {
     ).toEqual({ p: { name: "tab\tnew\nline 😀 & <ok>" } });
   });
 
-  test("a suite with no verification check is rejected", () => {
-    const withoutVerify = { ...MINIMAL, verify: undefined };
-    expect(() => parseSuiteDefinition(withoutVerify, "x.yml")).toThrow(
-      /verify: verify needs at least one answerIncludes or screenIncludes entry/,
-    );
-    expect(() =>
-      parseSuiteDefinition(
-        { ...MINIMAL, verify: { answerIncludes: [], screenIncludes: [] } },
-        "x.yml",
-      ),
-    ).toThrow(/without one a run passes without doing the task/);
+  test("a suite without a device screen check is rejected", () => {
+    // The screen is the oracle: an answer alone can be echoed without touching the app.
+    for (const verify of [
+      undefined,
+      { answerIncludes: [], screenIncludes: [] },
+      { answerIncludes: ["DONE"] },
+    ]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, verify }, "x.yml")).toThrow(
+        /verify.screenIncludes: verify.screenIncludes needs at least one entry/,
+      );
+    }
     expect(
       parseSuiteDefinition({ ...MINIMAL, verify: { screenIncludes: ["Done"] } }, "x.yml").verify,
     ).toEqual({ answerIncludes: [], screenIncludes: ["Done"] });
@@ -160,7 +160,7 @@ describe("agent benchmark suite config", () => {
     const fs = {
       readFile: (path: string) =>
         path.endsWith(".yml")
-          ? "name: demo\nplatform: android\nprompt: p.md\napp:\n  packageName: com.example\nverify:\n  answerIncludes: [DONE]\n"
+          ? "name: demo\nplatform: android\nprompt: p.md\napp:\n  packageName: com.example\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n"
           : "  \n",
     };
     expect(() => loadSuite(resolve("/s/demo.yml"), resolve("/repo"), fs)).toThrow(

@@ -203,6 +203,25 @@ final class PrototypeRequestTests: XCTestCase {
         XCTAssertEqual(session.state["status"], .string("success"))
     }
 
+    func testABodyThatLeavesNoRoomForMetaIsRolledBackAsInvalidResponse() throws {
+        var (session, actions) = try shown(onTap: feed)
+        _ = session.run(actions)
+        // The body alone fits the data limit; with any form of `__meta` beside it, it does not.
+        let body = String(repeating: "x", count: PrototypeLimits.maxDataWriteBytes - 40)
+        let events = session.completeRequest("r-1", ok(.string(body)))
+        XCTAssertNil(PrototypeDataPointer.resolve(session.data, pointer: "/feed"))
+        XCTAssertEqual(
+            PrototypeDataPointer.resolve(session.data, pointer: "/feed__meta/error"),
+            .object([
+                "code": .string("invalid_response"),
+                "message": .string("response and metadata exceed the data limit"),
+            ])
+        )
+        XCTAssertEqual(PrototypeDataPointer.resolve(session.data, pointer: "/title"), .string("Feed"))
+        XCTAssertEqual(try requestEvent(events)["outcome"], .string("error"))
+        XCTAssertEqual(session.state["status"], .string("error"))
+    }
+
     func testARequestWithoutIntoWritesNoDataButStillReportsStatusAndFollowUp() throws {
         var (session, actions) = try shown(
             onTap:

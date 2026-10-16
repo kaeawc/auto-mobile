@@ -61,18 +61,29 @@ function metaOf(response: PrototypeResponseMessage): PrototypeRequestMeta {
   };
 }
 
-function writeMeta(data: PrototypeData, into: string, meta: PrototypeRequestMeta): PrototypeData {
+/** The data with `__meta` set in the first form that fits (full, without headers), else undefined. */
+function tryWriteMeta(
+  data: PrototypeData,
+  into: string,
+  meta: PrototypeRequestMeta,
+  minimal = false,
+): PrototypeData | undefined {
   const path = prototypeRequestMetaPath(into);
   const { headers, ...withoutHeaders } = meta;
-  const attempts = headers === undefined ? [meta] : [meta, withoutHeaders];
-  for (const value of attempts) {
+  const forms = headers === undefined ? [meta] : [meta, withoutHeaders];
+  if (minimal && meta.error) {
+    forms.push({ durationMs: meta.durationMs, error: meta.error });
+  }
+  for (const value of forms) {
     const written = applyPrototypeDataWrite(data, { op: "set", path, value });
     if (written.success) {
       return written.data;
     }
   }
-  return data;
+  return undefined;
 }
+
+const NO_ROOM_FOR_META = "response and metadata exceed the data limit";
 
 /**
  * Applies one response. `into` is the authored `/data/<pointer>` with repeat `{index}` already
@@ -101,7 +112,16 @@ export function applyPrototypeRequestOutcome(
     }
   }
   if (into !== undefined) {
-    next = writeMeta(next, into, meta);
+    const withMeta = tryWriteMeta(next, into, meta);
+    if (withMeta !== undefined) {
+      next = withMeta;
+    } else if (wroteInto) {
+      // The completion is atomic: a body that fits without room for any `__meta` is rolled back,
+      // and the request is an error whose minimal metadata is written if even that fits.
+      meta = { ...meta, error: { code: "invalid_response", message: NO_ROOM_FOR_META } };
+      wroteInto = false;
+      next = tryWriteMeta(data, into, meta, true) ?? data;
+    }
   }
   return {
     status: meta.error === undefined ? "success" : "error",

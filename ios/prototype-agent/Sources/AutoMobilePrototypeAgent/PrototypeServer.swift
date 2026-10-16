@@ -115,6 +115,11 @@ final class PrototypeServer {
         delivery.sendToHost(message, requestId: requestId)
     }
 
+    /// A `prototype_request_cancel` frame for a pending host request, to its owning connection only.
+    func cancelHostRequest(_ message: [String: Any], requestId: String) {
+        delivery.cancelHostRequest(message, requestId: requestId)
+    }
+
     /// The host request ended (answered, timed out or cancelled): its owning connection is forgotten.
     func hostRequestFinished(_ requestId: String) { delivery.hostRequestFinished(requestId) }
 

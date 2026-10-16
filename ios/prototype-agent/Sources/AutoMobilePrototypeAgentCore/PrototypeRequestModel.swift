@@ -204,6 +204,9 @@ struct PrototypeRequestMeta: Equatable {
 }
 
 enum PrototypeRequestOutcome {
+    /// The error when a body fits `/data` but not together with any form of its `__meta`.
+    static let noRoomForMeta = "response and metadata exceed the data limit"
+
     /// What a 2xx response stores at `into`: JSON as it is, a string as it is, an empty body (and a
     /// HEAD) as `""`.
     static func storedBody(_ body: JSONValue, method: PrototypeRequestMethod) -> JSONValue {

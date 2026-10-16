@@ -26,6 +26,7 @@ struct PrototypeTransportWriter: Sendable {
         case frame(Int, PrototypeTransportJSON)
         case broadcast(PrototypeTransportJSON)
         case toHost(String, PrototypeTransportJSON)
+        case hostCancel(String, PrototypeTransportJSON)
         case hostFinished(String)
         case removed(Int)
         case flush(CheckedContinuation<Void, Never>)
@@ -61,6 +62,9 @@ struct PrototypeTransportWriter: Sendable {
                     } else {
                         onHostRequestsLost([requestId])
                     }
+                case let .hostCancel(requestId, json):
+                    // Only to the connection that owns the request; nothing if it is gone.
+                    if let id = routing.owner(of: requestId) { await Self.write(json, to: sinks[id]) }
                 case let .hostFinished(requestId): routing.finish(requestId)
                 case let .removed(id):
                     let lost = routing.disconnect(id)
@@ -91,6 +95,11 @@ struct PrototypeTransportWriter: Sendable {
     /// A host request: written to the most recently authenticated connection only.
     func sendToHost(_ message: [String: Any], requestId: String) {
         continuation.yield(.toHost(requestId, PrototypeTransportJSON(object: message)))
+    }
+
+    /// A `prototype_request_cancel` for a pending host request, to its owning connection only.
+    func cancelHostRequest(_ message: [String: Any], requestId: String) {
+        continuation.yield(.hostCancel(requestId, PrototypeTransportJSON(object: message)))
     }
 
     /// The host request ended; its owner is forgotten.
@@ -324,6 +333,10 @@ final class PrototypeTransportDelivery {
     }
 
     func hostRequestFinished(_ requestId: String) { writer.hostRequestFinished(requestId) }
+
+    func cancelHostRequest(_ message: [String: Any], requestId: String) {
+        writer.cancelHostRequest(message, requestId: requestId)
+    }
 
     deinit { consumer?.cancel() }
 }

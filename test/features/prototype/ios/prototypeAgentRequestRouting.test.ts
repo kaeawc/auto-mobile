@@ -40,6 +40,10 @@ class RecordingHost implements PrototypeRequestHost {
     });
     return Promise.resolve();
   }
+  readonly cancels: unknown[] = [];
+  handleCancel(received: unknown): void {
+    this.cancels.push(received);
+  }
   handleDisconnect(): void {
     this.disconnects += 1;
   }
@@ -108,6 +112,18 @@ describe("iOS prototype agent request routing (#12529)", () => {
         durationMs: 0,
       },
     ]);
+  });
+
+  test("routes a prototype_request_cancel frame to the host without replying", async () => {
+    const { socket, client } = await connected();
+    const host = new RecordingHost();
+    client.attachRequestHost?.(host);
+    const cancel = { type: "prototype_request_cancel", requestId: "q1" };
+    socket.push(cancel);
+    await flush();
+    expect(host.cancels).toEqual([cancel]);
+    expect(host.frames).toEqual([]);
+    expect(socket.frames()).toEqual([]);
   });
 
   test("cancels the host's requests when the connection closes", async () => {

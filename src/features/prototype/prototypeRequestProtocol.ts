@@ -8,6 +8,12 @@ import { z } from "zod";
 
 export const PROTOTYPE_REQUEST_MESSAGE_TYPE = "prototype_request";
 export const PROTOTYPE_RESPONSE_MESSAGE_TYPE = "prototype_response";
+/**
+ * Device to host: a host request was superseded (latest wins), cancelled on dismiss or reset, or
+ * abandoned. The host aborts that request's fetch, frees its slot and sends no reply (a response
+ * that crosses it is ignored by the device). Not in the Kotlin-mirrored wire manifest.
+ */
+export const PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE = "prototype_request_cancel";
 
 export const PROTOTYPE_REQUEST_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
 export type PrototypeRequestMethod = (typeof PROTOTYPE_REQUEST_METHODS)[number];
@@ -58,6 +64,11 @@ export const prototypeRequestMessageSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 export type PrototypeRequestMessage = z.infer<typeof prototypeRequestMessageSchema>;
+
+export const prototypeRequestCancelMessageSchema = z.object({
+  type: z.literal(PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE),
+  requestId: z.string().min(1),
+});
 
 export const prototypeResponseMessageSchema = z.discriminatedUnion("ok", [
   z.object({

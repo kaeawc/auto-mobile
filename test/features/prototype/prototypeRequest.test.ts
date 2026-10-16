@@ -510,6 +510,21 @@ describe("applyPrototypeRequestOutcome", () => {
     expect(prototypeRequestMetaPath("/data/a/b~1c")).toBe("/data/a/b~1c__meta");
   });
 
+  test("a body that fits without room for any metadata is rolled back as invalid_response", () => {
+    const message = "response and metadata exceed the data limit";
+    const result = applyPrototypeRequestOutcome({}, "/data/feed", ok("x".repeat(262120)));
+    expect(result.status).toBe("error");
+    expect(result.wroteInto).toBe(false);
+    expect(result.meta.error).toEqual({ code: "invalid_response", message });
+    // `into` is untouched and the error metadata still fits, so it is written.
+    expect(result.data).toEqual({ feed__meta: result.meta });
+    const pad = { pad: "p".repeat(262100) };
+    const full = applyPrototypeRequestOutcome(pad, "/data/feed", ok("ab"));
+    expect(full.status).toBe("error");
+    expect(full.meta.error?.message).toBe(message);
+    expect(full.data).toEqual(pad);
+  });
+
   test("a JSON body is written to into and the metadata beside it", () => {
     const result = applyPrototypeRequestOutcome(
       { title: "T" },

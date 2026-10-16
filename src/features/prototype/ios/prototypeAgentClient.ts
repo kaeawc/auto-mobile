@@ -18,6 +18,7 @@ import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import type { PrototypeRequestHost, PrototypeResponseSender } from "../prototypeRequestHandler";
 import {
+  PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
   PROTOTYPE_REQUEST_MESSAGE_TYPE,
   PROTOTYPE_RESPONSE_MESSAGE_TYPE,
 } from "../prototypeRequestProtocol";
@@ -401,6 +402,10 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
     }
     if (message.type === PROTOTYPE_REQUEST_MESSAGE_TYPE) {
       void this.handlePrototypeRequest(message);
+      return;
+    }
+    if (message.type === PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE) {
+      this.requestHost?.handleCancel(message);
       return;
     }
     // A reply that arrives after its request timed out has nobody waiting; dropping it is safe.

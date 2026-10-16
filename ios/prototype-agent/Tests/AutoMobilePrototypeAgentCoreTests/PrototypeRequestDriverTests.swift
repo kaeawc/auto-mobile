@@ -321,6 +321,32 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(settled, [id])
     }
 
+    func testASupersededHostRequestSendsACancelFrameWithNoOtherFields() async throws {
+        let harness = RequestHarness()
+        var cancels: [[String: Any]] = []
+        harness.driver.onHostCancel = { cancels.append($0) }
+        try harness.show(request())
+        harness.tap()
+        harness.tap()
+        let ids = harness.hostFrames.compactMap { $0["requestId"] as? String }
+        XCTAssertEqual(ids, ["r-1", "r-2"])
+        XCTAssertEqual(cancels.count, 1)
+        XCTAssertEqual(cancels.first?["type"] as? String, "prototype_request_cancel")
+        XCTAssertEqual(cancels.first?["requestId"] as? String, "r-1")
+        XCTAssertEqual(cancels.first?.count, 2)
+    }
+
+    func testAnAnsweredOrLostHostRequestSendsNoCancel() async throws {
+        let harness = RequestHarness()
+        var cancels: [[String: Any]] = []
+        harness.driver.onHostCancel = { cancels.append($0) }
+        try harness.show(request())
+        harness.tap()
+        harness.driver.receiveHostResponse(["type": "prototype_response", "requestId": "r-1"])
+        harness.driver.hostRequestsLost(["r-1"])
+        XCTAssertTrue(cancels.isEmpty)
+    }
+
     func testDismissingForgetsHostRequestsAndTheirWatchdogs() throws {
         let harness = RequestHarness()
         try harness.show(request())

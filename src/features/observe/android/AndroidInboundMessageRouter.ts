@@ -1,6 +1,9 @@
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
-import { PROTOTYPE_REQUEST_MESSAGE_TYPE } from "../../prototype/prototypeRequestProtocol";
+import {
+  PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
+  PROTOTYPE_REQUEST_MESSAGE_TYPE,
+} from "../../prototype/prototypeRequestProtocol";
 import { displayTransitions } from "../DisplayTransition";
 import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
@@ -32,6 +35,12 @@ import {
   parseCtrlProxyJson,
   SDK_TELEMETRY_EVENT_TYPES,
 } from "./androidCtrlProxyInboundWire";
+/** Host-proxied prototype HTTP frames (#12527): not in the Kotlin-mirrored wire manifest. */
+const PROTOTYPE_HOST_FRAME_TYPES: ReadonlySet<string> = new Set([
+  PROTOTYPE_REQUEST_MESSAGE_TYPE,
+  PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
+]);
+
 export class AndroidInboundMessageRouter {
   readonly webSocketMessageHandlers;
   constructor(private readonly ctx: AndroidInboundMessageRouterContext) {
@@ -374,6 +383,20 @@ export class AndroidInboundMessageRouter {
     | "screenshot"
     | "screenshot_error"
   >;
+  /**
+   * `prototype_request` runs a host HTTP call: not awaited, since a request can run for 30s and
+   * must not hold up the inbound handler drain. `prototype_request_cancel` aborts one (no reply).
+   */
+  private routePrototypeHostFrame(type: string, message: unknown): void {
+    if (type === PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE) {
+      this.ctx.prototypes.handlePrototypeRequestCancel(message);
+      return;
+    }
+    this.ctx.prototypes.handlePrototypeRequest(message).catch((error) => {
+      logger.warn(`[CTRL_PROXY] prototype_request failed: ${error}`);
+    });
+  }
+
   async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
     try {
       const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
@@ -402,12 +425,8 @@ export class AndroidInboundMessageRouter {
         await this.ctx.recordSdkTelemetryEvent(
           message as { type: string; timestamp?: number; event?: Record<string, unknown> },
         );
-      } else if (type === PROTOTYPE_REQUEST_MESSAGE_TYPE) {
-        // Host-proxied prototype HTTP (#12527). Not awaited: a request can run for 30s and must
-        // not hold up the inbound handler drain. Not in the Kotlin-mirrored wire manifest.
-        this.ctx.prototypes.handlePrototypeRequest(message).catch((error) => {
-          logger.warn(`[CTRL_PROXY] prototype_request failed: ${error}`);
-        });
+      } else if (PROTOTYPE_HOST_FRAME_TYPES.has(type)) {
+        this.routePrototypeHostFrame(type, message);
       } else {
         logger.debug(`[CTRL_PROXY] Ignoring unknown WebSocket message type: ${type}`);
       }

@@ -762,14 +762,22 @@ extension PrototypeSession {
     {
         var meta = PrototypeRequestMeta(response)
         var events: [PrototypeEvent] = []
+        var minimalMeta = false
         if case let .received(_, _, body, _) = response, meta.error == nil, let into = inFlight.into {
             let stored = PrototypeRequestOutcome.storedBody(body, method: inFlight.job.method)
-            switch commitDataWrite(.set, path: into, value: stored) {
-            case let .success(written): events += written
-            case let .failure(failure): meta.error = PrototypeRequestError(.invalidResponse, failure.message)
+            if leavesNoRoomForMeta(stored, into: into, meta: meta) {
+                // The completion is atomic: a body that fits without room for any `__meta` is not
+                // written, and the request is an error whose minimal metadata is written if it fits.
+                meta.error = PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta)
+                minimalMeta = true
+            } else {
+                switch commitDataWrite(.set, path: into, value: stored) {
+                case let .success(written): events += written
+                case let .failure(failure): meta.error = PrototypeRequestError(.invalidResponse, failure.message)
+                }
             }
         }
-        if let into = inFlight.into { events += writeRequestMeta(meta, beside: into) }
+        if let into = inFlight.into { events += writeRequestMeta(meta, beside: into, minimal: minimalMeta) }
         let failed = meta.error != nil
         events += writeRequestStatus(inFlight.statusKey, failed ? "error" : "success")
         events += emit(
@@ -780,15 +788,37 @@ extension PrototypeSession {
         return events + run(failed ? inFlight.onError : inFlight.onSuccess)
     }
 
-    /// `<into>__meta`, without `headers` when the whole value does not fit the data write limit.
-    private mutating func writeRequestMeta(_ meta: PrototypeRequestMeta, beside into: String) -> [PrototypeEvent] {
-        let path = into + "__meta"
-        for includeHeaders in meta.headers == nil ? [true] : [true, false] {
-            if case let .success(events) = commitDataWrite(
-                .set,
-                path: path,
-                value: meta.json(includingHeaders: includeHeaders)
-            ) {
+    /// The `__meta` values to try, in order: whole, without `headers`, and (only when `minimal`)
+    /// reduced to the duration and error.
+    private func metaForms(_ meta: PrototypeRequestMeta, minimal: Bool) -> [JSONValue] {
+        var forms = [meta.json(includingHeaders: true)]
+        if meta.headers != nil { forms.append(meta.json(includingHeaders: false)) }
+        if minimal, let error = meta.error {
+            forms.append(PrototypeRequestMeta(.failed(error, durationMs: meta.durationMs)).json())
+        }
+        return forms
+    }
+
+    /// Whether the body would fit at `into` but no form of `<into>__meta` would fit beside it.
+    private func leavesNoRoomForMeta(_ stored: JSONValue, into: String, meta: PrototypeRequestMeta) -> Bool {
+        guard case let .success(withBody) = PrototypeDataWrite.apply(spec?.data, op: .set, path: into, value: stored)
+        else { return false }
+        return !metaForms(meta, minimal: false).contains { form in
+            if case .success = PrototypeDataWrite.apply(withBody, op: .set, path: into + "__meta", value: form) {
+                return true
+            }
+            return false
+        }
+    }
+
+    /// `<into>__meta` in the first form that fits the data write limit.
+    private mutating func writeRequestMeta(
+        _ meta: PrototypeRequestMeta, beside into: String, minimal: Bool
+    )
+        -> [PrototypeEvent]
+    {
+        for form in metaForms(meta, minimal: minimal) {
+            if case let .success(events) = commitDataWrite(.set, path: into + "__meta", value: form) {
                 return events
             }
         }

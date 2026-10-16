@@ -247,6 +247,9 @@ final class PrototypeAgent: NSObject {
             server.sendToHost(frame, requestId: frame["requestId"] as? String ?? "")
             return true
         }
+        driver.onHostCancel = { [weak self] frame in
+            self?.server?.cancelHostRequest(frame, requestId: frame["requestId"] as? String ?? "")
+        }
         driver.onHostSettled = { [weak self] requestId in self?.server?.hostRequestFinished(requestId) }
         server?.onHostRequestsLost = { [weak driver] ids in driver?.hostRequestsLost(ids) }
         driver.onComplete = { [weak model] requestId, response in

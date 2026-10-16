@@ -159,6 +159,50 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.parseErrors).toEqual(["result event has a non-boolean is_error"]);
   });
 
+  test("empty model and version strings stay unknown", () => {
+    const init = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      model: "",
+      claude_code_version: " ",
+      mcp_servers: [],
+    });
+    const audit = auditTranscript(`${init}\n`, NO_PATTERNS);
+    expect(audit.observedModel).toBeUndefined();
+    expect(audit.claudeCodeVersion).toBeUndefined();
+  });
+
+  test("terminal metrics outside the baseline domains fail the transcript", () => {
+    const result = (fields: Record<string, unknown>) =>
+      `${JSON.stringify({ type: "result", subtype: "success", is_error: false, ...fields })}\n`;
+    expect(auditTranscript(result({ num_turns: 2.5 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid num_turns",
+    ]);
+    expect(auditTranscript(result({ num_turns: -1 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid num_turns",
+    ]);
+    expect(auditTranscript(result({ total_cost_usd: -0.1 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid total_cost_usd",
+    ]);
+    expect(auditTranscript(result({ total_cost_usd: "1" }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid total_cost_usd",
+    ]);
+    expect(
+      auditTranscript(result({ num_turns: 0, total_cost_usd: 0 }), NO_PATTERNS).parseErrors,
+    ).toEqual([]);
+  });
+
+  test("a non-array permission_denials fails the transcript", () => {
+    const result = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      permission_denials: { tool_name: "Bash" },
+    });
+    const audit = auditTranscript(`${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["result event has a non-array permission_denials"]);
+  });
+
   test("an empty transcript audits to zero calls with no init", () => {
     const audit = auditTranscript("", NO_PATTERNS);
     expect(audit.totalToolCalls).toBe(0);

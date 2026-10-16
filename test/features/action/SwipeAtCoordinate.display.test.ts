@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { SwipeAtCoordinate } from "../../../src/features/action/SwipeAtCoordinate";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import type { BootedDevice } from "../../../src/models";
+import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
@@ -156,14 +157,19 @@ describe("swipeAt display", () => {
       to: { x: 10, y: 150 },
     });
 
-    expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+    expect(result).toMatchObject({
+      success: false,
+      outcomeIndeterminate: true,
+      duration: 300,
+    });
     expect(result.error).toContain("do not retry automatically");
     expect(adb.getExecutedCommands().join("\n")).not.toContain("touchscreen");
   });
 
-  test("a non-stale dispatch rejection becomes a structured failure", async () => {
+  test("a non-stale rejection after dispatch becomes a structured failure", async () => {
     const { swipeAt, ctrl } = setup();
-    ctrl.requestSwipe = async () => {
+    ctrl.requestSwipe = async (...args) => {
+      args[8]?.();
       throw new Error("socket closed");
     };
 
@@ -173,7 +179,8 @@ describe("swipeAt display", () => {
       to: { x: 10, y: 150 },
     });
 
-    expect(result).toMatchObject({ success: false, error: "socket closed" });
+    expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+    expect(result.error).toContain("socket closed");
   });
 
   test("a panel without a prior observation returns a failure result", async () => {
@@ -264,5 +271,50 @@ describe("swipeAt display", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Android-only");
     expect(ctrl.getSwipeHistory()).toEqual([]);
+  });
+
+  test("a thrown CtrlProxy error before dispatch falls back to adb", async () => {
+    const { swipeAt, ctrl, adb } = setup();
+    ctrl.requestSwipe = async () => {
+      throw new Error("WebSocket not connected");
+    };
+
+    const result = await swipeAt.execute({
+      display: "external",
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(adb.getExecutedCommands().join("\n")).toContain(
+      "input touchscreen -d 2 swipe 10 20 10 150 300",
+    );
+  });
+
+  test("an aborted signal aborts without an adb fallback", async () => {
+    const { swipeAt, ctrl, adb } = setup();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      swipeAt.execute(
+        { display: "external", from: { x: 10, y: 20 }, to: { x: 10, y: 150 } },
+        { signal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(ctrl.getSwipeHistory()).toEqual([]);
+    expect(adb.getExecutedCommands().join("\n")).not.toContain("touchscreen");
+  });
+
+  test("a pinned display that cannot be selected keeps the pin details", async () => {
+    const { swipeAt } = setup();
+
+    const result = await runWithSelectedDisplayPin(
+      { pin: "ghost", inventory: device.displays },
+      () => swipeAt.execute({ display: "ghost", from: { x: 10, y: 20 }, to: { x: 10, y: 150 } }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result).toHaveProperty("pinnedDisplay");
   });
 });

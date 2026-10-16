@@ -24,7 +24,6 @@ import {
   inputDurationArgument,
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
-import { isStaleFrameContextRejection } from "./tapAtGesture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
@@ -210,7 +209,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
         throw error;
       }
       logger.warn(`${TOOL_NAME} display routing failed: ${errorMessage(error)}`, error);
-      return failure(errorMessage(error));
+      return withStaleDisplay(failure(errorMessage(error)), error);
     }
     const checked = this.checkObservation(options, target.observation, failure);
     if ("failure" in checked) {
@@ -239,7 +238,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
               },
             }),
           );
-          return sent.success ? { ...sent, ...base } : { ...sent, ...base, duration: 0 };
+          return sent.success || sent.outcomeIndeterminate
+            ? { ...sent, ...base }
+            : { ...sent, ...base, duration: 0 };
         } catch (error) {
           if (
             error instanceof StaleDisplayError ||
@@ -249,15 +250,18 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             throw error;
           }
           logger.warn(`${TOOL_NAME} display dispatch failed: ${errorMessage(error)}`, error);
-          return {
-            success: false,
-            ...base,
-            duration: 0,
-            error: dispatched
-              ? `${errorMessage(error)} (the swipe was dispatched and may have been applied; do not retry automatically)`
-              : errorMessage(error),
-            ...(dispatched ? { outcomeIndeterminate: true } : {}),
-          };
+          return withStaleDisplay(
+            {
+              success: false,
+              ...base,
+              duration: dispatched ? duration : 0,
+              error: dispatched
+                ? `${errorMessage(error)} (the swipe was dispatched and may have been applied; do not retry automatically)`
+                : errorMessage(error),
+              ...(dispatched ? { outcomeIndeterminate: true } : {}),
+            },
+            error,
+          );
         }
       },
       {
@@ -291,7 +295,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     const { from, to, duration, target, perf, signal, onDispatch } = input;
     const { displayId } = target;
     if (displayId === undefined || displayId === 0) {
-      onDispatch();
+      // The gesture reports its own outcomeIndeterminate; a throw before sending is a plain failure.
       return this.executeGesture.swipe(
         from.x,
         from.y,
@@ -304,45 +308,51 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     }
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
       let dispatched = false;
-      const result = await this.androidClient.requestSwipe(
-        from.x,
-        from.y,
-        to.x,
-        to.y,
-        duration,
-        undefined,
-        perf,
-        undefined,
-        () => {
-          dispatched = true;
-          onDispatch();
-        },
-        signal,
-        displayId,
-        target.assertCurrent,
-      );
-      throwIfAborted(signal);
-      if (result.success) {
-        return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
+      const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+      let reason: string | undefined;
+      try {
+        const result = await this.androidClient.requestSwipe(
+          from.x,
+          from.y,
+          to.x,
+          to.y,
+          duration,
+          undefined,
+          perf,
+          undefined,
+          () => {
+            dispatched = true;
+            onDispatch();
+          },
+          signal,
+          displayId,
+          target.assertCurrent,
+        );
+        throwIfAborted(signal);
+        if (result.success) {
+          return { success: true, ...base, duration };
+        }
+        reason = result.error ?? "Android swipe failed";
+      } catch (error) {
+        if (
+          dispatched ||
+          error instanceof StaleDisplayError ||
+          (error instanceof Error && error.name === "AbortError")
+        ) {
+          throw error;
+        }
+        reason = errorMessage(error);
       }
       if (dispatched) {
         return {
           success: false,
-          x1: from.x,
-          y1: from.y,
-          x2: to.x,
-          y2: to.y,
-          duration: 0,
-          error: `${result.error ?? "Android swipe failed"} (the swipe was dispatched and may have been applied; do not retry automatically)`,
+          ...base,
+          duration,
+          error: `${reason} (the swipe was dispatched and may have been applied; do not retry automatically)`,
           outcomeIndeterminate: true,
         };
       }
-      if (isStaleFrameContextRejection(result.error)) {
-        throw new ActionableError(result.error ?? "Stale frame context");
-      }
-      logger.warn(
-        `${TOOL_NAME} CtrlProxy swipe failed (${result.error}), falling back to ADB input`,
-      );
+      logger.warn(`${TOOL_NAME} CtrlProxy swipe failed (${reason}), falling back to ADB input`);
     }
     throwIfAborted(signal);
     await executeTouchscreenInput(

@@ -35,11 +35,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ForwardLeaseForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import {
+  ForwardLeaseForeignDeviceOwnership,
+  deviceAllocationClaimPath,
+} from "../../src/daemon/foreignDeviceOwnership";
 import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import {
+  readExclusiveLockContent,
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../../src/utils/fileLock";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { loadSuite, type LoadedSuite } from "./config";
@@ -254,33 +262,79 @@ const realFs: HarnessFs = {
  * The claim names no control socket: the harness serves none, so other daemons judge it
  * by this process's liveness alone instead of lapsing it after their startup grace.
  */
+async function claimForBenchmark(
+  serial: string,
+): Promise<{ release(): void } | { refused: string }> {
+  const ownership = new ForwardLeaseForeignDeviceOwnership(
+    process.pid,
+    undefined,
+    undefined,
+    () => undefined,
+    undefined,
+    createForeignCtrlProxyForwardEvidence(),
+  );
+  const holder = async () => {
+    await ownership.refresh([serial]);
+    const pid = ownership.foreignOwnerPid(serial);
+    if (pid !== undefined) {
+      return `is claimed by another AutoMobile session (pid ${pid})`;
+    }
+    return ownership.foreignClaimUnreadable(serial)
+      ? "is claimed by another AutoMobile session (an unreadable claim)"
+      : undefined;
+  };
+  const before = await holder();
+  if (before) {
+    return { refused: before };
+  }
+  if (!(await ownership.claim(serial))) {
+    return { refused: (await holder()) ?? "could not be claimed" };
+  }
+  // claim() fails open for daemons when the claim cannot be written; a benchmark about to
+  // clear app data must not, so confirm the claim file now names this process.
+  if (readExclusiveLockContent(deviceAllocationClaimPath(serial))?.pid !== process.pid) {
+    ownership.release(serial);
+    return { refused: `could not be claimed (${deviceAllocationClaimPath(serial)} not written)` };
+  }
+  return { release: () => ownership.release(serial) };
+}
+
+/**
+ * Daemon claims are handed to the run's private daemon before Claude starts, so a second
+ * benchmark could otherwise reserve the device during that run. This benchmark-only lock,
+ * held for the whole run, keeps other benchmarks off the device (a dead holder's lock is
+ * reclaimed).
+ */
+function benchmarkLockPath(serial: string): string {
+  return `${deviceAllocationClaimPath(serial)}.agent-benchmark`;
+}
+
 const realDeviceClaims: DeviceClaims = {
   async reserve(serial) {
-    const ownership = new ForwardLeaseForeignDeviceOwnership(
-      process.pid,
-      undefined,
-      undefined,
-      () => undefined,
-      undefined,
-      createForeignCtrlProxyForwardEvidence(),
-    );
-    const refusal = async () => {
-      await ownership.refresh([serial]);
+    const lockPath = benchmarkLockPath(serial);
+    mkdirSync(dirname(lockPath), { recursive: true });
+    if (!tryAcquireExclusiveLock(lockPath)) {
+      const pid = readExclusiveLockContent(lockPath)?.pid;
+      return { refused: `is in use by another agent benchmark (pid ${pid ?? "unknown"})` };
+    }
+    const releaseLock = () => releaseExclusiveLock(lockPath);
+    try {
+      const claim = await claimForBenchmark(serial);
+      if ("refused" in claim) {
+        releaseLock();
+        return claim;
+      }
       return {
-        refusedBy: {
-          pid: ownership.foreignOwnerPid(serial),
-          unreadable: ownership.foreignClaimUnreadable(serial),
+        handOff: () => claim.release(),
+        release: () => {
+          claim.release();
+          releaseLock();
         },
       };
-    };
-    const current = await refusal();
-    if (current.refusedBy.pid !== undefined || current.refusedBy.unreadable) {
-      return current;
+    } catch (error) {
+      releaseLock();
+      throw error;
     }
-    if (!(await ownership.claim(serial))) {
-      return refusal();
-    }
-    return { release: () => ownership.release(serial) };
   },
 };
 

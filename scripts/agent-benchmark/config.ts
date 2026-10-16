@@ -27,6 +27,13 @@ function fitsFloat32(value: number): boolean {
   return Number.isFinite(stored) && (stored !== 0 || value === 0);
 }
 
+/** XML 1.0 forbids most C0 controls, U+FFFE/U+FFFF, and unpaired surrogates. */
+const XML_ILLEGAL =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const xmlText = z.string().refine((text) => !XML_ILLEGAL.test(text), {
+  message: "preference keys and strings must be valid XML text (no control characters)",
+});
+
 const baselineSchema = z
   .object({
     totalToolCalls: z.number().int().nonnegative().optional(),
@@ -42,6 +49,8 @@ const baselineSchema = z
     suiteDigest: z.string().min(1).optional(),
     /** The model Claude reported running (stream-json init), not the requested selector. */
     observedModel: z.string().min(1).optional(),
+    /** `claude --version` the baseline was recorded with. */
+    claudeCodeVersion: z.string().min(1).optional(),
   })
   .strict();
 
@@ -82,6 +91,7 @@ const suiteSchema = z
           .record(
             z.string().regex(/^[A-Za-z0-9_.-]+$/, "preference file names are plain identifiers"),
             z.record(
+              xmlText,
               z.union([
                 z.boolean(),
                 // Android parses integers as int/long; beyond the safe range a JS number is
@@ -95,7 +105,7 @@ const suiteSchema = z
                   .refine((value) => Number.isInteger(value) || fitsFloat32(value), {
                     message: "non-integer preference values must fit Android's 32-bit float",
                   }),
-                z.string(),
+                xmlText,
               ]),
             ),
           )

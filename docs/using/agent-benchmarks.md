@@ -96,8 +96,11 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   the harness runs the same ownership check daemons use (forwarding lease, current and legacy
   claims, unreadable claims, live CtrlProxy forwards) and refuses a device another AutoMobile
   session holds. It then holds the device's allocation claim itself through preflight, so a
-  concurrent benchmark or daemon is refused rather than racing `pm clear`, and releases it just
-  before Claude starts so the run's own daemon can claim it.
+  concurrent daemon is refused rather than racing `pm clear`, and hands it over just before Claude
+  starts so the run's own daemon can claim it. If that claim cannot be written, the run stops
+  instead of continuing unprotected. A separate benchmark-only lock
+  (`<claim file>.agent-benchmark`) is held for the whole run, so a second benchmark on the same
+  device is refused even after the handover; a crashed benchmark's lock is reclaimed.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
@@ -197,9 +200,11 @@ yourself and remove `app.apkPath` to run without the check.
 It also records `baseline.suiteDigest`, a digest of the prompt, every suite setting other than
 the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
 patterns, or timeout change, the report flags that the baseline measured a different task.
-Finally it records `baseline.observedModel`, the model Claude reported running. Suites without
+It also records `baseline.claudeCodeVersion` (CLI releases change system prompts and
+tool handling) and `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
-flagged too.
+flagged too. A fingerprint that could not be read (`unknown`) is never written into a baseline
+and never counts as a match.
 
 Suites have no free-form Claude flags. Any flag could undo run isolation (`--settings`,
 `--resume`, `--plugin-dir`), so each supported option is its own typed `claude` field.

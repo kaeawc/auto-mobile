@@ -97,7 +97,10 @@ function setup(transcript: string, launchMs = 42_000) {
     deviceClaims: {
       reserve: async (serial) => {
         claims.push(`reserve ${serial}`);
-        return { release: () => claims.push(`release ${serial}`) };
+        return {
+          handOff: () => claims.push(`hand off ${serial}`),
+          release: () => claims.push(`release ${serial}`),
+        };
       },
     },
     fs,
@@ -391,8 +394,27 @@ describe("agent benchmark harness", () => {
     };
     await runSuite(loadedSuite(), options, deps);
     expect(order).toEqual(["pm clear with reserve emulator-5554"]);
-    expect(claims).toEqual(["reserve emulator-5554", "release emulator-5554", "launch"]);
+    expect(claims).toEqual([
+      "reserve emulator-5554",
+      "hand off emulator-5554",
+      "launch",
+      "release emulator-5554",
+    ]);
     expect(runner.adbCalls().some((call) => call.includes("pm clear"))).toBe(true);
+  });
+
+  test("elapsed times use the monotonic clock, so a wall-clock step cannot skew them", async () => {
+    const { timer, deps, options } = setup(PASSING, 42_000);
+    const launcher = deps.launcher;
+    deps.launcher = {
+      async launch(spec) {
+        const exit = await launcher.launch(spec);
+        timer.stepWallClock(-3_600_000);
+        return exit;
+      },
+    };
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.outcome.wallClockSeconds).toBe(42);
   });
 
   test("a failed preflight releases the device claim", async () => {
@@ -404,7 +426,11 @@ describe("agent benchmark harness", () => {
 
   test("an unreadable foreign claim also keeps the device untouched", async () => {
     const { runner, deps, options } = setup(PASSING);
-    deps.deviceClaims = { reserve: async () => ({ refusedBy: { unreadable: true } }) };
+    deps.deviceClaims = {
+      reserve: async () => ({
+        refused: "is claimed by another AutoMobile session (an unreadable claim)",
+      }),
+    };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /claimed by another AutoMobile session \(an unreadable claim\)/,
     );
@@ -435,8 +461,8 @@ describe("agent benchmark harness", () => {
     deps.deviceClaims = {
       reserve: async (serial) =>
         serial === "emulator-5554"
-          ? { refusedBy: { pid: 4242, unreadable: false } }
-          : { release: () => undefined },
+          ? { refused: "is claimed by another AutoMobile session (pid 4242)" }
+          : { handOff: () => undefined, release: () => undefined },
     };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /emulator-5554 is claimed by another AutoMobile session \(pid 4242\)/,

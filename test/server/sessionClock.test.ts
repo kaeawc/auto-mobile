@@ -41,13 +41,11 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
   };
   const restoreSignals: Array<AbortSignal | undefined> = [];
   const restored: Array<{ deviceId: string; value: 0 | 1 }> = [];
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: (target) => ({
         restore: async (value, signal) => {
@@ -60,7 +58,7 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
         },
       }),
     },
-  );
+  });
   const state = new DeviceState(device, {
     timer,
     clockAdapter: adapter,

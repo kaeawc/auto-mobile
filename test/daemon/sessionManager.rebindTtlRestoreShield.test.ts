@@ -45,16 +45,18 @@ async function harness() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
   const fake = new SignalAwareNetwork();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => ({ status: "restored" as const }),
     }),
-    () => ({ restore: async () => {} }),
-    (device) => ({ restore: (profile) => fake.restore(device.deviceId, profile) }),
-  );
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
+      networkCondition: (device) => ({
+        restore: (profile) => fake.restore(device.deviceId, profile),
+      }),
+    },
+  });
   managers.push(manager);
   const session = await manager.createSession("owner", oldDevice, "android");
   manager.setNetworkCondition("owner", { initialProfile: "none" });

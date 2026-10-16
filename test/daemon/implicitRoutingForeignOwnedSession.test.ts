@@ -146,8 +146,10 @@ describe("the implicit routing session of a call that names none", () => {
 
   const build = async (): Promise<void> => {
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     sessionManager.stopCleanupTimer();
     devices = new RecordingKillDeviceManager();

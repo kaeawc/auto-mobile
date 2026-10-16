@@ -75,7 +75,7 @@ async function createHarness(): Promise<Harness> {
   const repository = new DeviceSessionRepository(db);
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
-  const manager = new SessionManager(timer, repository, () => barrier);
+  const manager = new SessionManager(timer, repository, { barrier: () => barrier });
   const devices = new FakeDeviceManager(
     [],
     [{ deviceId: DEVICE_ID, name: AVD_NAME, platform: "android" }],

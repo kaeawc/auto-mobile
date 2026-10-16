@@ -235,11 +235,9 @@ test.each(["active", "all"])(
     };
     baseline.observationId = "owner-baseline";
     baseline.display = { key: "cover", role: "cover", posture: "closed", generation: 0 };
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const session = await sessions.createSession("owner", device.deviceId, "android");
     sessions.setLastRenderedObservation("owner", baseline);
     await store.put(device.deviceId, baseline, store.currentGeneration(device.deviceId));

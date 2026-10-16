@@ -47,11 +47,9 @@ interface World {
 
 async function liveBaseAndLabel(baseIdleMs = BASE_IDLE_MS): Promise<World> {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const released: Array<[string, string]> = [];
   manager.onSessionRelease((sessionId, _deviceId, reason) => {

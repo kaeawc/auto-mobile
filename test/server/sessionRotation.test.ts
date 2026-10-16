@@ -132,13 +132,11 @@ function harness() {
   const adb = new RotationAdb();
   const restored: string[] = [];
   const signals: Array<AbortSignal | undefined> = [];
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       rotation: (target) => ({
@@ -149,7 +147,7 @@ function harness() {
         },
       }),
     },
-  );
+  });
   const rotate = new Rotate(device, adb, timer, {
     sessionRotation: async (mutation) => {
       const { runSessionRotationMutation } = await import("../../src/server/sessionRotation");

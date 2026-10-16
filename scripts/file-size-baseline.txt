@@ -17,7 +17,7 @@
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
-13327	src/daemon/sessionManager.ts
+13257	src/daemon/sessionManager.ts
 8795	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
@@ -54,7 +54,7 @@
 1841	src/features/observe/android/ctrlProxyProtocol.ts
 1114	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
-4569	src/features/observe/ios/IOSCtrlProxyClient.ts
+4586	src/features/observe/ios/IOSCtrlProxyClient.ts
 2118	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts

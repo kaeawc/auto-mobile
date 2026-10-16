@@ -128,7 +128,7 @@ export const dragPathSchema = withJsonSchemaOverride(
   ),
   (js) => {
     js.description =
-      "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android). Use for drawing, unlock patterns, sliders, and long press then drag.";
+      "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag.";
   },
 );
 

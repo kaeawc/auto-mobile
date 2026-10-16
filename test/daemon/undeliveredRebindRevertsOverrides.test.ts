@@ -48,11 +48,9 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     biometricGate = undefined;
     resets = [];
     renewals = [];
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      (device) => ({
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: (device) => ({
         restore: async () => {
           restoredKeepAwake.push(device.deviceId);
           await keepAwakeGate;
@@ -60,13 +58,13 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
           return { status: "restored" as const };
         },
       }),
-      (device) => ({
+      biometricEnrollmentRestorer: (device) => ({
         restore: async () => {
           restoredBiometrics.push(device.deviceId);
           await biometricGate;
         },
       }),
-      {
+      restorers: {
         networkCondition: (device) => ({
           restore: async (state) => {
             restoredSettings.push({ slot: "networkCondition", deviceId: device.deviceId, state });
@@ -97,7 +95,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
           },
         },
       },
-    );
+    });
   });
   afterEach(() => {
     sessions.stopCleanupTimer();

@@ -107,6 +107,7 @@ final class FakeGesturePerformer: GesturePerforming {
     var onPressKey: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
+    var pathCalls: [[PathGesturePoint]] = []
     var setTextCalls = 0
     var clearTextCalls = 0
     var selectAllCalls = 0
@@ -188,6 +189,7 @@ final class FakeGesturePerformer: GesturePerforming {
         pressDuration _: TimeInterval, dragDuration _: TimeInterval, holdDuration _: TimeInterval
     )
         throws {}
+    func path(points: [PathGesturePoint]) throws { pathCalls.append(points) }
     func pinch(
         centerX _: Double, centerY _: Double, distanceStart _: Double, distanceEnd _: Double,
         rotationDegrees _: Double, duration _: TimeInterval

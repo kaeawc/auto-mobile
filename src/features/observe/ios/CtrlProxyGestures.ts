@@ -173,6 +173,46 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   }
 
   /**
+   * Drag one finger through timed points (down at the first, up after the last). Needs a runner
+   * advertising `path_gesture_v1`; an older runner would reject the unknown request after the
+   * fact, so refuse before any input. A reply that never arrives after the send is reported
+   * `dispatched` and not `acknowledged`: the stroke may already have run.
+   */
+  async requestPathGesture(
+    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    const features = await this.getDoubleTapFeatures?.(signal);
+    if (features && !features.includes("path_gesture_v1")) {
+      return {
+        success: false,
+        totalTimeMs: 0,
+        error:
+          "iOS CtrlProxy runner is too old for dragPath and must be updated; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.",
+        dispatched: false,
+        acknowledged: false,
+      };
+    }
+    return sendIOSPressCommand(this.context, {
+      idPrefix: "path_gesture",
+      responseType: "path_gesture_result",
+      messageType: "request_path_gesture",
+      params: {
+        points: points.map(({ x, y, offsetMs }) => ({ x, y, offsetMs: Math.round(offsetMs) })),
+        frameContext,
+      },
+      timeoutMs,
+      abortSignal: signal,
+      onDispatch,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Path gesture",
+    });
+  }
+
+  /**
    * Send a two-finger pinch. A request the runner never answered (socket close, timeout or
    * cancellation after the send) is reported `dispatched` and not `acknowledged`, and not retryable:
    * the pinch may already have zoomed the screen.

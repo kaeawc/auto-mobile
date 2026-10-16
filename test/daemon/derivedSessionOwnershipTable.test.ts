@@ -51,11 +51,9 @@ async function emptyWorld(devices: BootedDevice[]): Promise<World> {
     }
   }
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const discovery = new FakeDeviceUtils();
   discovery.setBootedDevices("android", devices);

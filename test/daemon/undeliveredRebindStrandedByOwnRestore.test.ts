@@ -27,11 +27,9 @@ let restoreAttempts: number;
 beforeEach(() => {
   timer = new FakeTimer();
   restoreAttempts = 0;
-  sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         restoreAttempts++;
         if (restoreAttempts === 1) {
@@ -41,7 +39,7 @@ beforeEach(() => {
         return { status: "restored" as const };
       },
     }),
-  );
+  });
 });
 afterEach(() => {
   sessions.stopCleanupTimer();

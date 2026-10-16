@@ -65,26 +65,23 @@ async function harness() {
     busyMark: boolean;
     lookupGate?: Promise<void>;
   } = { busy: false, busyMark: false };
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         await behavior.gate;
         writes.push("restore");
         return { status: "restored" as const };
       },
     }),
-    undefined,
-    {
+    restorers: {
       rotation: () => ({
         restore: async () => {
           writes.push("rotation");
         },
       }),
     },
-  );
+  });
   manager.stopCleanupTimer();
   await manager.createSession(SESSION, DEVICE, "android");
   await manager.adoptManagedExecutionLivenessPolicy(SESSION);

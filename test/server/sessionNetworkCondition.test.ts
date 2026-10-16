@@ -21,14 +21,14 @@ describe("runSessionNetworkMutation", () => {
       persistence = new FakeDeviceSessionPersistence(),
     }: { persistence?: DeviceSessionPersistence } = {},
   ) =>
-    new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-      () => ({ restore: async () => {} }),
-      () => ({ restore: async (profile) => restored.push(profile) }),
-    );
+    new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+      restorers: {
+        networkCondition: () => ({ restore: async (profile) => restored.push(profile) }),
+      },
+    });
 
   test("refused setup publishes nothing, mutates nothing, restores nothing", async () => {
     class DeferredRebindPersistence extends FakeDeviceSessionPersistence {
@@ -173,11 +173,9 @@ describe("runSessionNetworkMutation", () => {
   });
 
   test("does not shape an old device after the session rebinds", async () => {
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     let mutationStarted = false;
     try {
       await manager.createSession("net-rebind", "emulator-5554", "android");

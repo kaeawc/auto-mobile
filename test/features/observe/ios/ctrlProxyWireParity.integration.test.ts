@@ -50,6 +50,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_swipe",
   "request_two_finger_swipe",
   "request_multi_finger_swipe",
+  "request_path_gesture",
   "request_drag",
   "request_pinch",
   "request_set_text",

@@ -79,13 +79,9 @@ async function setupDaemonPool() {
   process.env[AUTOLOCK_ENV] = "1";
   const timer = new FakeTimer();
   const restoredRotations: RotationRestoreState[] = [];
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    restorers: {
       networkCondition: () => ({
         restore: async () => {
           throw new Error("no network-condition restore expected");
@@ -102,7 +98,7 @@ async function setupDaemonPool() {
         },
       }),
     },
-  );
+  });
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [DEVICE]);
   const pool = new DevicePool(

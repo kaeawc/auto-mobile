@@ -188,11 +188,9 @@ class DaemonUnderTest {
   }
 
   static async start(timer: FakeTimer, devices: BootedDevice[]): Promise<DaemonUnderTest> {
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", devices);
     const pool = new DevicePool(

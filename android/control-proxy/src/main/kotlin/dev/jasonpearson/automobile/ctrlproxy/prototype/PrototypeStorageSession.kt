@@ -243,6 +243,9 @@ internal constructor(
 ) {
   private val lock = Any()
   private val values = LinkedHashMap(stored)
+
+  /** What the disk holds, as far as this session knows: the last document it wrote or loaded. */
+  private var persistedValues = LinkedHashMap(persisted)
   private val sizes =
     stored.mapValuesTo(HashMap()) { (key, value) ->
       PrototypeStorageRestorer.entryBytes(key, value)
@@ -331,6 +334,7 @@ internal constructor(
         withContext(io) {
           if (document.values.isEmpty()) store.delete(id) else store.save(id, document)
         }
+        synchronized(lock) { persistedValues = LinkedHashMap(document.values) }
       }
     } catch (error: CancellationException) {
       markDirtyUnlessCleared(snapshotGeneration)
@@ -383,23 +387,54 @@ internal constructor(
     }
   }
 
-  /** Forgets every stored value of this id, writes nothing pending; returns the keys removed. */
+  /**
+   * Forgets every stored value of this id, writes nothing pending; returns the keys that were
+   * stored (on disk), not those still waiting in the debounce window. If the disk refuses the
+   * delete, what was forgotten is put back (under anything recorded since) and the keys are owed a
+   * write again, so the live ledger never claims a clean slate the disk does not have.
+   */
   suspend fun clear(): Int {
+    val forgotten = LinkedHashMap<String, JsonElement>()
+    val wasDirty: Boolean
     val removed =
       synchronized(lock) {
         pending?.cancel()
         pending = null
+        wasDirty = dirty
         dirty = false
         generation++
-        values.size.also {
+        forgotten.putAll(values)
+        persistedValues.size.also {
           values.clear()
           sizes.clear()
           skipped.clear()
         }
       }
-    diskLock.withLock { withContext(io) { store.delete(id) } }
+    try {
+      diskLock.withLock { withContext(io) { store.delete(id) } }
+    } catch (error: CancellationException) {
+      restoreAfterFailedClear(forgotten, wasDirty)
+      throw error
+    } catch (error: IOException) {
+      restoreAfterFailedClear(forgotten, wasDirty)
+      throw error
+    }
+    synchronized(lock) { persistedValues = LinkedHashMap() }
     return removed
   }
+
+  private fun restoreAfterFailedClear(
+    forgotten: Map<String, JsonElement>,
+    wasDirty: Boolean,
+  ) =
+    synchronized(lock) {
+      for ((key, value) in forgotten) {
+        if (key in values) continue
+        values[key] = value
+        sizes[key] = PrototypeStorageRestorer.entryBytes(key, value)
+      }
+      if (wasDirty || values.isNotEmpty()) markDirty()
+    }
 
   fun report(): PrototypeStorageReport =
     synchronized(lock) {

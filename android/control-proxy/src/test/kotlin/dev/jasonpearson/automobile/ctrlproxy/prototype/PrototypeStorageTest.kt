@@ -294,7 +294,8 @@ class PrototypeStorageTest {
     val (runtime, opened) = open()
     runtime.handle(runtime.tap(1))
 
-    assertEquals(3, opened.session!!.clear())
+    // Only the two persisted keys count; the third was still in the debounce window.
+    assertEquals(2, opened.session!!.clear())
 
     assertNull(store.stored("prefs"))
     timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
@@ -306,6 +307,32 @@ class PrototypeStorageTest {
     runtime.handle(runtime.tap(0))
     runtime.flushStorage()
     assertEquals(stored("state:dark" to JsonPrimitive(false)), store.saves.single().second)
+  }
+
+  @Test
+  fun `a clear the disk refuses keeps the ledger and the keys owed`() = runTest {
+    store.seed(
+      "prefs",
+      stored("state:dark" to JsonPrimitive(true), "state:count" to JsonPrimitive(5)),
+    )
+    val (runtime, opened) = open()
+    store.refuseWrites = true
+
+    val failure = runCatching { opened.session!!.clear() }
+
+    assertTrue(failure.exceptionOrNull() is java.io.IOException)
+    assertEquals(
+      listOf("state:dark", "state:count"),
+      opened.session!!.report().keys.map { it.key },
+    )
+    // The disk record survives, and a later change writes the whole ledger, not just itself.
+    store.refuseWrites = false
+    runtime.handle(runtime.tap(1))
+    runtime.flushStorage()
+    assertEquals(
+      setOf("state:dark", "state:count"),
+      store.stored("prefs")!!.values.keys.filter { it.startsWith("state:") }.toSet(),
+    )
   }
 
   @Test

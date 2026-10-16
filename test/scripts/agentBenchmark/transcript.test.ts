@@ -100,6 +100,21 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result).toBeUndefined();
   });
 
+  test("a tool_result for a call the stream never showed is a parse error", () => {
+    const orphan = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_ghost", content: "boom", is_error: true },
+        ],
+      },
+    });
+    const jsonl = `${new TranscriptBuilder().init().mcp("observe").build()}${orphan}\n`;
+    const audit = auditTranscript(jsonl, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["tool_result for unknown tool_use_id toolu_ghost"]);
+    expect(audit.toolCalls).toHaveLength(1);
+  });
+
   test("an empty transcript audits to zero calls with no init", () => {
     const audit = auditTranscript("", NO_PATTERNS);
     expect(audit.totalToolCalls).toBe(0);

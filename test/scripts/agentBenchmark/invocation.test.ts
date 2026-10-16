@@ -209,6 +209,7 @@ describe("agent benchmark provider identity", () => {
     expect(isRunShapingClaudeVariable("CLAUDE_AUTO_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_EXTRA_BODY")).toBe(true);
     expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
+    expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);
     // Every provider endpoint override and the adb endpoint are part of the identity.
     expect(
@@ -244,11 +245,13 @@ describe("agent benchmark provider identity", () => {
         ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION: "us-east-2",
         VERTEX_REGION_CLAUDE_HAIKU: "europe-west1",
         ANTHROPIC_BEDROCK_SERVICE_TIER: "flex",
+        ANTHROPIC_FOUNDRY_RESOURCE: "my-resource",
       }),
     ).toBe(
       [
         "ANTHROPIC_BEDROCK_REGION_PREFIX=eu",
         "ANTHROPIC_BEDROCK_SERVICE_TIER=flex",
+        "ANTHROPIC_FOUNDRY_RESOURCE=my-resource",
         "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION=us-east-2",
         "VERTEX_REGION_CLAUDE_HAIKU=europe-west1",
       ].join("\n"),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, extname } from "node:path";
 import {
   loadSuite,
   parseSuiteDefinition,
@@ -178,11 +178,12 @@ describe("agent benchmark suite config", () => {
   });
 
   test("every committed suite loads and its name matches its file", () => {
-    const files = readdirSync(SUITES_DIR).filter((file) => file.endsWith(".yml"));
+    // The same predicate --all discovery uses, so a .yaml suite cannot skip this guard.
+    const files = readdirSync(SUITES_DIR).filter((file) => /\.ya?ml$/.test(file));
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const suite = loadSuite(join(SUITES_DIR, file), REPO_ROOT);
-      expect(`${suite.definition.name}.yml`).toBe(file);
+      expect(`${suite.definition.name}${extname(file)}`).toBe(file);
       // Every shipped suite checks its start screen, so a broken preflight never reaches Claude.
       expect(suite.definition.preflight.startScreenIncludes.length).toBeGreaterThan(0);
     }

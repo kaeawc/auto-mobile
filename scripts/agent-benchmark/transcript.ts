@@ -101,7 +101,14 @@ function contentBlocks(event: JsonRecord, line: number, state: AuditState): Json
       `line ${line}: ${String(event.type)} event has a non-object block`,
     );
   }
-  return content.filter(isRecord);
+  const blocks = content.filter(isRecord);
+  if (blocks.some((block) => typeof block.type !== "string" || block.type.trim() === "")) {
+    // Unknown block kinds are skipped, but a block with no kind could be hiding a tool call.
+    state.audit.parseErrors.push(
+      `line ${line}: ${String(event.type)} event has a block without a type`,
+    );
+  }
+  return blocks;
 }
 
 /**
@@ -253,9 +260,9 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("duplicate result event");
     return;
   }
-  if (event.result !== undefined && typeof event.result !== "string") {
-    // The final answer is the run's text; any other shape would read as an empty answer.
-    state.audit.parseErrors.push("result event has a non-string result");
+  if (typeof event.result !== "string") {
+    // The final answer is required text; a missing or other-shaped one would read as empty.
+    state.audit.parseErrors.push("result event has a missing or non-string result");
   }
   if (typeof event.is_error !== "boolean") {
     // The flag is required on every terminal result; a missing or non-boolean one ("true")

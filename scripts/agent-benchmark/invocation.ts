@@ -125,6 +125,7 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_EXTRA_BODY",
   // Background tasks (force-enabling them backgrounds long MCP calls)
   "CLAUDE_AUTO_BACKGROUND_TASKS",
+  "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
   // Retries and API request timeouts
   "API_TIMEOUT_MS",
   "CLAUDE_CODE_MAX_RETRIES",
@@ -327,6 +328,8 @@ const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
 const PROVIDER_REGION = /^(?:ANTHROPIC_\w*REGION\w*|VERTEX_REGION_\w+)$/;
 // Provider service tiers (ANTHROPIC_BEDROCK_SERVICE_TIER: default, flex, priority).
 const PROVIDER_TIER = /^ANTHROPIC_\w*SERVICE_TIER$/;
+// Provider resource selectors (ANTHROPIC_FOUNDRY_RESOURCE): a resource name, not a secret.
+const PROVIDER_RESOURCE = /^ANTHROPIC_\w*RESOURCE$/;
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
 const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
@@ -363,7 +366,7 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
   const set = (key: string) => env[key] !== undefined && env[key] !== "";
   const urls = Object.keys(env).filter((key) => PROVIDER_URL.test(key));
   const regions = Object.keys(env).filter(
-    (key) => PROVIDER_REGION.test(key) || PROVIDER_TIER.test(key),
+    (key) => PROVIDER_REGION.test(key) || PROVIDER_TIER.test(key) || PROVIDER_RESOURCE.test(key),
   );
   const routing = Object.keys(env)
     .filter((key) => /^ANTHROPIC_(?:DEFAULT_\w+_)?MODEL$|^ANTHROPIC_SMALL_FAST_MODEL$/.test(key))

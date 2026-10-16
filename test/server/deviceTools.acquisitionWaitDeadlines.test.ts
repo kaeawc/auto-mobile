@@ -35,6 +35,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import {
   registerLiveDeadline,
@@ -347,12 +348,12 @@ describe("device acquisition wait deadlines", () => {
         const gate = Promise.withResolvers<void>();
         const execute = adb.executeCommand.bind(adb);
         const commands: string[] = [];
-        adb.executeCommand = async (command, timeout, buffer, noRetry, signal) => {
+        adb.executeCommand = async (command, ...rest) => {
           commands.push(command);
           if (!command.startsWith("install ")) {
-            return execute(command, timeout, buffer, noRetry, signal);
+            return execute(command, ...rest);
           }
-          stageSignal = signal ?? getAbortSignal();
+          stageSignal = executeCommandOptionsOf([command, ...rest]).signal;
           await gate.promise;
           return {
             stdout: "Success",

@@ -1008,7 +1008,11 @@ function isProductRefusal(response: DaemonResponse): boolean {
   const code = response.code ?? payload?.code;
   if (
     typeof code === "string" &&
-    ["device_outside_managed_slots", "session_ownership_lost"].includes(code)
+    [
+      "device_outside_broker_grant",
+      "device_outside_managed_slots",
+      "session_ownership_lost",
+    ].includes(code)
   ) {
     return true;
   }

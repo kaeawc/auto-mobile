@@ -171,6 +171,11 @@ function handleUser(event: JsonRecord, state: AuditState): void {
       state.audit.parseErrors.push(`tool_result for unknown tool_use_id ${id || "(missing)"}`);
       continue;
     }
+    if (record.hasResult) {
+      // A second result would overwrite the first (an error, say) and hide it.
+      state.audit.parseErrors.push(`duplicate tool_result for tool_use_id ${id}`);
+      continue;
+    }
     const text = toolResultText(block.content);
     record.isError = block.is_error === true;
     record.resultText = truncate(text);

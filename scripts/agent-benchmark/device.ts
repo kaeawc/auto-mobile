@@ -10,7 +10,7 @@
 
 import { parseStringPromise } from "xml2js";
 import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
-import { parseFontScale } from "../../src/features/utility/DisplayConfig";
+import { parseFontScale, parseNightMode } from "../../src/features/utility/DisplayConfig";
 import { readWindowManagerRotation } from "../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import type { AdbCommandRunner } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../src/utils/describeUnknownError";
@@ -307,7 +307,7 @@ async function verifyInstalledApk(
 // persist.sys.locale is unset until someone changes the locale (common on emulators), so
 // fall back to ro.product.locale on the device while still printing exactly one line.
 const DEVICE_PROPERTIES =
-  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale';
+  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
 
 /** The shared WindowManager reader, over this harness's command runner. */
 function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
@@ -350,7 +350,8 @@ function parseAnimationScale(raw: string): number | undefined {
  * animator animation scales.
  */
 function trailingScales(lines: string[]): { font?: string; animation?: string } {
-  const [fontLine, ...animationLines] = lines.filter(Boolean).slice(-4);
+  // The night-mode line follows the four scale lines.
+  const [fontLine, ...animationLines] = lines.filter(Boolean).slice(-5, -1);
   const font = parseFontScale(fontLine ?? "");
   const animation = animationLines.map(parseAnimationScale);
   if (font === undefined || animation.length !== 3 || animation.includes(undefined)) {
@@ -372,7 +373,7 @@ async function liveRotation(runner: CommandRunner, serial: string): Promise<stri
 
 /**
  * The device environment a run measured against (SDK level, model, locale, screen size,
- * density, font scale, animation scales, and live rotation, since `wm size` reports the natural size whatever the
+ * density, font and animation scales, theme, and live rotation, since `wm size` reports the natural size whatever the
  * orientation), since hierarchy shape, scrolling, and timing all depend on it. Best effort:
  * a device that cannot answer reports "unknown", which never matches a baseline.
  */
@@ -399,9 +400,11 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["font", scales.font],
     // Animation scales change timing and which UI states an agent sees mid-transition.
     ["anim", scales.animation],
+    // Light and dark themes render different hierarchies and screenshots.
+    ["theme", parseNightMode(lines.filter(Boolean).at(-1) ?? "")],
     ["rotation", await liveRotation(runner, serial)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-  return result.exitCode === 0 && parts.length === 8
+  return result.exitCode === 0 && parts.length === 9
     ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
     : "unknown";
 }

@@ -275,6 +275,11 @@ describe("verification text matching", () => {
     expect(containsBounded("\u0663\u066B\u0665", "\u0663")).toBe(false);
     expect(containsBounded("1/2 done", "2 done")).toBe(false);
     expect(containsBounded("done / 3 left", "3 left")).toBe(true);
+    // Ranges and ratios are not the scalar either.
+    expect(containsBounded("EXPECTED_COUNT: 3-4", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3\u20134", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3:4", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3 - done", "EXPECTED_COUNT: 3")).toBe(true);
     // Canonically equivalent forms match each other (NFC vs NFD).
     expect(containsBounded("Cafe\u0301", "Caf\u00e9")).toBe(true);
     expect(containsBounded("Caf\u00e9", "Cafe\u0301")).toBe(true);

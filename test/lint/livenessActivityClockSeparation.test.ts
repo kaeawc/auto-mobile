@@ -1199,7 +1199,7 @@ function forbiddenReads(
 /** The innermost named function enclosing `node`, or `<module>`. */
 /** The device-tool admission sites, and the read-classification names their guard must negate. */
 const ADMISSION_SITES: Readonly<Record<string, readonly string[]>> = {
-  "src/server/toolRegistry.ts": ["readOnly", "readSession"],
+  "src/server/pipeline/executionTarget.ts": ["readOnly", "readSession"],
 };
 
 /** Whether `condition` contains `!name` for one of `names`, possibly among `&&` operands. */

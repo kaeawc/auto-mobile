@@ -84,7 +84,7 @@
 1331	src/server/planExecutionOrchestrator.ts
 2875	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts
-4278	src/server/toolRegistry.ts
+1301	src/server/toolRegistry.ts
 1048	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts

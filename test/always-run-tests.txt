@@ -1,0 +1,10 @@
+# Cross-cutting "source-scan" tests that `scripts/prepush-node.sh --changed`
+# always runs, whatever files changed (#12755). They scan source, workflow or
+# classification files, so moving code elsewhere breaks them even though Bun's
+# changed-file graph and the reference scan never select them. CI runs the
+# whole unit lane, so this list only closes the local fast-path gap.
+# One repo-relative path per line; `.bats` entries run with bats when installed.
+# Keep it small and fast: every unit entry must stay under the 100 ms budget.
+test/server/interactionTools.outputSchema.test.ts
+test/scripts/integrationSafeTier.test.ts
+test/bats/linux-qualification-workflow.bats

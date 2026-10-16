@@ -1,8 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   selectAffectedTests,
   parseIntegrationTiers,
   affectedTestsExitCode,
+  parseAlwaysRun,
 } from "../../scripts/lib/affectedTests";
 import { FakeSourceReader } from "../fakes/FakeSourceReader";
 
@@ -277,5 +280,43 @@ describe("affected tests", () => {
       ["a", "safe"],
       ["b", "unsafe"],
     ]);
+  });
+
+  describe("always-run list", () => {
+    const audit = "test/server/interactionTools.outputSchema.test.ts";
+    const bats = "test/bats/linux-qualification-workflow.bats";
+    const reader = new FakeSourceReader({ [audit]: "export {};", "src/a.ts": "export {};" });
+    const run = (changedFiles: string[], alwaysRun: string[]) =>
+      selectAffectedTests({ reader, changedFiles, tierList: "", alwaysRun });
+
+    test("parses paths, ignoring comments and blanks", () =>
+      expect(parseAlwaysRun(`# note\n\n  ${audit}  \n${bats}\n`)).toEqual([audit, bats]));
+    test("selects listed tests regardless of what changed, even when nothing did", () => {
+      for (const changed of [["src/a.ts"], ["docs/x.md"], []]) {
+        const result = run(changed, [audit, bats]);
+        expect(result.unit).toEqual([audit]);
+        expect(result.unitReferenceOnly).toEqual([audit]);
+        expect(result.alwaysRunBats).toEqual([bats]);
+        expect(affectedTestsExitCode(result)).toBe(0);
+      }
+    });
+    test("does not duplicate a listed test already selected as changed", () => {
+      expect(run([audit], [audit]).unitReferenceOnly).toEqual([audit]);
+    });
+    test("a stale entry fails the gate", () => {
+      const result = run([], ["test/gone.test.ts"]);
+      expect(result.alwaysRunMissing).toEqual(["test/gone.test.ts"]);
+      expect(affectedTestsExitCode(result)).toBe(3);
+    });
+    test("the checked-in list parses and has no duplicates", () => {
+      const listed = parseAlwaysRun(
+        readFileSync(path.join(import.meta.dir, "../always-run-tests.txt"), "utf8"),
+      );
+      expect(listed.length).toBeGreaterThan(0);
+      expect(new Set(listed).size).toBe(listed.length);
+      for (const file of listed) {
+        expect(existsSync(path.join(import.meta.dir, "../..", file))).toBe(true);
+      }
+    });
   });
 });

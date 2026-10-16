@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import ts from "typescript";
@@ -15,6 +15,8 @@ export interface AffectedTestsInput {
   reader: SourceReader;
   changedFiles: string[];
   tierList: string;
+  /** Repo-relative tests that always run (see test/always-run-tests.txt). */
+  alwaysRun?: string[];
   maxUnit?: number;
   maxIntegration?: number;
 }
@@ -31,6 +33,14 @@ export function parseIntegrationTiers(text: string): Map<string, "safe" | "unsaf
     }
   }
   return tiers;
+}
+
+/** One path per line; blank lines and `#` comments are ignored. */
+export function parseAlwaysRun(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
 }
 
 const isSource = (file: string): boolean => /\.(?:ts|tsx|mts)$/.test(file);
@@ -186,9 +196,30 @@ export function selectAffectedTests(input: AffectedTestsInput) {
     }
     seed(tierValidator, "validates: test/integration-safe-tier.txt classification");
   }
+  // Cross-cutting source-scan tests break when code moves, not when they or their
+  // imports change, so neither Bun's --changed graph nor the reference scan sees them.
+  const alwaysRun = input.alwaysRun ?? [];
+  const alwaysRunBats = alwaysRun.filter((file) => file.endsWith(".bats"));
+  const alwaysRunMissing = alwaysRun.filter((file) => !file.endsWith(".bats") && !files.has(file));
+  for (const file of alwaysRun) {
+    if (file.endsWith(".bats") || !files.has(file)) {
+      continue;
+    }
+    seed(file, "always-run: test/always-run-tests.txt");
+    if (!unit.includes(file)) {
+      unit.push(file);
+    }
+    if (!unitReferenceOnly.includes(file)) {
+      unitReferenceOnly.push(file);
+    }
+  }
+  unit.sort();
+  unitReferenceOnly.sort();
   return {
     unit,
     unitReferenceOnly,
+    alwaysRunBats,
+    alwaysRunMissing,
     integrationSafe,
     integrationUnsafeSkipped,
     integrationUnlisted,
@@ -201,8 +232,13 @@ export function selectAffectedTests(input: AffectedTestsInput) {
 }
 
 /** An empty selection succeeds; missing integration classifications block the gate. */
-export function affectedTestsExitCode(result: { integrationUnlisted: readonly string[] }): 0 | 3 {
-  return result.integrationUnlisted.length > 0 ? 3 : 0;
+export function affectedTestsExitCode(result: {
+  integrationUnlisted: readonly string[];
+  alwaysRunMissing?: readonly string[];
+}): 0 | 3 {
+  return result.integrationUnlisted.length > 0 || (result.alwaysRunMissing?.length ?? 0) > 0
+    ? 3
+    : 0;
 }
 
 if (import.meta.main) {
@@ -210,6 +246,7 @@ if (import.meta.main) {
     options: {
       "changed-files": { type: "string" },
       "tier-file": { type: "string", default: "test/integration-safe-tier.txt" },
+      "always-run-file": { type: "string", default: "test/always-run-tests.txt" },
       "max-unit": { type: "string", default: "80" },
       "max-integration": { type: "string", default: "40" },
       "out-dir": { type: "string", default: "scratch/affected-tests" },
@@ -244,6 +281,7 @@ if (import.meta.main) {
       .map((file) => file.trim())
       .filter(Boolean),
     tierList: readFileSync(values["tier-file"], "utf8"),
+    alwaysRun: parseAlwaysRun(readFileSync(values["always-run-file"], "utf8")),
     maxUnit: cap(values["max-unit"]),
     maxIntegration: cap(values["max-integration"]),
   });
@@ -252,6 +290,13 @@ if (import.meta.main) {
     writeFileSync(path.join(values["out-dir"], name), lines.length ? `${lines.join("\n")}\n` : "");
   write("unit.txt", result.unitReferenceOnly);
   write("integration-safe.txt", result.integrationSafe);
+  result.alwaysRunMissing.push(
+    ...result.alwaysRunBats.filter((file) => !existsSync(path.join(root, file))),
+  );
+  write("bats.txt", result.alwaysRunBats);
+  for (const file of result.alwaysRunMissing) {
+    console.error(`Always-run test ${file} does not exist: fix test/always-run-tests.txt.`);
+  }
   const fallbacks: string[] = [];
   if (result.fallback.unitFallback) {
     fallbacks.push("unit");

@@ -445,6 +445,26 @@ describe("session-only broker lifecycle", () => {
     }
   });
 
+  test("capacity refusal is retryable under a new request ID; the old ID replays it identically", async () => {
+    const holder = await ready("holder");
+    const refusal = await broker.prepare(config("over-cap"), "owner-token");
+    expect(refusal).toMatchObject({
+      outcome: "failed",
+      sessionUuid: null,
+      failure: {
+        code: "capacity_exhausted",
+        retryable: true,
+        retryRequires: "new_request_id",
+      },
+    });
+    await broker.release(holder);
+    expect(await broker.prepare(config("over-cap"), "owner-token")).toEqual(refusal);
+    expect(await broker.status("over-cap")).toEqual(refusal);
+    expect(await broker.prepare(config("over-cap-2"), "owner-token")).toMatchObject({
+      outcome: "ready",
+    });
+  });
+
   test("Duo refusal happens before capacity and never evicts a device", async () => {
     await ready("first");
     const request = config("duo");

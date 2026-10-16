@@ -1,6 +1,6 @@
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool, type SessionPreservingRecoveryResult } from "../../src/daemon/devicePool";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
@@ -13,7 +13,7 @@ import {
 } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -44,12 +44,18 @@ describe("DevicePool", () => {
   let fakeTimer: FakeTimer;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeDeviceManager: FakeDeviceManager;
-  const { initializeLiveDevices, configureAfterFirstSession, failIosLivenessAfterFirstSession } =
-    devicePoolSuiteActions(() => ({
-      devicePool,
-      sessionManager,
-      fakeDeviceManager,
-    }));
+  const {
+    initializeLiveDevices,
+    configureAfterFirstSession,
+    failIosLivenessAfterFirstSession,
+    makePool,
+  } = devicePoolSuiteActions(() => ({
+    devicePool,
+    sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
+    fakeDeviceManager,
+  }));
 
   beforeEach(() => {
     ({ devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager } =
@@ -69,14 +75,7 @@ describe("DevicePool", () => {
         [firstConnection],
       );
       fakeDeviceManager = deferredDeviceManager;
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool();
       await initializeLiveDevices([firstConnection]);
 
       const preflightAllocation = devicePool.assignMultipleDevices(
@@ -284,14 +283,7 @@ describe("DevicePool", () => {
       const sessionPersistence = new FakeDeviceSessionPersistence();
       sessionPersistence.createFailureOnAttempt = 2;
       sessionManager = new SessionManager(fakeTimer, sessionPersistence);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool();
       await initializeLiveDevices([
         createBootedDevice("emulator-5554"),
         createBootedDevice("emulator-5556"),
@@ -330,14 +322,7 @@ describe("DevicePool", () => {
       );
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, sessionPersistence);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool();
       await initializeLiveDevices([
         createBootedDevice("emulator-5554"),
         createBootedDevice("emulator-5556"),
@@ -374,19 +359,14 @@ describe("DevicePool", () => {
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          releaseSessionForDisconnectedDevice: async (sessionId, deviceId, reason) => {
-            releaseCalls.push({ sessionId, deviceId, reason });
-            await sessionManager.releaseSession(sessionId, reason);
-          },
-          recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        releaseSessionForDisconnectedDevice: async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        },
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      });
 
       const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
       expect(assignments.get("session-1")).toBe("emulator-5554");
@@ -421,18 +401,13 @@ describe("DevicePool", () => {
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          releaseSessionForDisconnectedDevice: async (sessionId, deviceId, reason) => {
-            releaseCalls.push({ sessionId, deviceId, reason });
-            await sessionManager.releaseSession(sessionId, reason);
-          },
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        releaseSessionForDisconnectedDevice: async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        },
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
@@ -467,14 +442,7 @@ describe("DevicePool", () => {
       const persistence = new DeferredDeviceSessionPersistence();
       sessionManager.stopCleanupTimer();
       sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
 
       // A rolled-back create leaves the device free: it cancels no sessionless call (#10905).
       const acquisitionCancellations: string[] = [];
@@ -517,14 +485,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         manager.bootedDevices = [];
@@ -582,16 +543,11 @@ describe("DevicePool", () => {
           fakeTimer,
           new CountingIdGenerator("incident"),
         );
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            recoveryPolicy: { onLoss: true, maxAttempts: 2 },
-            emulatorLossIncidentStore: incidents,
-          }),
-        );
+        devicePool = makePool({
+          deviceManager: manager,
+          recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+          emulatorLossIncidentStore: incidents,
+        });
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         manager.bootedDevices = [];
@@ -673,16 +629,11 @@ describe("DevicePool", () => {
           return await backingStore.list(limit);
         },
       };
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-          emulatorLossIncidentStore: incidents,
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+        emulatorLossIncidentStore: incidents,
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
@@ -744,16 +695,11 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-          emulatorLossIncidentStore: incidents,
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+        emulatorLossIncidentStore: incidents,
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
@@ -809,16 +755,11 @@ describe("DevicePool", () => {
         },
       ];
       manager.deviceImages = images;
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-          emulatorLossIncidentStore: incidents,
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+        emulatorLossIncidentStore: incidents,
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       const disconnected = devicePool.getDevice("emulator-5554")!;
@@ -877,16 +818,11 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-          emulatorLossIncidentStore: incidents,
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+        emulatorLossIncidentStore: incidents,
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       const disconnected = devicePool.getDevice("emulator-5554")!;
@@ -957,17 +893,12 @@ describe("DevicePool", () => {
           return false;
         },
       };
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          androidDeviceReboot: twoFailedAttempts,
-          recoveryPolicy: { onLoss: true, maxAttempts: 2 },
-          emulatorLossIncidentStore: incidents,
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        androidDeviceReboot: twoFailedAttempts,
+        recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+        emulatorLossIncidentStore: incidents,
+      });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
@@ -1024,14 +955,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         devicePool.markIntentionalShutdown("emulator-5554");
@@ -1068,14 +992,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         devicePool.markIntentionalShutdown("emulator-5554");
@@ -1112,14 +1029,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithDistinctStartedProcesses(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -1156,14 +1066,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithExitedRecoveryProcess(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
@@ -1204,14 +1107,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithExitedInitialProcess(images);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await expect(
           devicePool.assignMultipleDevices(["session-1"], 1_000, "android"),
@@ -1241,14 +1137,7 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithExitedRecoveryProcess(images, null, "SIGTERM");
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool({ deviceManager: manager });
 
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
@@ -1289,14 +1178,7 @@ describe("DevicePool", () => {
           source: "local",
         },
       ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
@@ -1380,15 +1262,7 @@ describe("DevicePool", () => {
             source: "local",
           },
         ];
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: fakeDeviceManager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            lifecycleCoordinator,
-          }),
-        );
+        devicePool = makePool({ lifecycleCoordinator });
         const owner = await lifecycleCoordinator.reserve(
           { kind: "stable", platform: "android", stableId: "pixel_8_api_35" },
           { operation: "recovery", deadlineMs: 300_000 },
@@ -1480,14 +1354,7 @@ describe("DevicePool", () => {
           source: "local",
         },
       ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
@@ -1531,14 +1398,7 @@ describe("DevicePool", () => {
           source: "local",
         },
       ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);

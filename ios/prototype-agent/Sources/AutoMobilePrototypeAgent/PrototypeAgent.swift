@@ -236,15 +236,15 @@ final class PrototypeAgent: NSObject {
     }
 
     /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames
-    /// to the connected host and come back as `prototype_response`; `via: "device"` calls run on a
-    /// dedicated URLSession client.
+    /// to the most recently authenticated host (one connection only) and come back as
+    /// `prototype_response`; `via: "device"` calls run on a dedicated URLSession client.
     private func installRequestDriver() {
         let driver = PrototypeRequestDriver(
             clock: SystemPrototypeClock(),
             device: PrototypeURLSessionClient()
         ) { [weak self] frame in
             guard let self, connectedClients > 0, let server else { return false }
-            server.broadcast(frame)
+            server.sendToHost(frame)
             return true
         }
         driver.onComplete = { [weak model] requestId, response in

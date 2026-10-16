@@ -25,6 +25,7 @@ struct PrototypeTransportWriter: Sendable {
         case hello(Int, PrototypeTransportJSON)
         case frame(Int, PrototypeTransportJSON)
         case broadcast(PrototypeTransportJSON)
+        case toHost(PrototypeTransportJSON)
         case removed(Int)
         case flush(CheckedContinuation<Void, Never>)
     }
@@ -36,23 +37,26 @@ struct PrototypeTransportWriter: Sendable {
         continuation = output.continuation
         Task.detached {
             var sinks: [Int: Sink] = [:]
-            var authenticated: Set<Int> = []
+            var authenticated = PrototypeConnectionRegistry<Int>()
             for await operation in output.stream {
                 switch operation {
                 case let .accepted(id, sink): sinks[id] = sink
                 case let .hello(id, json):
                     await Self.write(json, to: sinks[id])
-                    authenticated.insert(id)
+                    authenticated.register(id)
                 case let .frame(id, json):
                     await Self.write(json, to: sinks[id])
                 case let .broadcast(json):
                     if let data = Self.encode(json.object) {
-                        for id in authenticated {
+                        for id in authenticated.all {
                             await sinks[id]?(data)
                         }
                     }
+                case let .toHost(json):
+                    // Exactly one connection: the most recently authenticated.
+                    if let id = authenticated.current { await Self.write(json, to: sinks[id]) }
                 case let .removed(id):
-                    authenticated.remove(id)
+                    authenticated.unregister(id)
                     sinks[id] = nil
                 case let .flush(done): done.resume()
                 }
@@ -74,6 +78,11 @@ struct PrototypeTransportWriter: Sendable {
 
     func broadcast(_ message: [String: Any]) {
         continuation.yield(.broadcast(PrototypeTransportJSON(object: message)))
+    }
+
+    /// A host request: written to the most recently authenticated connection only.
+    func sendToHost(_ message: [String: Any]) {
+        continuation.yield(.toHost(PrototypeTransportJSON(object: message)))
     }
 
     func remove(_ id: Int) { continuation.yield(.removed(id)) }
@@ -291,6 +300,9 @@ final class PrototypeTransportDelivery {
     }
 
     func broadcast(_ message: [String: Any]) { writer.broadcast(message) }
+
+    /// Sends to the most recently authenticated connection only (host-proxied requests).
+    func sendToHost(_ message: [String: Any]) { writer.sendToHost(message) }
 
     deinit { consumer?.cancel() }
 }

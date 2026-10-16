@@ -109,6 +109,10 @@ final class PrototypeServer {
     /// Events go only to authenticated connections, synchronously enqueued in call order.
     func broadcast(_ message: [String: Any]) { delivery.broadcast(message) }
 
+    /// A host-proxied request goes to the most recently authenticated connection only, so a
+    /// side-effecting call is never run by two hosts.
+    func sendToHost(_ message: [String: Any]) { delivery.sendToHost(message) }
+
     /// Network.framework requires a dispatch queue for callbacks; it owns no transport state.
     private nonisolated static func adapt(_ connection: NWConnection) -> PrototypeTransportConnection {
         let input = AsyncThrowingStream<Data, Error>.makeStream()

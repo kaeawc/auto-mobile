@@ -584,8 +584,11 @@ other JSON body as `application/json`, as on the host and Android.
 `PrototypeRequestDriver` runs what the session starts, behind a clock and two seams so its tests are
 deterministic:
 
-- **`via: "host"` (the default).** The agent broadcasts a `prototype_request` frame
-  (`prototypeRequestMessageSchema`) to the authenticated host connection and the host's
+- **`via: "host"` (the default).** The agent sends a `prototype_request` frame
+  (`prototypeRequestMessageSchema`) to exactly one connection, the most recently authenticated one
+  (`PrototypeConnectionRegistry.current`, as Android's `WebSocketServer.sendToHost`), so a
+  reconnecting daemon replaces the one it superseded and a side-effecting call never runs twice
+  (events still broadcast to every authenticated connection). The host's
   `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
   never replies to. The host has no cancel frame, so a cancelled call is forgotten and its late response
   ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or

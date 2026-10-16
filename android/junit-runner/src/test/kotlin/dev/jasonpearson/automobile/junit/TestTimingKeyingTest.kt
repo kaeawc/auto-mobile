@@ -196,12 +196,12 @@ object PlanRecordingAlpha {
   class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
     fun runsPlan() {
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-        collaborators,
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
     }
   }
 }
@@ -211,12 +211,12 @@ object PlanRecordingBeta {
   class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
     fun runsPlan() {
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-        collaborators,
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
     }
   }
 }

@@ -116,15 +116,11 @@ describe("losing the old device during a deferred rebind cleanup", () => {
 
   const evictOld = async (attemptDeviceLossRecovery: boolean): Promise<void> => {
     devices.bootedDevices = [booted[1]!];
-    const evict = (
-      pool as unknown as {
-        evictMissingPooledDevice(
-          device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
-          reason: string,
-          options?: { attemptDeviceLossRecovery?: boolean },
-        ): Promise<void>;
-      }
-    ).evictMissingPooledDevice.bind(pool);
+    const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+      device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
+      reason: string,
+      options?: { attemptDeviceLossRecovery?: boolean },
+    ) => Promise<void>;
     await evict(pool.getDevice(OLD)!, "not present in adb devices", { attemptDeviceLossRecovery });
     await spin();
     expectSessionKeptOnNew();
@@ -139,36 +135,34 @@ describe("losing the old device during a deferred rebind cleanup", () => {
   });
 
   test("a newer identity observation during eviction leaves the deferred release to free the old device", async () => {
-    const internals = pool as unknown as {
-      tryPreserveSessionForMissingDevice(): Promise<boolean>;
-      releaseDeviceClaim(deviceId: string): void;
-      evictMissingPooledDevice(
-        device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
-        reason: string,
-        options: {
-          identityObservation: {
-            deviceId: string;
-            name: string;
-            platform: "android";
-            observedAt: number;
-          };
-        },
-      ): Promise<void>;
-    };
+    const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+      device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
+      reason: string,
+      options: {
+        identityObservation: {
+          deviceId: string;
+          name: string;
+          platform: "android";
+          observedAt: number;
+        };
+      },
+    ) => Promise<void>;
     const old = pool.getDevice(OLD)!;
     old.identityObservedAt = 1;
     const claimsReleased: string[] = [];
-    const releaseClaim = internals.releaseDeviceClaim.bind(pool);
-    internals.releaseDeviceClaim = (deviceId) => {
+    const releaseClaim = Reflect.get(pool, "releaseDeviceClaim").bind(pool) as (
+      deviceId: string,
+    ) => void;
+    Reflect.set(pool, "releaseDeviceClaim", (deviceId: string) => {
       claimsReleased.push(deviceId);
       releaseClaim(deviceId);
-    };
+    });
     // The eviction awaits here; a newer observation reconfirms OLD meanwhile.
-    internals.tryPreserveSessionForMissingDevice = async () => {
+    Reflect.set(pool, "tryPreserveSessionForMissingDevice", async () => {
       old.identityObservedAt = 5;
       return false;
-    };
-    await internals.evictMissingPooledDevice(old, "runtime identity changed", {
+    });
+    await evict(old, "runtime identity changed", {
       identityObservation: { deviceId: OLD, name: "avd-z", platform: "android", observedAt: 3 },
     });
     releaseGate();

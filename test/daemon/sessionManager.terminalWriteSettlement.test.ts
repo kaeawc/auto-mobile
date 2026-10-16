@@ -162,7 +162,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     const release = manager.releaseSessionUnlessSuperseded(
       SESSION,
       `device-disconnected:${DEVICE}`,
-      () => !superseded,
+      { commitFence: () => !superseded },
     );
     await settleMicrotasks();
     const snapshot = manager["sessionSlots"].getTerminalSnapshot(SESSION)!;

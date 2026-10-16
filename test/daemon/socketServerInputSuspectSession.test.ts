@@ -151,7 +151,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
           sessionId,
           new SessionReleasedDuringCallError(sessionId, reason),
         );
-        await sessionManager.releaseSession(sessionId, reason, true);
+        await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );

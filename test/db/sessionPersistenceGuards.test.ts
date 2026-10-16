@@ -434,7 +434,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       const release = manager.releaseSessionUnlessSuperseded(
         SESSION,
         `device-disconnected:${DEVICE}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await settleMicrotasks(100);
       // Fail the eager rewrite so the late terminal write drives the original activity race.

@@ -220,7 +220,7 @@ describe("session release device ownership hold", () => {
     manager.onSessionRelease((_id, _device, _reason, _snapshot, releaseOptions) => {
       options.push(releaseOptions.deviceIdentityReplaced === true);
     });
-    const release = manager.releaseSession(SESSION, "explicit-release", false, undefined, {
+    const release = manager.releaseSession(SESSION, "explicit-release", {
       deviceIdentityReplaced: true,
     });
     await drainMicrotasks(40);
@@ -366,7 +366,7 @@ describe("session release device ownership hold", () => {
       await reowner.reown([SESSION], { rehydrated: true });
       held = false;
       manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
-      const release = manager.releaseSession(SESSION, "heartbeat-timeout", true);
+      const release = manager.releaseSession(SESSION, "heartbeat-timeout", { allowExpired: true });
       await drainMicrotasks(30);
       expect(reowner.isReleaseHeld(SESSION)).toBe(true);
       expect(writes).toEqual([]);

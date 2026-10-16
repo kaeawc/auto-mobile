@@ -184,7 +184,9 @@ describe("remaining session row writes (#11557)", () => {
     store.releaseGates = [firstWrite.promise, secondWrite.promise, restoreWrite.promise];
     store.failRewrites = 1;
     let firstSuperseded = false;
-    const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !firstSuperseded);
+    const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !firstSuperseded,
+    });
     await settle();
     expect(store.releases).toEqual([reason]);
     firstSuperseded = true;
@@ -198,7 +200,9 @@ describe("remaining session row writes (#11557)", () => {
     await settle();
     expect(store.liveRowRewrites).toBe(2);
     let secondSuperseded = false;
-    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !secondSuperseded);
+    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !secondSuperseded,
+    });
     await settle();
     expect(store.releases).toEqual([reason, reason]);
     await timer.advanceTimeAsync(40);

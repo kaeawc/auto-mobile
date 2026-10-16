@@ -842,11 +842,9 @@ warmedTest(
           await gate.promise;
           return;
         }
-        const result = await h.sessions.releaseSessionUnlessSuperseded(
-          sessionId,
-          reason,
-          shouldCommit ?? (() => true),
-        );
+        const result = await h.sessions.releaseSessionUnlessSuperseded(sessionId, reason, {
+          commitFence: shouldCommit ?? (() => true),
+        });
         return !result.superseded;
       },
     });

@@ -81,7 +81,6 @@
 1645	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
 3670	src/server/interactionTools.ts
-1445	src/server/observeWaitEvaluation.ts
 1331	src/server/planExecutionOrchestrator.ts
 2867	src/server/prototypeTools.ts
 1009	src/server/proxyServer.ts

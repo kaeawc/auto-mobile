@@ -1,4 +1,4 @@
-import type { SessionDeviceProfile } from "../devices/sessionRequirements";
+import type { SessionDeviceProfile } from "./sessionRequirements";
 
 export type SessionBrokerProtocolErrorCode =
   | "session_broker_exclusive"

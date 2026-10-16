@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
-import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/models/sessionConfig";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/devices/sessionConfig";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

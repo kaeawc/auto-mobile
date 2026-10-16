@@ -5,17 +5,20 @@ import {
   resolvePrototypeAgentChecksum,
   resolvePrototypeAgentUrl,
   resolvePinnedVersion,
-} from "../../constants/release";
-import { ActionableError } from "../../models/ActionableError";
-import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
-import { type IdGenerator, defaultIdGenerator } from "../../utils/IdGenerator";
-import { logger } from "../../utils/logger";
-import { type Timer, defaultTimer } from "../../utils/SystemTimer";
-import { VerifiedArtifactCache } from "../../utils/VerifiedArtifactCache";
-import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+} from "../../../constants/release";
+import { ActionableError } from "../../../models/ActionableError";
+import {
+  type ChecksumCalculator,
+  DefaultChecksumCalculator,
+} from "../../../utils/ChecksumCalculator";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { type FileDownloader, DefaultFileDownloader } from "../../../utils/FileDownloader";
+import { type IdGenerator, defaultIdGenerator } from "../../../utils/IdGenerator";
+import { logger } from "../../../utils/logger";
+import { type Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { VerifiedArtifactCache } from "../../../utils/VerifiedArtifactCache";
+import { ensureSecureTempDirSync, getTempDir } from "../../../utils/tempDir";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
 
 const CACHE_SUBDIR = "prototype-agent";
 const SECURE_DIR_MODE = 0o700;

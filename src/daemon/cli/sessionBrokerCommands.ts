@@ -2,7 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type {
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../../models/sessionBrokerResult";
+} from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { parseBooleanFlagValue, readValueOperand, splitFlagToken } from "../../utils/flagTokens";
 import { z } from "zod";

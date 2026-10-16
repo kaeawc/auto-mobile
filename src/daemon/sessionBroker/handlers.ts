@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseSessionConfig } from "../../models/sessionConfig";
+import { parseSessionConfig } from "../../devices/sessionConfig";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { DaemonRequest } from "../types";

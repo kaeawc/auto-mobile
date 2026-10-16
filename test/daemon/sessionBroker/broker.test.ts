@@ -9,7 +9,7 @@ import {
   type SqliteSlotRegistry,
 } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
 import type { SlotProcessIdentity } from "../../../src/daemon/managedSlots/slotRegistry";
-import { parseSessionConfig, type SessionConfig } from "../../../src/models/sessionConfig";
+import { parseSessionConfig, type SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 

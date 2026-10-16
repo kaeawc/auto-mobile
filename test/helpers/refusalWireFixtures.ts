@@ -6,7 +6,7 @@ import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureS
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { ManagedSlotConfigError } from "../../src/models/managedSlotConfig";
-import { SessionConfigError } from "../../src/models/sessionConfig";
+import { SessionConfigError } from "../../src/devices/sessionConfig";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";

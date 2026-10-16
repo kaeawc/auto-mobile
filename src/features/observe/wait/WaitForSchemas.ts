@@ -2,18 +2,18 @@
  * The observe `waitFor` / `settled` zod schemas, their advertised compact JSON schema and the
  * cross-field refinements shared by `observe` and `openLink` (moved out of observeTools.ts, #11828).
  */
-import { MAX_WAIT_FOR_TIMEOUT_MS } from "../features/observe/waitForTimeout";
-import { errorMessage } from "../utils/describeUnknownError";
+import { MAX_WAIT_FOR_TIMEOUT_MS } from "../waitForTimeout";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { z } from "zod/v4";
-import { ActionableError } from "../models/ActionableError";
-import { JsonSchemaOverride } from "./toolSchemaHelpers";
+import { ActionableError } from "../../../models/ActionableError";
+import { JsonSchemaOverride } from "../../../server/toolSchemaHelpers";
 import {
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
-} from "./elementSelectorSchemas";
-import type { HierarchyLayer } from "../models/HierarchyLayer";
-import { logger } from "../utils/logger";
-import { hasElementPredicate } from "./observeWaitEvaluation";
+} from "../../../server/elementSelectorSchemas";
+import type { HierarchyLayer } from "../../../models/HierarchyLayer";
+import { logger } from "../../../utils/logger";
+import { hasElementPredicate } from "./WaitEvaluation";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are

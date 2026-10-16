@@ -707,6 +707,9 @@ Symbol button beside the field (a plain glyph without `onTap`), named by `label`
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
 
+`leadingIcon` (`prototype_text_field_leading_icon_v1`) is a built-in icon name drawn before the
+text as an SF Symbol, decoration only, hidden from accessibility.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

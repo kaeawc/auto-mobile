@@ -35,7 +35,7 @@ describe("file-size baseline", () => {
   test("recorded counts are at least the current non-blank line counts", () => {
     for (const { count, file } of rows()) {
       const actual = readFileSync(join(ROOT, file), "utf8")
-        .split("\n")
+        .split(/\r?\n/)
         .filter((line) => /\S/.test(line)).length;
       expect({ file, ok: actual <= count }).toEqual({ file, ok: true });
     }

@@ -1215,7 +1215,7 @@ function foreignDeviceRead(
   }
   const assignedDevice = DaemonState.getInstance()
     .getSessionManager()
-    .getSession(sessionUuid)?.assignedDevice;
+    .findSession(sessionUuid)?.assignedDevice;
   return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
 }
 
@@ -1225,7 +1225,7 @@ function gatedReadSessionDevice(sessionUuid: string | undefined): string | undef
   return sessionUuid &&
     state.isInitialized() &&
     state.getDevicePool().bindingOwnershipGate(sessionUuid)
-    ? state.getSessionManager().getSession(sessionUuid)?.assignedDevice
+    ? state.getSessionManager().findSession(sessionUuid)?.assignedDevice
     : undefined;
 }
 
@@ -2117,7 +2117,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return sessionId;
     }
 
-    const session = DaemonState.getInstance().getSessionManager().getSession(sessionId);
+    const session = DaemonState.getInstance().getSessionManager().findSession(sessionId);
     return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
   }
 
@@ -3235,7 +3235,7 @@ async function assertBindingControlAccess(input: {
     deviceId: input.deviceId,
     requesterSessionUuid,
     grantedDeviceOf: (grantedSessionUuid) =>
-      sessionManager.getSession(grantedSessionUuid)?.assignedDevice ?? undefined,
+      sessionManager.findSession(grantedSessionUuid)?.assignedDevice ?? undefined,
   });
   if (connectionRefusal) {
     throw connectionRefusal;
@@ -3322,7 +3322,7 @@ function assertInternalCallWithinBrokerGrant(
     args: invocation.args,
     requesterSessionUuid,
     grantedDeviceOf: (grantedSessionUuid) =>
-      sessionManager.getSession(grantedSessionUuid)?.assignedDevice ?? undefined,
+      sessionManager.findSession(grantedSessionUuid)?.assignedDevice ?? undefined,
   });
   if (refusal) {
     throw refusal;

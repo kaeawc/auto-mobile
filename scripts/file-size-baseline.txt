@@ -9,7 +9,7 @@
 6025	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8463	src/daemon/devicePool.ts
+8457	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
 4163	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
@@ -17,11 +17,11 @@
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
-12916	src/daemon/sessionManager.ts
+11642	src/daemon/sessionManager.ts
 8803	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
-1096	src/db/failureAnalyticsRepository.ts
+1089	src/db/failureAnalyticsRepository.ts
 1451	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
 2620	src/devices/DeviceSessionManager.ts
@@ -51,7 +51,7 @@
 1056	src/features/observe/ViewHierarchy.ts
 5141	src/features/observe/android/AndroidCtrlProxyClient.ts
 1857	src/features/observe/android/CtrlProxyHierarchy.ts
-1871	src/features/observe/android/ctrlProxyProtocol.ts
+1873	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
 4586	src/features/observe/ios/IOSCtrlProxyClient.ts
@@ -59,7 +59,7 @@
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
-1265	src/features/prototype/prototypeSpec.ts
+1266	src/features/prototype/prototypeSpec.ts
 1224	src/features/prototype/prototypeValidation.ts
 2878	src/features/systemTray/systemTrayHelpers.ts
 1684	src/features/utility/DeepLinkManager.ts
@@ -80,9 +80,9 @@
 1170	src/server/executionTracker.ts
 1644	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
-3747	src/server/interactionTools.ts
+3152	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
-2866	src/server/prototypeTools.ts
+2852	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts
 4278	src/server/toolRegistry.ts
 1048	src/server/utilityTools.ts

@@ -1,24 +1,24 @@
-import { ActionableError } from "../models/ActionableError";
-import type { ConditionEvaluation } from "../features/observe/interfaces/WaitForCondition";
+import { ActionableError } from "../../../models/ActionableError";
+import type { ConditionEvaluation } from "../interfaces/WaitForCondition";
 import {
   usesScopedWait,
   waitContainerSelector,
   isScopedWaitResolutionError,
   waitResolutionFailure,
-} from "../features/observe/ConditionPredicates";
-import { BootedDevice, Element, ViewHierarchyResult } from "../models";
-import { isMissingContainerError, type MatchMode } from "../features/utility/ElementResolver";
-import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
+} from "../ConditionPredicates";
+import { BootedDevice, Element, ViewHierarchyResult } from "../../../models";
+import { isMissingContainerError, type MatchMode } from "../../utility/ElementResolver";
+import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import {
   hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
-} from "../features/utility/ElementGeometry";
-import type { ScreenSize } from "../models/ScreenSize";
-import { normalizeQuotes } from "../features/utility/TextMatcher";
-import type { ResolverSelector } from "./elementSelectorSchemas";
-import type { ConditionResolver } from "../features/observe/ConditionPredicates";
-import type { ObserveWaitForOptions } from "./observeWaitForSchemas";
+} from "../../utility/ElementGeometry";
+import type { ScreenSize } from "../../../models/ScreenSize";
+import { normalizeQuotes } from "../../utility/TextMatcher";
+import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { ConditionResolver } from "../ConditionPredicates";
+import type { ObserveWaitForOptions } from "./WaitForSchemas";
 
 const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | undefined =>
   waitContainerSelector(waitFor.container);

@@ -22,6 +22,8 @@ interface SwipeAtGestureOptions {
   speed?: "slow" | "normal" | "fast";
   /** Refuse the gesture when the `from` point lies on the other layer's windows. */
   layer?: HierarchyLayer;
+  /** Android panel key, role, or `active`; points are in that panel's coordinate space. */
+  display?: string;
 }
 
 export type SwipeAtOptions = SwipeAtGestureOptions &

@@ -407,8 +407,12 @@ are in `image.unit`, not `coordinateSpace`. Add
 `snapshotId` to reject the swipe when the screen geometry changed since that
 observation, or the reference expired. `speed` selects `slow`, `normal` (the
 default), or `fast` as in `swipeOn`. `layer` is checked at the `from` point, because touches go to the window under the
-finger-down point. `swipeAt` does not accept `display`; use `swipeOn` for a
-non-default display.
+finger-down point. `display` (panel key, role, or `active`) swipes on that
+Android panel: points, `coordinateSpace` and `image` resolve against the panel's observed
+`screenSize`, `snapshotId` and `layer` are checked against its observation, and the display fence
+is re-checked before dispatch (a changed or removed display returns `staleDisplay`). A
+non-default panel needs the CtrlProxy `gesture_display_id_v1` capability and otherwise fails with
+an actionable error. iOS refuses `display`.
 
 `recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
 half the on-axis travel), or a swipe with a known path but no direction, as

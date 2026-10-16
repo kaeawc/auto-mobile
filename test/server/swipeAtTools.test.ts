@@ -41,6 +41,10 @@ describe("swipeAtSchema", () => {
       },
     ],
     [
+      "from/to on a selected display",
+      { platform: "android", from: { x: 1, y: 2 }, to: { x: 30, y: 40 }, display: "cover" },
+    ],
+    [
       "image-relative from/to",
       {
         platform: "android",
@@ -129,11 +133,6 @@ describe("swipeAtSchema", () => {
       ["from", "x"],
     ],
     [
-      "undeclared display",
-      { platform: "android", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, display: "main" },
-      [],
-    ],
-    [
       "undeclared durationMs",
       { platform: "android", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, durationMs: 500 },
       [],
@@ -172,6 +171,7 @@ describe("swipeAtHandler", () => {
       speed: "slow",
       layer: "app",
       snapshotId: "snapshot-9",
+      display: "cover",
     });
 
     expect(received).toEqual([
@@ -182,6 +182,7 @@ describe("swipeAtHandler", () => {
         speed: "slow",
         layer: "app",
         snapshotId: "snapshot-9",
+        display: "cover",
       },
     ]);
     expect(response.isError).toBeUndefined();

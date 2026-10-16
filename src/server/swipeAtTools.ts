@@ -105,6 +105,12 @@ export const swipeAtSchema = withJsonSchemaOverride(
             "Screenshot-relative from/to points sharing one image source; mutually exclusive with outer from, to, and coordinateSpace. Without image, from and to are required.",
           ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        display: z
+          .string()
+          .optional()
+          .describe(
+            "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
+          ),
         layer: hierarchyLayerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
@@ -166,6 +172,7 @@ export function createSwipeAtHandler({
         snapshotId: args.snapshotId,
         speed: args.speed,
         layer: args.layer,
+        display: args.display,
       } as SwipeAtOptions,
       { progress, signal },
     );

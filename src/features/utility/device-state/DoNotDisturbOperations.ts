@@ -48,12 +48,9 @@ export class DoNotDisturbOperations {
     }
     try {
       const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const result = await adb.executeCommand(
-        "shell settings get global zen_mode",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await adb.executeCommand("shell settings get global zen_mode", {
+        noRetry: true,
+      });
       return parseAndroidZenMode(result.stdout);
     } catch (error) {
       return {
@@ -70,12 +67,9 @@ export class DoNotDisturbOperations {
     const mode = modeForInput(input);
     try {
       const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const setResult = await adb.executeCommand(
-        `shell cmd notification set_dnd ${mode}`,
-        undefined,
-        undefined,
-        true,
-      );
+      const setResult = await adb.executeCommand(`shell cmd notification set_dnd ${mode}`, {
+        noRetry: true,
+      });
       const stdout = setResult.stdout;
       const stderr = setResult.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {

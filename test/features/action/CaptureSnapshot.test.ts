@@ -7,7 +7,6 @@ import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
@@ -594,7 +593,7 @@ describe("CaptureSnapshot", () => {
 
 describe("CaptureSnapshot (iOS)", () => {
   let device: BootedDevice;
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let store: DeviceSnapshotStore;
   let testBasePath: string;
 
@@ -605,7 +604,7 @@ describe("CaptureSnapshot (iOS)", () => {
       platform: "ios",
     };
 
-    simctl = new FakeSimCtlClient();
+    simctl = new FakeSimctl();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-capture-"));
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });

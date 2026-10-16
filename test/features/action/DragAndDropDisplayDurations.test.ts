@@ -11,7 +11,6 @@ import { prepareTargetDisplayAction } from "../../../src/features/action/TargetD
 import { throwIfAborted } from "../../../src/utils/toolUtils";
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -69,7 +68,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string; autoAdva
   if (options.autoAdvance !== false) {
     timer.enableAutoAdvance();
   }
-  const action = new DragAndDrop(device, adb as unknown as AdbClient, timer, {
+  const action = new DragAndDrop(device, adb, timer, {
     lastRenderedObservation: () => observation,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy),
   });
@@ -582,7 +581,7 @@ test("explicit-display helper throws an indeterminate ActionableError after disp
     device,
     "external",
     observe,
-    adb as unknown as AdbClient,
+    adb,
     () => observation,
   );
   drag.mockImplementation(async (...args) => {

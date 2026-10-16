@@ -302,12 +302,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     for (;;) {
       let bootCompleted: string | null = null;
       try {
-        const result = await this.adb.executeCommand(
-          "shell getprop sys.boot_completed",
-          undefined,
-          undefined,
-          true,
-        );
+        const result = await this.adb.executeCommand("shell getprop sys.boot_completed", {
+          noRetry: true,
+        });
         bootCompleted = normalizeSettingValue(result.stdout);
       } catch (error) {
         // Expected while the framework is mid-restart: the shell may briefly
@@ -523,12 +520,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   /** True only when the device itself says the current user is user 0. */
   private async currentUserIsPrimary(): Promise<boolean> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell am get-current-user",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell am get-current-user", { noRetry: true });
       const currentUserId = Number.parseInt(result.stdout.trim(), 10);
       return currentUserId === 0;
     } catch (error) {
@@ -912,7 +904,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       }
     }
     try {
-      const result = await this.adb.executeCommand(command, undefined, undefined, true);
+      const result = await this.adb.executeCommand(command, { noRetry: true });
       return normalizeSettingValue(result.stdout);
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to read setting (${command}): ${error}`);
@@ -980,9 +972,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     try {
       const result = await this.adb.executeCommand(
         `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       const reply = parseAppLocalesReply(result.stdout, result.stderr);
       if (reply.kind === "list") {
@@ -1043,12 +1033,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
   private async getEffectiveLocaleTag(): Promise<string | null> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell am get-config",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell am get-config", { noRetry: true });
       return this.parseLocaleFromAmConfig(result.stdout);
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to read effective Android locale: ${error}`);

@@ -594,9 +594,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is installed");
       const result = await this.adb.executeCommand(
         `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
       if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -730,11 +728,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
-    const result = await this.adb.executeCommand(
-      "shell dumpsys accessibility",
-      undefined,
-      DUMPSYS_MAX_BUFFER,
-    );
+    const result = await this.adb.executeCommand("shell dumpsys accessibility", {
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
       throw new ActionableError(diagnostic);
@@ -1050,7 +1046,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private async runShieldedCommand(command: string): Promise<ExecResult> {
     const shield = new AbortController();
     return raceWithDeadline(
-      () => this.adb.executeCommand(command, undefined, undefined, undefined, shield.signal, true),
+      () =>
+        this.adb.executeCommand(command, {
+          signal: shield.signal,
+          waitForProcessSettlementAfterAbort: true,
+        }),
       {
         timer: this.timer,
         timeoutMs: REBIND_MUTATION_COMMAND_TIMEOUT_MS,
@@ -1945,9 +1945,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const result = await this.adb.executeCommand(
         `shell pm list packages ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       if (!packageListingContains(result.stdout, AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
         return;
@@ -1961,7 +1959,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       uninstallAttempted = true;
       await this.adb.executeCommand(
         `shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
-        CTRL_PROXY_INSTALL_TIMEOUT_MS,
+        { timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS },
       );
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
@@ -2006,13 +2004,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           }),
       },
       async (signal) => {
-        const result = await this.adb.executeCommand(
-          command,
-          CTRL_PROXY_INSTALL_TIMEOUT_MS,
-          undefined,
-          undefined,
+        const result = await this.adb.executeCommand(command, {
+          timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS,
           signal,
-        );
+        });
         signal.throwIfAborted();
         return result;
       },
@@ -2614,12 +2609,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async isEmulator(): Promise<[boolean, boolean]> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell getprop ro.kernel.qemu",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", {
+        noRetry: true,
+      });
       const qemuProp = result.stdout.trim();
       // ro.kernel.qemu is "1" on emulators, empty or "0" on physical devices
       if (qemuProp === "1") {
@@ -2627,12 +2619,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       // Fallback: check ro.product.model for common emulator strings
-      const modelResult = await this.adb.executeCommand(
-        "shell getprop ro.product.model",
-        undefined,
-        undefined,
-        true,
-      );
+      const modelResult = await this.adb.executeCommand("shell getprop ro.product.model", {
+        noRetry: true,
+      });
       const model = modelResult.stdout.trim().toLowerCase();
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
@@ -2652,12 +2641,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async getApiLevel(): Promise<[number | null, boolean]> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell getprop ro.build.version.sdk",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", {
+        noRetry: true,
+      });
       const apiLevel = parseInt(result.stdout.trim(), 10);
       return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
@@ -2796,10 +2782,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       throwIfAborted();
-      await this.adb.executeCommand(
-        `pull "${apkPath}" "${localApkPath}"`,
-        CTRL_PROXY_PULL_TIMEOUT_MS,
-      );
+      await this.adb.executeCommand(`pull "${apkPath}" "${localApkPath}"`, {
+        timeoutMs: CTRL_PROXY_PULL_TIMEOUT_MS,
+      });
       const apkBuffer = await fs.readFile(localApkPath);
       const sha256 = crypto.createHash("sha256").update(apkBuffer).digest("hex");
       return {
@@ -2839,9 +2824,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const pathResult = await this.adb.executeCommand(
         `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       const line = pathResult.stdout
         .split("\n")

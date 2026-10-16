@@ -41,6 +41,10 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import type { CtrlProxyRequestActionOptions } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
+import {
+  resolveAccessibilityHierarchyArgs,
+  type AccessibilityHierarchyRequest,
+} from "../../src/features/observe/hierarchyReadArgs";
 
 /**
  * Fake implementation of IOSCtrlProxy for testing
@@ -612,14 +616,22 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
+    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    signalArg?: AbortSignal,
+    timeoutMsArg?: number,
   ): Promise<ViewHierarchyResult | null> {
-    void signal;
+    const { readOptions } = resolveAccessibilityHierarchyArgs(
+      perfOrRequest,
+      skipWaitForFresh,
+      minTimestamp,
+      disableAllFiltering,
+      signalArg,
+      timeoutMsArg,
+    );
+    const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     this.hierarchyRequestCount++;
     this.hierarchyRequestTimeouts.push(timeoutMs);
     await this.applyDelay("getHierarchy");

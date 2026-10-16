@@ -1,14 +1,14 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { SettleObserve } from "./interfaces/SettleObserve";
 import type { ViewHierarchyResult } from "../../models";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { HierarchyCaptureReader, HierarchyCaptureRequest } from "./HierarchyCapture";
-import type { ViewHierarchy } from "./interfaces/ViewHierarchy";
+import type { ViewHierarchy, ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 
 /** Adapter preserving the existing reader injection while making cache policy explicit. */
 export class ViewHierarchyCaptureReader implements HierarchyCaptureReader {
   constructor(
-    private readonly hierarchy: Pick<ViewHierarchy, "getViewHierarchy" | "filterOffscreenNodes">,
+    private readonly hierarchy: Pick<ViewHierarchy, "filterOffscreenNodes"> &
+      ViewHierarchyRequestReader,
     private readonly sync: (request: HierarchyCaptureRequest) => Promise<ViewHierarchyResult>,
     private readonly visible: (hierarchy: ViewHierarchyResult) => ViewHierarchyResult,
     private readonly settle?: SettleObserve,
@@ -17,11 +17,12 @@ export class ViewHierarchyCaptureReader implements HierarchyCaptureReader {
   readCached(request: HierarchyCaptureRequest): Promise<ViewHierarchyResult> {
     return this.hierarchy.getViewHierarchy(
       {},
-      new NoOpPerformanceTracker(),
-      true,
-      request.minTimestamp ?? 0,
-      request.signal,
-      request.timeoutMs,
+      {
+        skipWaitForFresh: true,
+        minTimestamp: request.minTimestamp ?? 0,
+        signal: request.signal,
+        timeoutMs: request.timeoutMs,
+      },
     );
   }
 

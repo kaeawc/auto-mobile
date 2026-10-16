@@ -353,9 +353,9 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
       const result = perf
         ? await perf.track(`activityApproach_${index + 1}`, () =>
-            this.adb.executeCommand(command, undefined, undefined, undefined, signal),
+            this.adb.executeCommand(command, { signal }),
           )
-        : await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+        : await this.adb.executeCommand(command, { signal });
       this.assertLaunchNotAborted(signal);
       logger.info(
         `[LaunchApp] Approach ${index + 1} result: ${result.stdout.length} chars of output`,
@@ -382,21 +382,9 @@ export class LaunchApp extends BaseVisualChange {
     try {
       const simpleResult = perf
         ? await perf.track("activityFallback", () =>
-            this.adb.executeCommand(
-              `shell pm dump ${shellQuote(packageName)}`,
-              undefined,
-              undefined,
-              undefined,
-              signal,
-            ),
+            this.adb.executeCommand(`shell pm dump ${shellQuote(packageName)}`, { signal }),
           )
-        : await this.adb.executeCommand(
-            `shell pm dump ${shellQuote(packageName)}`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          );
+        : await this.adb.executeCommand(`shell pm dump ${shellQuote(packageName)}`, { signal });
       this.assertLaunchNotAborted(signal);
       const activities = parseLauncherActivitiesFromPackageDump(simpleResult.stdout, packageName);
       for (const activity of activities) {
@@ -1628,13 +1616,9 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     try {
-      await this.adb.executeCommand(
-        "shell cmd statusbar collapse",
-        undefined,
-        undefined,
-        undefined,
-        combineWithAmbientAbort(signal),
-      );
+      await this.adb.executeCommand("shell cmd statusbar collapse", {
+        signal: combineWithAmbientAbort(signal),
+      });
     } catch (error) {
       logger.warn(
         `[LaunchApp] Failed to collapse notification shade: ${errorMessage(error)}`,
@@ -2097,9 +2081,9 @@ export class LaunchApp extends BaseVisualChange {
 
       const checkResult = perf
         ? await perf.track("dumpsysCheck", () =>
-            this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER),
+            this.adb.executeCommand(cmd, { maxBuffer: DUMPSYS_MAX_BUFFER }),
           )
-        : await this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER);
+        : await this.adb.executeCommand(cmd, { maxBuffer: DUMPSYS_MAX_BUFFER });
 
       const output = (checkResult && checkResult.stdout ? checkResult.stdout : "").trim();
       logger.info(`[LaunchApp] Dumpsys check output: "${output}" (${output.length} chars)`);

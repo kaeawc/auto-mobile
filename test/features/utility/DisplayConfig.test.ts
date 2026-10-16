@@ -11,7 +11,7 @@ import {
   parseWmDensity,
 } from "../../../src/features/utility/DisplayConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import {
   getDeviceIncarnationListeners,
   notifyDeviceIdentityReplaced,
@@ -212,7 +212,7 @@ describe("DisplayConfig getConfig", () => {
   });
 
   test("fails an iOS Simulator read when simctl does not report an appearance", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(["ui", iosSimulator.deviceId, "appearance"], { stdout: "\n" });
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
@@ -623,13 +623,13 @@ describe("DisplayConfig setConfig", () => {
 });
 
 /** Argv arrays actually issued to simctl (each recorded call's `args`). */
-function simctlArgvCalls(simctl: FakeSimCtlClient): string[][] {
+function simctlArgvCalls(simctl: FakeSimctl): string[][] {
   return simctl.getMethodCalls("executeCommandArgs").map((c) => c.args as string[]);
 }
 
 describe("DisplayConfig platform gating", () => {
   test("reports physical iOS as fully unsupported for reads without issuing commands", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosPhysical, { simctl }).getConfig();
 
     expect(result.success).toBe(false);
@@ -640,7 +640,7 @@ describe("DisplayConfig platform gating", () => {
   });
 
   test("reports physical iOS as fully unsupported for writes without issuing commands", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosPhysical, { simctl }).setConfig({
       fontScale: 2.0,
     });
@@ -654,14 +654,14 @@ describe("DisplayConfig platform gating", () => {
 
 describe("DisplayConfig iOS Simulator theme support", () => {
   test("reports theme (only) as supported on an iOS Simulator", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
   });
 
   test("reads the current appearance through the SimCtlClient seam", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "dark\n");
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
@@ -673,7 +673,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("sets the appearance through the SimCtlClient seam", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResultSequence(
       ["ui", iosSimulator.deviceId, "appearance"],
       [{ stdout: "light\n" }, { stdout: "dark\n" }],
@@ -694,7 +694,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("fails when the Simulator does not apply the requested appearance", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResultSequence(
       ["ui", iosSimulator.deviceId, "appearance"],
       [{ stdout: "light\n" }, { stdout: "light\n" }],
@@ -709,7 +709,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("reset restores light appearance", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResultSequence(
       ["ui", iosSimulator.deviceId, "appearance"],
       [{ stdout: "dark\n" }, { stdout: "light\n" }],
@@ -729,7 +729,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("rejects theme 'system' as an honest per-field refusal, issuing no appearance write", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
@@ -747,7 +747,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("rejects fontScale on the iOS Simulator without issuing a simctl appearance write", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       fontScale: 1.3,
@@ -761,7 +761,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("rejects density on the iOS Simulator", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       density: 480,
@@ -772,7 +772,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("fails closed when the iOS Simulator snapshot is unreadable before mutation", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "unknown\n");
 
     const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
@@ -788,7 +788,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 
   test("preserves previous state when the post-mutation appearance read fails", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     // The pre-read (before the write) succeeds ("light"), the write itself
     // succeeds, but the read used to verify what actually landed rejects
     // afterward — e.g. a transient failure or cancellation after dispatch. The

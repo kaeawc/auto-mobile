@@ -109,6 +109,47 @@ export function runVideoRecordingRepositoryContract(
         expect(await repository.getRecording("missing")).toBeNull();
       }));
 
+    test("captureTeardown round-trips, update(undefined) clears it, and hasCaptureTeardown lists only rows with one", () =>
+      withRepository(async (repository) => {
+        const teardown = {
+          kind: "android-screenrecord" as const,
+          deviceTempPath: "/sdcard/rec.mp4",
+          devicePid: 4242,
+        };
+        await repository.insertRecording(
+          record({ recordingId: "with", captureTeardown: teardown }),
+        );
+        await repository.insertRecording(record({ recordingId: "without" }));
+        expect((await repository.getRecording("with"))?.captureTeardown).toEqual(teardown);
+        expect((await repository.getRecording("without"))?.captureTeardown).toBeUndefined();
+        expect(ids(await repository.listRecordings({ hasCaptureTeardown: true }))).toEqual([
+          "with",
+        ]);
+        await repository.updateRecording("with", { captureTeardown: undefined });
+        expect((await repository.getRecording("with"))?.captureTeardown).toBeUndefined();
+        expect(await repository.listRecordings({ hasCaptureTeardown: true })).toEqual([]);
+        // An update that does not mention captureTeardown leaves it alone.
+        await repository.updateRecording("without", { captureTeardown: teardown });
+        await repository.updateRecording("without", { sizeBytes: 5 });
+        expect((await repository.getRecording("without"))?.captureTeardown).toEqual(teardown);
+      }));
+
+    test("re-inserting without a captureTeardown clears it, but a missing recorderDaemonSessionId keeps the stored one", () =>
+      withRepository(async (repository) => {
+        await repository.insertRecording(
+          record({
+            captureTeardown: { kind: "android-screenrecord", deviceTempPath: "/sdcard/a.mp4" },
+            recorderDaemonSessionId: "daemon-1",
+          }),
+        );
+        await repository.insertRecording(record({ status: "completed" }));
+        const afterOverwrite = await repository.getRecording("rec-1");
+        expect(afterOverwrite?.captureTeardown).toBeUndefined();
+        expect(afterOverwrite?.recorderDaemonSessionId).toBe("daemon-1");
+        await repository.insertRecording(record({ recorderDaemonSessionId: "daemon-2" }));
+        expect((await repository.getRecording("rec-1"))?.recorderDaemonSessionId).toBe("daemon-2");
+      }));
+
     test("deleteRecording reports whether a row was removed", () =>
       withRepository(async (repository) => {
         await repository.insertRecording(record());

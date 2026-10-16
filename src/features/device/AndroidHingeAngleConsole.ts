@@ -48,13 +48,10 @@ export class AdbAndroidHingeAngleConsole implements AndroidHingeAngleConsole {
     adb: ReturnType<AdbClientFactory["create"]>,
     options: { signal?: AbortSignal } = {},
   ): Promise<AndroidHingeAngleReadbackResult> {
-    const { stdout, stderr } = await adb.executeCommand(
-      "emu sensor get hinge-angle0",
-      undefined,
-      undefined,
-      true,
-      options.signal,
-    );
+    const { stdout, stderr } = await adb.executeCommand("emu sensor get hinge-angle0", {
+      noRetry: true,
+      signal: options.signal,
+    });
     if (emulatorConsoleReportsFailure(stdout, stderr)) {
       const reason = `${stdout}\n${stderr}`.split(/\r?\n/).find((line) => line.trim().length > 0)!;
       return { ok: false, reason };
@@ -67,13 +64,10 @@ export class AdbAndroidHingeAngleConsole implements AndroidHingeAngleConsole {
     degrees: number,
     options: { signal?: AbortSignal } = {},
   ): Promise<AndroidHingeAngleConsoleResult> {
-    const { stdout, stderr } = await adb.executeCommand(
-      `emu sensor set hinge-angle0 ${degrees}`,
-      undefined,
-      undefined,
-      true,
-      options.signal,
-    );
+    const { stdout, stderr } = await adb.executeCommand(`emu sensor set hinge-angle0 ${degrees}`, {
+      noRetry: true,
+      signal: options.signal,
+    });
     if (emulatorConsoleReportsFailure(stdout, stderr)) {
       // Preserve the first non-empty line verbatim; this is no sensor-output parser.
       const reason = `${stdout}\n${stderr}`.split(/\r?\n/).find((line) => line.trim().length > 0)!;

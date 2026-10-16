@@ -343,12 +343,12 @@ class PlanRecoveryInteractionTest {
   fun `a failure with no recovery to follow holds nothing`() {
     daemon.cannedFailure = failedPayload { it }
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-        collaborators = collaborators,
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse(result.success)
     assertEquals(listOf<Boolean?>(null), daemon.holdSessionOnFailureArgs)
@@ -392,12 +392,12 @@ class PlanRecoveryInteractionTest {
   fun `a failure payload with no device id falls back to the configured device, not auto`() {
     daemon.cannedFailure = failedPayload { it.without("deviceId") }
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = true, device = "emulator-5558"),
-        collaborators = collaborators,
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(aiAssistance = true, device = "emulator-5558"),
+        )
 
     assertTrue(result.success)
     assertEquals("emulator-5558", recordingAgent.contexts.single().deviceId)
@@ -415,28 +415,28 @@ class PlanRecoveryInteractionTest {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private fun executePlaceholderPlan(): AutoMobilePlanExecutionResult =
-    AutoMobilePlanExecutor.execute(
-      "test-plans/recovery-interaction.yaml",
-      mapOf(
-        "greeting" to HOSTILE_GREETING,
-        "dismiss" to "Dismiss",
-        "second" to "Second step",
-        "target" to "Confirm",
-      ),
-      AutoMobilePlanExecutionOptions(aiAssistance = true),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/recovery-interaction.yaml",
+        mapOf(
+          "greeting" to HOSTILE_GREETING,
+          "dismiss" to "Dismiss",
+          "second" to "Second step",
+          "target" to "Confirm",
+        ),
+        AutoMobilePlanExecutionOptions(aiAssistance = true),
+      )
 
   private fun executeSimplePlan(
     maxRetries: Int = 0,
     timings: PlanExecutorTimings = PlanExecutorTimings(),
   ): AutoMobilePlanExecutionResult =
-    AutoMobilePlanExecutor.execute(
-      "test-plans/launch-clock-app.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
-      collaborators.copy(timings = timings),
-    )
+    PlanExecutor(collaborators.copy(timings = timings))
+      .execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
+      )
 
   private fun resultMessage(result: AutoMobilePlanExecutionResult, stepIndex: Int): String? {
     val entry = result.getToolResult(stepIndex)

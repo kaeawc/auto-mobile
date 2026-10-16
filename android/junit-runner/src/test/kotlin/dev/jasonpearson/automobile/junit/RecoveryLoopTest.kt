@@ -289,12 +289,12 @@ class RecoveryLoopTest {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private fun executePlan(aiAssistance: Boolean): AutoMobilePlanExecutionResult {
-    return AutoMobilePlanExecutor.execute(
-      "test-plans/launch-clock-app.yaml",
-      emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
-      collaborators = collaborators,
-    )
+    return PlanExecutor(collaborators)
+      .execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
+      )
   }
 
   private fun buildSuccessResponse(): DaemonResponse {

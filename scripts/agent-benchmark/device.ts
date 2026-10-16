@@ -539,6 +539,11 @@ interface HierarchyNode {
 function visibleText(nodes: HierarchyNode[], packageName: string): string[] {
   return nodes.flatMap((node) => {
     const attributes = node.$ ?? {};
+    // A node explicitly marked invisible (off screen, behind another window) and its subtree
+    // are not what the user sees, so they cannot satisfy a screen check.
+    if (attributes["visible-to-user"] === "false") {
+      return [];
+    }
     const own =
       attributes.package === packageName
         ? [attributes.text, attributes["content-desc"]].filter((value): value is string =>

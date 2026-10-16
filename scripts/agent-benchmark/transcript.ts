@@ -308,7 +308,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
   }
   // Terminal metrics land in baseline.yml, so they must fit the baseline schema's domains.
   const turns = event.num_turns;
-  if (turns !== undefined && !(Number.isInteger(turns) && (turns as number) >= 0)) {
+  if (turns === undefined && event.subtype === "success") {
+    // A successful result always reports its turn count; without it the metric goes missing.
+    state.audit.parseErrors.push("result event has no num_turns");
+  } else if (turns !== undefined && !(Number.isInteger(turns) && (turns as number) >= 0)) {
     state.audit.parseErrors.push("result event has an invalid num_turns");
   }
   const cost = event.total_cost_usd;

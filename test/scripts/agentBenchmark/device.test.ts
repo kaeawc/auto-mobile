@@ -359,6 +359,16 @@ describe("agent benchmark screen capture", () => {
     expect(await screenTextForApp(xml, PACKAGE)).toBe('A & <b>\nClose "x"');
   });
 
+  test("nodes marked invisible, and their subtrees, do not count as screen text", async () => {
+    const xml =
+      '<?xml version="1.0"?><hierarchy rotation="0">' +
+      '<node package="dev.example.app" text="Shown" visible-to-user="true"/>' +
+      '<node package="dev.example.app" text="Behind" visible-to-user="false">' +
+      '<node package="dev.example.app" text="Hidden child"/>' +
+      "</node></hierarchy>";
+    expect(await screenTextForApp(xml, PACKAGE)).toBe("Shown");
+  });
+
   test("malformed hierarchy XML rejects rather than matching raw text", async () => {
     await expect(screenTextForApp("<hierarchy><node", PACKAGE)).rejects.toThrow();
   });

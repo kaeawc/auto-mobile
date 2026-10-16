@@ -197,6 +197,41 @@ const realRunner: CommandRunner = {
   },
 };
 
+/**
+ * Signal a launched process and everything it started. POSIX children are spawned as their own
+ * process group, so a `--claude` wrapper that does not `exec` cannot leave Claude and its MCP
+ * server running after a timeout; Windows has no groups, so taskkill walks the tree.
+ */
+export function killProcessTree(
+  pid: number,
+  signal: NodeJS.Signals,
+  platform: NodeJS.Platform = process.platform,
+  deps: {
+    kill: (pid: number, signal: NodeJS.Signals) => void;
+    taskkill: (pid: number) => void;
+  } = {
+    kill: (target, sig) => process.kill(target, sig),
+    taskkill: (target) => {
+      spawnSync("taskkill", ["/pid", String(target), "/T", "/F"], { stdio: "ignore" });
+    },
+  },
+): void {
+  if (platform === "win32") {
+    deps.taskkill(pid);
+    return;
+  }
+  try {
+    deps.kill(-pid, signal);
+  } catch {
+    // The group is already gone (or never formed); fall back to the process itself.
+    try {
+      deps.kill(pid, signal);
+    } catch {
+      // Already exited: nothing left to signal.
+    }
+  }
+}
+
 function createLauncher(timer: Timer): ClaudeLauncher {
   return {
     launch(spec) {
@@ -206,7 +241,24 @@ function createLauncher(timer: Timer): ClaudeLauncher {
         cwd: spec.cwd,
         env: spec.env,
         stdio: ["pipe", stdout, stderr],
+        // Its own process group, so the timeout and an interrupt reach every descendant.
+        detached: process.platform !== "win32",
       });
+      const killTree = (signal: NodeJS.Signals) => {
+        if (child.pid !== undefined) {
+          killProcessTree(child.pid, signal);
+        }
+      };
+      // A separate group no longer receives the terminal's Ctrl+C, so forward an interrupt
+      // or termination to the group, then let the signal end the harness as usual.
+      const forward = (signal: NodeJS.Signals) => {
+        killTree("SIGTERM");
+        process.off("SIGINT", forward);
+        process.off("SIGTERM", forward);
+        process.kill(process.pid, signal);
+      };
+      process.on("SIGINT", forward);
+      process.on("SIGTERM", forward);
       // Claude can exit before reading stdin (bad flag, auth failure); the resulting
       // EPIPE must not crash the CLI. The child close/error handlers settle the run.
       child.stdin.on("error", () => undefined);
@@ -215,8 +267,8 @@ function createLauncher(timer: Timer): ClaudeLauncher {
       let killHandle: NodeJS.Timeout | undefined;
       const timeoutHandle = timer.setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        killHandle = timer.setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+        killTree("SIGTERM");
+        killHandle = timer.setTimeout(() => killTree("SIGKILL"), KILL_GRACE_MS);
       }, spec.timeoutMs);
       // A failed spawn can emit both `error` and `close`; settle (and close the fds) once.
       let settled = false;
@@ -225,6 +277,8 @@ function createLauncher(timer: Timer): ClaudeLauncher {
           return false;
         }
         settled = true;
+        process.off("SIGINT", forward);
+        process.off("SIGTERM", forward);
         timer.clearTimeout(timeoutHandle);
         if (killHandle) {
           timer.clearTimeout(killHandle);

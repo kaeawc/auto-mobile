@@ -40,8 +40,8 @@ const baselineSchema = z
     mcpToolCalls: z.number().int().nonnegative().optional(),
     toolErrors: z.number().int().nonnegative().optional(),
     numTurns: z.number().int().nonnegative().optional(),
-    costUsd: z.number().nonnegative().optional(),
-    wallClockSeconds: z.number().nonnegative().optional(),
+    costUsd: z.number().finite().nonnegative().optional(),
+    wallClockSeconds: z.number().finite().nonnegative().optional(),
     tools: z.record(z.number().int().nonnegative()).optional(),
     /** The preflight app fingerprint the baseline was recorded against. */
     appBuild: z.string().min(1).optional(),

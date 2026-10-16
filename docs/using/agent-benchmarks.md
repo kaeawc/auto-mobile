@@ -32,17 +32,17 @@ bun scripts/agent-benchmark/run.ts --suite ux-flow --model claude-sonnet-5-5 --j
 bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-repro/20261016T010203Z-1a2b3c4d
 ```
 
-| Option                             | Meaning                                                                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                                              |
-| `--all`                            | Run every suite in `benchmark/agent/suites/` (not combinable with `--suite`).                                      |
-| `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.                                   |
-| `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                                                   |
-| `--json`                           | Print the full result JSON instead of the text report.                                                             |
-| `--dry-run`                        | Validate suites and print the Claude command and MCP config; touches no device or API.                             |
-| `--from-result <dir\|result.json>` | Re-render an earlier run without re-running Claude.                                                                |
-| `--claude <command>`               | Claude Code executable (default `claude`). A wrapper script must `exec` the CLI so the timeout's signals reach it. |
-| `--output <dir>`                   | Artifact root (default `scratch/agent-benchmarks`).                                                                |
+| Option                             | Meaning                                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                                                                                     |
+| `--all`                            | Run every suite in `benchmark/agent/suites/` (not combinable with `--suite`).                                                                             |
+| `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.                                                                          |
+| `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                                                                                          |
+| `--json`                           | Print the full result JSON instead of the text report.                                                                                                    |
+| `--dry-run`                        | Validate suites and print the Claude command and MCP config; touches no device or API.                                                                    |
+| `--from-result <dir\|result.json>` | Re-render an earlier run without re-running Claude.                                                                                                       |
+| `--claude <command>`               | Claude Code executable (default `claude`). Claude runs in its own process group, so a timeout or Ctrl+C stops a wrapper script and everything it started. |
+| `--output <dir>`                   | Artifact root (default `scratch/agent-benchmarks`).                                                                                                       |
 
 The exit code is `0` when every run passed, `1` when any run failed or was incomplete, and `2`
 for a usage error.

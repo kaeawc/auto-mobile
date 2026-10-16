@@ -103,6 +103,7 @@ import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/Wo
 import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
+import { sendCommand } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
@@ -1353,6 +1354,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     key: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11ySettingsGetResult>;
 
   requestSettingsPut(
@@ -1362,12 +1364,14 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     valueType?: SettingsValueType,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11ySettingsPutResult>;
 
   requestSettingsList(
     namespace: SettingsNamespace,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11ySettingsListResult>;
 
   requestInstallCaCertificate(
@@ -2591,6 +2595,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ? this.supportedCommands?.has(messageType) === true
           : this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
+      idGenerator: this.idGenerator,
     };
   }
 
@@ -4537,150 +4542,108 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  async requestSettingsGet(
+  requestSettingsGet(
     namespace: SettingsNamespace,
     key: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<A11ySettingsGetResult> {
-    const startTime = this.timer.now();
-    try {
-      if (!this.isConnected()) {
-        return {
-          success: false,
-          found: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      const requestId = this.requestManager.generateId("settings_get");
-      const promise = this.requestManager.register<A11ySettingsGetResult>(
-        requestId,
-        "settings_get",
+    return this.sendSettingsCommand(
+      "get",
+      { namespace, key },
+      {
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          found: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Settings get timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        this.ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestSettingsGet({ requestId, namespace, key }),
-          ),
-        );
-      });
-
-      const result = await perf.track("waitForSettingsGet", () => promise);
-      return result;
-    } catch (error) {
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Settings get failed after ${duration}ms: ${error}`);
-      return { success: false, found: false, totalTimeMs: duration, error: `${error}` };
-    }
+        perf,
+        signal,
+        failure: (error, totalTimeMs) => ({ success: false, found: false, totalTimeMs, error }),
+      },
+    );
   }
 
-  async requestSettingsPut(
+  requestSettingsPut(
     namespace: SettingsNamespace,
     key: string,
     value: string | null,
     valueType: SettingsValueType = "string",
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    ...[perf = new NoOpPerformanceTracker(), signal]: [
+      perf?: PerformanceTracker,
+      signal?: AbortSignal,
+    ]
   ): Promise<A11ySettingsPutResult> {
-    const startTime = this.timer.now();
-    try {
-      if (!this.isConnected()) {
-        return {
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      const requestId = this.requestManager.generateId("settings_put");
-      const promise = this.requestManager.register<A11ySettingsPutResult>(
-        requestId,
-        "settings_put",
+    return this.sendSettingsCommand(
+      "put",
+      { namespace, key, value, valueType },
+      {
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Settings put timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        this.ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestSettingsPut({ requestId, namespace, key, value, valueType }),
-          ),
-        );
-      });
-
-      const result = await perf.track("waitForSettingsPut", () => promise);
-      return result;
-    } catch (error) {
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Settings put failed after ${duration}ms: ${error}`);
-      return { success: false, totalTimeMs: duration, error: `${error}` };
-    }
+        perf,
+        signal,
+        failure: (error, totalTimeMs) => ({ success: false, totalTimeMs, error }),
+      },
+    );
   }
 
-  async requestSettingsList(
+  requestSettingsList(
     namespace: SettingsNamespace,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<A11ySettingsListResult> {
-    const startTime = this.timer.now();
-    try {
-      if (!this.isConnected()) {
-        return {
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      const requestId = this.requestManager.generateId("settings_list");
-      const promise = this.requestManager.register<A11ySettingsListResult>(
-        requestId,
-        "settings_list",
+    return this.sendSettingsCommand(
+      "list",
+      { namespace },
+      {
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Settings list timeout after ${timeout}ms`,
-        }),
+        perf,
+        signal,
+        failure: (error, totalTimeMs) => ({ success: false, totalTimeMs, error }),
+      },
+    );
+  }
+
+  private async sendSettingsCommand<T>(
+    operation: "get" | "put" | "list",
+    params: Record<string, unknown>,
+    options: {
+      timeoutMs: number;
+      perf: PerformanceTracker;
+      signal?: AbortSignal;
+      failure: (error: string, totalTimeMs: number) => T;
+    },
+  ): Promise<T> {
+    const startTime = this.timer.now();
+    const failure = (error: string): T => options.failure(error, this.timer.now() - startTime);
+    try {
+      const abortSignal = combineWithAmbientAbort(options.signal);
+      abortSignal?.throwIfAborted();
+      return await sendCommand<T>(
+        {
+          ...this.createDelegateContext(),
+          // Settings historically dispatch even when omitted from the handshake or rejected.
+          isCommandSupported: undefined,
+        },
+        {
+          idPrefix: `settings_${operation}`,
+          responseType: `settings_${operation}`,
+          messageType: `request_settings_${operation}`,
+          // The Android serializer leaves settings fields untouched; createMessage has the
+          // same type, requestId, params order as the typed settings builders.
+          params,
+          timeoutMs: options.timeoutMs,
+          perf: options.perf,
+          abortSignal,
+          requireExistingConnection: true,
+          cancelScreenshotBackoff: false,
+          notConnectedError: () => failure("WebSocket not connected"),
+          timeoutError: (timeout) => failure(`Settings ${operation} timeout after ${timeout}ms`),
+          unsupportedCommandError: (_type, error) => failure(error),
+        },
       );
-
-      await perf.track("sendRequest", async () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        this.ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestSettingsList({ requestId, namespace }),
-          ),
-        );
-      });
-
-      const result = await perf.track("waitForSettingsList", () => promise);
-      return result;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Settings list failed after ${duration}ms: ${error}`);
-      return { success: false, totalTimeMs: duration, error: `${error}` };
+      logger.warn(`[CTRL_PROXY] Settings ${operation} failed after ${duration}ms`, error);
+      return options.failure(`${error}`, duration);
     }
   }
 

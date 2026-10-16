@@ -5,7 +5,11 @@ import {
   TextRequestState,
   runWithTextRequestContext,
 } from "../../../src/features/action/textTransportTimeout";
-import { INPUT_TEXT_HOST_WAIT_PER_CHAR_MS } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
+import {
+  INPUT_TEXT_CONSUME_MARGIN_MS,
+  INPUT_TEXT_CONSUME_PER_CHAR_MS,
+  INPUT_TEXT_HOST_WAIT_PER_CHAR_MS,
+} from "../../../src/utils/android-cmdline-tools/AndroidInputText";
 import {
   buildAndroidInputTextCommand,
   type KeyEventPlan,
@@ -26,7 +30,8 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     const error = new Error("cancelled text");
     const state = new TextRequestState();
     const plan = { commands: [buildAndroidInputTextCommand("abcd")], textLength: 4 };
-    adb.setTypingDuration(timer, 150);
+    // The host client exits at 150 ms, but the app is still consuming events until 300 ms.
+    adb.setTypingDuration(timer, 300, 150);
     const input = new InputText(android, adb, undefined, timer);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
@@ -93,6 +98,10 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     expect(released).toBe(false);
     expect(adb.isTyping()).toBe(true);
     timer.advanceTime(1);
+    await drainMicrotasks(50);
+    expect(released).toBe(false);
+    expect(settled).toBe(false);
+    timer.advanceTime(4 * INPUT_TEXT_CONSUME_PER_CHAR_MS + INPUT_TEXT_CONSUME_MARGIN_MS);
     expect(await outcome).toBe(error);
     await followUp;
     expect(released).toBe(true);

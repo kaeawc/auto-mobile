@@ -66,6 +66,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     refresh: { stateKey: "liked", onRefresh: [{ type: "emit", name: "refresh" }] },
     child: label,
   }),
+  prototype_swipe_actions_v1: fixture({
+    type: "row",
+    id: "label",
+    swipeActions: { end: [{ label: "Delete", onTap: [{ type: "emit", name: "delete" }] }] },
+    children: [{ type: "spacer" }],
+  }),
   prototype_search_bar_v1: fixture({
     type: "searchBar",
     id: "label",

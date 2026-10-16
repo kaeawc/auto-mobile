@@ -596,6 +596,29 @@ Symbol button beside the field (a plain glyph without `onTap`), named by `label`
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
 
+## Swipe actions (not device-verified)
+
+A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
+`prototype_swipe_actions_v1`). `start` is revealed by swiping right and `end` by swiping left
+(mirrored in right-to-left layouts is not done: sides are physical). Each side holds 1-3 entries
+`{label, icon?, role?, color?, onTap}`: `label` is the button text and its accessibility name,
+`icon` a built-in icon name (an SF Symbol on iOS), `role` `default` (primary colours) or
+`destructive` (error colours), `color` a hex or theme role that overrides the background, and
+`onTap` 1-32 actions. The first entry of a side sits at the screen edge. A release past 40% of
+the revealed width, or a fling past the open velocity, leaves the row open; a drag beyond the
+revealed width resists (rubber-band). With `fullSwipe: true` a drag past 60% of the row (or a hard
+fling) runs the swiped side's first entry and closes the row. Only one row is open at a time, and a
+tap on an open row closes it instead of running its `onTap`. Revealed buttons get the test tag
+`<rowTestTag>.swipe.<index>`, counting `start` entries first and then `end`; they exist only while
+the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
+action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+`motion: "none"` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
+horizontal `pager` or a `carousel` is refused because their drag would compete.
+
+iOS uses a custom `DragGesture` reveal inside the existing `ScrollView` (not a SwiftUI `List`), an
+`accessibilityAction` per entry for VoiceOver, SF Symbols for icons and the same thresholds
+(`PrototypeSwipe.swift`).
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

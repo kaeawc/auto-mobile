@@ -193,6 +193,24 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    // Every provider endpoint override and the adb endpoint are part of the identity.
+    expect(
+      providerIdentity({
+        ANTHROPIC_FOUNDRY_BASE_URL: "https://foundry.example",
+        ANTHROPIC_BEDROCK_MANTLE_BASE_URL: "https://mantle.example",
+        ANTHROPIC_AWS_BASE_URL: "https://aws.example",
+        ADB_SERVER_SOCKET: "tcp:10.0.0.5:5037",
+        ANDROID_ADB_SERVER_PORT: "5038",
+      }),
+    ).toBe(
+      [
+        "ADB_SERVER_SOCKET=tcp:10.0.0.5:5037",
+        "ANDROID_ADB_SERVER_PORT=5038",
+        "ANTHROPIC_AWS_BASE_URL=aws.example",
+        "ANTHROPIC_BEDROCK_MANTLE_BASE_URL=mantle.example",
+        "ANTHROPIC_FOUNDRY_BASE_URL=foundry.example",
+      ].join("\n"),
+    );
     // Gateway routes on one host differ by path; a trailing slash is the same route.
     const route = (url: string) => providerIdentity({ ANTHROPIC_BASE_URL: url });
     expect(route("https://gw:4000")).toBe("ANTHROPIC_BASE_URL=gw:4000");

@@ -240,6 +240,23 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.totalToolCalls).toBe(0);
   });
 
+  test("a tool_use without an id fails the transcript and a blank result cannot complete it", () => {
+    const use = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id: "", name: "mcp__auto-mobile__observe" }] },
+    });
+    const result = JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "", content: "ok" }] },
+    });
+    const audit = auditTranscript(`${use}\n${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([
+      "line 1: tool_use without an id",
+      "tool_result for unknown tool_use_id (missing)",
+    ]);
+    expect(audit.toolCalls[0].hasResult).toBe(false);
+  });
+
   test("a reused tool_use id fails the transcript", () => {
     const use = (name: string) =>
       JSON.stringify({

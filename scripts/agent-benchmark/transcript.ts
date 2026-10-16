@@ -178,8 +178,13 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
       continue;
     }
     const name = asString(block.name) ?? "unknown";
+    const id = asString(block.id)?.trim();
+    if (!id) {
+      // A missing or blank id would let a result with a blank tool_use_id complete it.
+      state.audit.parseErrors.push(`line ${line}: tool_use without an id`);
+    }
     const record: ToolCallRecord = {
-      id: asString(block.id) ?? `line-${line}`,
+      id: id || `line-${line}`,
       name,
       shortName: shortToolName(name),
       isMcp: name.startsWith(MCP_TOOL_PREFIX),

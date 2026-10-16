@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -109,7 +110,7 @@ export class EmulatorLossIncidentLedger {
     device: PooledDevice,
   ): EmulatorLossSessionSnapshot | undefined {
     const sessionId =
-      device.sessionId ??
+      holderOf(device) ??
       device.adbServerResetSessionId ??
       this.pool.getSessionForDevice(device.id);
     const session = sessionId ? this.pool.getSession(sessionId) : null;

@@ -107,9 +107,9 @@ test.each(causeTable)(
     const internals = {
       clockRestores: manager["clockRestores"],
       rotationRestores: manager["rotationRestores"],
-      screenReaderRestores: manager["screenReaderRestores"],
+      screenReaderRestores: manager["stateRestore"].screenReaderRestores,
       abandonedRotations: manager["abandonedRotations"] as Map<string, object>,
-      abandonedScreenReaders: manager["abandonedScreenReaders"] as Map<string, object>,
+      abandonedScreenReaders: manager["stateRestore"].abandonedScreenReaders as Map<string, object>,
     };
     const queues: Record<Kind, DeviceStateRestoreQueue<object>> = {
       clock: internals.clockRestores,

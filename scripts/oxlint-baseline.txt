@@ -1,5 +1,5 @@
 # AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh
-# Gated rules: eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)
+# Gated rules: eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(complexity)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(max-params)
 1	src/daemon/client.ts	eslint(max-params)

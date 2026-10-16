@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
@@ -9,7 +9,10 @@ import {
 } from "../../src/daemon/sessionManager";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { fixedBackoff } from "../../src/utils/Backoff";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRowNotReleasableError,
+  type MarkReleasedOptions,
+} from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -38,13 +41,18 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
   /** While set, `upsertActiveSession` waits on this before writing. */
   parkCreate: Promise<void> | undefined;
   readonly releaseWrites: string[] = [];
+  readonly releaseOptions: MarkReleasedOptions[] = [];
+  readonly refusedWrites: unknown[] = [];
+  readonly terminalizedGenerations: number[] = [];
 
   override async markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
     reason: string,
+    options: MarkReleasedOptions = {},
   ): Promise<void> {
+    this.releaseOptions.push(options);
     await this.park;
     const failure = this.failNextReleaseWrite;
     if (failure) {
@@ -52,12 +60,22 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
       throw failure;
     }
     this.releaseWrites.push(`${sessionUuid}:${reason}`);
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason);
+    try {
+      await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+      this.terminalizedGenerations.push(
+        (await this.getSession(sessionUuid))?.stable_identity_generation ?? 0,
+      );
+    } catch (error) {
+      this.refusedWrites.push(error);
+      throw error;
+    }
   }
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkCreate;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(...args);
   }
 }
 
@@ -109,7 +127,70 @@ function reap(h: Harness): { done: Promise<void>; settled: () => boolean } {
   return { done, settled: () => settled };
 }
 
+beforeAll(async () => {
+  // Warm release lifecycle modules outside the 15 ms per-test budget.
+  const h = await harness();
+  await reap(h).done;
+  h.manager.stopCleanupTimer();
+});
+
 describe("a release whose DB write never settles is bounded by a deadline (#10836)", () => {
+  test.each(["noop", "failed-file", "durable-file"])(
+    "%s intent keeps row-first ordering and diagnoses crash safety at timeout",
+    async (kind) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = await harness();
+        if (kind !== "noop") {
+          const files = new FakeTerminalReleaseJournalFileSystem();
+          if (kind === "failed-file") {
+            files.failNextAppend = new Error("ENOSPC");
+          }
+          h.manager.attachTerminalReleaseJournal(
+            new FileTerminalReleaseJournal("/data/release.jsonl", files),
+          );
+        }
+        h.persistence.park = new Promise<void>(() => {});
+        const pending = reap(h);
+        await flush();
+        expect(h.pool.getDevice(device.deviceId)?.sessionId).toBe("old");
+        await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+        await pending.done;
+        expect((await h.persistence.getSession("old"))?.status).toBe("active");
+        expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
+        expect(
+          warn.mock.calls.some((call) =>
+            String(call[0]).includes("no crash-safe intent (volatile)"),
+          ),
+        ).toBe(kind !== "durable-file");
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+  test("a volatile intent still warns when the deadline sees an upgraded snapshot copy", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      h.persistence.park = new Promise<void>(() => {});
+      const pending = reap(h);
+      await flush();
+      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      // Reason reconciliation copies snapshots even when the winning reason stays the same.
+      h.manager["terminalReleaseSnapshots"].set(
+        "old",
+        h.manager["withReleaseReason"](snapshot, snapshot.releaseReason),
+      );
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await pending.done;
+      expect(
+        warn.mock.calls.some((call) => String(call[0]).includes("no crash-safe intent (volatile)")),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a parked terminal markReleased frees the device at the deadline and keeps the session fenced", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -295,6 +376,40 @@ describe("a crash while a terminal release write is parked does not revive the U
     return restarted;
   }
 
+  test.each([0, 1000])(
+    "startup stale-row sweep before replay cannot revive a UUID (rehydration budget %i ms)",
+    async (deadlineMs) => {
+      const h = await journaledHarness();
+      const intent = { sessionId: "old", reason: "heartbeat-timeout", at: h.timer.now() };
+      new FileTerminalReleaseJournal(JOURNAL, h.files).record(intent);
+      // Daemon.initializeDatabase's stale-active sweep precedes journal attachment in startOn.
+      await h.persistence.markReleased("old", "expired", h.timer.now(), "daemon-restart");
+      expect((await h.persistence.getSession("old"))?.release_reason).toBe("daemon-restart");
+      const restarted = restart(h, h.files);
+      const assign = spyOn(h.pool, "assignDeviceToSession");
+      try {
+        const summary = await restarted.rehydratePersistedSessions(h.pool, { deadlineMs });
+        expect(summary.rehydrated).toEqual([]);
+        expect(assign).not.toHaveBeenCalled();
+        await expect(restarted.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
+          TerminalSessionError,
+        );
+        expect((await h.persistence.getSession("old"))?.release_reason).toBe(
+          deadlineMs === 0 ? "daemon-restart" : "heartbeat-timeout",
+        );
+        expect(h.files.files.has(JOURNAL)).toBe(deadlineMs === 0);
+        // The deadlineAt break leaves the intent fenced and available for the next startup.
+        expect(await restarted.applyRecoveredTerminalReleaseIntents()).toEqual(
+          deadlineMs === 0 ? ["old"] : [],
+        );
+        expect((await h.persistence.getSession("old"))?.release_reason).toBe("heartbeat-timeout");
+        expect(h.files.files.has(JOURNAL)).toBe(false);
+      } finally {
+        assign.mockRestore();
+      }
+    },
+  );
+
   test("a crash after the intent, before the write lands, restarts with the UUID terminal", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -430,6 +545,113 @@ describe("a crash while a terminal release write is parked does not revive the U
 });
 
 describe("a superseded device-loss release leaves the live session's row active (#11206)", () => {
+  test("a late terminal generation miss preserves a different Session recreated by the same manager", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      h.manager.attachTerminalReleaseJournal(
+        new FileTerminalReleaseJournal("/data/generation.jsonl", files),
+      );
+      const originalGeneration = (await h.persistence.getSession("old"))!
+        .stable_identity_generation;
+      const gate = Promise.withResolvers<void>();
+      h.persistence.park = gate.promise;
+      let superseded = false;
+      const release = h.manager.releaseSessionUnlessSuperseded(
+        "old",
+        `device-disconnected:${device.deviceId}`,
+        () => !superseded,
+      );
+      await flush();
+      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      superseded = true;
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await expect(release).resolves.toEqual({ superseded: true });
+      // Lifted fence permits a new incarnation. #12515: a different Session's upsert must
+      // stay protected even when this same daemon owned the old release.
+      h.persistence.park = undefined;
+      await h.manager.releaseSession("old", "plan-auto-release");
+      await h.manager.createSession("old", device.deviceId, "android");
+      const generation = (await h.persistence.getSession("old"))!.stable_identity_generation!;
+      expect(generation).toBeGreaterThan(originalGeneration!);
+      expect(h.manager.getTerminalReleaseSnapshot("old")).toBeUndefined();
+      expect(files.files.size).toBe(0);
+      h.persistence.park = undefined;
+      gate.resolve();
+      await flush();
+      expect(h.persistence.terminalizedGenerations).not.toContain(generation);
+      expect(h.persistence.releaseOptions[0].expectedRowGeneration).toBe(originalGeneration);
+      // Even a recoverable row cannot substitute its new generation while this UUID is held.
+      const liveRow = { ...(await h.persistence.getSession("old"))! };
+      h.persistence.seed({ ...liveRow, status: "expired", release_reason: "daemon-restart" });
+      expect(
+        (await h.manager["retriedReleaseWritePrecondition"](snapshot)).expectedRowGeneration,
+      ).toBe(originalGeneration);
+      h.persistence.seed(liveRow);
+      expect(h.persistence.refusedWrites).toHaveLength(1);
+      expect(h.persistence.refusedWrites[0]).toBeInstanceOf(DeviceSessionRowNotReleasableError);
+      expect((await h.persistence.getSession("old"))?.status).toBe("active");
+      expect((await h.persistence.getSession("old"))?.stable_identity_generation).toBe(generation);
+      expect(await h.manager.drainReleasePromises(5_000)).toBe(true);
+      await h.timer.advanceTimeAsync(10_000);
+      await flush();
+      expect(h.persistence.releaseWrites).toHaveLength(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a generation refusal before the deadline resolves the journal without throwing or retrying", async () => {
+    const h = await harness();
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    h.manager.attachTerminalReleaseJournal(
+      new FileTerminalReleaseJournal("/data/refusal.jsonl", files),
+    );
+    const gate = Promise.withResolvers<void>();
+    h.persistence.park = gate.promise;
+    const pending = reap(h);
+    await flush();
+    const row = (await h.persistence.getSession("old"))!;
+    // Model a generation advancing after statement issue, before the injected writer executes.
+    h.persistence.seed({ ...row, stable_identity_generation: row.stable_identity_generation! + 1 });
+    h.persistence.park = undefined;
+    gate.resolve();
+    await pending.done;
+    expect(h.persistence.refusedWrites[0]).toBeInstanceOf(DeviceSessionRowNotReleasableError);
+    expect((await h.persistence.getSession("old"))?.status).toBe("active");
+    expect(files.files.size).toBe(0);
+    expect(await h.manager.drainReleasePromises(5_000)).toBe(true);
+    await h.timer.advanceTimeAsync(10_000);
+    await flush();
+    expect(h.persistence.releaseWrites).toHaveLength(1);
+  });
+
+  test("an unheld recoverable row still substitutes its hand-back generation for a terminal retry", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      h.persistence.park = new Promise<void>(() => {});
+      const pending = reap(h);
+      await flush();
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await pending.done;
+      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      const row = (await h.persistence.getSession("old"))!;
+      const handedBackGeneration = row.stable_identity_generation! + 2;
+      h.persistence.seed({
+        ...row,
+        stable_identity_generation: handedBackGeneration,
+        status: "expired",
+        release_reason: "daemon-restart",
+      });
+      expect(
+        (await h.manager["retriedReleaseWritePrecondition"](snapshot)).expectedRowGeneration,
+      ).toBe(handedBackGeneration);
+    } finally {
+      warn.mockRestore();
+    }
+  });
   /** A new daemon process on the same database rehydrates the session the client still holds. */
   async function expectRehydratedAfterRestart(h: Harness): Promise<void> {
     // The next daemon's startup sweep retires only rows still active, as daemon-restart.

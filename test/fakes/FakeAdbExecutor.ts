@@ -17,6 +17,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private commandResponseSequences: Map<string, ExecResult[]> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  private commandStdoutChunks = new Map<string, string[]>();
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
@@ -115,6 +116,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     // If response already has the required methods, use it as-is; otherwise enhance it
     const enhancedResponse = this.ensureExecResultMethods(response);
     this.commandResponses.set(commandPattern, enhancedResponse);
+  }
+
+  /** Stream configured chunks before the command completes or rejects. */
+  setCommandStdoutChunks(commandPattern: string, chunks: string[]): void {
+    this.commandStdoutChunks.set(commandPattern, chunks);
   }
 
   /**
@@ -349,6 +355,7 @@ export class FakeAdbExecutor implements AdbExecutor {
       options.noRetry,
       options.signal,
       options.waitForProcessSettlementAfterAbort,
+      options.onStdout,
     );
   }
 
@@ -359,6 +366,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
+    onStdout?: (chunk: string) => void,
   ): Promise<ExecResult> {
     this.executedCommands.push(command);
     this.commandCalls.push({
@@ -378,6 +386,19 @@ export class FakeAdbExecutor implements AdbExecutor {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
+    const response = this.resolveCommandResponse(command);
+    const streamed = [...this.commandStdoutChunks].filter(([pattern]) => command.includes(pattern));
+    if (streamed.length > 0) {
+      for (const [, chunks] of streamed) {
+        for (const chunk of chunks) {
+          onStdout?.(chunk);
+        }
+      }
+    } else {
+      onStdout?.(response.stdout);
+    }
+
+    // Emit partial output before either successful completion or host failure.
     // Check for per-command errors based on pattern matching
     for (const [pattern, error] of this.commandErrors.entries()) {
       if (command.includes(pattern)) {
@@ -389,8 +410,6 @@ export class FakeAdbExecutor implements AdbExecutor {
     if (this.defaultError) {
       throw this.defaultError;
     }
-
-    const response = this.resolveCommandResponse(command);
 
     // Post-command abort hooks: this read has "completed"; trip any registered
     // controller so the NEXT read observes cancellation.

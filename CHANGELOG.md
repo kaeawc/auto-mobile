@@ -1,5 +1,90 @@
 # Changelog
 
+## [v0.0.86] - 2026-10-16
+
+### Changed
+
+- Split src/utils/android-cmdline-tools/EmulatorLauncher.ts below the 1,000-line cap ([#12677](https://github.com/kaeawc/auto-mobile/issues/12677))
+- Split src/server/observeWaitEvaluation.ts below the 1,000-line cap ([#12676](https://github.com/kaeawc/auto-mobile/issues/12676))
+- build(android): set targetSdk 37 and Build-Tools 37 ([#12276](https://github.com/kaeawc/auto-mobile/issues/12276)) (android)
+- ctrlproxy: audit Android 17 behaviour changes for targetSdk 37 ([#12274](https://github.com/kaeawc/auto-mobile/issues/12274)) (android)
+- refactor(ios xctestrunner): share JSON-RPC encode/extract helpers between the two MCP clients ([#11893](https://github.com/kaeawc/auto-mobile/issues/11893)) (ios)
+- refactor(ios control-proxy): collapse repeated failure-response construction in the SDK-backed handlers ([#11892](https://github.com/kaeawc/auto-mobile/issues/11892)) (ios)
+- refactor(ios sdk): split SdkHierarchyServer into an HTTP reader and a route table ([#11891](https://github.com/kaeawc/auto-mobile/issues/11891)) (ios, sdk)
+- refactor(ios xctestrunner): replace 1,303 lines of hand-rolled YAML scanning ([#11889](https://github.com/kaeawc/auto-mobile/issues/11889)) (ios, needs-decision)
+- refactor(ios control-proxy): retire the Rewrite name and the reference-implementation narrative ([#11888](https://github.com/kaeawc/auto-mobile/issues/11888)) (ios)
+- chore(ios control-proxy): delete dead code left by the rewrite migration ([#11887](https://github.com/kaeawc/auto-mobile/issues/11887)) (ios, dead-code)
+- refactor(ios control-proxy): split the 3,372-line GesturePerformer by concern ([#11884](https://github.com/kaeawc/auto-mobile/issues/11884)) (ios)
+- chore(android): delete verified-dead code in junit-runner, control-proxy and the root build script ([#11880](https://github.com/kaeawc/auto-mobile/issues/11880)) (android, dead-code)
+- chore(scripts): one prepush dispatcher that selects gates from changed paths ([#11873](https://github.com/kaeawc/auto-mobile/issues/11873)) (devxp)
+- chore(test): remove raw NUL bytes from two test sources and guard against them ([#11869](https://github.com/kaeawc/auto-mobile/issues/11869)) (testing)
+- refactor(db): load the main migration set from static imports, as the slot registry does ([#11861](https://github.com/kaeawc/auto-mobile/issues/11861)) (database)
+- chore(deps): drop tsx and ts-prune, and reconcile knip with the pinned runtime graph ([#11855](https://github.com/kaeawc/auto-mobile/issues/11855)) (dependencies)
+- refactor(ctrlproxy): separate process-wide APK/bundle prefetch state from the per-device managers ([#11852](https://github.com/kaeawc/auto-mobile/issues/11852))
+- refactor(device-state): split DeviceState.ts by sub-state ([#11842](https://github.com/kaeawc/auto-mobile/issues/11842))
+- chore(tools): one registerAllTools list instead of five hand-copied ones ([#11829](https://github.com/kaeawc/auto-mobile/issues/11829))
+- refactor(devicePool): derive device availability from one function returning a typed hold reason ([#11803](https://github.com/kaeawc/auto-mobile/issues/11803)) (daemon)
+- refactor(db): make DeviceSessionPersistence methods required, with one complete in-memory fake ([#11801](https://github.com/kaeawc/auto-mobile/issues/11801)) (testing, database, daemon)
+
+### Fixed
+
+- killDevice: fail closed when the emulator process table is unreadable instead of reporting 'not running' ([#12772](https://github.com/kaeawc/auto-mobile/issues/12772))
+- Session broker: post-activation receipt read failure destroys a committed grant ([#12771](https://github.com/kaeawc/auto-mobile/issues/12771)) (database, daemon)
+- Session broker: final ownership hold ignores preparation deadline and cancellation ([#12770](https://github.com/kaeawc/auto-mobile/issues/12770)) (daemon)
+- Terminal release generation guard: withheld-settlement race can still drop a legitimate terminal write ([#12547](https://github.com/kaeawc/auto-mobile/issues/12547)) (daemon)
+- session broker: fence broker session owners by process start identity (PID reuse) ([#12491](https://github.com/kaeawc/auto-mobile/issues/12491)) (daemon)
+- emulator output redaction: multi-byte character split across chunks can defeat credential redaction ([#12467](https://github.com/kaeawc/auto-mobile/issues/12467))
+- getAppPermissions (iOS): photos-add reports denied from a stale TCC row after revoke then full grant ([#12462](https://github.com/kaeawc/auto-mobile/issues/12462)) (ios)
+- ci: npm unpacked size 22.36 MB exceeds the 21 MiB threshold, failing Node Checks on every TS PR ([#12457](https://github.com/kaeawc/auto-mobile/issues/12457)) (ci)
+- Database health: slow probe-worker startup repeatedly consumes the 1s query deadline ([#12455](https://github.com/kaeawc/auto-mobile/issues/12455)) (database, needs-device-verify, daemon)
+- Session broker: retryable preparation failures become nonretryable session_preparation_failed ([#12452](https://github.com/kaeawc/auto-mobile/issues/12452)) (android, daemon)
+- Session broker: recovery sweep destroys resources during recoverable device-restart handoff ([#12451](https://github.com/kaeawc/auto-mobile/issues/12451)) (android, daemon)
+- ci: Node Unit Tests (ubuntu-latest) hit the 720 s shard budget on both attempts on a starved runner; same-runner retry cannot recover ([#12237](https://github.com/kaeawc/auto-mobile/issues/12237)) (ci)
+- serial-reuse handoff: release listeners and in-flight releases still send device commands to the serial now running another AVD ([#12063](https://github.com/kaeawc/auto-mobile/issues/12063)) (android, daemon)
+- libwebp cache ignores AUTOMOBILE_DATA_DIR; /proc process-table reader tested with a non-captured fixture ([#11998](https://github.com/kaeawc/auto-mobile/issues/11998))
+- CI: the nightly randomized unit lane fails every night on order-dependent tests ([#11614](https://github.com/kaeawc/auto-mobile/issues/11614)) (testing)
+- session persistence: the activity stale guard compares wall stamps, so a backward wall-clock step drops genuine activity ([#11497](https://github.com/kaeawc/auto-mobile/issues/11497)) (daemon, needs-decision)
+
+### Security
+
+- feat(ci-attestation): GitHub App as transport between CI and the attestation service ([#11981](https://github.com/kaeawc/auto-mobile/issues/11981)) (enhancement, ci)
+- refactor(utils): one path-containment helper and one cached-download-and-verify workflow ([#11857](https://github.com/kaeawc/auto-mobile/issues/11857)) (maintenance)
+
+### Other
+
+- ci: decide contended-runner reruns inside the unit job instead of a workflow_run trigger on every run ([#12758](https://github.com/kaeawc/auto-mobile/issues/12758)) (ci)
+- main red: On Merge continuously failing 24h+ with deterministic non-flake test failures (structured-output audit + BATS) the PR gate isn't catching ([#12755](https://github.com/kaeawc/auto-mobile/issues/12755)) (bot-filed, needs-human, routine:flake-sentinel)
+- sendKeys cancel still splices on API 36 after #12576 (host adb client exits before the app has consumed the typed events) ([#12599](https://github.com/kaeawc/auto-mobile/issues/12599))
+- sendKeys cancel still splices follow-up text on API 36 after #12545 (guest settlement waits on a dead cmd client) ([#12566](https://github.com/kaeawc/auto-mobile/issues/12566))
+- sendKeys cancel: follow-up text still garbles because the guest 'input text' process outlives the killed adb client (#12506 not effective) ([#12524](https://github.com/kaeawc/auto-mobile/issues/12524))
+- Terminal release write carries no row generation and can land on a re-upserted row ([#12515](https://github.com/kaeawc/auto-mobile/issues/12515))
+- Terminal-release journal: record() swallows append failure, no dir fsync on create, silent mid-file corruption ([#12514](https://github.com/kaeawc/auto-mobile/issues/12514))
+- bug(session): re-issue of a device-restart row ignores a lapsed recovery window for an in-flight caller ([#12502](https://github.com/kaeawc/auto-mobile/issues/12502))
+- DB health probe reuses a dead worker after a clean (code 0) exit ([#12500](https://github.com/kaeawc/auto-mobile/issues/12500))
+- Flaky (unnamed) failure in restartEndToEnd: twoDaemon harness leaks a wedged tracked DB write into the shared barrier ([#12499](https://github.com/kaeawc/auto-mobile/issues/12499))
+- session broker: delegate timing, shared-process test classification and PR-body corrections before shipping ([#12492](https://github.com/kaeawc/auto-mobile/issues/12492)) (daemon)
+- getAppPermissions reports photos-add granted after a full photos grant on iOS 26.5, where PhotoKit says not authorized ([#12486](https://github.com/kaeawc/auto-mobile/issues/12486))
+- iOS prototype onDoubleTap still never fires: host double tap lands outside the agent's 0.35 s window ([#12485](https://github.com/kaeawc/auto-mobile/issues/12485))
+- CtrlProxy pushes no device_state transitions on Pixel Fold emulator after WindowInfoTracker switch ([#12460](https://github.com/kaeawc/auto-mobile/issues/12460))
+- iOS prototype onDoubleTap never fires; double tap arrives as two onTap events ([#12459](https://github.com/kaeawc/auto-mobile/issues/12459))
+- prototype(ios): Swift menus / pager-options / emit-context validators don't walk `stack` screens ([#12414](https://github.com/kaeawc/auto-mobile/issues/12414)) (ios, bot-filed, routine:tracker-hygiene)
+- MCP tools/call cancel after dispatch frees the per-device forward key while the tool may still be writing (InputText) ([#12393](https://github.com/kaeawc/auto-mobile/issues/12393))
+- test(lint): oxlintConfigScoping.integration.test.ts can hang under load and leaves oxlint-scoping-* temp dirs in src/ and test/ ([#12346](https://github.com/kaeawc/auto-mobile/issues/12346))
+- testing: keep Robolectric suites working when targetSdk is 37 (SDK pins, Robolectric SDK 37 support) ([#12272](https://github.com/kaeawc/auto-mobile/issues/12272)) (android, testing, dependencies)
+- Live Idle Release nightly is failing ([#12250](https://github.com/kaeawc/auto-mobile/issues/12250)) (live-idle-release-nightly)
+- manual-test harness: no host power/sleep preflight and all roles boot at once — batch 20261013a was cut by two clamshell sleeps and a load-172 spike ([#12212](https://github.com/kaeawc/auto-mobile/issues/12212)) (testing)
+- perf(ctrlproxy): own-window accessibility events cost two binder calls on the UI thread each, and nothing limits their volume ([#12134](https://github.com/kaeawc/auto-mobile/issues/12134)) (android, performance, a11y)
+- Managed slots: qualify and publish the hardened package with native recovery evidence ([#12060](https://github.com/kaeawc/auto-mobile/issues/12060)) (release engineering, testing, daemon)
+- test(ios ctrlproxy): close the wire-contract gaps between the Swift runner and the TS client ([#11890](https://github.com/kaeawc/auto-mobile/issues/11890)) (ios, testing)
+- docs(android): state the DI position for in-scope modules ([#11883](https://github.com/kaeawc/auto-mobile/issues/11883)) (documentation, android)
+- test(protocol): guard field-level and response-level wire parity between Kotlin and TypeScript with shared fixtures ([#11879](https://github.com/kaeawc/auto-mobile/issues/11879)) (android, testing)
+- docs(agents): move dated and hand-counted facts out of CLAUDE.md and AGENTS.md ([#11875](https://github.com/kaeawc/auto-mobile/issues/11875)) (documentation, devxp)
+- test(db): check that the hand-written Database interface matches the migrated schema ([#11860](https://github.com/kaeawc/auto-mobile/issues/11860)) (testing, database)
+- hitTest: out-of-bounds error names tapAt instead of hitTest ([#11662](https://github.com/kaeawc/auto-mobile/issues/11662)) (bot-filed, routine:exploratory)
+- cli: displayConfig --fontScale <number> is rejected as a string, so a numeric font scale cannot be set from the CLI ([#11661](https://github.com/kaeawc/auto-mobile/issues/11661)) (bot-filed, routine:exploratory)
+- displayConfig (Android): density has no upper bound; 100000 is applied and puts system_server into an ANR ([#11660](https://github.com/kaeawc/auto-mobile/issues/11660)) (bot-filed, routine:exploratory)
+- pinchOn (Android): gestures stall for the full 8 s idle timeout when the foreground package's gfxinfo has no frame stats ([#11659](https://github.com/kaeawc/auto-mobile/issues/11659)) (bot-filed, routine:exploratory)
+
 ## [v0.0.85] - 2026-10-15
 
 ### Added

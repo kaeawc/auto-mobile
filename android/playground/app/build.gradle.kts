@@ -13,7 +13,7 @@ android {
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.playground"
     versionCode = 1
-    versionName = "0.0.85-SNAPSHOT"
+    versionName = "0.0.86-SNAPSHOT"
   }
 
   buildTypes {

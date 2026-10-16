@@ -1,7 +1,13 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
+import type {
+  BootedDevice,
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
+import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -36,6 +42,15 @@ export class AndroidTapStrategy implements TapStrategy {
     const filtered = viewHierarchy.filterViewHierarchy(rawHierarchy);
     attachRawViewHierarchy(filtered, rawHierarchy);
     return filtered;
+  }
+
+  clipNavigationTapBounds(
+    bounds: ElementBounds,
+    _hierarchy: ViewHierarchyResult,
+    _screenSize: ObserveResult["screenSize"] | undefined,
+    _elements: readonly Element[],
+  ): TapBoundsClip {
+    return { bounds };
   }
 
   async isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean> {

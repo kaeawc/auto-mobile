@@ -14,6 +14,8 @@ Run JUnit Runner Emulator*|*could not connect to TCP port 5554: Connection refus
 Run JUnit Runner Emulator*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator start-up infra failure (system-image download corruption; emulator never launched), non-required, rerun; see the emulator diagnostics step
 Run Playground Automobile Emulator*|*could not connect to TCP port 5554: Connection refused*|RERUN-DONT-FIX|emulator start-up infra failure (emulator never launched, often a corrupt system-image download), non-required, rerun; see the emulator diagnostics step
 Run Playground Automobile Emulator*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator start-up infra failure (system-image download corruption; emulator never launched), non-required, rerun; see the emulator diagnostics step
+Android Device Capture to WHEP*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator SDK package download corruption (sdkmanager), emulator never launched; rerun
+Verify Android Emulator SDK Resolution*|*Error on ZipFile unknown archive*|INVESTIGATE|ensure-emulator-sdk.sh already retries the emulator package install 3 times; three corrupt downloads in a row is a runner image or mirror problem, file an infra issue
 Run JUnit Runner Emulator*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run JUnit Runner Emulator*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run JUnit Runner Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun

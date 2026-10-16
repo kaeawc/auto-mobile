@@ -390,6 +390,7 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     duration: "required",
     offset: "required",
     displayId: "optional",
+    fingerCount: "optional",
   },
   save_prototype: {
     type: "required",

@@ -8,7 +8,7 @@ import type { TimingData } from "./TimingData";
 import { GfxMetrics } from "./GfxMetrics";
 import { PerfSnapshot } from "./PerfSnapshot";
 import { BackStackInfo } from "./BackStack";
-import { PerformanceAuditResult } from "../features/performance/PerformanceAudit";
+import type { PerformanceAuditResult } from "./PerformanceAuditResult";
 import { AccessibilityAuditResult } from "./AccessibilityAudit";
 import { RecompositionSummary } from "./Recomposition";
 import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
@@ -237,7 +237,7 @@ export type ObserveResult = {
   /** Host-clock epoch milliseconds through which this returned path is retained. */
   screenshotExpiresAt?: number;
   /** Upright display-oriented PNG crop; its orientation is independent of the full screenshot. */
-  crop?: import("../features/observe/screenshot/observeCrop").ObserveCropResult;
+  crop?: import("./ObserveCropResult").ObserveCropResult;
   /** Provenance of the screenshot returned with this observation. */
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";

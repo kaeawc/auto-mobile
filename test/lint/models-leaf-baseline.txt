@@ -1,4 +1,1 @@
 src/models/EmulatorLaunchCancelledError.ts	src/utils/HostCommandExecutor
-src/models/ImageRelativePoint.ts	src/features/observe/screenshot/observeCrop
-src/models/ObserveResult.ts	src/features/observe/screenshot/observeCrop
-src/models/ObserveResult.ts	src/features/performance/PerformanceAudit

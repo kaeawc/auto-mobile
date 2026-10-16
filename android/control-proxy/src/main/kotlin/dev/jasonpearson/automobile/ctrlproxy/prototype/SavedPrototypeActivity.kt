@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -130,10 +131,11 @@ class SavedPrototypeActivity : ComponentActivity() {
           CoroutinePrototypeScheduler(scope),
           SavedPrototypeActivityDependencies.ioDispatcher,
         )
-        .open(loaded.spec) { restored ->
+        .prepare(loaded.spec) { restored ->
           PrototypeSpecValidator.validate(Json.encodeToString(restored)) is
             PrototypeSpecValidation.Success
         }
+    opened.commit()
     runtime =
       PrototypeRuntime(
         opened.spec,
@@ -169,7 +171,11 @@ class SavedPrototypeActivity : ComponentActivity() {
 
   /** The last point a stopped activity is sure to run: write what the debounce still holds. */
   override fun onStop() {
-    scope.launch { interactions.withLock { runtime?.flushStorage() } }
+    // Not on [scope]: onDestroy cancels it, and a stop followed by a destroy must still save.
+    val target = runtime
+    SavedPrototypeActivityDependencies.flushScope.launch {
+      withContext(NonCancellable) { interactions.withLock { target?.flushStorage() } }
+    }
     super.onStop()
   }
 

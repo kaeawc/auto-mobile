@@ -6,7 +6,9 @@ import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /** Credential-encrypted app-private root shared by saving and shortcut publishing. */
 fun savedPrototypeRoot(context: Context): File = File(context.filesDir, "saved-prototypes")
@@ -67,6 +69,9 @@ internal object SavedPrototypeActivityDependencies {
     it.getSystemService(UserManager::class.java)?.isUserUnlocked == true
   }
   @Volatile var ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+
+  /** Outlives any one activity: the last storage flush of a stopped activity runs here. */
+  @Volatile var flushScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   @Volatile var clock: () -> Long = System::currentTimeMillis
   @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
 
@@ -75,6 +80,7 @@ internal object SavedPrototypeActivityDependencies {
     store = { SavedPrototypeStores.inDirectory(savedPrototypeRoot(it)) }
     isUserUnlocked = { it.getSystemService(UserManager::class.java)?.isUserUnlocked == true }
     ioDispatcher = Dispatchers.IO
+    flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     clock = System::currentTimeMillis
     eventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
   }

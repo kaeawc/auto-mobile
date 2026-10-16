@@ -159,8 +159,11 @@ object PrototypeRequestResolver {
         is Parsed.Url -> parsed
       }
     val headers = linkedMapOf<String, String>()
-    val query = target.query.toMutableList()
-    for ((field, entries) in listOf("headers" to action.headers, "query" to action.query)) {
+    val query = target.segments.toMutableList()
+    // Query entries are set in sorted key order (UTF-16 code units), whatever order they were
+    // authored in, so every platform builds the same URL.
+    val authored = listOf("headers" to action.headers, "query" to action.query?.toSortedMap())
+    for ((field, entries) in authored) {
       for ((name, raw) in entries.orEmpty()) {
         val text =
           entryText(raw, "$field.$name", inputs)
@@ -181,7 +184,7 @@ object PrototypeRequestResolver {
     val resolved =
       PrototypeResolvedRequest(
         method = method,
-        url = target.render(if (action.query.isNullOrEmpty()) target.query else query),
+        url = target.render(query.takeUnless { action.query.isNullOrEmpty() }),
         headers = headers,
         body = body,
       )
@@ -227,21 +230,24 @@ object PrototypeRequestResolver {
       val scheme: String,
       val authority: String,
       val path: String,
-      val query: List<Pair<String, String>>,
+      val rawQuery: String?,
       val fragment: String?,
     ) : Parsed {
-      /** Matches `URL.toString()`: lower-case scheme, a `/` path for none, form-encoded query. */
-      fun render(pairs: List<Pair<String, String>>): String = buildString {
+      /** The query's `&`-separated pieces exactly as written. */
+      val segments: List<String>
+        get() = rawQuery?.split('&')?.filter { it.isNotEmpty() }.orEmpty()
+
+      /**
+       * Matches `URL.toString()`: lower-case scheme, a `/` path for none. With no authored query
+       * ([pieces] null) the query keeps the spelling it was written in (`?flag`, `%20`); setting an
+       * entry changes only that key's pieces and leaves every other piece as written.
+       */
+      fun render(pieces: List<String>?): String = buildString {
         append(scheme).append("://").append(authority).append(path.ifEmpty { "/" })
-        if (pairs.isNotEmpty()) {
-          append('?')
-          append(
-            pairs.joinToString("&") { (name, value) ->
-              URLEncoder.encode(name, Charsets.UTF_8) +
-                "=" +
-                URLEncoder.encode(value, Charsets.UTF_8)
-            },
-          )
+        if (pieces == null) {
+          rawQuery?.let { append('?').append(it) }
+        } else if (pieces.isNotEmpty()) {
+          append('?').append(pieces.joinToString("&"))
         }
         fragment?.let { append('#').append(it) }
       }
@@ -257,22 +263,10 @@ object PrototypeRequestResolver {
           scheme = parsed.scheme,
           authority = parsed.authority,
           path = parsed.path,
-          query = parseQuery(parsed.query),
+          rawQuery = parsed.query,
           fragment = parsed.fragment,
         )
     }
-
-  private fun parseQuery(raw: String?): List<Pair<String, String>> =
-    raw
-      ?.takeIf { it.isNotEmpty() }
-      ?.split('&')
-      ?.filter { it.isNotEmpty() }
-      ?.map { part ->
-        val name = part.substringBefore('=')
-        val value = if ('=' in part) part.substringAfter('=') else ""
-        decode(name) to decode(value)
-      }
-      .orEmpty()
 
   private fun decode(text: String): String =
     try {
@@ -282,17 +276,23 @@ object PrototypeRequestResolver {
       text
     }
 
-  /** `URLSearchParams.set`: replace the first pair of that name, drop the rest, else append. */
-  private fun setQuery(pairs: MutableList<Pair<String, String>>, name: String, value: String) {
-    val first = pairs.indexOfFirst { it.first == name }
+  /**
+   * `URLSearchParams.set` on raw pieces: the first piece of that name is replaced, later ones
+   * dropped, else a new piece is appended. Pieces of other names are not re-encoded.
+   */
+  private fun setQuery(pieces: MutableList<String>, name: String, value: String) {
+    val encoded =
+      URLEncoder.encode(name, Charsets.UTF_8) + "=" + URLEncoder.encode(value, Charsets.UTF_8)
+    val named = { piece: String -> decode(piece.substringBefore('=')) == name }
+    val first = pieces.indexOfFirst(named)
     if (first < 0) {
-      pairs.add(name to value)
+      pieces.add(encoded)
       return
     }
-    pairs[first] = name to value
-    var at = pairs.size - 1
+    pieces[first] = encoded
+    var at = pieces.size - 1
     while (at > first) {
-      if (pairs[at].first == name) pairs.removeAt(at)
+      if (named(pieces[at])) pieces.removeAt(at)
       at--
     }
   }
@@ -364,7 +364,7 @@ object PrototypeRequestOutcome {
 
   /** The `into` value of a 2xx response: JSON as is, an empty body (and HEAD) as `""`. */
   fun intoValue(response: PrototypeRequestResponse.Received): JsonElement =
-    response.body?.takeUnless { it is JsonNull } ?: JsonPrimitive("")
+    response.body ?: JsonPrimitive("")
 
   /**
    * Applies one response through [commit], which performs one `/data` write and returns why it was
@@ -380,7 +380,21 @@ object PrototypeRequestOutcome {
   ): PrototypeRequestResult {
     var meta = metaOf(response)
     var wroteInto = false
-    if (response is PrototypeRequestResponse.Received && meta.error == null && into != null) {
+    if (response is PrototypeRequestResponse.Received && response.body is JsonNull) {
+      // A literal JSON `null` body is not an empty one: /data cannot hold it, so `into` stays.
+      if (meta.error == null) {
+        meta =
+          meta.copy(
+            error =
+              PrototypeRequestError(
+                PrototypeRequestErrorCode.INVALID_RESPONSE,
+                "The response body is JSON null, which /data cannot hold.",
+              ),
+          )
+      }
+    } else if (
+      response is PrototypeRequestResponse.Received && meta.error == null && into != null
+    ) {
       val refused = commit(PrototypeDataWrite.Set(into, intoValue(response)))
       if (refused == null) {
         wroteInto = true

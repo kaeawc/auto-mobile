@@ -1145,7 +1145,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val hostPrototypeHttp =
     HostPrototypeHttpClient(
       PrototypeHostLink { frame ->
-        ::webSocketServer.isInitialized && webSocketServer.sendToHost(frame)
+        if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
       },
     )
   private val prototypeRefreshCoalescer =
@@ -2371,6 +2371,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
               gestureStreamRouter.cancelOwnedBy(client)
+              // Its in-flight host requests have no socket to answer on, even if another remains.
+              hostPrototypeHttp.onHostLost(client)
             },
             onClientCountChanged = { count, session ->
               if (count == 0) hostPrototypeHttp.onHostLost()

@@ -1082,12 +1082,13 @@ class WebSocketServer(
 
   /**
    * Sends [message] to one host: the most recently connected client, so a reconnecting daemon
-   * replaces the one it superseded and a request is never run twice. False when none is connected.
+   * replaces the one it superseded and a request is never run twice. Returns the client it went to
+   * (so the caller can fail the request if that socket closes), or null when none is connected.
    */
-  internal fun sendToHost(message: String): Boolean {
-    val host = synchronized(connections) { connections.lastOrNull() } ?: return false
+  internal fun sendToHost(message: String): ConnectedClient? {
+    val host = synchronized(connections) { connections.lastOrNull() } ?: return null
     sendToClient(host, message)
-    return true
+    return host
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */

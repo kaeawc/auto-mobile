@@ -8,7 +8,11 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -44,11 +48,11 @@ class PrototypeStorageTest {
   private val events = mutableListOf<PrototypeEvent>()
   private var sequence = 0L
 
-  private fun persistence() =
+  private fun persistence(io: CoroutineContext = EmptyCoroutineContext) =
     PrototypeStoragePersistence(
       store,
       timer,
-      EmptyCoroutineContext,
+      io,
       warn = PrototypeStorageWarn { message, _ -> warnings += message },
     )
 
@@ -363,4 +367,77 @@ class PrototypeStorageTest {
 
     assertNull(store.stored("prefs"))
   }
+
+  @Test
+  fun `preparing a show changes nothing on disk until it is committed`() = runTest {
+    store.seed("prefs", stored("state:dark" to JsonPrimitive(true), version = 1))
+
+    val prepared = persistence().prepare(spec(storage = null))
+
+    assertEquals(PrototypeScalar.BooleanValue(false), prepared.spec.state!!["dark"])
+    assertEquals(stored("state:dark" to JsonPrimitive(true)), store.stored("prefs"))
+    assertEquals(emptyList<String>(), store.deletes)
+    assertEquals(emptyList<Any>(), store.saves)
+
+    prepared.commit()
+    prepared.commit()
+
+    assertNull(store.stored("prefs"))
+    assertEquals(listOf("prefs"), store.deletes)
+  }
+
+  /** Runs io work inline until [hold], then queues it for the test to run in an order it picks. */
+  private class ManualDispatcher : CoroutineDispatcher() {
+    var hold = false
+    val queue = ArrayDeque<Runnable>()
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+      if (hold) queue.addLast(block) else block.run()
+    }
+  }
+
+  @Test
+  fun `a clear is not overtaken by a save already in flight`() =
+    runTest(UnconfinedTestDispatcher()) {
+      val io = ManualDispatcher()
+      val (runtime, opened) = open(persistence = persistence(io))
+      runtime.handle(runtime.tap(0))
+      io.hold = true
+      val writer = launch { opened.session!!.flush() }
+      val clearer = launch { opened.session!!.clear() }
+
+      // The most recently queued io work runs first, as a later thread can win the race.
+      io.hold = false
+      while (io.queue.isNotEmpty()) io.queue.removeLast().run()
+      writer.join()
+      clearer.join()
+
+      assertEquals(listOf("prefs"), store.saves.map { it.first })
+      assertNull(store.stored("prefs"))
+    }
+
+  @Test
+  fun `a snapshot taken before a clear is discarded and not written back`() =
+    runTest(UnconfinedTestDispatcher()) {
+      val io = ManualDispatcher()
+      val (runtime, opened) = open(persistence = persistence(io))
+      val session = opened.session!!
+      runtime.handle(runtime.tap(0))
+      // The first write is in flight on the io dispatcher, holding the session's disk order.
+      io.hold = true
+      val first = launch { session.flush() }
+      runtime.handle(runtime.tap(0))
+      // The second snapshots the document, then waits behind the first.
+      val second = launch { session.flush() }
+      val clearer = launch { session.clear() }
+
+      io.hold = false
+      while (io.queue.isNotEmpty()) io.queue.removeFirst().run()
+      first.join()
+      second.join()
+      clearer.join()
+
+      assertEquals(1, store.saves.size)
+      assertNull(store.stored("prefs"))
+    }
 }

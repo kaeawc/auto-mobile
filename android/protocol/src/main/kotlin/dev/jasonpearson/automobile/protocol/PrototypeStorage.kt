@@ -5,6 +5,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -190,6 +191,8 @@ object PrototypeStorageRestorer {
     when (value) {
       is JsonObject -> "object"
       is JsonArray -> "array"
+      // JsonNull is a JsonPrimitive; it is its own kind, never a number.
+      is JsonNull -> "null"
       is JsonPrimitive ->
         when {
           value.isString -> "string"

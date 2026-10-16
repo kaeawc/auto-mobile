@@ -73,7 +73,10 @@ class PrototypeRequestRuntimeTest {
       if (extra.isEmpty()) "" else ",$extra"
     }}"""
 
-  private fun TestScope.runtime(spec: PrototypeSpec) =
+  private fun TestScope.runtime(
+    spec: PrototypeSpec,
+    limiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
+  ) =
     PrototypeRuntime(
       spec,
       PrototypeEventSink { events += it },
@@ -83,6 +86,7 @@ class PrototypeRequestRuntimeTest {
       httpClients = PrototypeHttpClients(host, device),
       requestScope = backgroundScope,
       newRequestId = { "r-${++requestIds}" },
+      requestLimiter = limiter,
     )
 
   private fun tapOf(runtime: PrototypeRuntime) =
@@ -301,7 +305,7 @@ class PrototypeRequestRuntimeTest {
 
     assertEquals(
       json(
-        """{"requestId":"r-1","method":"POST","url":"http://localhost:8080/feed/cats?q=cats&limit=20","via":"device","into":"/data/feed","outcome":"success","status":201,"durationMs":31}""",
+        """{"requestId":"r-1","method":"POST","url":"http://localhost:8080/feed/cats?limit=20&q=cats","via":"device","into":"/data/feed","outcome":"success","status":201,"durationMs":31}""",
       ),
       requestEvents().single(),
     )
@@ -403,6 +407,90 @@ class PrototypeRequestRuntimeTest {
     assertEquals(json("""{"v":2}"""), runtime.data("feed"))
     assertEquals(2, requestEvents().size)
     assertEquals("r-2", requestEvents().last().getValue("requestId").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `a newer request that fails to resolve still supersedes the older one`() = runTest {
+    val runtime = runtime(spec(request()))
+    runtime.handle(tapOf(runtime))
+    runCurrent()
+    val broken = request(""""headers":{"X-Missing":{"data":"/absent"}}""")
+    runtime.handle(PrototypeInteraction.Tap(actionsOf(broken)))
+    runCurrent()
+
+    assertEquals(listOf("r-1"), host.cancelled)
+    assertEquals("error", runtime.status())
+
+    host.answer(0, received(json("""{"v":1}""")))
+    runCurrent()
+
+    // The older response writes nothing over the newer failure.
+    assertEquals("error", runtime.status())
+    assertNull(runtime.data("feed"))
+    val metaCode =
+      runtime.data("feed__meta")!!.jsonObject.getValue("error").jsonObject.getValue("code")
+    assertEquals("invalid_request", metaCode.jsonPrimitive.content)
+    assertEquals(
+      listOf("cancelled", "invalid_request"),
+      requestEvents().map {
+        it.getValue("error").jsonObject.getValue("code").jsonPrimitive.content
+      },
+    )
+  }
+
+  @Test
+  fun `the in-flight cap holds across runtimes that share a limiter`() = runTest {
+    val limiter = PrototypeRequestLimiter()
+    val bare = """{"type":"request","url":"http://localhost:8080/feed","statusKey":"status"}"""
+    val first = runtime(spec(bare), limiter)
+    val second = runtime(spec(bare), limiter)
+    repeat(2) { first.handle(tapOf(first)) }
+    repeat(3) { second.handle(tapOf(second)) }
+    runCurrent()
+
+    assertEquals(4, host.requests.size)
+    assertEquals(
+      "too_many_in_flight",
+      requestEvents().single().getValue("error").jsonObject.getValue("code").jsonPrimitive.content,
+    )
+    assertEquals("error", second.status())
+  }
+
+  @Test
+  fun `a same-id replacement adopts the requests in flight and applies their response`() = runTest {
+    val actions = request(""""onSuccess":[{"type":"toggle","key":"flag"}]""")
+    val old = runtime(spec(actions))
+    old.handle(tapOf(old))
+    runCurrent()
+    val replacement = runtime(spec(actions))
+
+    old.handOverRequests(replacement)
+    old.close()
+    host.answer(0, received(json("""{"v":1}""")))
+    runCurrent()
+
+    assertEquals(emptyList<String>(), host.cancelled)
+    assertEquals("success", replacement.status())
+    assertEquals(json("""{"v":1}"""), replacement.data("feed"))
+    assertEquals(
+      200,
+      replacement.data("feed__meta")!!.jsonObject.getValue("status").jsonPrimitive.int,
+    )
+    assertEquals(PrototypeScalar.BooleanValue(true), replacement.current.state["flag"])
+    assertEquals(1, requestEvents().size)
+    assertNull(old.data("feed"))
+  }
+
+  @Test
+  fun `closing a runtime without a hand-over still cancels its requests`() = runTest {
+    val old = runtime(spec(request()))
+    old.handle(tapOf(old))
+    runCurrent()
+
+    old.close()
+    runCurrent()
+
+    assertEquals(listOf("r-1"), host.cancelled)
   }
 
   @Test
@@ -590,7 +678,7 @@ class PrototypeRequestRuntimeTest {
       runCurrent()
 
       val sent = host.requests.single()
-      assertEquals("http://localhost:8080/feed?q=cats&limit=20", sent.url)
+      assertEquals("http://localhost:8080/feed?limit=20&q=cats", sent.url)
       assertEquals("Feed", sent.headers["X-Title"])
       assertEquals(5000, sent.timeoutMs)
       assertEquals(

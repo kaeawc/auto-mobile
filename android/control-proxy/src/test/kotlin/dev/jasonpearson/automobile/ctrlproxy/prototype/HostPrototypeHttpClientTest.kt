@@ -22,6 +22,7 @@ import org.junit.Test
 class HostPrototypeHttpClientTest {
   private val frames = mutableListOf<String>()
   private var connected = true
+  private var socket: Any = "A"
   private val warnings = mutableListOf<String>()
   private var now = 0L
 
@@ -30,7 +31,7 @@ class HostPrototypeHttpClientTest {
       link =
         PrototypeHostLink { frame ->
           if (connected) frames += frame
-          connected
+          socket.takeIf { connected }
         },
       clock = { now },
       graceMs = graceMs,
@@ -65,6 +66,35 @@ class HostPrototypeHttpClientTest {
       frame,
     )
     pending.cancel()
+  }
+
+  @Test
+  fun `losing the socket a request went to fails it at once while another stays up`() = runTest {
+    val client = client()
+    socket = "B"
+    val toB = async { client.execute(request("r-b")) }
+    runCurrent()
+
+    client.onHostLost("A")
+    runCurrent()
+    assertFalse(toB.isCompleted)
+
+    client.onHostLost("B")
+    runCurrent()
+    assertEquals(PrototypeRequestErrorCode.NETWORK, failure(toB.await()).code)
+
+    // The next request goes to the connection that remains.
+    socket = "A"
+    val toA = async { client.execute(request("r-a")) }
+    runCurrent()
+    client.onHostLost("B")
+    runCurrent()
+    assertFalse(toA.isCompleted)
+    client.onResponse(
+      """{"type":"prototype_response","requestId":"r-a","ok":true,"status":200,"durationMs":1}""",
+    )
+    runCurrent()
+    assertTrue(toA.await() is PrototypeRequestResponse.Received)
   }
 
   @Test

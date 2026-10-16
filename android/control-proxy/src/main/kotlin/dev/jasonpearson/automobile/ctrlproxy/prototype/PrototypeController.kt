@@ -242,6 +242,9 @@ class PrototypeController(
 
   private val mutex = Mutex()
 
+  /** One cap on requests in flight for every surface this controller shows. */
+  private val requestLimiter = PrototypeRequestLimiter()
+
   private class Surface(
     val runtime: PrototypeRuntime,
     @Volatile var request: PrototypeRequest,
@@ -504,7 +507,8 @@ class PrototypeController(
     val authored = validate(spec)
     // A same-id show reads the document the shown prototype is about to have written.
     surfaces[spec.id]?.runtime?.flushStorage()
-    val opened = storage?.open(authored, ::restoredSpecFits) ?: PrototypeStorageOpen(authored, null)
+    val opened =
+      storage?.prepare(authored, ::restoredSpecFits) ?: PrototypeStorageOpen(authored, null)
     val validated = opened.spec
     val request =
       render(validated)
@@ -548,6 +552,7 @@ class PrototypeController(
         requestScope = requestScope,
         // A response lands between interactions, never in the middle of one.
         exclusively = { block -> settleRequest(runtime, block) },
+        requestLimiter = requestLimiter,
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -584,9 +589,13 @@ class PrototypeController(
       scope.restore(scopeBefore)
       throw error
     }
+    // The accepted window is the first point the stored document may change.
+    opened.commit()
     // Render acceptance precedes replacing records. Refused renders keep all old timers/runtime.
     val retiring = if (replaceOthers) surfaces.values.filter { it !== reused } else emptyList()
     reused?.runtime?.flushStorage()
+    // A same-id show without a reset keeps its requests in flight; a reset or another id cancels.
+    if (preservePages && reused === previous) reused?.runtime?.handOverRequests(runtime)
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =

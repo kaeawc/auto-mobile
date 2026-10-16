@@ -310,7 +310,7 @@ class PrototypeRequestTest {
         "http://localhost:8080/feed?q=old",
       )
     assertEquals("POST", request.method)
-    assertEquals("http://localhost:8080/feed?q=cats&n=3&flag=true&z=9", request.url)
+    assertEquals("http://localhost:8080/feed?q=cats&flag=true&n=3&z=9", request.url)
     assertEquals(mapOf("A" to "lit", "B" to "cats", "C" to "Feed", "D" to "5"), request.headers)
     assertEquals(obj("""{"k":1}"""), request.body)
     val bare = resolved("""{"type":"request","url":"x"}""", "https://a.test")
@@ -321,9 +321,39 @@ class PrototypeRequestTest {
   }
 
   @Test
+  fun `a url's query keeps its spelling when no query is authored`() {
+    assertEquals(
+      "http://localhost:8080/feed?flag&x=%20",
+      resolved(request(), "http://localhost:8080/feed?flag&x=%20").url,
+    )
+    assertEquals(
+      "http://localhost:8080/feed?",
+      resolved(request(), "http://localhost:8080/feed?").url,
+    )
+  }
+
+  @Test
+  fun `an authored query entry is appended to the url's existing query`() {
+    // Output of resolvePrototypeRequest for the same url and {b: "2"}.
+    assertEquals(
+      "http://localhost:8080/feed?a=1&b=2",
+      resolved(request(""""query":{"b":"2"}"""), "http://localhost:8080/feed?a=1").url,
+    )
+  }
+
+  @Test
   fun `a query key already in the url is replaced and a duplicate is dropped`() {
     val url = resolved(request(""""query":{"a":"2"}"""), "http://h.test/p?a=1&b=x%20y&a=3&c").url
-    assertEquals("http://h.test/p?a=2&b=x+y&c=", url)
+    // Only the replaced key is re-encoded; the other pieces keep their spelling.
+    assertEquals("http://h.test/p?a=2&b=x%20y&c", url)
+  }
+
+  @Test
+  fun `authored query entries are set in sorted key order`() {
+    assertEquals(
+      "http://h.test/p?a=2&z=1",
+      resolved(request(""""query":{"z":"1","a":"2"}"""), "http://h.test/p").url,
+    )
   }
 
   @Test
@@ -400,7 +430,22 @@ class PrototypeRequestTest {
       applied("{}", "/data/t", received(JsonPrimitive("plain text"))).data!!["t"],
     )
     assertEquals(JsonPrimitive(""), applied("{}", "/data/t", received(null, 204)).data!!["t"])
-    assertEquals(JsonPrimitive(""), applied("{}", "/data/t", received(JsonNull)).data!!["t"])
+  }
+
+  @Test
+  fun `a literal null body is invalid_response and leaves into unchanged`() {
+    val result = applied("""{"t":"old"}""", "/data/t", received(JsonNull))
+    assertFalse(result.result.succeeded)
+    assertFalse(result.result.wroteInto)
+    assertEquals(JsonPrimitive("old"), result.data!!["t"])
+    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.result.meta.error!!.code)
+  }
+
+  @Test
+  fun `an empty 2xx body succeeds and writes an empty string`() {
+    val result = applied("{}", "/data/t", received(null))
+    assertTrue(result.result.succeeded)
+    assertEquals(JsonPrimitive(""), result.data!!["t"])
   }
 
   @Test

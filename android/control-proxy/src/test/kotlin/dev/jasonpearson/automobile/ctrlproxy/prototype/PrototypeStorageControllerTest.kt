@@ -194,4 +194,59 @@ class PrototypeStorageControllerTest {
     assertEquals(listOf<Pair<String?, Int>>("c" to 0), cleared)
     assertTrue(results.isEmpty())
   }
+
+  private fun controllerWith(displays: PrototypeDisplayProvider) =
+    PrototypeController(
+      host,
+      sink,
+      clock = { 42L },
+      lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+      displays = displays,
+      storage =
+        PrototypeStoragePersistence(
+          store,
+          storageTimer,
+          EmptyCoroutineContext,
+          warn = PrototypeStorageWarn { _, _ -> },
+        ),
+    )
+
+  @Test
+  fun `a show rejected for an unavailable display leaves the stored document untouched`() =
+    runTest {
+      store.seed("prefs", stored("state:dark" to JsonPrimitive(true)))
+
+      // No storage block and a new version would both delete the document if the show were taken.
+      controllerWith { false }.show("s", spec(storage = null), displayId = 7)
+      controllerWith { false }
+        .show("s2", spec(storage = """{"version":2,"keys":["state:dark"]}"""), displayId = 7)
+
+      assertEquals(listOf(false, false), results.map { it.second })
+      assertEquals(stored("state:dark" to JsonPrimitive(true)), store.stored("prefs"))
+      assertEquals(emptyList<String>(), store.deletes)
+      assertEquals(emptyList<Any>(), store.saves)
+    }
+
+  @Test
+  fun `a show the host refuses leaves the stored document untouched`() = runTest {
+    store.seed("prefs", stored("state:dark" to JsonPrimitive(true)))
+    host.accept = false
+
+    controller.show("s", spec(storage = null))
+
+    assertEquals(false, results.single().second)
+    assertEquals(stored("state:dark" to JsonPrimitive(true)), store.stored("prefs"))
+    assertEquals(emptyList<String>(), store.deletes)
+  }
+
+  @Test
+  fun `an accepted show applies the deletions`() = runTest {
+    store.seed("prefs", stored("state:dark" to JsonPrimitive(true)))
+
+    controller.show("s", spec(storage = null))
+
+    assertEquals(true, results.single().second)
+    assertNull(store.stored("prefs"))
+    assertEquals(listOf("prefs"), store.deletes)
+  }
 }

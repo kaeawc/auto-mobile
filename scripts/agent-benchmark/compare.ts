@@ -296,7 +296,13 @@ export function compareRun(
       extra: lines.filter((line) => line.kind === "extra").length,
       lines,
     },
-    stumbles: audit.toolErrors + audit.patternMatches.length + audit.permissionDenials.length,
+    // A call that never got a result is unaccounted for (a damaged stream or wrapper), so it
+    // counts as a stumble rather than letting the run look clean.
+    stumbles:
+      audit.toolErrors +
+      audit.patternMatches.length +
+      audit.permissionDenials.length +
+      audit.toolCalls.filter((call) => !call.hasResult).length,
     appBuild: fingerprintCheck(baseline?.appBuild, fingerprints.appBuild),
     serverBuild: fingerprintCheck(baseline?.serverBuild, fingerprints.serverBuild),
     suiteDigest: fingerprintCheck(baseline?.suiteDigest, fingerprints.suiteDigest),

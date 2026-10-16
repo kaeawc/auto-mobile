@@ -257,7 +257,9 @@ export function describeAppBuild(dumpsysOutput: string, apkDigest?: string): str
       ? ["sha256", apkDigest.slice(0, 16)]
       : ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
   ].filter((entry): entry is [string, string] => entry[1] !== undefined);
-  return parts.length > 0 ? parts.map(([key, value]) => `${key}=${value}`).join(" ") : "unknown";
+  // A partial fingerprint (say, versions without the install time) would let two local
+  // rebuilds with the same declared versions compare as one build.
+  return parts.length === 3 ? parts.map(([key, value]) => `${key}=${value}`).join(" ") : "unknown";
 }
 
 /**

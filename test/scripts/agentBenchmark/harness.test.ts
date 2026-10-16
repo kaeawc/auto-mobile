@@ -86,7 +86,10 @@ function setup(transcript: string, launchMs = 42_000) {
     .onAdb("pm path", { stdout: "package:/x.apk" })
     .onAdb("pm clear", { stdout: "Success\n" })
     .onAdb("exec-out cat", { stdout: SCREEN })
-    .onAdb("dumpsys package", { stdout: "versionCode=7 minSdk=26\n    versionName=1.0\n" })
+    .onAdb("dumpsys package", {
+      stdout:
+        "versionCode=7 minSdk=26\n    versionName=1.0\n    lastUpdateTime=2026-10-16 10:00:00\n",
+    })
     .onAdb("getprop", {
       stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n",
     })

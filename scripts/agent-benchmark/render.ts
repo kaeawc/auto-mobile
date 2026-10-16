@@ -112,7 +112,18 @@ function stumbleSection(result: BenchmarkResult): string[] {
     .slice(0, MAX_LISTED_STUMBLES)
     .map((match) => `  • pattern ${match.pattern} in ${match.tool} @ line ${match.line}`);
   const denials = audit.permissionDenials.map((tool) => `  • permission denied: ${tool}`);
-  return ["", `Stumbles: ${comparison.stumbles}`, ...errors, ...patterns, ...denials];
+  const unfinished = audit.toolCalls
+    .filter((call) => !call.hasResult)
+    .slice(0, MAX_LISTED_STUMBLES)
+    .map((call) => `  • ${call.shortName} @ line ${call.line}: no result`);
+  return [
+    "",
+    `Stumbles: ${comparison.stumbles}`,
+    ...errors,
+    ...patterns,
+    ...denials,
+    ...unfinished,
+  ];
 }
 
 function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {

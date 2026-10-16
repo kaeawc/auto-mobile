@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import type { DeviceInfo } from "../../src/models/DeviceInfo";
@@ -16,13 +17,10 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
@@ -49,15 +47,11 @@ describe("DevicePool binding exclusion", () => {
     open: () => Promise<BindingRegistry> = async () => registry,
   ) => {
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "broker-binding-exclusion", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        bindingExclusion: new RegistryBindingExclusion(open, timer),
-      }),
-    );
+    pool = makePool(sessions, "broker-binding-exclusion", {
+      timer,
+      deviceManager: manager,
+      bindingExclusion: new RegistryBindingExclusion(open, timer),
+    });
     await pool.initializeWithDevices(devices);
   };
 

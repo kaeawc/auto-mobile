@@ -1,6 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { statusOf } from "../../src/daemon/deviceBinding";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -9,10 +9,8 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Regression for #7951: multi-device allocation runs its pre-allocation cleanup
@@ -66,14 +64,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingFakeDeviceManager();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "repro-6393-daemon", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    pool = makePool(sessionManager, "repro-6393-daemon", { timer, deviceManager: deviceManager });
   });
 
   afterEach(() => {
@@ -462,15 +453,11 @@ describe("idle eviction with a stale discovery snapshot", () => {
       platform: "android",
       deviceId: "R58M1234ABC",
     };
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "repro-6393-daemon", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      }),
-    );
+    pool = makePool(sessionManager, "repro-6393-daemon", {
+      timer,
+      deviceManager: deviceManager,
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    });
     deviceManager.bootedDevices = [handset];
     await pool.initializeWithDevices([handset]);
     await pool.addDevice(emulator, image);

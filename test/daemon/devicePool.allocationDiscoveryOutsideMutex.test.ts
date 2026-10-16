@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
@@ -15,12 +16,9 @@ import type {
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Each gate holds exactly one discovery, with the observation captured before
 // parking. Later calls proceed independently, including a fresh retry snapshot.
@@ -99,15 +97,11 @@ async function setup(
     "ios",
     devices.filter((d) => d.platform === "ios"),
   );
-  pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "allocation-discovery", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      retryExecutor: new DefaultRetryExecutor(timer),
-      ...overrides,
-    }),
-  );
+  pool = makePool(sessions, "allocation-discovery", {
+    timer,
+    deviceManager: manager,
+    ...overrides,
+  });
   await pool.initializeWithDevices(devices);
 }
 afterEach(() => {

@@ -1,11 +1,10 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { logger } from "../../src/utils/logger";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -57,15 +56,11 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingBootDeviceManager();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "recovery-outside-mutex", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      }),
-    );
+    pool = makePool(sessionManager, "recovery-outside-mutex", {
+      timer,
+      deviceManager: deviceManager,
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    });
     deviceManager.bootedDevices = [handset];
     await pool.initializeWithDevices([handset]);
     await pool.addDevice(emulator, image);
@@ -193,15 +188,11 @@ describe("DevicePool exhausted session release ownership", () => {
       const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const manager = new FakeDeviceManager();
       manager.bootedDevices = [handset];
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "release-retry-ownership", {
-          timer,
-          deviceSessionRepository: new FakeDeviceSessionRepository(),
-          deviceManager: manager,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessions, "release-retry-ownership", {
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        deviceManager: manager,
+      });
       const failure = new Error("release failed");
       const poolFailure = new Error("pool release failed");
       const warn = spyOn(logger, "warn").mockImplementation(() => {});

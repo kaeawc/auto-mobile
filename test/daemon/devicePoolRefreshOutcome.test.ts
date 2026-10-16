@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -10,8 +11,6 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
@@ -46,36 +45,32 @@ describe("allocation after a partial refresh failure", () => {
     deviceManager.setBootedDevices("android", [device]);
     let trackingAttempts = 0;
     let clearPool = () => {};
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "allocation-refresh-failure", {
-        timer,
-        deviceManager,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        devicePoolRefreshFactory: (port) => {
-          clearPool = () => port.getDevices().clear();
-          return new DevicePoolRefresh({
-            ...port,
-            setDeviceSessionTracking: async () => {
-              if (busy) {
-                port.getDevices().get(device.deviceId)!.status = "busy";
+    const pool = makePool(sessions, "allocation-refresh-failure", {
+      timer,
+      deviceManager,
+      devicePoolRefreshFactory: (port) => {
+        clearPool = () => port.getDevices().clear();
+        return new DevicePoolRefresh({
+          ...port,
+          setDeviceSessionTracking: async () => {
+            if (busy) {
+              port.getDevices().get(device.deviceId)!.status = "busy";
+            }
+            if (persistentFailure || trackingAttempts++ === 0) {
+              throw new Error(failure);
+            }
+          },
+          // Criteria allocation refreshes again when the target is absent.
+          ...(persistentFailure
+            ? {
+                foldObservationIntoPooledEntry: async () => {
+                  throw new Error(failure);
+                },
               }
-              if (persistentFailure || trackingAttempts++ === 0) {
-                throw new Error(failure);
-              }
-            },
-            // Criteria allocation refreshes again when the target is absent.
-            ...(persistentFailure
-              ? {
-                  foldObservationIntoPooledEntry: async () => {
-                    throw new Error(failure);
-                  },
-                }
-              : {}),
-          });
-        },
-      }),
-    );
+            : {}),
+        });
+      },
+    });
     return { pool, timer, deviceManager, clearPool: () => clearPool() };
   }
 

@@ -1,3 +1,4 @@
+import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { holderOf } from "../../src/daemon/deviceBinding";
@@ -76,6 +77,8 @@ const SETTLE_TURNS = 300;
 /** Fake-time nudges a settle point may spend unparking sleeping operations. */
 const SETTLE_TIME_NUDGES = 75;
 const SETTLE_NUDGE_MS = 1_000;
+/** Microtask turns the fake keep-screen-awake restore takes. */
+const RESTORE_TURNS = 60;
 
 export type StepKind =
   | "acquireMcp"
@@ -93,7 +96,10 @@ export type StepKind =
   | "disconnect"
   | "reconnect"
   | "rebind"
+  | "rebindActive"
   | "evict"
+  | "refreshDevices"
+  | "replaceIdentity"
   | "closeConnection"
   | "reopenConnection"
   | "attachAutolock"
@@ -162,6 +168,7 @@ export function describeStep(step: Step, index: number): string {
             "disconnect",
             "reconnect",
             "evict",
+            "replaceIdentity",
             "slotAssign",
             "slotExecStart",
             "slotExecEnd",
@@ -172,6 +179,7 @@ export function describeStep(step: Step, index: number): string {
               "acquireAutolock",
               "acquireCli",
               "rebind",
+              "rebindActive",
               "attachAutolock",
               "restoreAutolock",
               "toolControl",
@@ -426,7 +434,15 @@ class OwnershipWorld {
   private async createDaemon(): Promise<DaemonProcess> {
     const life: { dead: boolean } = { dead: false };
     const timer = processTimer(this.timer, () => life.dead);
-    const manager = new SessionManager(timer, this.persistence);
+    const manager = new SessionManager(timer, this.persistence, {
+      // A real restore is adb work: it keeps the old device's deferred rebind cleanup window open.
+      keepScreenAwakeRestorer: () => ({
+        restore: async () => {
+          await drainMicrotasks(RESTORE_TURNS);
+          return { status: "restored" as const };
+        },
+      }),
+    });
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "ownership-concurrency-daemon", {
         timer,
@@ -702,8 +718,13 @@ class OwnershipWorld {
     const idle = devices.filter((d) => d.status === "idle" && !d.sessionId).length;
     // An idle device a broker binding holds counts as assigned once the pool has read the registry
     // (its snapshot is cached), so the stats may show it either way.
+    // A restart-released session's rehydration reservation holds its idle device the same way, and
+    // the pool counts it as assigned.
     const slotIdle = devices.filter(
-      (d) => d.status === "idle" && !d.sessionId && this.slotHoldsDevice(d.id),
+      (d) =>
+        d.status === "idle" &&
+        !d.sessionId &&
+        (this.slotHoldsDevice(d.id) || this.pool.poolBucket(d.id) === "assigned"),
     ).length;
     const statsAgree =
       stats.total === devices.length &&
@@ -1282,13 +1303,30 @@ class OwnershipWorld {
     this.launch(`disconnect ${device.deviceId}`, async () => {
       const pooled = this.pool.getDevice(device.deviceId);
       const sessionId = pooled?.sessionId ?? null;
-      if (sessionId && this.manager.getSession(sessionId)) {
+      const liveSession = sessionId && this.manager.getSession(sessionId) ? sessionId : null;
+      // The daemon's disconnect monitor treats a session that already moved on as a stale target
+      // (this device is only pinned for deferred rebind cleanup) and returns without removing it
+      // (daemon.ts isCapturedDisconnectTargetCurrent). Refresh-miss eviction or an identity
+      // replacement later loses the device (see refreshDevices and replaceIdentity).
+      if (liveSession && this.manager.getSessionForDevice(device.deviceId) !== liveSession) {
+        this.log(`  disconnect ${device.deviceId}: stale target, session moved on`);
+        return;
+      } else if (liveSession) {
         await releaseSessionAndDevice(
           this.manager,
           this.pool,
           device.deviceId,
-          sessionId,
-          deviceLossCancellationReason(device.deviceId),
+          liveSession,
+          undefined,
+          {
+            // cancelAndReleaseSession frees the device the release returns, which is the session's
+            // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
+            release: () =>
+              this.manager.releaseSession(
+                liveSession,
+                deviceLossCancellationReason(device.deviceId),
+              ),
+          },
         );
       }
       await this.pool.removeDisconnectedDevice(
@@ -1300,20 +1338,58 @@ class OwnershipWorld {
     });
   }
 
+  /** A plain refresh: offline serials accrue misses and are evicted once confirmed gone. */
+  refreshDevices(): void {
+    this.log("refresh devices");
+    this.launch("refresh devices", async () => {
+      await this.pool.refreshDevices();
+    });
+  }
+
+  /**
+   * Another AVD answers on the serial for one refresh (runtime identity replacement, which
+   * evicts the pooled entry), then discovery goes back to the harness's online set.
+   */
+  replaceIdentity(deviceIndex: number): void {
+    // Prefer a device a moved-on session only still holds for deferred rebind cleanup: the window
+    // a lost device must not release that session from.
+    const pinned = DEVICES.findIndex((candidate) => {
+      const holder = holderOf(this.pool.getDevice(candidate.deviceId));
+      return holder !== null && this.manager.getSessionForDevice(candidate.deviceId) !== holder;
+    });
+    const device = DEVICES[pinned >= 0 ? pinned : deviceIndex]!;
+    this.log(`replace identity ${device.deviceId}`);
+    this.launch(`replace identity ${device.deviceId}`, async () => {
+      this.discovery.setBootedDevices("android", [
+        ...this.onlineDevices().filter((booted) => booted.deviceId !== device.deviceId),
+        { ...device, name: `${device.name}_replacement` },
+      ]);
+      try {
+        await this.pool.refreshDevices();
+      } finally {
+        this.discovery.setBootedDevices("android", this.onlineDevices());
+      }
+    });
+  }
+
   /**
    * The client's live session moves to another device through the pool's non-deferred explicit
-   * rebind branch (allowSessionRebind, no deferCleanup). It does not model setActiveDevice's
-   * receipt + deferRebindCleanup path. Rebinds of one session may overlap; production serialises
+   * rebind branch (allowSessionRebind, no deferCleanup). Rebinds of one session may overlap; production serialises
    * them under DevicePool.assignmentMutex.
+   *
+   * `setActiveDevice` shape (`active`): src/server/setActiveDevice.ts binds with an acquisition
+   * receipt, refusePreparedForOtherRequest, and no connection id, then commits the receipt, which
+   * defers the old device's cleanup so it stays pool-bound to the session after the call returns.
    */
-  rebind(client: ClientState, deviceIndex: number): void {
+  rebind(client: ClientState, deviceIndex: number, active: boolean = false): void {
     const sessionId = client.sessionId;
     if (!sessionId) {
       return;
     }
     const device = DEVICES[deviceIndex]!;
-    this.log(`c${client.index} rebind ${sessionId} -> ${device.deviceId}`);
-    this.launch(`c${client.index} rebind ${device.deviceId}`, async () => {
+    const label = active ? "rebindActive" : "rebind";
+    this.log(`c${client.index} ${label} ${sessionId} -> ${device.deviceId}`);
+    this.launch(`c${client.index} ${label} ${device.deviceId}`, async () => {
       const from = this.manager.getSession(sessionId)?.assignedDevice;
       if (!from || from === device.deviceId) {
         return;
@@ -1323,20 +1399,45 @@ class OwnershipWorld {
       group.devices.add(from).add(device.deviceId);
       this.rebinding.set(sessionId, group);
       try {
-        await this.pool.bindOrReuseDeviceSession(
-          sessionId,
-          device.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-          undefined,
-          undefined,
-          undefined,
-          client.kind === "mcp" ? client.connection : undefined,
-          client.kind === "cli",
-        );
+        if (active) {
+          this.manager.updateSessionCache(sessionId, {
+            keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
+          });
+          const receipt: AcquisitionReceipt = {};
+          await this.pool.bindOrReuseDeviceSession(
+            sessionId,
+            device.deviceId,
+            "android",
+            undefined,
+            undefined,
+            undefined,
+            true,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            receipt,
+            true,
+          );
+          commitAcquisition(receipt);
+          await drainMicrotasks(SETTLE_TURNS);
+        } else {
+          await this.pool.bindOrReuseDeviceSession(
+            sessionId,
+            device.deviceId,
+            "android",
+            undefined,
+            undefined,
+            undefined,
+            true,
+            undefined,
+            undefined,
+            undefined,
+            client.kind === "mcp" ? client.connection : undefined,
+            client.kind === "cli",
+          );
+        }
       } catch (error) {
         // Losing the race with the session's own release is the expected outcome of a rebind.
         if (!errorMessage(error).startsWith("Cannot rebind released session")) {
@@ -1621,6 +1722,15 @@ class OwnershipWorld {
         break;
       case "rebind":
         this.rebind(client, step.device);
+        break;
+      case "rebindActive":
+        this.rebind(client, step.device, true);
+        break;
+      case "refreshDevices":
+        this.refreshDevices();
+        break;
+      case "replaceIdentity":
+        this.replaceIdentity(step.device);
         break;
       case "evict":
         this.evict(step.device);

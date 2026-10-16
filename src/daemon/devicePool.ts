@@ -4143,6 +4143,22 @@ export class DevicePool {
       : undefined;
   }
 
+  /**
+   * A holder whose assignment moved elsewhere only pins the lost device for deferred rebind
+   * cleanup (cf. isCapturedDisconnectTargetCurrent): drop that hold, leaving the session on its
+   * new device. Returns whether the hold was dropped.
+   */
+  private dropRebindCleanupHold(device: PooledDevice, sessionId: string): boolean {
+    const held = this.sessionManager.findSession(sessionId);
+    if (!held || held.assignedDevice === device.id) {
+      return false;
+    }
+    this.deferredDeviceReleases.delete(device.id);
+    unbindDevice(device, { expectedSessionId: sessionId, status: "keep" });
+    this.notifyDeviceStateChanged(device);
+    return true;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4169,6 +4185,9 @@ export class DevicePool {
           "superseded this eviction",
       );
       return false;
+    }
+    if (this.dropRebindCleanupHold(device, sessionId)) {
+      return true;
     }
     const releaseReason =
       this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??

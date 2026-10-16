@@ -139,8 +139,11 @@ const PROFILES: Record<string, HarnessProfile> = {
     weights: {
       acquireMcp: 8,
       acquireCli: 2,
-      rebind: 14,
+      rebind: 7,
+      rebindActive: 7,
       evict: 2,
+      refreshDevices: 2,
+      replaceIdentity: 2,
       release: 2,
       kill: 1,
       disconnect: 1,
@@ -202,4 +205,11 @@ describe("device-session ownership under seeded concurrent interleavings", () =>
       });
     }
   }
+
+  // Pinned finding: a session that rebound with setActiveDevice's shape lost its old device
+  // (runtime identity replacement) while that device was only held for deferred rebind cleanup.
+  // Eviction released the moved-on session and left its new device bound to it.
+  test("rebindEvict: seed 17 keeps a rebound session when its old device is lost mid-cleanup", async () => {
+    await assertOwnershipInvariants([17], PROFILES.rebindEvict, { tolerate: KNOWN_VIOLATIONS });
+  });
 });

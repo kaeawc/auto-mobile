@@ -8,6 +8,7 @@ import {
 import { HeartbeatKeeper, type HeartbeatKeeperPort } from "./proxy/HeartbeatKeeper";
 import {
   DaemonLifecycleReconciler,
+  type DaemonLifecycleReconcilerDeps,
   runPreflightTransport,
 } from "./proxy/DaemonLifecycleReconciler";
 import {
@@ -45,6 +46,7 @@ import {
   type PendingHeldSessionLoss,
 } from "./proxy/HeldSessionLosses";
 import { ReleaseEpochLedger } from "./proxy/ReleaseEpochLedger";
+import { StallProbe, daemonRestartEvidence, type StallProbePort } from "./proxy/StallProbe";
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
 import {
   ProxySessionState,
@@ -68,7 +70,6 @@ export {
 import {
   reportedOwnerHold,
   isLivenessOwnerConflictError,
-  isDaemonInstanceChangedError,
   isLivenessOwnershipLostError,
   ackDaemonInstance,
 } from "./proxy/livenessErrorPredicates";
@@ -386,23 +387,6 @@ export interface LatestHeartbeatAsk {
   notFound: boolean;
   /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
   handoff: boolean;
-}
-
-/**
- * The restart a resume acknowledgement reveals (#11018): another daemon process than the one that
- * stalled answered. Undefined when both are the same, or either was never reported.
- */
-function daemonRestartEvidence(
-  record: StallHandoverRecord,
-  ack: unknown,
-): DaemonRestartEvidence | undefined {
-  const previousDaemonInstance = record.stalledDaemonInstance;
-  const daemonInstance = ackDaemonInstance(ack);
-  return previousDaemonInstance !== undefined &&
-    daemonInstance !== undefined &&
-    daemonInstance !== previousDaemonInstance
-    ? { previousDaemonInstance, daemonInstance }
-    : undefined;
 }
 
 /** Append the resumed-session warning as one more text block of a tool result (#10989). */
@@ -793,6 +777,7 @@ export class DaemonMcpProxy {
   private ackedDaemonInstance: string | undefined;
   /** Keeps probing a daemon that stalled past recovery, so one that resumes is heard (#10989). */
   private readonly stallResumeProbe: SingleFlightInterval;
+  private readonly stallProbe: StallProbe;
   /** Definitively lost sessions awaiting one tool-call delivery; these do not fence lifecycle. */
   private readonly pendingSessionLosses = new Map<string, LivenessHandover>();
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
@@ -1035,65 +1020,7 @@ export class DaemonMcpProxy {
         this.connectResourceSubscriptionsInBackground(),
       assertConnectedClient: (client) => this.assertConnectedClient(client),
     });
-    this.lifecycleReconciler = new DaemonLifecycleReconciler({
-      get config() {
-        return proxy.config;
-      },
-      get daemonManager() {
-        return proxy.daemonManager;
-      },
-      get daemonStatusProbe() {
-        return proxy.daemonStatusProbe;
-      },
-      get timer() {
-        return proxy.timer;
-      },
-      get clientVersion() {
-        return proxy.clientVersion;
-      },
-      get clientAssetVersion() {
-        return proxy.clientAssetVersion;
-      },
-      get buildIdentity() {
-        return proxy.buildIdentity;
-      },
-      get reconciliationSnapshot() {
-        return proxy.reconciliationSnapshot;
-      },
-      set reconciliationSnapshot(value) {
-        proxy.reconciliationSnapshot = value;
-      },
-      invalidateCache: () => this.invalidateCache(),
-      assertDaemonLifecycleUnfenced: () => this.assertDaemonLifecycleUnfenced(),
-
-      reconciliationStatus: () => this.reconciliationStatus(),
-      isSameDaemonGeneration: (current, expected) => this.isSameDaemonGeneration(current, expected),
-      waitForJoinedRestartSuccessor: (expected, deadline) =>
-        this.waitForJoinedRestartSuccessor(expected, deadline),
-      waitForRunningReconciliationStatus: (deadline) =>
-        this.waitForRunningReconciliationStatus(deadline),
-      readSocketReconciliationStatus: () => this.readSocketReconciliationStatus(),
-      assertAutomaticRestartAllowed: (status, reason) =>
-        this.assertAutomaticRestartAllowed(status, reason),
-      ensureVersionMatches: (reconciliationDeadline, observedStatus) =>
-        this.ensureVersionMatches(reconciliationDeadline, observedStatus),
-      verifyRestartedVersion: () => this.verifyRestartedVersion(),
-      requiresVersionRestart: (status, runningVersion) =>
-        this.requiresVersionRestart(status, runningVersion),
-      assertNewerClientVersion: (status, runningVersion, runningBase, clientBase, sameRelease) =>
-        this.assertNewerClientVersion(status, runningVersion, runningBase, clientBase, sameRelease),
-      assertVersionRestartCooldownExpired: (status, runningVersion) =>
-        this.assertVersionRestartCooldownExpired(status, runningVersion),
-      versionMismatchError: (runningVersion, reason, detail, retryAfterMs, daemonBuild) =>
-        this.versionMismatchError(runningVersion, reason, detail, retryAfterMs, daemonBuild),
-
-      ensureBuildMatches: (reconciliationDeadline, observedStatus) =>
-        this.ensureBuildMatches(reconciliationDeadline, observedStatus),
-      finishBuildRestart: (restartResult, status, reconciliationDeadline) =>
-        this.finishBuildRestart(restartResult, status, reconciliationDeadline),
-      buildMismatchError: (daemon, reason, detail, retryAfterMs) =>
-        this.buildMismatchError(daemon, reason, detail, retryAfterMs),
-    });
+    this.lifecycleReconciler = new DaemonLifecycleReconciler(this.createLifecycleReconcilerDeps());
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
@@ -1133,10 +1060,16 @@ export class DaemonMcpProxy {
         },
       },
     );
+    this.stallProbe = new StallProbe({
+      timer: this.timer,
+      stallHandovers: this.sessionState.stallHandovers,
+      managedExecutionSessions: this.managedExecutionSessions,
+      port: this.createStallProbePort(),
+    });
     this.stallResumeProbe = new SingleFlightInterval(
       this.timer,
       this.heartbeatIntervalMs,
-      () => this.probeStalledSessions(),
+      () => this.stallProbe.probeStalledSessions(),
       {
         stopTimeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS,
         onError: (error) => {
@@ -2718,6 +2651,69 @@ export class DaemonMcpProxy {
       const waitDeadline = emptyHandoffDeadline ?? deadline;
       await this.timer.sleep(Math.min(100, waitDeadline - this.timer.now()));
     }
+  }
+
+  private createLifecycleReconcilerDeps(): DaemonLifecycleReconcilerDeps {
+    const proxy = this;
+    return {
+      get config() {
+        return proxy.config;
+      },
+      get daemonManager() {
+        return proxy.daemonManager;
+      },
+      get daemonStatusProbe() {
+        return proxy.daemonStatusProbe;
+      },
+      get timer() {
+        return proxy.timer;
+      },
+      get clientVersion() {
+        return proxy.clientVersion;
+      },
+      get clientAssetVersion() {
+        return proxy.clientAssetVersion;
+      },
+      get buildIdentity() {
+        return proxy.buildIdentity;
+      },
+      get reconciliationSnapshot() {
+        return proxy.reconciliationSnapshot;
+      },
+      set reconciliationSnapshot(value) {
+        proxy.reconciliationSnapshot = value;
+      },
+      invalidateCache: () => this.invalidateCache(),
+      assertDaemonLifecycleUnfenced: () => this.assertDaemonLifecycleUnfenced(),
+
+      reconciliationStatus: () => this.reconciliationStatus(),
+      isSameDaemonGeneration: (current, expected) => this.isSameDaemonGeneration(current, expected),
+      waitForJoinedRestartSuccessor: (expected, deadline) =>
+        this.waitForJoinedRestartSuccessor(expected, deadline),
+      waitForRunningReconciliationStatus: (deadline) =>
+        this.waitForRunningReconciliationStatus(deadline),
+      readSocketReconciliationStatus: () => this.readSocketReconciliationStatus(),
+      assertAutomaticRestartAllowed: (status, reason) =>
+        this.assertAutomaticRestartAllowed(status, reason),
+      ensureVersionMatches: (reconciliationDeadline, observedStatus) =>
+        this.ensureVersionMatches(reconciliationDeadline, observedStatus),
+      verifyRestartedVersion: () => this.verifyRestartedVersion(),
+      requiresVersionRestart: (status, runningVersion) =>
+        this.requiresVersionRestart(status, runningVersion),
+      assertNewerClientVersion: (status, runningVersion, runningBase, clientBase, sameRelease) =>
+        this.assertNewerClientVersion(status, runningVersion, runningBase, clientBase, sameRelease),
+      assertVersionRestartCooldownExpired: (status, runningVersion) =>
+        this.assertVersionRestartCooldownExpired(status, runningVersion),
+      versionMismatchError: (runningVersion, reason, detail, retryAfterMs, daemonBuild) =>
+        this.versionMismatchError(runningVersion, reason, detail, retryAfterMs, daemonBuild),
+
+      ensureBuildMatches: (reconciliationDeadline, observedStatus) =>
+        this.ensureBuildMatches(reconciliationDeadline, observedStatus),
+      finishBuildRestart: (restartResult, status, reconciliationDeadline) =>
+        this.finishBuildRestart(restartResult, status, reconciliationDeadline),
+      buildMismatchError: (daemon, reason, detail, retryAfterMs) =>
+        this.buildMismatchError(daemon, reason, detail, retryAfterMs),
+    };
   }
 
   private createStatusProbe(
@@ -5630,6 +5626,39 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createStallProbePort(): StallProbePort {
+    return {
+      isClosing: () => this.closing,
+      sendResumeHeartbeat: (...args) => this.sendStalledSessionResumeHeartbeat(...args),
+      sendProbeHeartbeat: (sessionUuid, expectedDaemonInstance) =>
+        runWithoutDaemonLifecycle(() =>
+          raceWithDeadline(
+            async () => {
+              await this.ensureConnected();
+              return this.requireClient().callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
+                ...this.boundSessionHeartbeatParams(sessionUuid, false, true),
+                expectedDaemonInstance,
+              });
+            },
+            {
+              timer: this.timer,
+              timeoutMs: this.heartbeatRequestTimeoutMs(),
+              label: "Stalled-daemon probe",
+            },
+          ),
+        ),
+      restoreResumedSession: (...args) => this.restoreResumedSession(...args),
+      noteDaemonIdleEvidence: (...args) => this.noteDaemonIdleEvidence(...args),
+      endLostSessionHandover: (...args) => this.endLostSessionHandover(...args),
+      isDefinitiveSessionLoss: (...args) => this.isDefinitiveSessionLoss(...args),
+      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      startProbeInterval: () => this.stallResumeProbe.start(),
+      stopProbeInterval: () => {
+        void this.stallResumeProbe.stop();
+      },
+    };
+  }
+
   private createHeldSessionLossesPort(): HeldSessionLossesPort {
     return {
       boundSessionUuid: () => this.boundSessionUuid,
@@ -5979,7 +6008,7 @@ export class DaemonMcpProxy {
       }
     }
     this.notifyLivenessHandoverListeners(handover);
-    if (this.hasProbeableStall() && !this.closing) {
+    if (this.stallProbe.hasProbeableStall() && !this.closing) {
       this.stallResumeProbe.start();
     }
   }
@@ -6058,155 +6087,6 @@ export class DaemonMcpProxy {
     };
   }
 
-  private hasProbeableStall(): boolean {
-    return [...this.stallHandovers.values()].some(
-      (record) =>
-        record.probeDaemonInstance !== undefined || record.managedReclaimSince !== undefined,
-    );
-  }
-
-  /**
-   * One round of the stall probe (#10989). A daemon that stopped answering may come back by itself
-   * (SIGSTOP/SIGCONT, a long GC pause, host sleep) still holding every session: its own stall
-   * forgiveness keeps them, but they lapse a lease later unless their owner heartbeats again. Each
-   * handed-over session is heartbeated with the same owner token, observation-only and pinned to
-   * the daemon process that stalled; the first acknowledgement resumes it. A restarted daemon
-   * refuses the pinned heartbeat without changing anything; both plain and managed sessions then
-   * reclaim themselves. Keep the heartbeat cadence: a restarted daemon
-   * only waits lease + suspect grace for its owner, so reclaim must land within one keeper interval.
-   */
-  private async probeStalledSessions(): Promise<void> {
-    const probed = [...this.stallHandovers].filter(
-      ([, record]) =>
-        record.probeDaemonInstance !== undefined || record.managedReclaimSince !== undefined,
-    );
-    if (probed.length === 0 || this.closing) {
-      void this.stallResumeProbe.stop();
-      return;
-    }
-    await Promise.all(
-      probed.map(([sessionUuid, record]) => this.probeStalledSession(sessionUuid, record)),
-    );
-  }
-
-  private async probeStalledSession(
-    sessionUuid: string,
-    record: StallHandoverRecord,
-  ): Promise<void> {
-    const expectedDaemonInstance = record.probeDaemonInstance;
-    const reclaiming = record.managedReclaimSince !== undefined;
-    let ack: unknown;
-    try {
-      ack = reclaiming
-        ? await this.sendStalledSessionResumeHeartbeat(sessionUuid)
-        : await runWithoutDaemonLifecycle(() =>
-            raceWithDeadline(
-              async () => {
-                await this.ensureConnected();
-                return this.requireClient().callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
-                  ...this.boundSessionHeartbeatParams(sessionUuid, false, true),
-                  expectedDaemonInstance,
-                });
-              },
-              {
-                timer: this.timer,
-                timeoutMs: this.heartbeatRequestTimeoutMs(),
-                label: "Stalled-daemon probe",
-              },
-            ),
-          );
-    } catch (error) {
-      await this.handleStallProbeFailure(sessionUuid, record, error);
-      return;
-    }
-    if (this.stallHandovers.get(sessionUuid) !== record || this.closing) {
-      return;
-    }
-    logger.info(
-      `[DaemonMcpProxy] The daemon answered again and still holds session ${sessionUuid}; resuming it after ${record.handover.code}`,
-    );
-    this.restoreResumedSession(
-      sessionUuid,
-      reclaiming ? daemonRestartEvidence(record, ack) : undefined,
-    );
-    this.noteDaemonIdleEvidence(sessionUuid, ack);
-  }
-
-  private async handleStallProbeFailure(
-    sessionUuid: string,
-    record: StallHandoverRecord,
-    error: unknown,
-  ): Promise<void> {
-    if (this.stallHandovers.get(sessionUuid) !== record || this.closing) {
-      return;
-    }
-    if (isDaemonInstanceChangedError(error)) {
-      const wasPinned = record.probeDaemonInstance !== undefined;
-      record.probeDaemonInstance = undefined;
-      if (wasPinned) {
-        record.managedReclaimSince = this.timer.now();
-        await this.probeStalledSession(sessionUuid, record);
-        return;
-      }
-      logger.info(
-        `[DaemonMcpProxy] The daemon was restarted while session ${sessionUuid} was handed over; ` +
-          `no longer probing it, the harness resumes it by naming its sessionUuid`,
-      );
-      return;
-    }
-    if (this.isDefinitiveSessionLoss(error)) {
-      const releaseReason = releaseReasonFromError(error);
-      if (
-        record.managedReclaimSince !== undefined &&
-        this.awaitManagedReclaimNotFound(sessionUuid, record, error)
-      ) {
-        // The successor may not have rehydrated this session yet; keep the same probe cadence.
-        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} is still awaiting rehydration`);
-        return;
-      }
-      // The daemon answered that the session is gone or owned by another token: the next call
-      // that reaches it reports the loss once.
-      this.endLostSessionHandover(sessionUuid, releaseReason, error);
-      return;
-    }
-    // Expected while the daemon is still stalled; the next probe round asks again.
-    logger.debug(
-      `[DaemonMcpProxy] Stalled-daemon probe for session ${sessionUuid} got no answer: ${errorMessage(error)}`,
-    );
-  }
-
-  /** Await only rehydratable not-found answers, within one window per answering process. */
-  private awaitManagedReclaimNotFound(
-    sessionUuid: string,
-    record: StallHandoverRecord,
-    error: unknown,
-  ): boolean {
-    const releaseReason = releaseReasonFromError(error);
-    if (
-      (!this.managedExecutionSessions.has(sessionUuid) &&
-        (record.managedReclaimSince === undefined || releaseReason !== undefined)) ||
-      record.handover.code !== DAEMON_STALLED_CODE ||
-      // Typed ownership losses have different codes and fail this not-found check too.
-      !this.isDaemonSessionNotFoundError(error) ||
-      (releaseReason !== undefined && !isRecoverableDaemonHandoffReason(releaseReason))
-    ) {
-      return false;
-    }
-    // An unpinned not-found proves the daemon answered but has not rehydrated this execution.
-    record.managedReclaimSince ??= this.timer.now();
-    record.probeDaemonInstance = undefined;
-    this.stallResumeProbe.start();
-    const daemonInstance = daemonInstanceFromError(error);
-    const window = record.managedNotFoundWindow;
-    if (!window || (daemonInstance !== undefined && daemonInstance !== window.daemonInstance)) {
-      record.managedNotFoundWindow = { since: this.timer.now(), daemonInstance };
-    }
-    return (
-      this.timer.now() - record.managedNotFoundWindow!.since <
-      RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
-    );
-  }
-
   /**
    * The daemon acknowledged a handed-over session again (#10989): lift its handover and hold it as
    * it was held before, heartbeating it from now on. Its next tool call carries a warning instead
@@ -6240,7 +6120,7 @@ export class DaemonMcpProxy {
       });
     }
     this.resumeHeartbeatKeeper();
-    if (!this.hasProbeableStall()) {
+    if (!this.stallProbe.hasProbeableStall()) {
       void this.stallResumeProbe.stop();
     }
   }
@@ -6293,7 +6173,7 @@ export class DaemonMcpProxy {
     } catch (error) {
       if (
         this.isDefinitiveSessionLoss(error) &&
-        !this.awaitManagedReclaimNotFound(sessionUuid, record, error)
+        !this.stallProbe.awaitManagedReclaimNotFound(sessionUuid, record, error)
       ) {
         this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error), error);
         this.reportPendingSessionLoss(args);
@@ -6378,7 +6258,7 @@ export class DaemonMcpProxy {
       }
     }
     this.forgetSessionLivenessState(sessionUuid);
-    if (!this.hasProbeableStall()) {
+    if (!this.stallProbe.hasProbeableStall()) {
       void this.stallResumeProbe.stop();
     }
     this.ownedDeviceSessions.delete(sessionUuid);
@@ -6412,7 +6292,7 @@ export class DaemonMcpProxy {
     this.forgetSessionLivenessState(sessionUuid);
     this.ownedDeviceSessions.delete(sessionUuid);
     this.claimableSessions.delete(sessionUuid);
-    if (!this.hasProbeableStall()) {
+    if (!this.stallProbe.hasProbeableStall()) {
       void this.stallResumeProbe.stop();
     }
     return true;

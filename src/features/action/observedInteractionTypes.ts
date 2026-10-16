@@ -1,6 +1,6 @@
 import type { DeviceLockState } from "../../models/DeviceLockState";
 import type { ObserveResult } from "../../models/ObserveResult";
-import type { StaleDisplayDetails } from "../../models/StaleDisplayError";
+import type { StaleDisplayDetails } from "../observe/StaleDisplayError";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import type { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";

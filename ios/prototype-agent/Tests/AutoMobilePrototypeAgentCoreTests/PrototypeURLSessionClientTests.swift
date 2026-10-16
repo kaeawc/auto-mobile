@@ -153,6 +153,8 @@ final class PrototypeURLSessionClientTests: XCTestCase {
             XCTAssertEqual(failed?.error.code, .invalidRequest, "\(headers)")
         }
         XCTAssertTrue(StubProtocol.requests.isEmpty)
+        let twice = PrototypeHttpHeaderCheck.problem(in: ["X-Test": "1", "x-test": "2"])
+        XCTAssertEqual(twice?.code, .invalidRequest)
         XCTAssertNil(PrototypeHttpHeaderCheck.problem(in: ["X-Token_1": "tab\there", "Accept": "a, b"]))
     }
 

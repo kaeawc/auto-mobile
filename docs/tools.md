@@ -738,9 +738,13 @@ clears them; see [storage](design-docs/plat/android/prototype-ux.md#storage-1252
 `statusKey` lifecycle, `onSuccess` / `onError` lists and a `prototype_request` emit event) require
 `prototype_network_v1`, and `prototype_network_device_v1` as well for `via: "device"`, with the same
 refusal; see [the request action](design-docs/plat/android/prototype-ux.md#request-action-12523).
-Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
-once per show on the device; `status` remembers shown data beside state, `inspect` reports and
-adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
+Data is nested content the agent supplies and state is user-owned scalars. Rendering bindings
+(`{data:/pointer}` text, `{data: pointer}` conditions, `repeat` rows) resolve against the current data
+whenever it changes, starting with the show; action bindings (`request` url, headers, query and body,
+`setData` values, emit context) are read at the moment the action runs, after the earlier actions in
+the list have committed. The device may write data (`setData`, `appendData`, `removeData`, a request
+`into`), so patches to `/data` follow the `baseRevision` rule above. `status` remembers shown data
+beside state, `inspect` reports and adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
 
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is

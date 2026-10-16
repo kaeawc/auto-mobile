@@ -200,6 +200,24 @@ final class PrototypeDataActionsTests: XCTestCase {
         return session
     }
 
+    func testAStateWriteIsRevalidatedAgainstDataAnEarlierActionChanged() throws {
+        // No row exists when the list is planned, so a string for `b` looks fine; the appended row
+        // adds a switch bound to `b`, which refuses it.
+        var session = PrototypeSession()
+        try session.show(spec("""
+        {"id":"rows","window":{"placement":{"type":"fullscreen"}},"state":{"b":true},"data":{"rows":[]},
+         "root":{"type":"column","children":[
+           {"type":"button","label":"Go","onTap":[
+             {"type":"appendData","path":"/data/rows","value":{"value":{"n":1}}},
+             {"type":"setState","key":"b","value":"not a boolean"}]},
+           {"type":"column","repeat":{"items":{"path":"/rows"},"as":"row"},"children":[
+             {"type":"switch","stateKey":"b"}]}]}}
+        """))
+        _ = try session.run(button(session, "Go"))
+        XCTAssertEqual(session.data?["rows"], .array([.object(["n": .number(1)])]))
+        XCTAssertEqual(session.state["b"], .bool(true))
+    }
+
     func testRepeatBindsTheRowIndexAndItemIntoEachRowsDataActions() throws {
         let session = try shown()
         let delete = try button(session, "Delete two")

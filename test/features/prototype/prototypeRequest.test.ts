@@ -189,6 +189,10 @@ describe("request action validation", () => {
       path: 'root.onTap[0].headers["bad name"]',
       message: "Invalid header name",
     });
+    expect(failure(request({ headers: { "X-Test": "1", "x-test": "2" } }))).toEqual({
+      path: 'root.onTap[0].headers["x-test"]',
+      message: "Duplicate header name (names are case-insensitive)",
+    });
     expect(failure(request({ query: { a: { bogus: 1 } } }))?.path).toBe(
       "root.onTap[0].query.a.bogus",
     );
@@ -435,6 +439,15 @@ describe("resolvePrototypeRequest", () => {
       inputs,
     );
     expect(resolved).toMatchObject({ request: { url: "http://a.test/p?a=2&z=1" } });
+  });
+
+  test("case-insensitive duplicate header names are invalid_request", () => {
+    const resolved = resolvePrototypeRequest(
+      request({ headers: { "X-Test": "1", "x-test": "2" } }),
+      "http://h.test/p",
+      inputs,
+    );
+    expect(resolved).toMatchObject({ success: false, error: { code: "invalid_request" } });
   });
 
   test("query entries touch only their own pieces, in place, with form encoding", () => {

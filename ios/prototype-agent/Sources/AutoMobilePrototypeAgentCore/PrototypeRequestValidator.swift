@@ -156,9 +156,14 @@ enum PrototypeRequestValidator {
         guard case let .object(fields) = raw, fields.count <= PrototypeLimits.maxRequestEntries else {
             throw fail(path, "Expected an object of at most \(PrototypeLimits.maxRequestEntries) entries")
         }
+        var seenHeaders = Set<String>()
         for name in fields.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
             let entryPath = PrototypeLimits.dataMemberPath(path, key: name)
             let range = NSRange(name.startIndex..., in: name)
+            // Header names are case-insensitive, so `X-Test` and `x-test` are one header given twice.
+            if isHeader, !seenHeaders.insert(name.lowercased()).inserted {
+                throw fail(entryPath, "Duplicate header name (names are case-insensitive)")
+            }
             if name.isEmpty || (isHeader && headerName?.firstMatch(in: name, range: range) == nil) {
                 throw fail(entryPath, isHeader ? "Invalid header name" : "Invalid query name")
             }

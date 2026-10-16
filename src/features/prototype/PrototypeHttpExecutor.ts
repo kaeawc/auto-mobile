@@ -54,6 +54,24 @@ export interface FetchPrototypeHttpExecutorOptions {
 
 const BODYLESS_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 
+/**
+ * The JSON text with every object's keys in sorted (UTF-16 code unit) order, recursively: the
+ * canonical body serialization shared by every runtime, whatever order the spec authored them in.
+ * It is built as text because a JS object lists integer-like keys first, whatever their order.
+ */
+function canonicalJson(value: PrototypeRequestJson): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const members = Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key]!)}`);
+    return `{${members.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === name);
 }
@@ -237,7 +255,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
       if (typeof request.body === "string") {
         body = request.body;
       } else {
-        body = JSON.stringify(request.body);
+        body = canonicalJson(request.body);
         if (!hasHeader(headers, "content-type")) {
           headers["Content-Type"] = "application/json";
         }

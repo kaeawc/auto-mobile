@@ -44,6 +44,7 @@ if [[ "$1" == "scripts/lib/affectedTests.ts" ]]; then
       printf '%s' "${MOCK_AFFECTED_UNIT:-}" > "$2/unit.txt"
       printf '%s' "${MOCK_AFFECTED_INTEGRATION:-}" > "$2/integration-safe.txt"
       printf '%s' "${MOCK_AFFECTED_FALLBACK:-}" > "$2/fallback.txt"
+      printf '%s' "${MOCK_AFFECTED_BATS:-}" > "$2/bats.txt"
     fi
     shift
   done
@@ -307,6 +308,18 @@ SCRIPT
   grep -Fx 'src/deleted.ts' "$COMMAND_LOG.changed"
   grep -Fx 'bash scripts/test-ts.sh unit test/packaging/runtimeGraphPinning.test.ts' "$COMMAND_LOG"
   grep -Fx 'bash scripts/prepush-integration-safe.sh test/a.integration.test.ts' "$COMMAND_LOG"
+}
+
+@test "changed selection runs the always-run unit and bats tests the selector emits" {
+  printf '#!/bin/bash\nprintf "bats %%s\\n" "$*" >> "$COMMAND_LOG"\n' > "${MOCK_BIN}/bats"
+  chmod +x "${MOCK_BIN}/bats"
+  run env MOCK_UNAME=macOS MOCK_CHANGED_FILES=docs/a.md \
+    MOCK_AFFECTED_UNIT=$'test/server/interactionTools.outputSchema.test.ts\n' \
+    MOCK_AFFECTED_BATS=$'test/bats/linux-qualification-workflow.bats\n' \
+    PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+  [ "$status" -eq 0 ]
+  grep -Fx 'bash scripts/test-ts.sh unit test/server/interactionTools.outputSchema.test.ts' "$COMMAND_LOG"
+  grep -Fx 'bats test/bats/linux-qualification-workflow.bats' "$COMMAND_LOG"
 }
 
 @test "changed selection fallbacks run full lanes" {

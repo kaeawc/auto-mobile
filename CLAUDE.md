@@ -121,7 +121,7 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `scripts/prepush.sh` (`--list` to preview, `--all`, `--changed`, or `--base`) to select per-lane gates from changed paths; per-lane scripts remain usable standalone and each records its own attestation, while the dispatcher does not.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
-loop; `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, and explicit cap fallbacks; formatting, typecheck, and lint intentionally remain full repository
+loop; `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, explicit cap fallbacks, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); formatting, typecheck, and lint intentionally remain full repository
 gates. It also runs the tool-free TypeScript subset of CI Fast Validation
 (`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
 lychee pass when `lychee` is installed), the `test/lint/` suites (including the

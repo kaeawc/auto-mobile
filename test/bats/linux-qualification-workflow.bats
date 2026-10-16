@@ -42,10 +42,15 @@ setup() {
   [ "$(yq -r '[.jobs[].steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | .with."retention-days"] | unique | join(",")' "$workflow")" = 30 ]
 }
 @test "KVM extraction preserves the old commands and forwards the configured shell" {
-  original="$BATS_TEST_TMPDIR/android-action.yml"
-  git show HEAD:.github/actions/android-emulator/action.yml > "$original"
+  # The pre-extraction commands are pinned verbatim: comparing against HEAD's
+  # android-emulator action breaks as soon as that commit already contains the
+  # extraction (main red #12755).
   kvm="$BATS_TEST_DIRNAME/../../.github/actions/enable-kvm/action.yml"
-  [ "$(yq -r '.runs.steps[] | select(.name=="Enable KVM group perms") | .run' "$original")" = "$(yq -r '.runs.steps[0].run' "$kvm")" ]
+  expected="$(printf '%s\n' \
+    'echo '\''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'\'' | sudo tee /etc/udev/rules.d/99-kvm4all.rules' \
+    'sudo udevadm control --reload-rules' \
+    'sudo udevadm trigger --name-match=kvm')"
+  [ "$(yq -r '.runs.steps[0].run' "$kvm")" = "$expected" ]
   [ "$(yq -r '.inputs.shell.default' "$kvm")" = bash ]
   [ "$(yq -r '.runs.steps[] | select(.name=="Enable KVM group perms") | .with.shell' "$BATS_TEST_DIRNAME/../../.github/actions/android-emulator/action.yml")" = '${{ inputs.shell }}' ]
 }

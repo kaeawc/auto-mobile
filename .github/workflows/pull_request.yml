@@ -2178,6 +2178,11 @@ jobs:
   # ts-code-coverage job on every push to main.
   ts-build-and-test:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
+    # Job-level permissions replace the workflow's. This job only checks out,
+    # runs tests and uploads artifacts; actions: write is for the rerun dispatch.
+    permissions:
+      actions: write
+      contents: read
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
@@ -2315,6 +2320,22 @@ jobs:
           name: mcp-build-test-logs-ubuntu-latest
           path: ci-logs/*.log
           retention-days: 7
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   # =============================================================================
   # Kotlin Code Coverage

@@ -223,11 +223,16 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`. The Rerun contended runner workflow
-automatically retries a failed job once on a fresh runner, for the first
-attempt only. It covers the "Pull Request" and "On Merge" workflows, and only
-when the job log can be fetched; a log-fetch failure is a logged skip. The
-per-shard `.wall` record still excludes the end probe and the poll latency.
+and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`) qualifies
+itself: its last step (`if: failure()`) runs
+`scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
+and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner
+workflow (#12758; it replaced a `workflow_run` trigger that started a run for every
+Pull Request and On Merge run). That workflow waits, bounded, for the run to finish,
+re-verifies from the fetched logs that every failed job is a unit lane carrying
+the marker, then reruns the failed jobs once. Fork PRs have a read-only token, so
+the dispatch is skipped or logs a warning and never fails the job; a log-fetch
+failure is a logged skip. The per-shard `.wall` record still excludes the end probe and the poll latency.
 
 ## 5. Change made: tier C files share processes
 

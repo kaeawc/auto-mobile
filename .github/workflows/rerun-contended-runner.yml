@@ -1,21 +1,36 @@
 name: Rerun contended runner
 
+# Dispatched by a unit job that qualified its own failure as runner contention
+# (scripts/ci/rerun-contended-runner.sh dispatch, #12758). Nothing triggers it
+# automatically, so green and ordinarily failing runs start no extra run.
 on:
-  workflow_run:
-    workflows: ["Pull Request", "On Merge"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id of the Pull Request / On Merge run to rerun"
+        required: true
+        type: string
+      run_attempt:
+        description: "Run attempt the dispatching job saw (only 1 is rerun)"
+        required: true
+        type: string
 
 permissions:
   actions: write
   contents: read
 
+# One rerun decision per run, even when several unit jobs dispatch.
+concurrency:
+  group: rerun-contended-runner-${{ inputs.run_id }}
+  cancel-in-progress: false
+
 jobs:
   rerun:
-    if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bounded wait for the dispatching run to complete (RERUN_WAIT_TIMEOUT_SECONDS).
+    timeout-minutes: 110
     steps:
-      # workflow_run has a write token: execute only default-branch code.
+      # Execute only default-branch code with the write token.
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -27,6 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-        run: bash scripts/ci/rerun-contended-runner.sh "$RUN_ID" "$RUN_ATTEMPT"
+          RUN_ID: ${{ inputs.run_id }}
+          RUN_ATTEMPT: ${{ inputs.run_attempt }}
+          RERUN_WAIT_TIMEOUT_SECONDS: "6000"
+        run: bash scripts/ci/rerun-contended-runner.sh rerun "$RUN_ID" "$RUN_ATTEMPT"

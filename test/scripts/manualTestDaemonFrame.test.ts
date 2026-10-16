@@ -1280,6 +1280,25 @@ posixTest(
 );
 
 posixTest(
+  "broker bindings also refuse the bare devices URI, subscriptions and template listing",
+  async () => {
+    const cases: Array<[string, string]> = [
+      ["read", '{"uri":"automobile:devices"}'],
+      ["resources/read", '{"uri":"automobile:devices"}'],
+      ["resources/subscribe", '{"uri":"automobile:devices/booted"}'],
+      ["resources/templates/list", "{}"],
+    ];
+    for (const [method, params] of cases) {
+      const f = fakeBrokerBindingFixture();
+      expect(
+        await runDaemonFrame(parsed(["send", method, params, "--broker-binding", config]), f.deps),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+    }
+  },
+);
+
+posixTest(
   "indexed and unknown client placeholders refuse before acquisition with migration guidance",
   async () => {
     for (const value of [

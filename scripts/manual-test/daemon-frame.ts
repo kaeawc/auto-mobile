@@ -553,6 +553,10 @@ export function daemonMethodHint(method: string): string | undefined {
   const camel = method.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
   return knownDaemonMethods.has(camel) ? `did you mean ${camel}?` : undefined;
 }
+function isDeviceInventoryUri(uri: unknown): boolean {
+  const text = String(uri ?? "");
+  return text === "automobile:devices" || text.startsWith("automobile:devices/");
+}
 function frameGuard(
   method: string,
   params: unknown,
@@ -562,9 +566,9 @@ function frameGuard(
 ): string | undefined {
   if (
     command.brokerBinding &&
-    (["resources", "resources/list"].includes(method) ||
-      (["read", "resources/read"].includes(method) &&
-        String((params as { uri?: unknown } | null)?.uri ?? "").startsWith("automobile:devices/")))
+    (["resources", "resources/list", "resources/templates/list"].includes(method) ||
+      (["read", "resources/read", "resources/subscribe", "subscribe"].includes(method) &&
+        isDeviceInventoryUri((params as { uri?: unknown } | null)?.uri)))
   ) {
     return "Device inventory resources are refused with --broker-binding.";
   }
@@ -1008,11 +1012,7 @@ function isProductRefusal(response: DaemonResponse): boolean {
   const code = response.code ?? payload?.code;
   if (
     typeof code === "string" &&
-    [
-      "device_outside_broker_grant",
-      "device_outside_managed_slots",
-      "session_ownership_lost",
-    ].includes(code)
+    ["device_outside_broker_grant", "session_ownership_lost"].includes(code)
   ) {
     return true;
   }

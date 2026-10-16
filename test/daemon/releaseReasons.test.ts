@@ -287,10 +287,8 @@ describe("resolveReleaseReason precedence (#11800)", () => {
   });
 
   test("other candidates follow outranksReleaseReason", () => {
-    expect(resolveReleaseReason("not-a-reason", "explicit-release")).toBe(
-      outranksReleaseReason("explicit-release", "not-a-reason")
-        ? "explicit-release"
-        : "not-a-reason",
-    );
+    expect(resolveReleaseReason("not-a-reason", "explicit-release")).toBe("explicit-release");
+    expect(resolveReleaseReason("heartbeat-timeout", "explicit-release")).toBe("heartbeat-timeout");
+    expect(resolveReleaseReason("explicit-release", "heartbeat-timeout")).toBe("explicit-release");
   });
 });

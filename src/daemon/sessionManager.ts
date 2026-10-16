@@ -1250,12 +1250,6 @@ function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRec
   );
 }
 
-function withCreateSessionDefaults(
-  options: CreateSessionOptions,
-): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
-  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
-}
-
 /** Optional inputs to {@link SessionManager.createSession}. */
 export interface CreateSessionOptions {
   timeoutMs?: number;
@@ -1265,6 +1259,12 @@ export interface CreateSessionOptions {
   initialOwnership?: "owned" | "awaiting-owner";
   /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
   persistenceSource?: string;
+}
+
+function withCreateSessionDefaults(
+  options: CreateSessionOptions,
+): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
+  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
 }
 
 export interface RebindSessionOptions {

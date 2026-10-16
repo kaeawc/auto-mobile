@@ -20,6 +20,7 @@ import {
   TerminalSessionError,
   type Session,
 } from "../../src/daemon/sessionManager";
+import type { SessionSlots } from "../../src/daemon/sessionSlots";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -1015,11 +1016,13 @@ test.each([
     const list = incidents.list.bind(incidents);
     let reads = 0;
     incidents.list = () => (++reads === 1 ? read.promise : list());
-    const state = sessions as unknown as {
-      pendingSessionAssignments: Map<string, Promise<Session>>;
-      sharedSessionAssignments: Map<string, { controller: AbortController; waiters: number }>;
-      pendingPersistedRecoveries: Map<string, unknown>;
-    };
+    const slots = Reflect.get(sessions, "sessionSlots") as SessionSlots<
+      Promise<Session>,
+      { controller: AbortController; waiters: number },
+      unknown,
+      object,
+      unknown
+    >;
     const acquire = (deadline: number | undefined) =>
       sessions
         .getOrCreateSession("session", pool, "android", undefined, true, {
@@ -1035,8 +1038,8 @@ test.each([
       : acquire(3_500);
     await drainUntilQuiescent(timer);
     expect(reads).toBe(1);
-    const deadAssignment = state.pendingSessionAssignments.get("session");
-    const deadShared = state.sharedSessionAssignments.get("session")!;
+    const deadAssignment = slots.assignments.get("session");
+    const deadShared = slots.sharedAssignments.get("session")!;
     timer.advanceTime(2_500);
     if (rehydration) {
       startupCaller.abort(new Error("startup caller cancelled"));
@@ -1046,13 +1049,13 @@ test.each([
     }
     expect(deadShared.controller.signal.aborted).toBe(true);
     expect(deadShared.waiters).toBe(0);
-    expect(state.pendingSessionAssignments.get("session")).toBe(deadAssignment);
+    expect(slots.assignments.get("session")).toBe(deadAssignment);
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     const second = acquire(requestDeadlineMs);
     await drainUntilQuiescent(timer);
     expect(deadShared.waiters).toBe(0);
-    expect(state.pendingSessionAssignments.get("session")).toBe(deadAssignment);
+    expect(slots.assignments.get("session")).toBe(deadAssignment);
     expect(pool.getDevice(original.deviceId)?.sessionId).toBeNull();
     read.resolve(await list());
     const result = await second;
@@ -1064,9 +1067,9 @@ test.each([
       sessionId: "session",
       assignmentCount: 1,
     });
-    expect(state.pendingSessionAssignments.size).toBe(0);
-    expect(state.sharedSessionAssignments.size).toBe(0);
-    expect(state.pendingPersistedRecoveries.size).toBe(0);
+    expect(slots.assignments.size).toBe(0);
+    expect(slots.sharedAssignments.size).toBe(0);
+    expect(slots.recoveries.size).toBe(0);
     expect(timer.getPendingTimeouts()).toEqual([]);
   },
 );

@@ -1,9 +1,9 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
@@ -143,7 +143,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
         }) as unknown as AndroidCtrlProxyClient,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

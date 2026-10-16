@@ -1,4 +1,4 @@
-import { clearDeviceError, markDeviceError } from "./deviceBinding";
+import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
@@ -134,9 +134,9 @@ export class MissingDeviceLiveness {
         observeMissingDevice(this.pool.getRefreshMissingDeviceMisses(), device.id, "present");
         continue;
       }
-      if (device.sessionId) {
+      if (holderOf(device)) {
         logger.warn(
-          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,
+          `Device ${device.id} is no longer booted but is assigned to session ${holderOf(device)}; keeping until session cleanup`,
         );
         continue;
       }
@@ -292,8 +292,8 @@ export class MissingDeviceLiveness {
         // over its absent snapshot; claim before any other bind can select it.
         if (
           this.pool.getDevices().get(device.id) !== device ||
-          device.status !== "idle" ||
-          device.sessionId !== null
+          !isIdle(device) ||
+          holderOf(device) !== null
         ) {
           return false;
         }
@@ -391,8 +391,8 @@ export class MissingDeviceLiveness {
     const replaceIfStillIdle = async () => {
       if (
         this.pool.getDevices().get(device.id) !== device ||
-        device.status !== "idle" ||
-        device.sessionId !== null
+        !isIdle(device) ||
+        holderOf(device) !== null
       ) {
         return false;
       }
@@ -465,7 +465,7 @@ export class MissingDeviceLiveness {
       return;
     }
     if (
-      device.sessionId &&
+      holderOf(device) &&
       !(await this.releaseSessionForEviction(device, correlatedIncidentId, identityObservation))
     ) {
       return;

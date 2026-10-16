@@ -73,6 +73,7 @@ describe("NavigateTo replay through navigation recording", () => {
         );
         return { success: true };
       },
+      { recordsNavigation: true },
     );
   });
 

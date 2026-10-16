@@ -515,3 +515,31 @@ All scripts should:
 - `scripts/android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
 
 See [prototype performance measurement](../docs/design-docs/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.
+
+### Manual Linux Qualification
+
+`.github/workflows/linux-qualification.yml` is dispatch-only; it never runs on
+push, pull request, or a schedule. No workflow is dispatched during development.
+`scripts/ci/linux-qualification/capture-proc-fixtures.sh <outdir>` captures real
+Alpine/Debian procfs bytes and a reproducible command/digest manifest (#11998).
+`scripts/ci/linux-qualification/emulator-cell.sh` runs the 4 GPU × 3 workload
+experiment (#12453), using `scripts/ci/linux-qualification/lib.sh` for bounded
+operations and injectable `NOW_CMD` / `SLEEP_CMD` clocks. The load drivers are
+`scripts/ci/linux-qualification/workload-automobile.sh`,
+`scripts/ci/linux-qualification/workload-raw-adb.sh`, and
+`scripts/ci/linux-qualification/workload-heartbeat.sh`.
+`scripts/ci/linux-qualification/classify-exit.sh <evidence-dir>` consumes timestamped
+harness evidence; `scripts/ci/linux-qualification/summarize.sh <artifact-dir>`
+produces three outcome lists, missing-cell coverage, and the experiment decision
+table offline. Tests are the three `test/bats/linux-qualification-*.bats` files.
+Defaults: 300 seconds, one cycle, 600-second boot bound, 4800-second cell budget measured from the first post-checkout step;
+reserve another 180 seconds for shutdown/evidence. Heartbeats allow 2 seconds of
+scheduling lateness and must return within 4 seconds. W and C run a serial
+Settings cold-launch/search-tap/text-and-enter/screenshot sequence with a one-second pause; H polls
+only get-state every five seconds. C uses tap (200,150), overridable by TAP_X/Y;
+W resolves the Settings “Search settings” label. These exercise the same
+operation cadence, but transport/selector latency and target coordinates differ.
+Each cycle cold boots (snapshot load/save disabled) with a fresh private daemon
+namespace for W. Host GPU boot refusal is UNEXERCISED. A crash is data and emits
+a warning; harness errors fail the cell. Inputs accept up to nine decimal digits. No runtime stability claim is made from
+one passing cycle. The artifacts can be large because cores and full logs are kept.

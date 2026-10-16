@@ -820,8 +820,6 @@ export class DaemonMcpProxy {
   private sessionBrokerBinding: { requestId: string; sessionUuid: string } | undefined;
   /** Broker sessions are excluded from generic release until their broker release settles. */
   private readonly sessionBrokerSessions = new Map<string, string>();
-  /** Always empty: the broker has no managed-execution sessions; StallProbe still takes the set. */
-  private readonly managedExecutionSessions = new Set<string>();
   /** Aborts preparation and same-request status polling when the proxy closes. */
   private sessionBrokerAcquisitionAbort: AbortController | undefined;
   /**
@@ -1005,7 +1003,6 @@ export class DaemonMcpProxy {
     this.stallProbe = new StallProbe({
       timer: this.timer,
       stallHandovers: this.sessionState.stallHandovers,
-      managedExecutionSessions: this.managedExecutionSessions,
       port: this.createStallProbePort(),
     });
     this.stallResumeProbe = new SingleFlightInterval(

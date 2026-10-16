@@ -457,6 +457,16 @@ interface ToolTraits {
   stopsApp?: boolean;
   /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
   replacesProcess?: boolean;
+  /** A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable paths). */
+  recordsNavigation?: boolean;
+  /** Read-only: nothing happened on the device, so an artifact write failure stays loud. */
+  loudArtifactWrites?: boolean;
+}
+
+/** Just the trait fields of a registration's options, for the registered tool and the recorder. */
+function pickToolTraits(options: ToolTraits): ToolTraits {
+  const { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites } = options;
+  return { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites };
 }
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions, ToolTraits {
@@ -654,6 +664,7 @@ function withAmbientDeviceContext(
 
 interface AfterToolCallInput {
   name: string;
+  traits?: ToolTraits;
   outputSchema: unknown;
   args: any;
   device: BootedDevice | undefined;
@@ -2228,19 +2239,6 @@ export class DefaultAuditRunner implements AuditRunner {
   }
 }
 
-// UI interaction tools that may cause navigation. Excludes app lifecycle tools
-// (launchApp, terminateApp, homeScreen, etc.) because they don't represent
-// replayable in-app navigation paths. Module-level Set so record() does O(1)
-// membership checks without re-allocating the list on every tool call.
-export const NAVIGATION_RELEVANT_TOOLS = new Set([
-  "tapOn",
-  "swipeOn",
-  "pinchOn",
-  "dragAndDrop",
-  "pressButton",
-  "sendKeys",
-]);
-
 /**
  * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
  * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
@@ -2270,7 +2268,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
       this.navigationManager(sessionUuid).forgetAllAppScreens();
     }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
-    if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
+    if (traits.recordsNavigation !== true) {
       return;
     }
 
@@ -2345,6 +2343,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const {
       name,
+      traits,
       outputSchema,
       args,
       internalCall,
@@ -2477,6 +2476,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     const finalizedResponse = finalizeToolResponse(response, {
       name,
+      loudArtifactWrites: traits?.loudArtifactWrites,
       outputSchema,
       args,
       sessionUuid,
@@ -3692,6 +3692,7 @@ export class ToolRegistryClass {
     options: DeviceAwareToolOptions = {},
   ): void {
     const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
+    const traits = pickToolTraits(options);
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
     // delivery requires an explicit per-tool opt-in.
     const transportRecovery = this.prepareDeviceAwareRegistration(name, options);
@@ -3758,7 +3759,7 @@ export class ToolRegistryClass {
                   signal,
                   auditRunner: this.auditRunner,
                   navigationRecorder: this.navigationToolCallRecorder,
-                  traits: options,
+                  traits,
                   isResponseFailure: this.isResponseFailure,
                 });
                 if (resolvedTarget.deviceRead) {
@@ -3773,6 +3774,7 @@ export class ToolRegistryClass {
 
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,
+                traits,
                 outputSchema: this.getToolOutputSchema(name),
                 args: handlerArgs,
                 device: resolvedTarget.device,
@@ -3836,8 +3838,7 @@ export class ToolRegistryClass {
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
-      stopsApp: options.stopsApp,
-      replacesProcess: options.replacesProcess,
+      ...traits,
       hidden: options.hidden ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,

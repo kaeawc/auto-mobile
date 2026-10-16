@@ -35,7 +35,6 @@ export interface StallProbePort {
 export interface StallProbeDependencies {
   timer: Timer;
   stallHandovers: Map<string, StallHandoverRecord>;
-  managedExecutionSessions: Set<string>;
   port: StallProbePort;
 }
 
@@ -60,13 +59,11 @@ export function daemonRestartEvidence(
 export class StallProbe {
   private readonly timer: Timer;
   private readonly stallHandovers: Map<string, StallHandoverRecord>;
-  private readonly managedExecutionSessions: Set<string>;
   private readonly port: StallProbePort;
 
   constructor(deps: StallProbeDependencies) {
     this.timer = deps.timer;
     this.stallHandovers = deps.stallHandovers;
-    this.managedExecutionSessions = deps.managedExecutionSessions;
     this.port = deps.port;
   }
 
@@ -180,8 +177,8 @@ export class StallProbe {
   ): boolean {
     const releaseReason = releaseReasonFromError(error);
     if (
-      (!this.managedExecutionSessions.has(sessionUuid) &&
-        (record.managedReclaimSince === undefined || releaseReason !== undefined)) ||
+      record.managedReclaimSince === undefined ||
+      releaseReason !== undefined ||
       record.handover.code !== DAEMON_STALLED_CODE ||
       // Typed ownership losses have different codes and fail this not-found check too.
       !this.port.isDaemonSessionNotFoundError(error) ||

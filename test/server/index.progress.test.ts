@@ -39,7 +39,7 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
     if (fixture) {
       await fixture.teardown();
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
     restoreHermeticServer();
   });
 

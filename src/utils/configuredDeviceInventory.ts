@@ -1,11 +1,8 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { DeviceImageDiscovery } from "../devices/deviceUtils";
 import { isAndroidEmulatorSerial } from "./androidSerial";
-import {
-  describeDevice,
-  projectConfiguredImage,
-  type ConfiguredImage,
-} from "../models/deviceDescription";
+import type { ConfiguredImage } from "../models/deviceDescription";
+import { describeDevice, projectConfiguredImage } from "./deviceDescriptionProjection";
 
 export const CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION = 1 as const;
 

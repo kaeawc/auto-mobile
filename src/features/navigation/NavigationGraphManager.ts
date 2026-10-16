@@ -259,7 +259,10 @@ export interface NavigationGraphService
   getNodeResourceByScreen(screenName: string): Promise<NavigationGraphNodeResource | null>;
   getEdgesFrom(screenName: string): Promise<NavigationEdge[]>;
   getEdgesTo(screenName: string): Promise<NavigationEdge[]>;
+  getEdgeTargetsFrom(screenName: string): Promise<NavigationEdgeTarget[]>;
   getStats(): Promise<NavigationGraphStats>;
+  /** Statistics for a specific app without changing the active graph. */
+  getStatsForApp(appId: string | null): Promise<NavigationGraphStats>;
 
   // Graph operations
   clearCurrentGraph(): Promise<void>;

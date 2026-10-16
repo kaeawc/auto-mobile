@@ -161,20 +161,6 @@ class NavigationEventAccumulator {
     }
   }
 
-  /** Get events since a given timestamp (inclusive). */
-  fun getEventsSince(sinceTimestamp: Long): List<TimestampedNavigationEvent> {
-    synchronized(bufferLock) {
-      return events.filter { it.timestamp >= sinceTimestamp }
-    }
-  }
-
-  /** Get events since a given sequence number (exclusive). */
-  fun getEventsSinceSequence(sinceSequence: Long): List<TimestampedNavigationEvent> {
-    synchronized(bufferLock) {
-      return events.filter { it.sequenceNumber > sinceSequence }
-    }
-  }
-
   /** Get the most recent N events. */
   fun getRecentEvents(count: Int): List<TimestampedNavigationEvent> {
     synchronized(bufferLock) {

@@ -1,4 +1,4 @@
-import { drainUntil } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -198,6 +198,54 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
     await manager.getPendingDeviceCleanup(device.deviceId);
     await bind();
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("test-2");
+  } finally {
+    cleanup.resolve();
+    manager.stopCleanupTimer();
+    PlatformDeviceManagerFactory.reset();
+  }
+});
+
+// The deferred-release continuation relies on its own entry identity and on
+// isCapturedReleaseCurrent's pooled-entry check, not on a separate devices.get guard (#11802).
+// initializeWithDevices overwriting an entry mid-deferral is the way to reach this.
+test("a deferred release never frees a same-id replacement entry after late teardown", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  const utils = new FakeDeviceUtils();
+  const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
+  utils.setBootedDevices("android", [device]);
+  PlatformDeviceManagerFactory.setInstance(utils);
+  const pool = new DevicePool(
+    createDevicePoolDependencies(manager, "daemon-test", { timer, deviceManager: utils }),
+  );
+  const cleanup = Promise.withResolvers<void>();
+  try {
+    await pool.initializeWithDevices([device]);
+    await pool.bindOrReuseDeviceSession("test-1", device.deviceId, "android");
+    manager.onSessionRelease((_sessionId, deviceId) => {
+      manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
+    });
+    await manager.releaseSession("test-1", "released", true);
+    await pool.releaseDevice(device.deviceId, "test-1");
+
+    const original = pool.getDevice(device.deviceId)!;
+    expect(original.sessionId).toBe("test-1");
+    const replacement = { ...original, incarnation: original.incarnation + 1 };
+    pool["devices"].set(device.deviceId, replacement);
+
+    cleanup.resolve();
+    await manager.getPendingDeviceCleanup(device.deviceId);
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+
+    expect(pool.getDevice(device.deviceId)).toBe(replacement);
+    expect(replacement.sessionId).toBe("test-1");
+    expect(original.sessionId).toBe("test-1");
+    // The stale deferred entry is cleared, so it cannot keep reporting a hold on the replacement.
+    expect(pool["deferredDeviceReleases"].has(device.deviceId)).toBe(false);
   } finally {
     cleanup.resolve();
     manager.stopCleanupTimer();

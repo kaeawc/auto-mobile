@@ -37,7 +37,8 @@ export class FakeFeatureFlagRepository implements FeatureFlagRepository {
     this.flags.set(key, {
       key,
       enabled,
-      config: config ?? this.flags.get(key)?.config ?? null,
+      // Mirrors SQLite: undefined keeps the stored config, an explicit null clears it.
+      config: config === undefined ? (this.flags.get(key)?.config ?? null) : config,
       updatedAt: new Date().toISOString(),
     });
   }

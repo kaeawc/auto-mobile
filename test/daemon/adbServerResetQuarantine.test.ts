@@ -54,7 +54,7 @@ function harness(session?: Session) {
     waitForRecoverySettlements: async (promises: readonly Promise<void>[]) => {
       await Promise.all(promises);
     },
-  } as unknown as DeviceRecoveryCoordinator;
+  } as DeviceRecoveryCoordinator;
   const port: AdbServerResetQuarantinePoolPort = {
     getAssignmentMutex: () => mutex,
     getDevices: () => devices,

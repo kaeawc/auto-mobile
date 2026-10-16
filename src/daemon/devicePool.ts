@@ -6177,7 +6177,6 @@ export class DevicePool {
         .then(() => {
           if (
             this.deferredDeviceReleases.get(deviceId) !== deferredRelease ||
-            this.devices.get(deviceId) !== device ||
             device.assignmentCount !== expectedAssignmentCount
           ) {
             return;
@@ -6231,7 +6230,7 @@ export class DevicePool {
       logger.debug(`Ignoring stale release for reassigned device ${deviceId}`);
       return false;
     }
-    if (expectedSessionId !== undefined && holderOf(device) !== expectedSessionId) {
+    if (holderOf(device) !== expectedSessionId) {
       logger.warn(
         `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
           `but it is owned by ${holderOf(device) ?? "no session"}`,
@@ -6244,12 +6243,6 @@ export class DevicePool {
       return false;
     }
 
-    if (holderOf(device) !== expectedSessionId) {
-      logger.debug(
-        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${holderOf(device)}`,
-      );
-      return false;
-    }
     return true;
   }
 

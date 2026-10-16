@@ -28,12 +28,12 @@ async function invokeHandler(result: DeepLinkResult) {
 describe("Deep Link Tools Registration", function () {
   beforeEach(() => {
     // Clear the tool registry before each test
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   afterEach(() => {
     // Clean up after each test
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   describe("registerDeepLinkTools", () => {

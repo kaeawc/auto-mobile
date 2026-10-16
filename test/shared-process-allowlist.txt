@@ -776,7 +776,6 @@ test/features/talkback/FocusNavigationExecutor.test.ts
 test/features/talkback/TapOnElement.focusNavigation.test.ts
 test/features/talkback/resourceIdActionError.test.ts
 test/features/toolSelection/SessionToolSelectionService.test.ts
-test/features/toolSelection/putAppFileTargetPolicy.test.ts
 test/features/toolSelection/selectionSessionResolver.test.ts
 test/features/toolSelection/toolSelectionControl.test.ts
 test/features/toolSelection/toolSelectionPolicy.test.ts
@@ -1139,7 +1138,6 @@ test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
 test/server/planLabelNeverTakesSessionOfItsOwn.test.ts
 test/server/planOrchestratorVideoRecorderInjection.test.ts
-test/server/platform/PlatformClient.test.ts
 test/server/preferenceTools.test.ts
 test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts

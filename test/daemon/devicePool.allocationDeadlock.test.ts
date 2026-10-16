@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -274,7 +275,7 @@ for (const criteria of [false, true]) {
       await setUp(["d1", "d2", "d3"]);
       await pool.bindOrReuseDeviceSession("s1", "d1", "android");
       await pool.bindOrReuseDeviceSession("s2", "d2", "android");
-      while (pool.getDevice("d3")?.status !== "error") {
+      while (statusOf(pool.getDevice("d3")!) !== "error") {
         pool.recordDeviceError("d3");
       }
 

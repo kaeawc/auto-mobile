@@ -154,7 +154,7 @@ import {
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
+import type { TapBoundsClip, TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
@@ -199,7 +199,7 @@ import {
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { compareSelectionRank } from "../utility/selectionRank";
-import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
+import { isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 import {
   createIosVisibleTapContext,
   iosVisibleTapArea,
@@ -1426,18 +1426,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     hierarchy: ViewHierarchyResult,
     screenSize: ObserveResult["screenSize"] | undefined,
     elements: readonly Element[],
-  ): ReturnType<typeof clipIosChromeBounds> {
-    if (this.device.platform !== "ios" || !isUsableScreenSize(screenSize)) {
-      return { bounds };
-    }
-    return clipIosChromeBounds({
-      bounds,
-      hierarchy,
-      screen: screenSize,
-      elements,
-      regions: ["navigation bar"],
-      forTapTarget: true,
-    });
+  ): TapBoundsClip {
+    return this.strategy.clipNavigationTapBounds(bounds, hierarchy, screenSize, elements);
   }
 
   private isCoveredByNavigationBar(

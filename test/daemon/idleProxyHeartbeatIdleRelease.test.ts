@@ -147,7 +147,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
 
     // Daemon side. SessionManager arms its real 5 min cleanup sweep on `timer`.
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [DEVICE]);
     pool = new DevicePool(

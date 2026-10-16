@@ -12,11 +12,9 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 describe("explicit rebind release caller ordering", () => {
   test.each([false, true])("pool rejection=%s keeps rebound session live", async (rejectPool) => {
     const timer = new FakeTimer();
-    const sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     sessions.stopCleanupTimer();
     const events: unknown[][] = [];
     const devices = ["old", "new"].map((deviceId) => ({

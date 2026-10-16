@@ -86,19 +86,17 @@ async function setup(saved = true) {
       return { status: "restored" as const };
     },
   });
-  const sessions = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    record("keep-awake"),
-    record("biometric"),
-    {
+  const sessions = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: record("keep-awake"),
+    biometricEnrollmentRestorer: record("biometric"),
+    restorers: {
       networkCondition: record("network"),
       clock: record("clock"),
       rotation: record("rotation"),
       screenReader: record("screen-reader"),
     },
-  );
+  });
   sessions.stopCleanupTimer();
   const releases: Array<{ reason: string; identityReplaced: boolean }> = [];
   sessions.onSessionRelease((_id, _deviceId, reason, _snapshot, options) => {

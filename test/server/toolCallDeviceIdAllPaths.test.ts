@@ -145,11 +145,9 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
   adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
   const adbFactory = new FakeAdbClientFactory(adb);
   PlatformDeviceManagerFactory.setInstance(discovery);
-  const sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   sessions.stopCleanupTimer();
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "device-id-all-paths", {

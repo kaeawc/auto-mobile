@@ -112,7 +112,9 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
       const persistence = new ParkablePersistence();
-      const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       const pool = await poolFor(manager, timer);
       const createGate = Promise.withResolvers<void>();
       persistence.parkCreate = createGate.promise;
@@ -190,11 +192,9 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
   test("a create with no racing release proceeds without waiting", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1000);
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const pool = await poolFor(manager, timer);
     const acquisitionCancellations: Array<[string, string]> = [];
     manager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {

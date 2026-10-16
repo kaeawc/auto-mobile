@@ -63,14 +63,10 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000_000);
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
     restorers,
-  );
+  });
   const deviceManager = new FakeDeviceUtils();
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "cleanup-bounds", {

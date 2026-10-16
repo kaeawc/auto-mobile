@@ -6,6 +6,7 @@ import { daemonCommandSkipsServerBootstrap } from "../../src/daemon/cli/daemonCo
 describe("daemon command routing around the server bootstrap", () => {
   test.each([
     "status",
+    "capabilities",
     "stop",
     "health",
     "diagnose",
@@ -14,6 +15,9 @@ describe("daemon command routing around the server bootstrap", () => {
     "active-sessions",
     "session-info",
     "release-session",
+    "session-request-status",
+    "abandon-session-request",
+    "release-broker-session",
     "release-liveness-ownership",
     "no-such-command",
   ])("%s returns before the server bootstrap", (command) => {

@@ -15,6 +15,7 @@ import {
   DeferredDeviceSessionPersistence,
   DeferredDiscoveryFakeDeviceManager,
   ThrowingDiscoveryFakeDeviceManager,
+  androidDeviceImage,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
@@ -66,12 +67,7 @@ describe("DevicePool", () => {
   });
 
   test("rejects an unpooled Unknown Android replacement whose serial is recovering", async () => {
-    const recoveringImage: DeviceInfo = {
-      name: "Pixel_8_API_35",
-      platform: "android",
-      isRunning: false,
-      deviceId: "emulator-5556",
-    };
+    const recoveringImage: DeviceInfo = androidDeviceImage("Pixel_8_API_35", "emulator-5556");
     (
       devicePool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
     ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
@@ -94,12 +90,7 @@ describe("DevicePool", () => {
   });
 
   test("accepts an unpooled resolved Android replacement with a recycled recovering serial", async () => {
-    const recoveringImage: DeviceInfo = {
-      name: "Pixel_7",
-      platform: "android",
-      isRunning: false,
-      deviceId: "emulator-5556",
-    };
+    const recoveringImage: DeviceInfo = androidDeviceImage("Pixel_7", "emulator-5556");
     (
       devicePool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
     ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);

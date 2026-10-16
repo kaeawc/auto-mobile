@@ -2,35 +2,24 @@ plugins {
   id("automobile.kotlin-common")
   id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
-  alias(libs.plugins.android.application)
+  id("automobile.android-application")
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
 }
 
 android {
   namespace = "dev.jasonpearson.automobile.playground"
-  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
-  buildToolsVersion = libs.versions.build.android.buildTools.get()
 
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.playground"
-    minSdk = libs.versions.build.android.minSdk.get().toInt()
-    targetSdk = libs.versions.build.android.targetSdk.get().toInt()
     versionCode = 1
     versionName = "0.0.85-SNAPSHOT"
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   buildTypes {
     release {
       isMinifyEnabled = false
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
-  }
-  compileOptions {
-    sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-    targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   buildFeatures {

@@ -42,7 +42,7 @@ function harness() {
   const calls: string[] = [];
   const port: DeviceShutdownReservationsPoolPort = {
     getDevices: () => devices,
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getIntentionalShutdowns: () => intentional,
     assertReadinessReservationOwner: () => calls.push("owner"),
     assertRuntimeIdentity: () => calls.push("identity"),

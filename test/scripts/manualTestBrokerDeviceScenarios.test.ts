@@ -464,7 +464,7 @@ describe("device scenario CLI routing with injected fake contexts", () => {
     expect(f.calls.some((c) => c.startsWith("permit:"))).toBe(true);
   });
   test.each([
-    ["parallel-acquire"],
+    ["daemon-restart-with-live-sessions"],
     ["parallel-acquire", "--device", "--max-devices", "5"],
     ["parallel-acquire", "--device", "--crash"],
     ["parallel-acquire", "--device", "--device"],

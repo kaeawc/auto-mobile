@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -8,7 +9,6 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonMcpProxy, DaemonToolUnavailableError } from "../../src/daemon/daemonMcpProxy";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, type DaemonResponse } from "../../src/daemon/types";
 import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -107,7 +107,7 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     loopbackCalls.length = 0;
     installStarted = Promise.withResolvers<void>();
     installRelease = Promise.withResolvers<void>();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       { isInitialized: () => false } as DaemonStateAccess,

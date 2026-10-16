@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -13,7 +14,7 @@ import {
   SOCKET_PATH,
   LOCK_FILE_PATH,
 } from "../../src/daemon/constants";
-import { UnixSocketServer, type McpClientFactory } from "../../src/daemon/socketServer";
+import { type UnixSocketServer, type McpClientFactory } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
@@ -237,7 +238,7 @@ export class InMemoryControlSocket {
               return typeof value === "function" ? value.bind(target) : value;
             },
           });
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       assertNotHostDaemonPath("control socket path", IN_MEMORY_SOCKET_PATH),
       "http://in-memory.invalid/mcp",
       daemonState,

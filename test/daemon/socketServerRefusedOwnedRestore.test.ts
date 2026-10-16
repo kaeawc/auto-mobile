@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
@@ -5,7 +6,7 @@ import {
 } from "../../src/daemon/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 
@@ -36,7 +37,7 @@ function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
     },
     releaseMcpSessionBindings: () => {},
   };
-  return new UnixSocketServer(
+  return createTestUnixSocketServer(
     "/tmp/never-listened.sock",
     "http://localhost:0/mcp",
     { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
@@ -55,7 +56,7 @@ describe("refused owned-session restore", () => {
   test("forwards a token-only call while uninitialized without resolving the pool or declaring ownership", async () => {
     const declarations: string[] = [];
     let poolReads = 0;
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
       "http://localhost:0/mcp",
       {
@@ -121,7 +122,7 @@ describe("refused owned-session restore", () => {
         return [];
       },
     };
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
       "http://localhost:0/mcp",
       {

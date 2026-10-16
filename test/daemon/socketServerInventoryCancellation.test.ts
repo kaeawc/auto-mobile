@@ -1,7 +1,7 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { logger } from "../../src/utils/logger";
@@ -44,7 +44,12 @@ interface Internals {
 }
 function harness() {
   const state = { isInitialized: () => false } as DaemonStateAccess;
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
+  const server = createTestUnixSocketServer(
+    "unused",
+    "http://localhost:0/mcp",
+    state,
+    new FakeTimer(),
+  );
   const internal = server as unknown as Internals;
   internal.acceptingRequests = true;
   const connect = () => {

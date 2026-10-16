@@ -1,7 +1,7 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -28,7 +28,7 @@ const SOCKET = "socket-1";
 afterEach(() => DaemonState.getInstance().reset());
 
 function newServer(): RouteInternals {
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/fake/one-call-session-route.sock",
     "http://localhost:0/mcp",
     DaemonState.getInstance(),

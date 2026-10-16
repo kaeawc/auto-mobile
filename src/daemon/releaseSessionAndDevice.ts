@@ -143,6 +143,28 @@ export interface SessionReleasePool {
 }
 
 /**
+ * The pool-side leg only, when session release happens elsewhere or is deliberately skipped:
+ * a rebind keeps the session live, a recovery flight releases it inside its own retry, a
+ * pool-held device has no session object, or the unknown-session handler must check for a
+ * racing publish between the two legs. Keep those distinct orderings at their callers.
+ * Full session-and-device releases use {@link releaseSessionAndDevice}.
+ */
+export function releasePoolDevice(
+  pool: SessionReleasePool,
+  deviceId: string,
+  sessionId: string,
+): Promise<void> {
+  return pool.releaseDevice(deviceId, sessionId);
+}
+
+/** For wiring done before the pool exists; resolve the pool and its method per release. */
+export function lazySessionReleasePool(resolve: () => SessionReleasePool): SessionReleasePool {
+  return {
+    releaseDevice: (deviceId, sessionId) => resolve().releaseDevice(deviceId, sessionId),
+  };
+}
+
+/**
  * Return the device to the pool after session release has committed.
  * A custom release supplies its success device; deviceId is the failure fallback.
  */

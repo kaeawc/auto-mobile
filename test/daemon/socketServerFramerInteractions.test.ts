@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { Socket } from "node:net";
@@ -5,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachability";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -138,7 +139,7 @@ beforeEach(() => {
         requestGestureEnd: record("gestureEnd"),
       }) as unknown as AndroidCtrlProxyClient,
   );
-  server = new UnixSocketServer(
+  server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     createFakeDaemonState(new Map()) as DaemonStateAccess,

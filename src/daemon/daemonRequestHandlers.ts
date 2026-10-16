@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   cancelExecutionsCutBySessionRelease,
+  releasePoolDevice,
   releaseSessionAndDevice,
   type ReleaseCutExecutions,
 } from "./releaseSessionAndDevice";
@@ -1840,7 +1841,7 @@ async function releaseUnknownSession(
       pool.releaseRehydrationReservation?.(sessionId);
       // A session released while it was being created may already hold its device in the pool;
       // this frees it only if this session is the holder.
-      await pool.releaseDevice(deviceId, sessionId);
+      await releasePoolDevice(pool, deviceId, sessionId);
       return {
         success: true,
         result: {

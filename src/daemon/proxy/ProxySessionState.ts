@@ -1,4 +1,9 @@
-import type { LivenessHandover, OwnerConflictLeash } from "../proxyLivenessRecovery";
+import type {
+  DaemonRestartEvidence,
+  LivenessHandover,
+  OwnerConflictLeash,
+} from "../proxyLivenessRecovery";
+import type { NotFoundAnswerOutcome } from "./notFoundDecision";
 import type { SessionReleaseSnapshot } from "../sessionManager";
 
 /** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
@@ -52,6 +57,22 @@ export interface TerminalBoundSession {
   release?: SessionReleaseSnapshot;
   /** First reported managed stall loss; lives and clears with this terminal binding. */
   reportedStallLossReason?: string;
+}
+
+/** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
+export interface DaemonIdleReport {
+  /** Epoch-ms idle deadline, or null when the daemon explicitly exempts idle release. */
+  releaseAt: number | null;
+  /** Proxy-clock time the ack carrying it arrived. */
+  reportedAt: number;
+}
+
+/** The latest binding's keeper heartbeat while it is in flight. */
+export interface LatestHeartbeatAsk {
+  /** It was answered not-found, so any further answer is to the second ask. */
+  notFound: boolean;
+  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
+  handoff: boolean;
 }
 
 export class ProxySessionState {
@@ -128,4 +149,73 @@ export class ProxySessionState {
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   initialSessionBindingConfigured = false;
+
+  /**
+   * What the daemon's latest not-found answer to a liveness recovery heartbeat means, per session,
+   * until recovery acts on that answer.
+   */
+  readonly recoveryNotFoundOutcomes = new Map<
+    string,
+    { outcome: NotFoundAnswerOutcome; releaseReason: string | undefined }
+  >();
+  /**
+   * Sessions resumed after a `daemon_stalled` handover whose next tool call has not run yet: that
+   * call carries the warning instead of the handover's failure (#10989).
+   */
+  readonly resumedStallNotices = new Map<
+    string,
+    { handover: LivenessHandover; restart?: DaemonRestartEvidence }
+  >();
+  /**
+   * When the daemon said each held session would be idle-released: the heartbeat ack's
+   * `idleReleaseAt`, an epoch-ms instant on the wall clock both processes read; the daemon converts it from its steady
+   * session clock when reporting (#10823, #11105). The daemon's window comes
+   * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
+   * answers. Absent for a daemon that reports nothing.
+   */
+  readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
+  /** Last reported heartbeat answer per tracked session, including a stopped held session. */
+  readonly sessionDaemonInstances = new Map<string, string>();
+  /** Proxy-clock time of each held session's last acknowledged heartbeat. */
+  readonly livenessAcks = new Map<string, number>();
+  /** Sessions whose live-owner conflict was already reported, so each tick does not repeat it. */
+  readonly livenessConflictLogged = new Set<string>();
+  /** Definitively lost sessions awaiting one tool-call delivery; these do not fence lifecycle. */
+  readonly pendingSessionLosses = new Map<string, LivenessHandover>();
+  /** Plain restart losses remain fenced by UUID after their stall handovers end (#12282). */
+  readonly plainRestartSessionLosses = new Map<string, string>();
+  /**
+   * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
+   * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
+   */
+  latestBindingConflict: ({ sessionUuid: string } & OwnerConflictLeash) | undefined = undefined;
+  /**
+   * The latest binding's heartbeat in flight, and whether it was answered not-found on a
+   * connection that had answered before. The connection made to ask that once more is this
+   * proxy's own doing, to the daemon it was already talking to: it re-establishes nothing, for
+   * the latest binding or for any session held besides it (#11557). Unless that answer named a
+   * recoverable handoff (`handoff`): the daemon said it is going away or handing the session
+   * back, so the connection may reach its successor, which has rehydrated nothing yet, and every
+   * session held gets its first answer there (#11570).
+   */
+  latestHeartbeatAsked: LatestHeartbeatAsk | undefined = undefined;
+  /** Supersession is informational; report it at most once per proxy instance. */
+  livenessSupersessionLogged = false;
+  /**
+   * The terminally released binding whose release a tool call has already been told about
+   * (#10971). From then on, read-only tools are forwarded without a session.
+   */
+  releaseSurfacedFor: string | undefined = undefined;
+  /**
+   * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
+   * While the previous owner is still heartbeating, its refusals must not fence the binding: the
+   * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
+   */
+  initialSessionAwaitingFirstCall = false;
+  /**
+   * The daemon process that last acknowledged a heartbeat, as the daemon reports it (#10989). A
+   * stall probe only resumes sessions on this same process; a restarted daemon is left to the
+   * harness, which resumes by naming each session.
+   */
+  ackedDaemonInstance: string | undefined = undefined;
 }

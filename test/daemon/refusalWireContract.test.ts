@@ -54,7 +54,7 @@ import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
 import * as toolUnavailable from "../../src/server/toolUnavailableError";
-import * as deviceTools from "../../src/server/deviceTools";
+import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
@@ -134,7 +134,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
   "server/toolUnavailableError": toolUnavailable,
-  "server/deviceTools": deviceTools,
+  "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */

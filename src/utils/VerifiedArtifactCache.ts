@@ -1,6 +1,10 @@
 import * as fs from "node:fs/promises";
 import { ActionableError } from "../models/ActionableError";
-import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
+import {
+  type ChecksumCalculator,
+  type Sha256Source,
+  DefaultChecksumCalculator,
+} from "./ChecksumCalculator";
 import { errorMessage } from "./describeUnknownError";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { logger } from "./logger";
@@ -13,6 +17,8 @@ export interface VerifiedArtifactFileSystem {
   writeText(path: string, content: string, mode?: number): Promise<void>;
   /** Forced removal; a missing path is not an error. */
   remove(path: string): Promise<void>;
+  /** Atomic move; replaces an existing destination. */
+  rename(from: string, to: string): Promise<void>;
 }
 
 export class NodeVerifiedArtifactFileSystem implements VerifiedArtifactFileSystem {
@@ -32,6 +38,10 @@ export class NodeVerifiedArtifactFileSystem implements VerifiedArtifactFileSyste
 
   async remove(path: string): Promise<void> {
     await fs.rm(path, { force: true });
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await fs.rename(from, to);
   }
 }
 
@@ -55,24 +65,40 @@ export interface VerifiedArtifactLookup<M extends VerifiedArtifactMetadata> {
 
 export interface VerifiedArtifactDownload {
   label: string;
-  expectedSha256: string;
+  /**
+   * Pinned SHA-256, or null to explicitly opt out of hashing (an unverified development
+   * build; the caller owns warning about that). An empty string is NOT an opt-out: it can
+   * never match, so it fails closed as a mismatch.
+   */
+  expectedSha256: string | null;
   url: string;
-  /** Where the release asset is downloaded; the cache removes it on failure. */
+  /**
+   * Temporary path the asset is downloaded to; the cache removes it on failure and never
+   * touches any already-cached artifact. Use `finalPath` to move the verified asset into
+   * place atomically.
+   */
   archivePath: string;
-  metadataPath: string;
+  /** When set, the verified archive is renamed here after `publish`, replacing any old copy. */
+  finalPath?: string;
+  /** Sidecar location; omit for callers that keep their own metadata (or none). */
+  metadataPath?: string;
   metadataMode?: number;
   /** Abort the download after this long; omit for no timeout. */
   downloadTimeoutMs?: number;
   /** Error to surface when the timeout aborted the download; omit to rethrow the abort. */
   timeoutError?(): ActionableError;
-  mismatchError(expected: string, actual: string): ActionableError;
+  mismatchError(expected: string, actual: string): Error;
   /** Runs right after the download and before hashing (e.g. restrict file mode). */
   afterDownload?(archivePath: string): Promise<void>;
   /**
    * Validate and move the verified asset into place; returns the sidecar to write
-   * (its `sha256` must be the verified `actual`).
+   * (its `sha256` must be the verified `actual`). Skipped when omitted.
    */
-  publish(archivePath: string, actualSha256: string): Promise<object>;
+  publish?(
+    archivePath: string,
+    actualSha256: string | null,
+    source: Sha256Source | null,
+  ): Promise<object | void>;
   /** Failure cleanup beyond the archive itself (partial extracts, published entries). */
   discard?(): Promise<void>;
   /** Always runs last, success or failure. */
@@ -152,18 +178,9 @@ export class VerifiedArtifactCache {
         request.downloadTimeoutMs === undefined ? undefined : controller.signal,
       );
       await request.afterDownload?.(request.archivePath);
-      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(
-        request.archivePath,
-      );
-      if (actual.toLowerCase() !== request.expectedSha256.toLowerCase()) {
-        throw request.mismatchError(request.expectedSha256, actual);
-      }
-      const metadata = await request.publish(request.archivePath, actual);
-      await this.fileSystem.writeText(
-        request.metadataPath,
-        JSON.stringify(metadata, null, 2),
-        request.metadataMode,
-      );
+      const { checksum: actual, source } = await this.verify(request);
+      const metadata = await request.publish?.(request.archivePath, actual, source);
+      await this.commit(request, metadata);
     } catch (error) {
       await this.discard(request);
       if (controller.signal.aborted && request.timeoutError) {
@@ -176,6 +193,34 @@ export class VerifiedArtifactCache {
       }
       await request.settle?.();
     }
+  }
+
+  /** Move the verified archive into place, then record the sidecar. */
+  private async commit(request: VerifiedArtifactDownload, metadata: object | void): Promise<void> {
+    if (request.finalPath !== undefined) {
+      await this.fileSystem.rename(request.archivePath, request.finalPath);
+    }
+    if (request.metadataPath !== undefined && metadata) {
+      await this.fileSystem.writeText(
+        request.metadataPath,
+        JSON.stringify(metadata, null, 2),
+        request.metadataMode,
+      );
+    }
+  }
+
+  /** Hash and compare against the pinned SHA-256; both null when no pin is configured. */
+  private async verify(
+    request: VerifiedArtifactDownload,
+  ): Promise<{ checksum: string | null; source: Sha256Source | null }> {
+    if (request.expectedSha256 === null) {
+      return { checksum: null, source: null };
+    }
+    const result = await this.checksumCalculator.computeFileSha256(request.archivePath);
+    if (result.checksum.toLowerCase() !== request.expectedSha256.toLowerCase()) {
+      throw request.mismatchError(request.expectedSha256, result.checksum);
+    }
+    return result;
   }
 
   /** Cleanup must never replace the failure that triggered it. */

@@ -251,7 +251,7 @@ export class NetworkFilterAppProvider {
         });
         return {
           version,
-          sha256,
+          sha256: sha256 ?? expected,
           downloadedAt: this.timer.now(),
         } satisfies NetworkFilterAppMetadata;
       },

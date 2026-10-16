@@ -11,6 +11,9 @@ import type { Timer } from "../utils/SystemTimer";
 import { releasedRowStatus } from "./releaseReasons";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 
+/** In-process refusal; unlike a SQL miss it needs no peer/generation reclassification. */
+export class TerminalReleaseGenerationRefusedError extends DeviceSessionRowNotReleasableError {}
+
 export const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 
 export interface DesiredReleaseRow {
@@ -43,6 +46,9 @@ export interface ReleaseRowLanded {
 
 export interface SessionRowWriter {
   desire(uuid: string, desired: DesiredReleaseRow): void;
+  noteLive(uuid: string): void;
+  noteRelease(snapshot: SessionReleaseSnapshot): void;
+  canIssueRelease(snapshot: SessionReleaseSnapshot): boolean;
   scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void;
   cancelRetry(snapshot: SessionReleaseSnapshot): void;
   beginReleaseDrain(): void;
@@ -156,6 +162,20 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private readonly retries = new Map<string, ScheduledReleaseRowRetry>();
   private readonly nonTerminalSnapshots = new Map<string, SessionReleaseSnapshot>();
   private readonly waiters = new Map<string, Set<() => void>>();
+  private readonly liveSequences = new Map<string, WeakRef<{ seq: number }>>();
+  private readonly releaseSequences = new WeakMap<
+    SessionReleaseSnapshot,
+    { seq: number; live: { seq: number } }
+  >();
+  // Snapshots retain their epoch; ended UUID names alone must not retain generation metadata.
+  private readonly finalizedGenerations = new FinalizationRegistry<{
+    uuid: string;
+    ref: WeakRef<{ seq: number }>;
+  }>(({ uuid, ref }) => {
+    if (this.liveSequences.get(uuid) === ref) {
+      this.liveSequences.delete(uuid);
+    }
+  });
   private desireSeq = 0;
   private draining = false;
 
@@ -166,6 +186,37 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     private readonly logger: Pick<Logger, "warn" | "debug">,
     private readonly options: SessionRowWriterOptions,
   ) {}
+
+  /** W2 adapter: register once, including first attempts whose promise timing stays in the manager. */
+  noteRelease(snapshot: SessionReleaseSnapshot): void {
+    if (!this.releaseSequences.has(snapshot)) {
+      const uuid = snapshot.sessionId;
+      const live = this.liveSequences.get(uuid)?.deref() ?? { seq: 0 };
+      if (!this.liveSequences.get(uuid)?.deref()) {
+        const ref = new WeakRef(live);
+        this.liveSequences.set(uuid, ref);
+        this.finalizedGenerations.register(live, { uuid, ref });
+      }
+      this.releaseSequences.set(snapshot, { seq: ++this.desireSeq, live });
+    }
+  }
+
+  noteLive(uuid: string): void {
+    const seq = ++this.desireSeq;
+    const live = this.liveSequences.get(uuid)?.deref();
+    if (live) {
+      live.seq = seq;
+    }
+    const row = this.rows.get(uuid);
+    if (row) {
+      row.liveSeq = seq;
+    }
+  }
+
+  canIssueRelease(snapshot: SessionReleaseSnapshot): boolean {
+    const desire = this.releaseSequences.get(snapshot);
+    return !snapshot.terminal || !desire || desire.seq > desire.live.seq;
+  }
 
   desire(uuid: string, desired: DesiredReleaseRow): void {
     const row = this.rows.get(uuid) ?? { liveSeq: 0, parked: 0 };
@@ -195,6 +246,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
 
   /** Schedule only: callbacks keep their original promise and await sequence. */
   scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void {
+    this.noteRelease(snapshot);
     const uuid = snapshot.sessionId;
     const pending = this.retries.get(uuid);
     if (!snapshot.terminal && pending?.snapshot.terminal) {
@@ -387,6 +439,11 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   }
 
   liftTerminal(uuid: string): void {
+    const retry = this.retries.get(uuid);
+    if (retry?.snapshot.terminal) {
+      this.cancelRetry(retry.snapshot);
+      this.cancel(uuid, retry.snapshot);
+    }
     const row = this.rows.get(uuid);
     if (!row) {
       return;
@@ -437,7 +494,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       const pendingOptions = this.precondition(entry);
       const options = pendingOptions instanceof Promise ? await pendingOptions : pendingOptions;
       if (!this.current(row, entry)) {
-        return;
+        throw new DeviceSessionRowNotReleasableError(uuid);
       }
       const issue = this.issue(row, entry, options);
       const startedAt = this.deadlineNow();
@@ -484,13 +541,16 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
 
   private async prepare(row: Row, entry: Desire): Promise<boolean> {
     if (!this.current(row, entry)) {
-      return false;
+      throw new DeviceSessionRowNotReleasableError(entry.desired.snapshot.sessionId);
     }
     if (entry.desired.due && !(await entry.desired.due(this.draining))) {
       return false;
     }
     await entry.desired.beforeWrite?.();
-    return this.current(row, entry);
+    if (!this.current(row, entry)) {
+      throw new DeviceSessionRowNotReleasableError(entry.desired.snapshot.sessionId);
+    }
+    return true;
   }
 
   private issue(row: Row, entry: Desire, options: MarkReleasedOptions) {

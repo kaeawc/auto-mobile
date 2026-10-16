@@ -564,7 +564,7 @@ to settled, and all three stayed on their characterized implementations; illegal
 throw under test and warn+count in production, with the reported §4 design gaps warning and
 counting in both modes. Ended guard bookkeeping is discarded with weak-identity finalization.
 
-S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, wired to `SessionRowWriter.pending` in W2 step 1 (#11799); the writer owns no manager writes yet.
+S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, wired to `SessionRowWriter.pending` in W2 (#11799).
 S8 landed (#12581): `findSession` is the pure lookup; `expireIfDue` keeps lazy expiry at the retained admission/routing sites; the in-class readers listed in test/lint/findSessionNoRelease.test.ts are the retained set; external callers of getSession migrate directory by directory.
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
@@ -572,12 +572,47 @@ so they merge serially. S8 can ship any time after S2 and is tracked separately.
 
 ### Part B: #11799 (blocked by S9, except W1)
 
-W2 step 1 landed: standalone SessionRowWriter wired minimally; manager fields move in later steps.
-The manager constructs the writer from its persistence, timer, backoff and logger, and slots read
-only the narrow `RowPendingSignal`. It sends no `desire` calls yet, so the default signal stays false.
-W2 decision (owner): a write frees its slot at its deadline; the SQL generation guard, not in-process serialization, closes the late-overwrite gap for parked writes.
-At most one unexpired write per UUID may issue; parked statements remain tracked for callbacks and drain.
-The W2 row below describes the remaining extraction and validation, rather than claiming it is complete.
+W2 landed: SessionRowWriter owns lateReleaseWrites, terminal retries and the non-terminal snapshot map; terminal generation guard + journal-lift invariant (liftTerminalFence) added; parked writes free their slot at the deadline (owner decision).
+
+The behavior-preserving adapter keeps first-attempt persistence, deadline/fallback and late callbacks
+on the manager, and the writer owns retry scheduling and drain tracking. Both first and retried
+statements synchronously consult the writer's snapshot desire sequence immediately before issue;
+publish and rebind publish synchronously call `noteLive`. A sequence refusal is a named subtype of
+`DeviceSessionRowNotReleasableError` and follows `handleReleaseWriteFailure` -> `confirmReleaseWrite`,
+resolving the journal without SQL-miss reclassification. Forced snapshots capture the session's
+known SQL generation and weak incarnation identity for the existing same-session rebind classifier.
+Real statement refusals keep their existing
+read/classify/retry sequence. There are no new manager awaits or promise hops.
+
+| Path                                                                   | Terminal guard form                                                                                                                                                                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `persistSessionRelease` (including forced fence and creation rollback) | Snapshot desire/live sequence at the synchronous issue boundary; captured `expectedRowGeneration` plus `unlessTerminalOrOwnedByLivePeer` at SQL when known.                                |
+| Writer-scheduled manager retry                                         | Same desire/live sequence, cancellation identity, and existing fresh `retriedReleaseWritePrecondition` read; SQL generation whenever known.                                                |
+| Refused-row fallback / physically parked statement                     | Same sequence check before a further statement issues; already-issued SQL keeps its original generation guard. Existing same-incarnation SQL classification and W3/W5 compensation remain. |
+| No captured generation and no newer in-process live generation         | Existing `unlessTerminalOrOwnedByLivePeer` statement guard only; no invented generation.                                                                                                   |
+| Standalone writer desires / retries                                    | Monotonic desire/live sequence checked after asynchronous preconditions and immediately before every issue; supplied SQL generation forwarded unchanged.                                   |
+| Startup replay / peer adoption                                         | Existing statement ownership/terminal guards; replay is before live publication. Resolution routes through `liftTerminalFence`.                                                            |
+
+`liftTerminalFence` performs deletion, volatile-intent clearing, journal resolution and writer
+cancellation in one synchronous turn. Successful writes, refusals, rejected-creation fence adoption,
+and startup replay retain the existing terminal admission fence: resolving an intent must not make
+an ended UUID reusable. They cancel only the matching snapshot, without eagerly removing the
+manager retry entry (its existing identity checks still retire it). Actual lifts remove the snapshot
+and cancel terminal desires and scheduled retries together. Plan-label minting retains its shadow
+probe and reason-state deletion between snapshot deletion and journal resolution. Startup retains
+recovered-intent/probe/adopted-owner deletion before resolution; retry-drop retains cancel-retry and
+superseded bookkeeping before resolution. A durable `record` clearing the volatile signal is not a
+fence lift. Non-terminal commit now uses the same synchronous lift boundary.
+
+At most one unexpired standalone desire per UUID may issue; parked statements remain tracked for
+callbacks and drain after their deadline frees the slot. Production bun:sqlite statements are
+synchronous; the overwrite regression therefore parks injected statements and retry/precondition
+work around actual manager lift/publication. Fault tests use in-memory persistence and journal
+files only. The synchronous journal fake models hang/delay as a whole-process pause: its injected supervisor
+advances FakeTimer without firing JS callbacks and explicitly resumes the syscall; an in-process
+rebind cannot run inside it. Rejected journal syscalls yield the W1 volatile result. Persistence
+hang/delay points suspend across FakeTimer turns. Crash cases discard the manager and
+replay the committed disk prefix via `rehydratePersistedSessions`.
 
 | #   | PR                                                                                                                                                                                                                                                                                                                                  | Size | Test plan                                                                                                                                                                                                                                                                     |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

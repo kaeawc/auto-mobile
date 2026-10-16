@@ -17,6 +17,27 @@ export class FakeSessionRowWriter implements SessionRowWriter {
     ReleaseRowRetry & { callbacks: ReleaseRowRetryCallbacks }
   >();
   private draining = false;
+  private seq = 0;
+  private readonly liveSequences = new Map<string, number>();
+  private readonly releaseSequences = new WeakMap<SessionReleaseSnapshot, number>();
+
+  noteLive(uuid: string): void {
+    this.liveSequences.set(uuid, ++this.seq);
+  }
+
+  noteRelease(snapshot: SessionReleaseSnapshot): void {
+    if (!this.releaseSequences.has(snapshot)) {
+      this.releaseSequences.set(snapshot, ++this.seq);
+    }
+  }
+
+  canIssueRelease(snapshot: SessionReleaseSnapshot): boolean {
+    return (
+      !snapshot.terminal ||
+      (this.releaseSequences.get(snapshot) ?? Infinity) >
+        (this.liveSequences.get(snapshot.sessionId) ?? 0)
+    );
+  }
   private readonly outcomes = new Map<string, ReturnType<typeof Promise.withResolvers<boolean>>>();
   private readonly waiters = new Map<string, Set<() => void>>();
   private readonly listeners = new Set<(event: ReleaseRowLanded) => void | Promise<unknown>>();
@@ -33,6 +54,7 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   }
 
   scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void {
+    this.noteRelease(snapshot);
     const uuid = snapshot.sessionId;
     const pending = this.retries.get(uuid);
     if (!snapshot.terminal && pending?.snapshot.terminal) {
@@ -160,6 +182,11 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   }
 
   liftTerminal(uuid: string): void {
+    const retry = this.retries.get(uuid);
+    if (retry?.snapshot.terminal) {
+      this.cancelRetry(retry.snapshot);
+      this.cancel(uuid, retry.snapshot);
+    }
     const desired = this.desires.get(uuid);
     if (desired?.terminal) {
       this.cancel(uuid, desired.snapshot);

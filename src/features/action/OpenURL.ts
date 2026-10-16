@@ -25,6 +25,7 @@ import type { ObserveResult } from "../../models";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
@@ -192,7 +193,11 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
-  async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
+  async execute(url: string, call?: ActionCall): Promise<OpenURLResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult>;
+  async execute(url: string, signalOrCall?: AbortSignal | ActionCall): Promise<OpenURLResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("openURL");
@@ -236,7 +241,7 @@ export class OpenURL extends BaseVisualChange {
         throwIfAborted(signal);
         const launchResult = await awaitWhileRequestIsLive(
           perf.track("launchApp", () =>
-            launchApp.execute(packageName, false, true, undefined, undefined, undefined, signal),
+            launchApp.execute(packageName, { clearAppData: false, coldBoot: true, signal }),
           ),
           signal,
         );

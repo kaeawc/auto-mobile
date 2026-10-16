@@ -74,6 +74,7 @@ import {
   type AndroidPriorPackageState,
   type TimedOutInstallVerdict,
 } from "./androidInstallTimeoutRecovery";
+import type { ActionCall } from "./ActionCall";
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
@@ -145,6 +146,12 @@ export interface InstallAppOptions {
   iosDowngradeRecoveryBackendResolver?: typeof resolveIosDowngradeRecoveryBackend;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   signingInspector?: PackageSigningInspector;
+}
+
+/** Call context for {@link InstallApp.execute}: the target user and install guard ride beside the signal. */
+export interface InstallAppCall extends ActionCall {
+  userId?: number;
+  guard?: InstallGuardOptions;
 }
 
 /** Opt-in Android guards; omitting them keeps the historical install behavior. */
@@ -229,12 +236,24 @@ export class InstallApp {
     });
   }
 
+  async execute(artifactPath: string, call?: InstallAppCall): Promise<InstallAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     artifactPath: string,
     userId?: number,
     signal?: AbortSignal,
     guard?: InstallGuardOptions,
+  ): Promise<InstallAppResult>;
+  async execute(
+    artifactPath: string,
+    userIdOrCall?: number | InstallAppCall,
+    signalArg?: AbortSignal,
+    guardArg?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
+    const { userId, signal, guard } =
+      typeof userIdOrCall === "object"
+        ? userIdOrCall
+        : { userId: userIdOrCall, signal: signalArg, guard: guardArg };
     const perf = this.createPerformanceTracker();
     const nested = hasAmbientPerfTracker();
     const result = await runWithNestedPerfTracker(perf, () =>

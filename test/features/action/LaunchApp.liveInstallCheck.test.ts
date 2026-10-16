@@ -93,7 +93,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   test("launches an app the cache lacks but the device lists, and stales the cache", async () => {
     fakeAdb.setCommandResponse(listCommand, { stdout: `package:${packageName}\n`, stderr: "" });
 
-    const result = await createLaunchApp(["com.example.cached"]).execute(packageName, false, false);
+    const result = await createLaunchApp(["com.example.cached"]).execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -108,7 +111,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       stderr: "",
     });
 
-    const result = await createLaunchApp(["com.example.cached"]).execute(packageName, false, false);
+    const result = await createLaunchApp(["com.example.cached"]).execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result).toMatchObject({ success: false, error: "App is not installed" });
     expect(hasAmStart()).toBe(false);
@@ -117,7 +123,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   });
 
   test("a cache hit costs no live package listing", async () => {
-    const result = await createLaunchApp([packageName]).execute(packageName, false, false);
+    const result = await createLaunchApp([packageName]).execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(listCommandCount()).toBe(0);
@@ -128,7 +137,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
     fakeAdb.setCommandError(listCommand, new Error("adb: device offline"));
 
     await expect(
-      createLaunchApp(["com.example.cached"]).execute(packageName, false, false),
+      createLaunchApp(["com.example.cached"]).execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+      }),
     ).rejects.toThrow(`Could not determine whether ${packageName} is installed`);
     expect(hasAmStart()).toBe(false);
   });
@@ -236,8 +248,7 @@ describe("LaunchApp live install confirmation (#9976)", () => {
 
         const result = await createLaunchApp([missingPackage], missingPackage).execute(
           missingPackage,
-          false,
-          false,
+          { clearAppData: false, coldBoot: false },
         );
 
         expect(result).toMatchObject({
@@ -270,8 +281,7 @@ describe("LaunchApp live install confirmation (#9976)", () => {
 
       const result = await createLaunchApp([missingPackage], missingPackage).execute(
         missingPackage,
-        false,
-        false,
+        { clearAppData: false, coldBoot: false },
       );
 
       expect(result).toMatchObject({ success: false, error: "App is not installed" });
@@ -291,11 +301,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       });
 
       await expect(
-        createLaunchApp([installedPackage], installedPackage).execute(
-          installedPackage,
-          false,
-          false,
-        ),
+        createLaunchApp([installedPackage], installedPackage).execute(installedPackage, {
+          clearAppData: false,
+          coldBoot: false,
+        }),
       ).rejects.toThrow("No launcher activity found and launcher intent failed");
 
       expect(listCommandCount()).toBe(1);
@@ -310,7 +319,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       fakeAdb.setCommandError(listCommand, new Error("adb: device offline"));
 
       await expect(
-        createLaunchApp([missingPackage], missingPackage).execute(missingPackage, false, false),
+        createLaunchApp([missingPackage], missingPackage).execute(missingPackage, {
+          clearAppData: false,
+          coldBoot: false,
+        }),
       ).rejects.toThrow("No launcher activity found and launcher intent failed");
 
       expect(adbCalls("shell monkey")).toHaveLength(1);
@@ -323,11 +335,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       failFallbacks("stderr", wrongActivityFailure);
 
       await expect(
-        createLaunchApp([installedPackage], installedPackage).execute(
-          installedPackage,
-          false,
-          false,
-        ),
+        createLaunchApp([installedPackage], installedPackage).execute(installedPackage, {
+          clearAppData: false,
+          coldBoot: false,
+        }),
       ).rejects.toThrow("No launcher activity found and launcher intent failed");
 
       expect(listCommandCount()).toBe(0);
@@ -351,7 +362,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       failFallbacks("stderr", wrongActivityFailure);
 
       await expect(
-        createLaunchApp([hostile], hostile).execute(hostile, false, false),
+        createLaunchApp([hostile], hostile).execute(hostile, {
+          clearAppData: false,
+          coldBoot: false,
+        }),
       ).rejects.toThrow("No launcher activity found and launcher intent failed");
 
       expect(listCommandCount()).toBe(0);
@@ -363,7 +377,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
         stderr: "",
       });
 
-      const result = await createLaunchApp([packageName]).execute(packageName, false, false);
+      const result = await createLaunchApp([packageName]).execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+      });
 
       expect(result.success).toBe(true);
       expect(listCommandCount()).toBe(0);

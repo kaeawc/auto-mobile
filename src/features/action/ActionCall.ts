@@ -79,6 +79,19 @@ export function deadlineRequest(deadlineMs?: number): { requestDeadlineMs?: numb
   return deadlineMs === undefined ? undefined : { requestDeadlineMs: deadlineMs };
 }
 
+/** An `AbortSignal` has a boolean `aborted`; an `ActionCall` never does. */
+export function isAbortSignal(value: unknown): value is AbortSignal {
+  return typeof value === "object" && value !== null && "aborted" in value;
+}
+
+/** Normalizes `(signal)` and `(call)` for actions whose only positional tail was a signal. */
+export function resolveSignalCall(signalOrCall?: AbortSignal | ActionCall): ActionCall {
+  if (signalOrCall === undefined || isAbortSignal(signalOrCall)) {
+    return { signal: signalOrCall };
+  }
+  return signalOrCall;
+}
+
 /** `ActionCall` for rotation, which also carries the orientation lock and target display. */
 export interface RotateCall extends ActionCall {
   lockOrientation?: boolean;

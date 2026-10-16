@@ -87,7 +87,9 @@ export interface DevicePoolRefreshPort {
   isAndroidTransportAssignable?(device: BootedDevice): boolean;
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
+  /** Publish a newly discovered device in the pool (the caller holds the assignment lock). */
+  addPooledDevice(device: PooledDevice): void;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getCriteriaMatcher(): DeviceCriteriaMatcher;
   identityEvidenceForBootedDevice(device: BootedDevice): IdentityEvidence;
@@ -245,7 +247,7 @@ export class DevicePoolRefresh {
             );
             return updated;
           }
-          this.pool.getDevices().set(device.deviceId, {
+          this.pool.addPooledDevice({
             id: device.deviceId,
             name: device.name,
             platform: device.platform,

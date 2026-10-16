@@ -1021,7 +1021,7 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
   );
   const inventory = new MultiPlatformDeviceManager(
     current.adb,
-    current.simctl as unknown as SimCtlClient,
+    current.simctl,
     client,
     new FakeVirtualDeviceLifecycleCoordinator(),
     current.timer,

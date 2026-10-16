@@ -1,37 +1,20 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseInputSwipeParams, parseInputTapParams } from "../../src/daemon/inputRouteParams";
+import { INPUT_ROUTES } from "../../src/daemon/inputRoutes";
 import { PressButton } from "../../src/features/action/PressButton";
 import { resolveAndroidKeyCode } from "../../src/features/action/pressButtonPolicy";
-import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 const doc = readFileSync(
   join(import.meta.dir, "../../docs/using/screen-control.md"),
   "utf8",
 ).replace(/\r\n?/g, "\n");
-const server = createTestUnixSocketServer(
-  "/fake/screen-control-docs.sock",
-  "http://localhost:0/mcp",
-  createFakeDaemonState(),
-  new FakeTimer(),
-);
 
 // These are the parser-backed input routes in handleLocalSocketRequest. No listener is started.
-const parsers = new Map<string, (params: unknown) => unknown>([
-  ["input/tap", (params) => server["parseInputTapParams"](params)],
-  ["input/swipe", (params) => server["parseInputSwipeParams"](params)],
-  ["input/typeText", (params) => server["parseInputTypeTextParams"](params)],
-  ["input/pressButton", (params) => server["parseInputPressButtonParams"](params)],
-  ["input/key", (params) => server["parseInputKeyParams"](params)],
-  ...["input/gestureStart", "input/gestureMove", "input/gestureEnd"].map(
-    (method): [string, (params: unknown) => unknown] => [
-      method,
-      (params) => server["parseInputGestureParams"](params, method),
-    ],
-  ),
-]);
+const parsers = new Map<string, (params: unknown) => unknown>(
+  INPUT_ROUTES.map((route) => [route.method, route.parse]),
+);
 
 interface FencedBlock {
   info: string;
@@ -492,27 +475,25 @@ describe("screen control contract guard regressions", () => {
     test(`tap rejects fractional duration on ${platform}; integers and omission retain values`, () => {
       const params = { platform, x: 1, y: 2 };
       for (const duration of [1.5, NaN, Infinity, -Infinity, "100"]) {
-        expect(() => server["parseInputTapParams"]({ ...params, duration })).toThrow(
+        expect(() => parseInputTapParams({ ...params, duration })).toThrow(
           "integer number of milliseconds",
         );
       }
-      expect(server["parseInputTapParams"]({ ...params, duration: 100 }).duration).toBe(100);
-      expect(server["parseInputTapParams"](params).duration).toBeUndefined();
+      expect(parseInputTapParams({ ...params, duration: 100 }).duration).toBe(100);
+      expect(parseInputTapParams(params).duration).toBeUndefined();
     });
 
     test(`swipe rejects fractional durationMs on ${platform}; integers, boundaries and omission retain values`, () => {
       const params = { platform, startX: 1, startY: 2, endX: 3, endY: 4 };
       for (const durationMs of [1.5, 0, 60_001, NaN, Infinity, -Infinity, "450"]) {
-        expect(() => server["parseInputSwipeParams"]({ ...params, durationMs })).toThrow(
+        expect(() => parseInputSwipeParams({ ...params, durationMs })).toThrow(
           "integer milliseconds between 1 and 60000",
         );
       }
       for (const durationMs of [1, 450, 60_000]) {
-        expect(server["parseInputSwipeParams"]({ ...params, durationMs }).durationMs).toBe(
-          durationMs,
-        );
+        expect(parseInputSwipeParams({ ...params, durationMs }).durationMs).toBe(durationMs);
       }
-      expect(server["parseInputSwipeParams"](params).durationMs).toBe(300);
+      expect(parseInputSwipeParams(params).durationMs).toBe(300);
     });
   }
 

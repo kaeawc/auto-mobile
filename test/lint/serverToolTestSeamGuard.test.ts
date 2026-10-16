@@ -10,7 +10,7 @@ const ALLOWLIST: Record<string, number> = {
   "deviceTools.ts": 2,
   "interactionTools.ts": 40,
   "videoRecordingManager.ts": 1,
-  "videoRecordingTools.ts": 3,
+  "videoRecordingTools.ts": 1,
   "webrtcStreamManager.ts": 1,
 };
 const SERVER_DIR = join(import.meta.dir, "../../src/server");

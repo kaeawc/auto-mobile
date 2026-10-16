@@ -22,11 +22,9 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/features/video";
 import type { ActiveVideoRecording } from "../../src/features/video";
 import {
-  registerVideoRecordingTools,
   resetSegmentedSessions,
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
-  setVideoRecordingDeviceDetectorForTesting,
 } from "../../src/server/videoRecordingTools";
 import {
   resetVideoRecordingManagerDependencies,
@@ -35,6 +33,9 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 // #10018 persists the segments.json manifest from the maxDuration auto-stop. A caller-driven
 // stop that lands while the auto-stop is already finalizing shares the session's one stop
@@ -83,7 +84,7 @@ describe("segmented recording: auto-stop racing a caller-driven stop (#10018 x #
 
   beforeAll(async () => {
     if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
+      videoRecording.register();
     }
     archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-seg-race-"));
   });
@@ -96,7 +97,7 @@ describe("segmented recording: auto-stop racing a caller-driven stop (#10018 x #
     finalSegmentStop = undefined;
     const devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([androidDevice]);
-    setVideoRecordingDeviceDetectorForTesting(devices);
+    videoRecording.configure({ deviceDetector: devices });
     await setVideoRecordingManagerDependencies({
       videoRecorderService: new VideoRecorderService({
         backend: new FakeVideoCaptureBackend(),
@@ -133,7 +134,7 @@ describe("segmented recording: auto-stop racing a caller-driven stop (#10018 x #
     writeFile.mockRestore();
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
-    setVideoRecordingDeviceDetectorForTesting(undefined);
+    videoRecording.clear();
   });
 
   afterAll(async () => {

@@ -24,6 +24,9 @@ import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { resetStoppedDeviceGestureRecordings } from "../../src/server/deviceGestureRecordingManager";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { logger } from "../../src/utils/logger";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 
@@ -68,15 +71,17 @@ describe("recording release after serial identity replacement", () => {
 
   beforeAll(() => {
     if (!ToolRegistry.getTool("videoRecording")) {
-      segmentedTools.registerVideoRecordingTools();
+      videoRecording.register();
     }
   });
 
   beforeEach(async () => {
-    segmentedTools.setRecordingRequesterResolverForTesting({
-      baseSessionUuid: (uuid) => uuid.split(":")[0],
-      connectionOwnsDeviceSession: () => false,
-      isDeviceHeld: () => true,
+    videoRecording.configure({
+      requesterResolver: {
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: () => false,
+        isDeviceHeld: () => true,
+      },
     });
     timer = new FakeTimer();
     spies.push(spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake host file")));
@@ -108,7 +113,7 @@ describe("recording release after serial identity replacement", () => {
       spy.mockRestore();
     }
     manager.resetVideoRecordingManagerDependencies();
-    segmentedTools.setRecordingRequesterResolverForTesting(undefined);
+    videoRecording.clear();
     resetSegmentedSessions();
     resetStoppedDeviceGestureRecordings();
     displayTransitions.reset(device.deviceId);

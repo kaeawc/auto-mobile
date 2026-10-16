@@ -21,6 +21,10 @@ import {
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
+import {
+  DeviceCleanupQuarantine,
+  type AbandonablePendingDeviceCleanup,
+} from "./deviceCleanupQuarantine";
 import type { ReleaseSessionRequest } from "./releaseSessionRequest";
 import {
   defaultBiometricEnrollmentRestorer,
@@ -1435,19 +1439,7 @@ export function getSessionReleaseCleanupWorstCaseMs(
   );
 }
 
-/** Listener cleanup with no bound of its own; the manager caps it once its holder leaves. */
-export interface AbandonablePendingDeviceCleanup {
-  name: string;
-  leftover: string;
-  /** Fence late work before the device can be acquired again. */
-  abandon?: () => void;
-}
-
-interface PendingDeviceCleanupBound {
-  settlesBy?: number;
-  /** Present only until a manager-enforced cap starts. */
-  start?: () => void;
-}
+export type { AbandonablePendingDeviceCleanup } from "./deviceCleanupQuarantine";
 /** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
 export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 /**
@@ -1711,26 +1703,10 @@ export class SessionManager {
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
     new Set();
   /**
-   * Device work that outlived its bounded release phase. The pool keeps the
-   * device assigned until this settles, so no replacement session can race a
-   * late setup or keep-awake restore.
+   * Device work that outlived its bounded release phase. The pool keeps the device assigned until
+   * this settles, so no replacement session can race a late setup or keep-awake restore.
    */
-  private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
-  /** Individual promises let an undo join every cleanup except the gate it still owns. */
-  private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
-  /** Bounds belong to individual promises and disappear as each settles. */
-  private readonly pendingDeviceCleanupBounds = new Map<string, Set<PendingDeviceCleanupBound>>();
-  /** Capped teardown promises retain the shield's deadline when transferred to device cleanup. */
-  private readonly teardownCleanupBounds = new WeakMap<Promise<void>, number>();
-  /**
-   * Work started by the device's current acquisition (owner-less recording stop, #11041). It never
-   * blocks the live holder, but counts as cleanup once the device has no owner again.
-   */
-  private readonly acquisitionDeviceCleanups: Map<string, Promise<void>> = new Map();
-  private readonly acquisitionDeviceCleanupBounds = new Map<
-    string,
-    Set<PendingDeviceCleanupBound>
-  >();
+  private readonly deviceCleanupQuarantine: DeviceCleanupQuarantine;
   /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
@@ -2726,6 +2702,13 @@ export class SessionManager {
     const restorers = options.restorers ?? {};
     this.timer = timer;
     this.sessionClock = new SteadyWallClock(timer);
+    this.deviceCleanupQuarantine = new DeviceCleanupQuarantine({
+      timer,
+      now: () => this.sessionNow(),
+      hasOwner: (deviceId) => this.getSessionForDevice(deviceId) !== null,
+      teardownCapMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+      defaultRetryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+    });
     // Rows are read by other processes on their own session clocks: stamps cross as wall ms (#11162).
     this.deviceSessionRepository = onSessionClock(deviceSessionRepository, {
       toWall: (sessionClockMs) => this.sessionClockToWall(sessionClockMs),
@@ -2856,41 +2839,13 @@ export class SessionManager {
 
   /** Return outstanding post-release device work, if the device must stay quarantined. */
   getPendingDeviceCleanup(deviceId: string, ownGate?: Promise<void>): Promise<void> | null {
-    if (ownGate) {
-      const work = Array.from(this.pendingDeviceCleanupWork.get(deviceId) ?? []).filter(
-        (cleanup) => cleanup !== ownGate,
-      );
-      return work.length > 0 ? Promise.allSettled(work).then(() => undefined) : null;
-    }
-    return this.pendingDeviceCleanups.get(deviceId) ?? null;
+    return this.deviceCleanupQuarantine.get(deviceId, ownGate);
   }
 
   /** Wait for the device work that outlived release, without blocking shutdown indefinitely. */
   async drainPendingDeviceCleanups(timeoutMs: number): Promise<boolean> {
     this.flushDeferredRebindCleanups();
-    const cleanups = [
-      ...this.pendingDeviceCleanups.values(),
-      ...this.acquisitionDeviceCleanups.values(),
-    ];
-    if (cleanups.length === 0) {
-      return true;
-    }
-    const timedOut = Symbol("device cleanup drain timeout");
-    try {
-      await raceWithDeadline(Promise.allSettled(cleanups), {
-        timer: this.timer,
-        timeoutMs,
-        label: "Device cleanup drain",
-        timeoutError: () => timedOut,
-      });
-      return true;
-    } catch (error) {
-      if (error !== timedOut) {
-        throw toActionableError(error, "Failed to drain pending device cleanups");
-      }
-      logger.warn(`Timed out after ${timeoutMs}ms draining pending device cleanups`);
-      return false;
-    }
+    return await this.deviceCleanupQuarantine.drain(timeoutMs);
   }
 
   /**
@@ -2906,95 +2861,11 @@ export class SessionManager {
     /** Numeric caps are trusted; only listener descriptors are manager-capped. */
     bound?: number | AbandonablePendingDeviceCleanup,
   ): void {
-    if (bound === undefined) {
-      this.trackPendingDeviceCleanup(deviceId, [cleanup]);
-      return;
-    }
-    const record: PendingDeviceCleanupBound = {};
-    if (typeof bound === "number") {
-      record.settlesBy = this.sessionNow() + bound;
-    } else {
-      cleanup = this.capPendingDeviceCleanup(deviceId, cleanup, record, bound);
-    }
-    this.trackDeviceCleanupBound(this.pendingDeviceCleanupBounds, deviceId, cleanup, record);
-    this.trackPendingDeviceCleanup(deviceId, [cleanup]);
-    this.armPendingDeviceCleanupCaps(deviceId);
-  }
-
-  private trackDeviceCleanupBound(
-    registry: Map<string, Set<PendingDeviceCleanupBound>>,
-    deviceId: string,
-    cleanup: Promise<unknown>,
-    record: PendingDeviceCleanupBound,
-  ): void {
-    const records = registry.get(deviceId) ?? new Set<PendingDeviceCleanupBound>();
-    registry.set(deviceId, records);
-    records.add(record);
-    const remove = () => {
-      records.delete(record);
-      if (records.size === 0 && registry.get(deviceId) === records) {
-        registry.delete(deviceId);
-      }
-    };
-    void cleanup.then(remove, remove);
+    this.deviceCleanupQuarantine.register(deviceId, cleanup, bound);
   }
 
   private armPendingDeviceCleanupCaps(deviceId: string): void {
-    if (this.getSessionForDevice(deviceId) !== null) {
-      return;
-    }
-    for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
-      record.start?.();
-    }
-  }
-
-  private capPendingDeviceCleanup(
-    deviceId: string,
-    cleanup: Promise<unknown>,
-    record: PendingDeviceCleanupBound,
-    descriptor: AbandonablePendingDeviceCleanup,
-  ): Promise<void> {
-    const tracked = Promise.withResolvers<void>();
-    let settled = false;
-    const settle = () => {
-      settled = true;
-      record.start = undefined;
-      tracked.resolve();
-    };
-    // Both outcomes retire work; late failure after abandonment is already observed here.
-    void cleanup.then(settle, settle);
-    record.start = () => {
-      record.start = undefined;
-      if (settled) {
-        return;
-      }
-      record.settlesBy = this.sessionNow() + SESSION_RELEASE_TEARDOWN_CAP_MS;
-      void raceWithDeadline(cleanup, {
-        timer: this.timer,
-        timeoutMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
-        unref: true,
-        label: descriptor.name,
-        onTimeout: () => {
-          try {
-            descriptor.abandon?.();
-          } catch (error) {
-            logger.warn(
-              `Failed to abandon ${descriptor.name} for ${deviceId}: ${errorMessage(error)}`,
-              error,
-            );
-          }
-          logger.warn(
-            `Abandoned ${descriptor.name} for ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
-              `the device is no longer held for it and may still carry ${descriptor.leftover}`,
-          );
-        },
-      }).then(settle, (error: unknown) => {
-        // The capped wait and raw rejection are observed; abandonment already named any leftover.
-        logger.debug(`Device cleanup wait ended for ${deviceId}: ${errorMessage(error)}`);
-        settle();
-      });
-    };
-    return tracked.promise;
+    this.deviceCleanupQuarantine.armCaps(deviceId);
   }
 
   /**
@@ -3005,7 +2876,7 @@ export class SessionManager {
    */
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
     const now = this.sessionNow();
-    const bounds = Array.from(this.sessionSlots.activeReleases)
+    const releaseBounds = Array.from(this.sessionSlots.activeReleases)
       .filter(
         (release) =>
           !release.forced && !release.commitDeclined && release.session.assignedDevice === deviceId,
@@ -3017,22 +2888,7 @@ export class SessionManager {
           2 * getSessionHeartbeatCheckIntervalMs() +
           SESSION_RELEASE_TEARDOWN_CAP_MS,
       );
-    for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
-      if (record.start) {
-        bounds.push(now + SESSION_RELEASE_TEARDOWN_CAP_MS);
-      } else if (record.settlesBy !== undefined) {
-        bounds.push(record.settlesBy);
-      }
-    }
-    if (this.getSessionForDevice(deviceId) === null) {
-      for (const record of this.acquisitionDeviceCleanupBounds.get(deviceId) ?? []) {
-        if (record.settlesBy !== undefined) {
-          bounds.push(record.settlesBy);
-        }
-      }
-    }
-    const remaining = Math.max(0, ...bounds.map((bound) => bound - now));
-    return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
+    return this.deviceCleanupQuarantine.retryAfterMs(deviceId, releaseBounds);
   }
 
   /**
@@ -3047,22 +2903,7 @@ export class SessionManager {
     /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
     capMs?: number,
   ): void {
-    if (capMs !== undefined) {
-      this.trackDeviceCleanupBound(this.acquisitionDeviceCleanupBounds, deviceId, cleanup, {
-        settlesBy: this.sessionNow() + capMs,
-      });
-    }
-    const tracked = Promise.allSettled([cleanup]).then(() => undefined);
-    const previous = this.acquisitionDeviceCleanups.get(deviceId);
-    const combined = previous
-      ? Promise.allSettled([previous, tracked]).then(() => undefined)
-      : tracked;
-    this.acquisitionDeviceCleanups.set(deviceId, combined);
-    void combined.then(() => {
-      if (this.acquisitionDeviceCleanups.get(deviceId) === combined) {
-        this.acquisitionDeviceCleanups.delete(deviceId);
-      }
-    });
+    this.deviceCleanupQuarantine.registerAcquisition(deviceId, cleanup, capMs);
   }
 
   /** Release owns the device until both bounded teardown and any overflow work settle. */
@@ -3074,7 +2915,7 @@ export class SessionManager {
         : undefined;
     return (
       this.getPendingDeviceCleanup(deviceId, ownGate) !== null ||
-      (this.acquisitionDeviceCleanups.has(deviceId) &&
+      (this.deviceCleanupQuarantine.hasAcquisitionWork(deviceId) &&
         this.getSessionForDevice(deviceId) === null) ||
       Array.from(this.sessionSlots.activeReleases).some(
         (release) => !release.forced && release.session.assignedDevice === deviceId,
@@ -7460,20 +7301,15 @@ export class SessionManager {
         throw error;
       }
     });
-    this.teardownCleanupBounds.set(bounded, startedAtMs + SESSION_RELEASE_TEARDOWN_CAP_MS);
+    this.deviceCleanupQuarantine.noteTeardownBound(
+      bounded,
+      startedAtMs + SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
     return bounded;
   }
 
   private trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
-    for (const cleanup of cleanups) {
-      const settlesBy = this.teardownCleanupBounds.get(cleanup);
-      if (settlesBy !== undefined) {
-        this.trackDeviceCleanupBound(this.pendingDeviceCleanupBounds, deviceId, cleanup, {
-          settlesBy,
-        });
-      }
-    }
-    this.trackPendingDeviceCleanup(deviceId, cleanups);
+    this.deviceCleanupQuarantine.trackTeardown(deviceId, cleanups);
   }
 
   private async startReleaseTeardown(
@@ -11118,28 +10954,7 @@ export class SessionManager {
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
-    const work = this.pendingDeviceCleanupWork.get(deviceId) ?? new Set<Promise<unknown>>();
-    this.pendingDeviceCleanupWork.set(deviceId, work);
-    for (const promise of cleanups) {
-      work.add(promise);
-      const remove = () => {
-        work.delete(promise);
-        if (work.size === 0 && this.pendingDeviceCleanupWork.get(deviceId) === work) {
-          this.pendingDeviceCleanupWork.delete(deviceId);
-        }
-      };
-      void promise.then(remove, remove);
-    }
-    const previous = this.pendingDeviceCleanups.get(deviceId);
-    const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
-      () => undefined,
-    );
-    this.pendingDeviceCleanups.set(deviceId, cleanup);
-    void cleanup.then(() => {
-      if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
-        this.pendingDeviceCleanups.delete(deviceId);
-      }
-    });
+    this.deviceCleanupQuarantine.track(deviceId, cleanups);
   }
 
   private notifySessionDeviceUnbound(

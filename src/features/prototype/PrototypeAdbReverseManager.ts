@@ -166,6 +166,29 @@ export class PrototypeAdbReverseManager {
     });
   }
 
+  /**
+   * Drops the claims of every prototype on the device whose key `keep` rejects, removing the
+   * reverses nobody else holds (a replacing show ended those prototypes on the device).
+   */
+  async releaseExcept(deviceId: string, keep: (key: string) => boolean): Promise<void> {
+    const state = this.devices.get(deviceId);
+    if (state === undefined) {
+      return;
+    }
+    await this.enqueue(state, async () => {
+      const keys = new Set([
+        ...state.report.keys(),
+        ...[...state.owned.values()].flatMap((h) => [...h]),
+      ]);
+      for (const key of keys) {
+        if (!keep(key)) {
+          state.report.delete(key);
+          await this.dropStale(state, key, new Set());
+        }
+      }
+    });
+  }
+
   /** The device went away or lost its session: remove every reverse this manager created on it. */
   async releaseAll(deviceId: string): Promise<void> {
     const state = this.devices.get(deviceId);

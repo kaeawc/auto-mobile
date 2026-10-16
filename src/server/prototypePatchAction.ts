@@ -48,6 +48,8 @@ export interface PrototypePatchDependencies {
   supportsPatch: () => Promise<boolean>;
   /** Checks spec-level capabilities on the complete validated patch result. */
   specRefusal?: (spec: unknown) => Promise<string | undefined>;
+  /** Settles what `specRefusal` staged: true once the patch landed (or may have), else false. */
+  settleSpec?: (landed: boolean) => Promise<void>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -131,12 +133,32 @@ async function queuedPatch(
   if (!("spec" in applied)) {
     return applied;
   }
-  const refused = await deps.specRefusal?.(applied.spec);
-  if (refused !== undefined) {
-    return failure(refused);
+  let landed = false;
+  try {
+    const refused = await deps.specRefusal?.(applied.spec);
+    if (refused !== undefined) {
+      return failure(refused);
+    }
+    signal?.throwIfAborted();
+    const result = await sendPatch(deps, args);
+    landed = result.success || result.delivery === "indeterminate";
+    return await finishPatch(deps, deviceId, args, { read, applied, result });
+  } finally {
+    await deps.settleSpec?.(landed);
   }
-  signal?.throwIfAborted();
-  const result = await sendPatch(deps, args);
+}
+
+async function finishPatch(
+  deps: PrototypePatchDependencies,
+  deviceId: string,
+  args: PrototypePatchArgs,
+  sent: {
+    read: { version: number };
+    applied: Extract<ReturnType<typeof patchSpec>, { spec: unknown }>;
+    result: PrototypePatchReply;
+  },
+): Promise<PrototypePatchOutput> {
+  const { read, applied, result } = sent;
   if (result.delivery === "indeterminate") {
     deps.store.shownSpecs.abandon(deviceId);
     return failure(

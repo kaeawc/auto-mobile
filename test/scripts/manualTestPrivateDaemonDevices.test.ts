@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
 import { BrokerDeviceInfoRefusedError } from "../../scripts/manual-test/brokerDeviceLedger";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
@@ -53,13 +53,19 @@ function row(
 }
 async function deviceFixture(protectedDevices: string[] = []) {
   const f = fixture();
-  await runPrivateDaemonCommand(
+  const initCode = await runPrivateDaemonCommand(
     {
       op: "init",
       options: { ...options, ...(protectedDevices.length ? { protectedDevices } : {}) },
     },
     f.deps,
   );
+  const manifest = f.files.get(join(options.batchDir, "batch.json"));
+  if (initCode !== 0 || manifest === undefined) {
+    throw new Error(
+      `fixture init failed (exit ${initCode}); logs: ${f.logs.join(" | ")}; files: ${[...f.files.keys()].join(", ")}`,
+    );
+  }
   f.files.set(
     baselinePath,
     JSON.stringify({ recordedAt: "2026-10-13T00:00:00.000Z", android: ["preexisting"], ios: [] }),
@@ -1123,6 +1129,8 @@ test.each(["protected", "name-only", "serial-reused", "plain-name", "released"])
     const f = await deviceFixture(kind === "protected" ? ["ambroker-ledger"] : []);
     const ledger = kind === "protected" ? undefined : await addBrokerLedger(f);
     if (kind === "protected") {
+      const stored = JSON.parse(f.files.get(join(resolve(options.batchDir), "batch.json")) ?? "{}");
+      expect(stored.options?.protectedDevices).toEqual(["ambroker-ledger"]);
       await expect(addBrokerLedger(f)).rejects.toBeInstanceOf(BrokerDeviceInfoRefusedError);
     }
     const name =

@@ -745,7 +745,6 @@ test/features/talkback/FocusNavigationExecutor.test.ts
 test/features/talkback/TapOnElement.focusNavigation.test.ts
 test/features/talkback/resourceIdActionError.test.ts
 test/features/toolSelection/SessionToolSelectionService.test.ts
-test/features/toolSelection/putAppFileTargetPolicy.test.ts
 test/features/toolSelection/selectionSessionResolver.test.ts
 test/features/toolSelection/toolSelectionControl.test.ts
 test/features/toolSelection/toolSelectionPolicy.test.ts

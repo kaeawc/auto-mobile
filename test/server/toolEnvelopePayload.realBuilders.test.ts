@@ -123,7 +123,7 @@ const rows: BuilderCase[] = [
         screenshotImage: { included: true, mimeType: "image/png", sizeBytes: 5 },
       };
       const r = createStructuredToolResponse(payload);
-      // Mirrors observeTools.ts withCapturedScreenshotImage; neither observe builder is exported.
+      // Mirrors observeResponse.ts withCapturedScreenshotImage; neither observe builder is exported.
       return {
         response: {
           ...r,

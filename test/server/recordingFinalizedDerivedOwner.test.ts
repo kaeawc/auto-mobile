@@ -10,12 +10,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { VideoRecorderService } from "../../src/features/video";
-import {
-  registerVideoRecordingTools,
-  resetSegmentedSessions,
-  setRecordingRequesterResolverForTesting,
-  setVideoRecordingDeviceDetectorForTesting,
-} from "../../src/server/videoRecordingTools";
+import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
@@ -25,6 +20,9 @@ import {
 } from "../../src/server/videoRecordingManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import type { BootedDevice } from "../../src/models";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 
@@ -36,7 +34,7 @@ describe("finalized recording lookup vs derived label sessions", () => {
 
   beforeAll(async () => {
     if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
+      videoRecording.register();
     }
     archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-hunt-rec-"));
   });
@@ -47,7 +45,7 @@ describe("finalized recording lookup vs derived label sessions", () => {
     backend.setNowProvider(() => new Date(timer.now()));
     const sessions = new FakeDeviceSessionManager();
     sessions.setConnectedDevices([device]);
-    setVideoRecordingDeviceDetectorForTesting(sessions);
+    videoRecording.configure({ deviceDetector: sessions });
     await setVideoRecordingManagerDependencies({
       videoRecorderService: new VideoRecorderService({
         backend,
@@ -62,18 +60,20 @@ describe("finalized recording lookup vs derived label sessions", () => {
       now: () => new Date(timer.now()),
     });
     // Same resolver shape the active-stop tests use: "base:label" resolves to "base".
-    setRecordingRequesterResolverForTesting({
-      baseSessionUuid: (uuid) => uuid.split(":")[0],
-      connectionOwnsDeviceSession: () => false,
-      isDeviceHeld: () => true,
+    videoRecording.configure({
+      requesterResolver: {
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: () => false,
+        isDeviceHeld: () => true,
+      },
     });
   });
 
   afterEach(() => {
-    setRecordingRequesterResolverForTesting(undefined);
+    videoRecording.clear();
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
-    setVideoRecordingDeviceDetectorForTesting(undefined);
+    videoRecording.clear();
   });
 
   afterAll(async () => {

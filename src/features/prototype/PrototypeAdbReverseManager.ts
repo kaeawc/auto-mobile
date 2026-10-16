@@ -63,6 +63,15 @@ export interface PrototypeReverseReport {
   reverseFailures: ReverseFailure[];
 }
 
+/** A staged replacement: the new ports are claimed; settle it with exactly one of the two. */
+export interface StagedReverses {
+  report: PrototypeReverseReport;
+  /** The send landed: release the ports the new spec no longer needs. */
+  commit(): Promise<void>;
+  /** The send failed: release the ports this stage added and keep the earlier claims. */
+  rollback(): Promise<void>;
+}
+
 interface DeviceState {
   adb: PrototypeReverseAdb;
   /** Ports this manager created -> prototypes relying on each (the refcount). */
@@ -82,28 +91,66 @@ export class PrototypeAdbReverseManager {
   private readonly devices = new Map<string, DeviceState>();
 
   /** Makes `prototypeId`'s device-loopback ports reachable; replaces what it needed before. */
-  sync(
+  async sync(
     deviceId: string,
     prototypeId: string,
     spec: unknown,
     adb: PrototypeReverseAdb,
   ): Promise<PrototypeReverseReport> {
+    const staged = await this.stage(deviceId, prototypeId, spec, adb);
+    await staged.commit();
+    return staged.report;
+  }
+
+  /**
+   * Acquires the ports `spec` needs while keeping what `prototypeId` held before, so a replacement
+   * that the device then refuses can be undone. `commit` releases the ports the new spec no longer
+   * needs; `rollback` releases only the ports this stage added and restores the previous report,
+   * leaving the earlier claims exactly as they were. Whichever runs first wins; the other is a no-op.
+   */
+  stage(
+    deviceId: string,
+    prototypeId: string,
+    spec: unknown,
+    adb: PrototypeReverseAdb,
+  ): Promise<StagedReverses> {
     const state = this.stateFor(deviceId, adb);
     return this.enqueue(state, async () => {
       const { ports, unreversible } = extractDeviceLoopbackPorts(spec);
       const failures: ReverseFailure[] = [];
-      await this.dropStale(state, prototypeId, new Set(ports));
+      const heldBefore = new Set(
+        [...state.owned].filter(([, holders]) => holders.has(prototypeId)).map(([port]) => port),
+      );
       await this.acquire(state, prototypeId, ports, failures);
+      const added = ports.filter(
+        (port) => !heldBefore.has(port) && state.owned.get(port)?.has(prototypeId),
+      );
       const report: PrototypeReverseReport = {
         unreversiblePorts: unreversible.map((entry) => ({ prototypeId, ...entry })),
         reverseFailures: failures,
       };
-      if (report.unreversiblePorts.length > 0 || failures.length > 0) {
-        state.report.set(prototypeId, report);
-      } else {
-        state.report.delete(prototypeId);
-      }
-      return report;
+      const previousReport = state.report.get(prototypeId);
+      this.record(state, prototypeId, report);
+      let done = false;
+      const once = (task: () => Promise<void>) => () => {
+        if (done) {
+          return Promise.resolve();
+        }
+        done = true;
+        return this.enqueue(state, task);
+      };
+      return {
+        report,
+        commit: once(() => this.dropStale(state, prototypeId, new Set(ports))),
+        rollback: once(async () => {
+          if (previousReport === undefined) {
+            state.report.delete(prototypeId);
+          } else {
+            state.report.set(prototypeId, previousReport);
+          }
+          await this.releasePorts(state, prototypeId, added);
+        }),
+      };
     });
   }
 
@@ -176,13 +223,35 @@ export class PrototypeAdbReverseManager {
     return run;
   }
 
+  private record(state: DeviceState, prototypeId: string, report: PrototypeReverseReport): void {
+    if (report.unreversiblePorts.length > 0 || report.reverseFailures.length > 0) {
+      state.report.set(prototypeId, report);
+    } else {
+      state.report.delete(prototypeId);
+    }
+  }
+
   private async dropStale(
     state: DeviceState,
     prototypeId: string,
     keep: ReadonlySet<number>,
   ): Promise<void> {
-    for (const [port, holders] of [...state.owned]) {
-      if (keep.has(port) || !holders.delete(prototypeId) || holders.size > 0) {
+    await this.releasePorts(
+      state,
+      prototypeId,
+      [...state.owned.keys()].filter((port) => !keep.has(port)),
+    );
+  }
+
+  /** Drops the prototype's claim on each port, removing the ones nobody else holds. */
+  private async releasePorts(
+    state: DeviceState,
+    prototypeId: string,
+    ports: readonly number[],
+  ): Promise<void> {
+    for (const port of ports) {
+      const holders = state.owned.get(port);
+      if (holders === undefined || !holders.delete(prototypeId) || holders.size > 0) {
         continue;
       }
       state.owned.delete(port);

@@ -1761,6 +1761,7 @@ async function performMutation(
     sent: false,
     startedFreshEvents: false,
   };
+  const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
     const generation = takenGeneration;
     const resolved = await preflightWithGeneration(ordering, () =>
@@ -1792,7 +1793,6 @@ async function performMutation(
     if (stage.failure) {
       withdrawGeneration(ordering);
     }
-    const reversing = reverseLifecycle(dependencies, device, args, target);
     const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
     const { result, warning } = await withdrawOnAbort(
       ordering,
@@ -1890,6 +1890,8 @@ async function performMutation(
     // Rethrow the original error to preserve abort and ActionableError identity after binding cleanup.
     throw error;
   } finally {
+    // A no-op once settled; after an exception or abort it undoes (or, once sent, keeps) the staging.
+    await reversing.abandon(ordering.sent);
     endShownSpec(store, ordering);
     settleGeneration(ordering);
   }

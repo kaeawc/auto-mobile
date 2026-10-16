@@ -89,8 +89,8 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
   });
 
   afterAll(() => {
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(STRICT_TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
+    ToolRegistry.removeToolForTesting(STRICT_TOOL);
     restoreHermeticServer();
   });
 

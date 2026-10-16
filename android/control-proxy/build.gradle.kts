@@ -8,7 +8,7 @@ plugins {
   id("automobile.kotlin-common")
   id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
-  alias(libs.plugins.android.application)
+  id("automobile.android-application")
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.compose.compiler)
 }
@@ -21,23 +21,16 @@ val minifyRelease =
 
 android {
   namespace = "dev.jasonpearson.automobile.ctrlproxy"
-  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
-  buildToolsVersion = libs.versions.build.android.buildTools.get()
 
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.ctrlproxy"
-    minSdk = libs.versions.build.android.minSdk.get().toInt()
-    targetSdk = libs.versions.build.android.targetSdk.get().toInt()
     versionCode = 1
     versionName = "0.0.85-SNAPSHOT"
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   buildTypes {
     release {
       isMinifyEnabled = minifyRelease.get()
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
 
@@ -53,11 +46,6 @@ android {
   // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+
   // fails on JDK 21).
   testOptions { unitTests.isIncludeAndroidResources = true }
-
-  compileOptions {
-    sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-    targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
-  }
 
   packaging {
     resources {

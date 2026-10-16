@@ -5,7 +5,6 @@
  * with a direct PackageManager call inside the accessibility service.
  */
 
-import WebSocket from "ws";
 import type { DelegateContext } from "./types";
 import { createTimestampedId } from "../../../utils/IdGenerator";
 import type {
@@ -13,7 +12,7 @@ import type {
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
 } from "./types";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 
@@ -56,75 +55,20 @@ export class CtrlProxyPackages {
     timeoutMs: number = 5000,
   ): Promise<A11yInstalledPackagesResult> {
     const startTime = this.context.timer.now();
-
-    try {
-      const ws0 = this.context.getWebSocket();
-      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
-      // Why: package queries are an optimization over ADB. Don't trigger a slow
-      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
-      if (!connected) {
-        return {
-          success: false,
-          userId: userId ?? -1,
-          packages: [],
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      // Check the socket is OPEN BEFORE registering, so an already-closed socket
-      // never leaves a registered request orphaned (a later cancelAll would reject
-      // an un-awaited promise as an unhandled rejection).
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-
-      const requestId = createTimestampedId(
-        "installed_packages",
-        this.context.timer,
-        this.context.idGenerator,
-      );
-      const resultPromise = this.context.requestManager.register<A11yInstalledPackagesResult>(
-        requestId,
-        "installed_packages",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          userId: userId ?? -1,
-          packages: [],
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Installed packages timeout after ${timeout}ms`,
-        }),
-      );
-
-      try {
-        ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId }),
-          ),
-        );
-      } catch (sendError) {
-        // Settle the registered request rather than orphaning it (see requestPackageInfo).
-        logger.warn(`[CtrlProxyPackages] installed_packages send failed: ${sendError}`);
-        this.context.requestManager.resolveError(
-          requestId,
-          `${sendError}`,
-          this.context.timer.now() - startTime,
-        );
-      }
-
-      return await resultPromise;
-    } catch (error) {
-      logger.warn(`[CtrlProxyPackages] installed_packages request failed: ${errorMessage(error)}`);
-      return {
-        success: false,
-        userId: userId ?? -1,
-        packages: [],
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `${error}`,
-      };
-    }
+    const failure = (error: string): A11yInstalledPackagesResult => ({
+      success: false,
+      userId: userId ?? -1,
+      packages: [],
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
+    return this.sendPackageCommand("installed_packages", {
+      messageType: "request_installed_packages",
+      params: { includeSystem, userId: userId ?? null },
+      timeoutMs,
+      timeoutLabel: "Installed packages",
+      failure,
+    });
   }
 
   async requestPackageInfo(
@@ -133,89 +77,22 @@ export class CtrlProxyPackages {
     timeoutMs: number = 5000,
   ): Promise<A11yPackageInfoResult> {
     const startTime = this.context.timer.now();
-
-    try {
-      const ws0 = this.context.getWebSocket();
-      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
-      // Why: package queries are an optimization over ADB. Don't trigger a slow
-      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
-      if (!connected) {
-        return {
-          success: false,
-          packageName,
-          isSystem: false,
-          requestedPermissions: [],
-          grantedPermissions: {},
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      // Check the socket is OPEN BEFORE registering, so an already-closed socket
-      // never leaves a registered request orphaned (a later cancelAll would reject
-      // an un-awaited promise as an unhandled rejection).
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-
-      const requestId = createTimestampedId(
-        "package_info",
-        this.context.timer,
-        this.context.idGenerator,
-      );
-      const resultPromise = this.context.requestManager.register<A11yPackageInfoResult>(
-        requestId,
-        "package_info",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          packageName,
-          isSystem: false,
-          requestedPermissions: [],
-          grantedPermissions: {},
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Package info timeout after ${timeout}ms`,
-        }),
-      );
-
-      try {
-        ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestPackageInfo({
-              requestId,
-              packageName,
-              includePermissions: options.includePermissions ?? true,
-            }),
-          ),
-        );
-      } catch (sendError) {
-        // Settle the just-registered request rather than orphaning it, so the
-        // always-awaited resultPromise below returns the failure instead of a later
-        // cancelAll surfacing an unhandled rejection.
-        logger.warn(
-          `[CtrlProxyPackages] package_info send failed for ${packageName}: ${sendError}`,
-        );
-        this.context.requestManager.resolveError(
-          requestId,
-          `${sendError}`,
-          this.context.timer.now() - startTime,
-        );
-      }
-
-      return await resultPromise;
-    } catch (error) {
-      logger.warn(`[CtrlProxyPackages] package_info request failed: ${errorMessage(error)}`);
-      return {
-        success: false,
-        packageName,
-        isSystem: false,
-        requestedPermissions: [],
-        grantedPermissions: {},
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `${error}`,
-      };
-    }
+    const failure = (error: string): A11yPackageInfoResult => ({
+      success: false,
+      packageName,
+      isSystem: false,
+      requestedPermissions: [],
+      grantedPermissions: {},
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
+    return this.sendPackageCommand("package_info", {
+      messageType: "request_package_info",
+      params: { packageName, includePermissions: options.includePermissions ?? true },
+      timeoutMs,
+      timeoutLabel: "Package info",
+      failure,
+    });
   }
 
   async requestLaunchIntent(
@@ -223,73 +100,59 @@ export class CtrlProxyPackages {
     timeoutMs: number = 5000,
   ): Promise<A11yLaunchIntentResult> {
     const startTime = this.context.timer.now();
+    const failure = (error: string): A11yLaunchIntentResult => ({
+      success: false,
+      packageName,
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
+    return this.sendPackageCommand("launch_intent", {
+      messageType: "request_launch_intent",
+      params: { packageName },
+      timeoutMs,
+      timeoutLabel: "Launch intent",
+      failure,
+    });
+  }
 
+  /**
+   * Shared sendCommand wrapper for the package queries. Package queries are an optimization
+   * over ADB, so an absent socket never triggers a slow connect: callers fall back to ADB.
+   * No ambient abort is attached, matching the pre-sendCommand behaviour.
+   */
+  private async sendPackageCommand<T extends { success: boolean }>(
+    operation: string,
+    request: {
+      messageType: string;
+      params: Record<string, unknown>;
+      timeoutMs: number;
+      timeoutLabel: string;
+      failure: (error: string) => T;
+    },
+  ): Promise<T> {
+    const { messageType, params, timeoutMs, timeoutLabel, failure } = request;
     try {
-      const ws0 = this.context.getWebSocket();
-      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
-      // Why: package queries are an optimization over ADB. Don't trigger a slow
-      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
-      if (!connected) {
-        return {
-          success: false,
-          packageName,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "WebSocket not connected",
-        };
-      }
-
-      // Check the socket is OPEN BEFORE registering, so an already-closed socket
-      // never leaves a registered request orphaned (a later cancelAll would reject
-      // an un-awaited promise as an unhandled rejection).
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-
-      const requestId = createTimestampedId(
-        "launch_intent",
-        this.context.timer,
-        this.context.idGenerator,
+      return await sendCommand<T>(
+        // Package queries never went through the generic command gate or wire deadlines.
+        { ...this.context, isCommandSupported: undefined, wireDeadlineParams: undefined },
+        {
+          idPrefix: operation,
+          responseType: operation,
+          messageType,
+          params,
+          timeoutMs,
+          requireExistingConnection: true,
+          cancelScreenshotBackoff: false,
+          createRequestId: () =>
+            createTimestampedId(operation, this.context.timer, this.context.idGenerator),
+          notConnectedError: () => failure("WebSocket not connected"),
+          timeoutError: (timeout) => failure(`${timeoutLabel} timeout after ${timeout}ms`),
+          unsupportedCommandError: (_messageType, error) => failure(error),
+        },
       );
-      const resultPromise = this.context.requestManager.register<A11yLaunchIntentResult>(
-        requestId,
-        "launch_intent",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          packageName,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Launch intent timeout after ${timeout}ms`,
-        }),
-      );
-
-      try {
-        ws.send(
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }),
-          ),
-        );
-      } catch (sendError) {
-        // Settle the registered request rather than orphaning it (see requestPackageInfo).
-        logger.warn(
-          `[CtrlProxyPackages] launch_intent send failed for ${packageName}: ${sendError}`,
-        );
-        this.context.requestManager.resolveError(
-          requestId,
-          `${sendError}`,
-          this.context.timer.now() - startTime,
-        );
-      }
-
-      return await resultPromise;
     } catch (error) {
-      logger.warn(`[CtrlProxyPackages] launch_intent request failed: ${errorMessage(error)}`);
-      return {
-        success: false,
-        packageName,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `${error}`,
-      };
+      logger.warn(`[CtrlProxyPackages] ${operation} request failed: ${errorMessage(error)}`);
+      return failure(`${error}`);
     }
   }
 }

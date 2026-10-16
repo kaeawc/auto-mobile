@@ -13,6 +13,7 @@ import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDown
 import { type IdGenerator, defaultIdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { VerifiedArtifactCache } from "../../utils/VerifiedArtifactCache";
 import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
@@ -89,6 +90,7 @@ export class PrototypeAgentProvider {
   private readonly cacheDir: string;
   private readonly usesDefaultCacheDir: boolean;
   private readonly timer: Timer;
+  private readonly cache: VerifiedArtifactCache;
   private readonly idGenerator: IdGenerator;
   private readonly env: NodeJS.ProcessEnv;
   private readonly expectedChecksumOverride?: string;
@@ -104,6 +106,11 @@ export class PrototypeAgentProvider {
     this.cacheDir = deps.cacheDir ?? getTempDir(CACHE_SUBDIR);
     this.usesDefaultCacheDir = deps.cacheDir === undefined;
     this.timer = deps.timer ?? defaultTimer;
+    this.cache = new VerifiedArtifactCache({
+      downloader: this.downloader,
+      checksumCalculator: this.checksumCalculator,
+      timer: this.timer,
+    });
     this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
     this.env = deps.env ?? process.env;
     this.expectedChecksumOverride = deps.expectedChecksum;
@@ -195,29 +202,16 @@ export class PrototypeAgentProvider {
   }
 
   private async isCacheUsable(expected: string): Promise<boolean> {
-    let metadata: unknown;
-    try {
-      metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
-    } catch (error) {
-      // Missing or corrupt metadata is expected on first use and after upgrades; download repairs it.
-      logger.debug("[PROTOTYPE_AGENT] No usable cached prototype agent metadata", {
-        error: errorMessage(error),
-      });
-      return false;
-    }
-    if (!isCacheMetadata(metadata)) {
-      // Stale metadata schemas are expected after upgrades; download rewrites them.
-      logger.debug("[PROTOTYPE_AGENT] No usable cached prototype agent metadata", {
-        reason: "Expected an object with a string sha256 and numeric size",
-      });
-      return false;
-    }
-    if (metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
-      return false;
-    }
-    // The sidecar only records what was once verified; re-hash so same-size corruption or a
-    // stale sidecar left by an interrupted publish never passes as a verified dylib.
-    return this.isPublishedDylibVerified(expected, metadata.size);
+    return this.cache.isCached<Pick<PrototypeAgentMetadata, "sha256" | "size">>({
+      label: "[PROTOTYPE_AGENT]",
+      subject: "prototype agent",
+      expectedSha256: expected,
+      metadataPath: this.metadataPath,
+      parseMetadata: (value) => (isCacheMetadata(value) ? value : null),
+      // The sidecar only records what was once verified; re-hash so same-size corruption or a
+      // stale sidecar left by an interrupted publish never passes as a verified dylib.
+      verifyArtifact: (metadata) => this.isPublishedDylibVerified(expected, metadata.size),
+    });
   }
 
   private async isPublishedDylibVerified(expected: string, size: number): Promise<boolean> {
@@ -279,65 +273,54 @@ export class PrototypeAgentProvider {
       dir,
       `${PROTOTYPE_AGENT_CACHE_FILENAME}.${this.idGenerator.next()}.download`,
     );
-    const controller = new AbortController();
-    const timeout = this.timer.setTimeout(() => controller.abort(), this.downloadTimeoutMs);
     // Only artifacts this attempt published may be removed on failure; another provider or daemon
     // sharing the cache may already have published a verified entry.
     let published = false;
 
-    try {
-      await this.downloader.download(
-        this.releaseUrlOverride ?? resolvePrototypeAgentUrl(this.env),
-        partialPath,
-        controller.signal,
-      );
-      await fs.chmod(partialPath, SECURE_FILE_MODE);
-      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(partialPath);
-      if (actual.toLowerCase() !== expected.toLowerCase()) {
-        throw new ActionableError(
-          `Prototype agent checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
+    await this.cache.fetch({
+      label: "[PROTOTYPE_AGENT]",
+      expectedSha256: expected,
+      url: this.releaseUrlOverride ?? resolvePrototypeAgentUrl(this.env),
+      archivePath: partialPath,
+      metadataPath: this.metadataPath,
+      metadataMode: SECURE_FILE_MODE,
+      downloadTimeoutMs: this.downloadTimeoutMs,
+      afterDownload: (downloaded) => fs.chmod(downloaded, SECURE_FILE_MODE),
+      mismatchError: (want, actual) =>
+        new ActionableError(
+          `Prototype agent checksum verification failed. Expected: ${want}, Got: ${actual}. ` +
             "The downloaded release asset is corrupted or tampered, and was deleted.",
-        );
-      }
-      const { size } = await fs.stat(partialPath);
-      published = await this.publishPartial(partialPath, expected, size);
-      await fs.writeFile(
-        this.metadataPath,
-        JSON.stringify(
-          {
-            version: resolvePinnedVersion(this.env),
-            sha256: actual,
-            size,
-            downloadedAt: this.timer.now(),
-          } satisfies PrototypeAgentMetadata,
-          null,
-          2,
         ),
-        { encoding: "utf8", mode: SECURE_FILE_MODE },
-      );
-      logger.info("[PROTOTYPE_AGENT] Downloaded and verified release prototype agent", {
-        path: this.dylibPath,
-        sha256: actual,
-      });
-      return this.dylibPath;
-    } catch (error) {
-      // Never leave unverified bytes where a later run could mistake them for a cache entry.
-      await Promise.all([
-        fs.rm(partialPath, { force: true }),
-        ...(published
-          ? [fs.rm(this.dylibPath, { force: true }), fs.rm(this.metadataPath, { force: true })]
-          : []),
-      ]);
-      if (controller.signal.aborted) {
-        throw new ActionableError(
+      timeoutError: () =>
+        new ActionableError(
           `Timed out downloading the prototype agent after ${this.downloadTimeoutMs}ms. ` +
             `Check GitHub Release asset availability or set ${IOS_PROTOTYPE_AGENT_ENV} for local development.`,
-        );
-      }
-      throw error;
-    } finally {
-      this.timer.clearTimeout(timeout);
-    }
+        ),
+      publish: async (downloaded, sha256) => {
+        const { size } = await fs.stat(downloaded);
+        published = await this.publishPartial(downloaded, expected, size);
+        logger.info("[PROTOTYPE_AGENT] Downloaded and verified release prototype agent", {
+          path: this.dylibPath,
+          sha256,
+        });
+        return {
+          version: resolvePinnedVersion(this.env),
+          sha256,
+          size,
+          downloadedAt: this.timer.now(),
+        } satisfies PrototypeAgentMetadata;
+      },
+      // Never leave unverified bytes where a later run could mistake them for a cache entry.
+      discard: async () => {
+        if (published) {
+          await Promise.all([
+            fs.rm(this.dylibPath, { force: true }),
+            fs.rm(this.metadataPath, { force: true }),
+          ]);
+        }
+      },
+    });
+    return this.dylibPath;
   }
 }
 

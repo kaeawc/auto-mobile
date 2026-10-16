@@ -111,6 +111,7 @@ junit-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine", vers
 kgp = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "build-kotlin" }
 kotlin-stdlib-consumer = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "build-kotlin-consumer" }
 agp = { module = "com.android.tools.build:gradle", version.ref = "build-android-agp" }
+mavenPublishPlugin = { module = "com.vanniktech:gradle-maven-publish-plugin", version.ref = "mavenpublish" }
 
 conveyor-control = { module = "dev.hydraulic.conveyor:conveyor-control", version.ref = "conveyor-control" }
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog-agents" }

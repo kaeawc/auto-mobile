@@ -1,6 +1,7 @@
 import { Timer, defaultTimer } from "./SystemTimer";
 import { logger } from "./logger";
-import { readEnvPositiveInteger } from "./envNumbers";
+import { ENV } from "../config/env";
+import { readEnvInt } from "./envNumbers";
 import { errorMessage } from "./describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -81,12 +82,7 @@ export function resolveWorkProfilePollIntervalMs(
 ): number {
   return (
     explicit ??
-    readEnvPositiveInteger(
-      "AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS",
-      undefined,
-      { fallback: DEFAULT_POLL_INTERVAL_MS },
-      env,
-    )
+    readEnvInt(ENV.WORK_PROFILE_POLL_INTERVAL_MS, env, { fallback: DEFAULT_POLL_INTERVAL_MS })
   );
 }
 

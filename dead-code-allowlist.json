@@ -13,9 +13,7 @@
     "src/features/webrtc/index.ts",
     "src/models/index.ts",
     "src/server/deviceMatcher.ts",
-    "src/utils/screenshot-utils.ts",
-    "src/vision/index.ts",
-    "test/helpers/test-database.ts"
+    "src/vision/index.ts"
   ],
   "ignorePathPatterns": ["scripts/memory/"],
   "ignoreEntries": [
@@ -111,11 +109,6 @@
     },
     {
       "file": "src/doctor/index.ts",
-      "name": "applyClientBuildIdentity",
-      "reason": "Doctor module barrel re-export; consumers/tests import from the implementation module"
-    },
-    {
-      "file": "src/doctor/index.ts",
       "name": "formatConsoleOutput",
       "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
     },
@@ -123,16 +116,6 @@
       "file": "src/doctor/index.ts",
       "name": "formatJsonOutput",
       "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
-    },
-    {
-      "file": "src/doctor/index.ts",
-      "name": "CheckStatus",
-      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
-    },
-    {
-      "file": "src/doctor/index.ts",
-      "name": "CheckSection",
-      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
     },
     {
       "file": "src/features/record/android/index.ts",
@@ -178,11 +161,6 @@
       "file": "src/db/types.ts",
       "name": "NewToolSelectionProfileProvenanceRow",
       "reason": "Kysely Insertable table type, part of the DB type API surface"
-    },
-    {
-      "file": "src/doctor/index.ts",
-      "name": "DoctorProbeOptions",
-      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
     },
     {
       "file": "src/features/action/InputKey.ts",
@@ -253,16 +231,6 @@
       "file": "src/daemon/client.ts",
       "name": "ZodType",
       "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'ZodType'"
-    },
-    {
-      "file": "src/features/toolSelection/putAppFileTargetPolicy.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/features/toolSelection/putAppFileTargetPolicy.ts",
-      "name": "Record",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'Record'"
     },
     {
       "file": "src/server/system-tray/notificationHints.ts",

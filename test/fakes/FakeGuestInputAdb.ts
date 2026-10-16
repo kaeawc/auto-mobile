@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { ExecResult } from "../../src/models";
 import type {
   AdbExecuteOptions,
@@ -12,6 +13,8 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
   readonly host = Promise.withResolvers<ExecResult>();
   readonly cleanupCalls: Array<{ args: string[]; options: AdbExecuteOptions }> = [];
   readonly dispatchOptions: AdbExecuteOptions[] = [];
+  /** The ambient request signal visible to each dispatch (AdbClient defaults to it). */
+  readonly ambientSignals: Array<AbortSignal | undefined> = [];
   stdoutChunks = ["42", "42\n"];
   guest: "input" | "recycled" | "gone" = "input";
   cleanupError: Error | undefined;
@@ -28,6 +31,12 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
 
   setTypingDuration(timer: FakeTimer, durationMs: number): void {
     this.typingDeadline = { timer, at: timer.now() + durationMs };
+    // API 31+: the host adb client stays attached until typing completes, unless it is killed.
+    timer.setTimeout(() => {
+      if (this.apiLevel >= 31 && !this.clientKilled) {
+        this.host.resolve({ stdout: "", stderr: "" });
+      }
+    }, durationMs);
   }
 
   isTyping(): boolean {
@@ -61,6 +70,19 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
     const result = await super.execute(args, options);
     if (args.join(" ").includes("input text ")) {
       this.dispatchOptions.push(options);
+      this.ambientSignals.push(getAbortSignal());
+      if (this.apiLevel >= 31) {
+        // Killing the host adb client closes the shell stream, so the guest `cmd` binder client
+        // dies with it. system_server keeps typing, but nothing is left to observe or wait on.
+        options.signal?.addEventListener(
+          "abort",
+          () => {
+            this.clientKilled = true;
+            this.host.reject(options.signal?.reason);
+          },
+          { once: true },
+        );
+      }
       for (const chunk of this.stdoutChunks) {
         options.onStdout?.(chunk);
       }

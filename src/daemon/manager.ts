@@ -249,7 +249,8 @@ export interface ExtractionCleaner {
   removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
 }
 
-function resolveExtractionRootForEntryScript(entryScript: string): string | null {
+/** Exported for tests. */
+export function resolveExtractionRootForEntryScript(entryScript: string): string | null {
   const resolved = resolve(entryScript);
   const parts = resolved.split(sep);
   const nodeModulesIndex = parts.lastIndexOf("node_modules");

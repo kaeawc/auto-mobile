@@ -20,8 +20,9 @@ export function slotAgreementRig(
   persistence = new FakeDeviceSessionPersistence(),
   fs = new FakeTerminalReleaseJournalFileSystem(),
   timer = new FakeTimer(),
+  keepAwake?: ConstructorParameters<typeof SessionManager>[3],
 ) {
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier(), keepAwake);
   manager.stopCleanupTimer();
   manager.attachDaemonSessionId("shadow-daemon");
   manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));

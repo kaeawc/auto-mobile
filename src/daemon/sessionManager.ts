@@ -4363,7 +4363,7 @@ export class SessionManager {
     return this.expireIfDue(sessionId, false);
   }
 
-  /** @internal Pure lookup with getSession's default expiry judgement, apart from the stall probe. */
+  /** Pure lookup with getSession's default expiry judgement, apart from the stall probe. */
   findSession(sessionId: string): Session | null {
     this.stallProbe?.();
     if (this.sessionSlots.hasTerminalSnapshot(sessionId)) {

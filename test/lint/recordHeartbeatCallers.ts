@@ -22,23 +22,30 @@ function calleeName(callee: Expression): string | undefined {
     : undefined;
 }
 
-/** Scan source only. Syntax errors fail the inventory instead of silently skipping a file. */
-export function scanRecordHeartbeatCalls(file: string, source: string): { line: number }[] {
+/**
+ * Scan source for calls of `name`: direct, optional, computed, wrapped, or through
+ * `.call/.apply/.bind`. Syntax errors fail the inventory instead of silently skipping a file.
+ */
+export function scanNamedCalls(file: string, source: string, name: string): { line: number }[] {
   const program = parseGuardSource(file, source);
   const findings: { line: number }[] = [];
   new Visitor({
     CallExpression(node) {
       const callee = unwrapCallee(node.callee);
-      const name = calleeName(callee);
+      const calleeNameText = calleeName(callee);
       if (
-        name === "recordHeartbeat" ||
+        calleeNameText === name ||
         (callee.type === "MemberExpression" &&
-          (name === "call" || name === "apply" || name === "bind") &&
-          calleeName(callee.object) === "recordHeartbeat")
+          (calleeNameText === "call" || calleeNameText === "apply" || calleeNameText === "bind") &&
+          calleeName(callee.object) === name)
       ) {
         findings.push({ line: source.slice(0, node.start).split("\n").length });
       }
     },
   }).visit(program);
   return findings.sort((a, b) => a.line - b.line);
+}
+
+export function scanRecordHeartbeatCalls(file: string, source: string): { line: number }[] {
+  return scanNamedCalls(file, source, "recordHeartbeat");
 }

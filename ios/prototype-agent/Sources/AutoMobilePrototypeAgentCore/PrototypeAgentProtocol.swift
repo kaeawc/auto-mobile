@@ -46,6 +46,8 @@ enum PrototypeAgentProtocol {
         checksCapability,
         identifierTestTagOnlyCapability,
         bottomSheetDragCapability,
+        clearStorageRequest,
+        storageCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -125,6 +127,13 @@ enum PrototypeAgentProtocol {
     static let identifierTestTagOnlyCapability = "prototype_identifier_test_tag_only_v1"
     /// Bottom sheets drag between detents and optionally dismiss on a downward swipe.
     static let bottomSheetDragCapability = "prototype_bottom_sheet_drag_v1"
+    /// Persisted `storage` (#12526): the spec's `storage` block is restored on a show and saved after
+    /// writes, `get_prototype_status` reports `storage`, and `clear_prototype_storage` is handled.
+    /// Same name as the CtrlProxy capability; the host refuses `storage` on an agent without it.
+    static let storageCapability = "prototype_storage_v1"
+    /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
+    /// beside `storageCapability` because the host checks request types against `capabilities`.
+    static let clearStorageRequest = "clear_prototype_storage"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

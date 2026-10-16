@@ -117,14 +117,16 @@ struct PrototypeSession {
     /// A show of the prototype already on screen replaces it in place: its spec state is
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Stack paths drop unknown screens and fall back to start when empty.
-    /// Any other show, or one with `reset`, starts fresh: the spec's own state, every pager on
-    /// its first page and every stack at start. Event sequences are per id and never rewound either way.
+    /// Any other show, or one with `reset`, starts fresh: the spec's own state (or `restoredState`, the
+    /// spec's with its stored values over it), every pager on its first page and every stack at start.
+    /// Event sequences are per id and never rewound either way.
     /// `appearance` is the request's own: a show that carries none follows the device again.
     mutating func show(
         _ spec: PrototypeSpec,
         reset: Bool = false,
         appearance: PrototypeAppearanceOverride = .device,
-        specBytes: Int? = nil
+        specBytes: Int? = nil,
+        restoredState: [String: JSONValue]? = nil
     ) {
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
@@ -137,7 +139,9 @@ struct PrototypeSession {
             keepingStacks: keepNavigation ? stacks : [:]
         )
         shownErrors = []
-        state = spec.state ?? [:]
+        // Stored values (#12526) arrive already applied by `PrototypeStorageCoordinator.prepare`, before
+        // the first draw; restoring is not a change, so no event is emitted and no revision moves.
+        state = restoredState ?? spec.state ?? [:]
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark

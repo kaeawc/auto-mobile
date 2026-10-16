@@ -526,6 +526,32 @@ event sequences are) and emits one `change` event whose `name` is the written `/
 array for an append) and whose payload is `{op, value?, revision}`. The value always travels. The agent
 does not implement `prototype_patch_v1`, so the revision has no patch conflict check on this platform yet.
 
+## Storage capability
+
+The agent advertises `prototype_storage_v1` and the `clear_prototype_storage` request type (#12526;
+[contract](../android/prototype-ux.md#storage-12522)). Stored values live in the host app's own sandbox,
+in `Application Support/AutoMobilePrototypeAgent/storage/<id>.json` (`FilePrototypeStorageStore`), never in
+the app's own files or its `UserDefaults` domain; the saved-prototype viewer app uses the same code in its
+own sandbox. Writes are atomic (`Data.write(options: .atomic)`) and the id is percent-encoded into the file
+name, so no id can leave the directory or collide after sanitizing. A file that does not decode (or is far
+over the byte limit) is logged, deleted and treated as nothing stored.
+
+`PrototypeStorageCoordinator` is the only code that touches a `PrototypeStorageStore`. `PrototypeModel.show`
+calls `prepare` first: `PrototypeStorageRestore` (a twin of the host's `restorePrototypeStorage`) applies the
+precedence rules, entries that no longer fit are deleted, and the session receives the restored state and
+data through `PrototypeSession.show(_:restoredState:)` before the first draw, with no `change` event and no
+data revision bump. After every transition the model calls `sessionChanged`; a listed key whose live value
+moved is written on a trailing 400 ms debounce (injected `PrototypeClock`), and a dismissal, the next show,
+`get_prototype_status` and the app entering the background or ending flush at once. A write that would take
+the id over `MAX_PROTOTYPE_STORAGE_BYTES` still applies live, keeps the key's previous stored value and is
+listed in `skippedKeys`. `reset: true` does not clear storage.
+
+`get_prototype_status` (and the standalone `inspect_prototypes` entry) carries a flat
+`storage: {version, keys: [{key, bytes}], totalBytes, skippedKeys?}` for a prototype whose spec declares
+`storage`. `clear_prototype_storage {id}` answers `cleared`, the number of stored keys removed, and leaves the
+shown prototype alone. The iOS saved prototype is its own app, so `deleteSaved` uninstalls the app and its
+sandbox, storage included.
+
 ## Text field options
 
 Text fields render via SwiftUI and require `prototype_text_field_options_v1` for the

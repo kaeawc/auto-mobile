@@ -1,3 +1,4 @@
+import type { WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import type { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import type { HierarchyCapture } from "./HierarchyCapture";
@@ -53,6 +54,7 @@ export interface ObserveScreenDependencies {
   daemonState?: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">;
   deviceStateCollector?: DeviceStateCollector;
   activeWindowAttributionReconciler?: ActiveWindowAttributionReconciler;
+  windowIdentityFreshnessResolver?: WindowIdentityFreshnessResolver;
   iosLockStateProbe?: IosLockStateProbe;
   performanceAuditor?: PerformanceAuditor;
   accessibilityAuditor?: AccessibilityAuditor;

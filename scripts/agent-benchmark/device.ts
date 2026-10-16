@@ -78,7 +78,7 @@ export interface PreflightSpec {
   serial: string;
   packageName: string;
   apkPath?: string;
-  /** Content digest of `apkPath`; identifies the build without the install timestamp. */
+  /** Hex SHA-256 of `apkPath`; identifies the build without the install timestamp. */
   apkDigest?: string;
   clearAppData: boolean;
   /** SharedPreferences files to seed (file name without `.xml` → key/value pairs). */
@@ -179,9 +179,46 @@ export function describeAppBuild(dumpsysOutput: string, apkDigest?: string): str
   const parts = [
     ["versionName", field(/versionName=(\S+)/)],
     ["versionCode", field(/versionCode=(\d+)/)],
-    apkDigest ? ["sha256", apkDigest] : ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
+    apkDigest
+      ? ["sha256", apkDigest.slice(0, 16)]
+      : ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
   ].filter((entry): entry is [string, string] => entry[1] !== undefined);
   return parts.length > 0 ? parts.map(([key, value]) => `${key}=${value}`).join(" ") : "unknown";
+}
+
+/**
+ * Confirm `app.packageName` is now the APK at `apkPath`: an APK for another package
+ * installs fine and leaves a stale target app behind, which the run would then measure
+ * under the new APK's digest. Android keeps the installed base APK byte-identical.
+ */
+async function verifyInstalledApk(
+  runner: CommandRunner,
+  spec: PreflightSpec,
+  pmPath: string,
+): Promise<string> {
+  const basePath = pmPath
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^package:/, ""))
+    .find((path) => path.endsWith("/base.apk"));
+  if (!basePath) {
+    return "could not verify the installed APK: no base.apk in pm path output";
+  }
+  const result = await runner.run(
+    "adb",
+    ["-s", spec.serial, "shell", "sha256sum", shellQuote(basePath)],
+    ADB_TIMEOUT_MS,
+  );
+  const deviceDigest = result.exitCode === 0 ? result.stdout.trim().split(/\s+/)[0] : undefined;
+  if (!deviceDigest) {
+    return `could not verify the installed APK: sha256sum exited ${result.exitCode}`;
+  }
+  if (deviceDigest !== spec.apkDigest) {
+    throw new Error(
+      `${spec.packageName} on ${spec.serial} is not the APK at ${spec.apkPath}; ` +
+        "check that app.apkPath builds app.packageName.",
+    );
+  }
+  return `verified ${spec.packageName} is ${spec.apkPath}`;
 }
 
 export interface PreflightOutcome {
@@ -205,6 +242,9 @@ export async function runPreflight(
   const installed = await adb(runner, [...target, "shell", "pm", "path", spec.packageName]);
   if (!installed.includes("package:")) {
     throw new Error(`${spec.packageName} is not installed on ${spec.serial}; set app.apkPath.`);
+  }
+  if (spec.apkPath && spec.apkDigest) {
+    log.push(await verifyInstalledApk(runner, spec, installed));
   }
   const dumpsys = await adb(runner, [...target, "shell", "dumpsys", "package", spec.packageName]);
   const appBuild = describeAppBuild(dumpsys, spec.apkDigest);

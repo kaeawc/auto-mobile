@@ -37,10 +37,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deviceAllocationClaimPath } from "../../src/daemon/foreignDeviceOwnership";
+import { ForwardLeaseForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { readExclusiveLockContent } from "../../src/utils/fileLock";
-import { isProcessRunning } from "../../src/utils/processLiveness";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { loadSuite, type LoadedSuite } from "./config";
@@ -248,12 +246,18 @@ const realFs: HarnessFs = {
   sha256: (path) => createHash("sha256").update(readFileSync(path)).digest("hex"),
 };
 
+/**
+ * The canonical checker daemons use before allocating a device: the CtrlProxy forwarding
+ * lease, the current and 0.0.84 allocation claims, unreadable claims, and live forwards,
+ * each confirmed against its owner daemon.
+ */
 const realDeviceClaims: DeviceClaims = {
-  liveOwner(serial) {
-    const owner = readExclusiveLockContent(deviceAllocationClaimPath(serial));
-    return owner && Number.isInteger(owner.pid) && isProcessRunning(owner.pid)
-      ? owner.pid
-      : undefined;
+  async foreignOwner(serial) {
+    const ownership = new ForwardLeaseForeignDeviceOwnership();
+    await ownership.refresh([serial]);
+    const pid = ownership.foreignOwnerPid(serial);
+    const unreadable = ownership.foreignClaimUnreadable(serial);
+    return pid === undefined && !unreadable ? undefined : { pid, unreadable };
   },
 };
 

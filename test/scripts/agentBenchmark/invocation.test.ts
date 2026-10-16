@@ -89,6 +89,21 @@ describe("agent benchmark claude invocation", () => {
     expect(fillPlaceholders("{packageName} {packageName}", VALUES)).toBe("dev.example dev.example");
   });
 
+  test("the MCP server env carries only shared claim roots from the inherited env", () => {
+    const config = buildMcpConfig(PATHS, {
+      PATH: "/bin",
+      AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+      AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy",
+      AUTOMOBILE_DB_PATH: "/resident.db",
+    }) as { mcpServers: Record<string, { env: Record<string, string> }> };
+    const env = config.mcpServers["auto-mobile"].env;
+    expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
+    expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy");
+    expect(env.PATH).toBeUndefined();
+    expect(env.AUTOMOBILE_DB_PATH).toBeUndefined();
+    expect(env.AUTOMOBILE_DB_DIR).toBe("/run/db");
+  });
+
   test("the MCP server runs against a private daemon with fresh state", () => {
     expect(buildMcpConfig(PATHS)).toEqual({
       mcpServers: {

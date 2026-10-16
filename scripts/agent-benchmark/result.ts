@@ -8,6 +8,8 @@ export interface BenchmarkResult {
   runDirectory: string;
   startedAt: string;
   deviceSerial: string;
+  /** Digest of the prompt, suite settings, and requested model (see suiteDigest). */
+  suiteDigest: string;
   claude: {
     requestedModel?: string;
     observedModel?: string;

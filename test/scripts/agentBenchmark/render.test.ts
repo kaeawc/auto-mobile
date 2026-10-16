@@ -24,6 +24,7 @@ function result(
     answer?: string[];
     sequence?: string[];
     baselineAppBuild?: string;
+    baselineSuiteDigest?: string;
   } = {},
 ): BenchmarkResult {
   const audit = auditTranscript(builder.build(), {
@@ -42,6 +43,7 @@ function result(
     runDirectory: "/out/demo/20261016T010203Z",
     startedAt: "20261016T010203Z",
     deviceSerial: "emulator-5554",
+    suiteDigest: "suite0123456789a",
     claude: { requestedModel: "m", observedModel: "claude-test-model", version: "2.1.301" },
     preflight: { log: [], durationSeconds: 4, appBuild: "versionName=1.0 versionCode=7" },
     outcome,
@@ -50,9 +52,14 @@ function result(
       audit,
       outcome,
       { answerIncludes: options.answer ?? [], screenIncludes: [] },
-      { totalToolCalls: 2, costUsd: 0.01, appBuild: options.baselineAppBuild },
+      {
+        totalToolCalls: 2,
+        costUsd: 0.01,
+        appBuild: options.baselineAppBuild,
+        suiteDigest: options.baselineSuiteDigest,
+      },
       options.sequence,
-      "versionName=1.0 versionCode=7",
+      { appBuild: "versionName=1.0 versionCode=7", suiteDigest: "suite0123456789a" },
     ),
   };
 }
@@ -139,6 +146,7 @@ describe("agent benchmark rendering", () => {
       costUsd: 0.0123,
       tools: { observe: 1, tapOn: 1 },
       appBuild: "versionName=1.0 versionCode=7",
+      suiteDigest: "suite0123456789a",
     });
     expect(suite.baselineToolSequence).toEqual(["observe", "tapOn"]);
   });
@@ -157,5 +165,19 @@ describe("agent benchmark rendering", () => {
     expect(same.comparison.appBuild?.matches).toBe(true);
     expect(renderReport(same)).not.toContain("baseline was recorded on");
     expect(result(passing()).comparison.appBuild).toBeUndefined();
+  });
+
+  test("a baseline from another suite definition is flagged; a matching one is not", () => {
+    const changed = result(passing(), { baselineSuiteDigest: "older0123456789a" });
+    expect(changed.comparison.suiteDigest).toEqual({
+      baseline: "older0123456789a",
+      current: "suite0123456789a",
+      matches: false,
+    });
+    expect(renderReport(changed)).toContain(
+      "! baseline was recorded with a different prompt or suite settings",
+    );
+    const same = result(passing(), { baselineSuiteDigest: "suite0123456789a" });
+    expect(renderReport(same)).not.toContain("different prompt or suite settings");
   });
 });

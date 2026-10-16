@@ -4,6 +4,7 @@ import { parseSuiteDefinition, type LoadedSuite } from "../../../scripts/agent-b
 import {
   runSuite,
   runTimestamp,
+  suiteDigest,
   type ClaudeLaunchSpec,
   type HarnessDeps,
   type HarnessFs,
@@ -91,7 +92,7 @@ function setup(transcript: string, launchMs = 42_000) {
     runner,
     timer,
     idGenerator: new CountingIdGenerator("run"),
-    deviceClaims: { liveOwner: () => undefined },
+    deviceClaims: { foreignOwner: async () => undefined },
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
@@ -293,17 +294,72 @@ describe("agent benchmark harness", () => {
       MCP_CONNECTION_NONBLOCKING: "1",
       MCP_TOOL_TIMEOUT: "100",
       MAX_THINKING_TOKENS: "0",
+      CLAUDE_CODE_EFFORT_LEVEL: "low",
+      CLAUDE_CODE_DISABLE_THINKING: "1",
+      CLAUDE_CODE_SUBAGENT_MODEL: "haiku",
+      CLAUDE_ADDITIONAL_DIRECTORIES: "/elsewhere",
       ANTHROPIC_API_KEY: "sk-test",
+      ANTHROPIC_MODEL: "provider-model-id",
       CLAUDE_CODE_USE_BEDROCK: "1",
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth",
+      CLAUDE_CODE_HTTPS_PROXY: "http://proxy",
     };
     await runSuite(loadedSuite(), options, deps);
     const env = launches[0].env;
-    expect(env.CLAUDE_CODE_MAX_TURNS).toBeUndefined();
-    expect(env.MCP_CONNECTION_NONBLOCKING).toBeUndefined();
-    expect(env.MCP_TOOL_TIMEOUT).toBeUndefined();
-    expect(env.MAX_THINKING_TOKENS).toBeUndefined();
+    for (const name of [
+      "CLAUDE_CODE_MAX_TURNS",
+      "MCP_CONNECTION_NONBLOCKING",
+      "MCP_TOOL_TIMEOUT",
+      "MAX_THINKING_TOKENS",
+      "CLAUDE_CODE_EFFORT_LEVEL",
+      "CLAUDE_CODE_DISABLE_THINKING",
+      "CLAUDE_CODE_SUBAGENT_MODEL",
+      "CLAUDE_ADDITIONAL_DIRECTORIES",
+    ]) {
+      expect({ name, value: env[name] }).toEqual({ name, value: undefined });
+    }
     expect(env.ANTHROPIC_API_KEY).toBe("sk-test");
+    expect(env.ANTHROPIC_MODEL).toBe("provider-model-id");
     expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth");
+    expect(env.CLAUDE_CODE_HTTPS_PROXY).toBe("http://proxy");
+  });
+
+  test("the suite digest covers the task, not the recorded baseline", () => {
+    const base = suiteDigest(loadedSuite());
+    expect(base).toMatch(/^[0-9a-f]{16}$/);
+    expect(suiteDigest(loadedSuite())).toBe(base);
+    expect(suiteDigest(loadedSuite({ baseline: { totalToolCalls: 9 } }))).toBe(base);
+    expect(suiteDigest({ ...loadedSuite(), apkPath: "/other/checkout/app.apk" })).toBe(base);
+    expect(suiteDigest({ ...loadedSuite(), prompt: "Do something else." })).not.toBe(base);
+    expect(suiteDigest(loadedSuite({ preflight: { launchUri: "example:other" } }))).not.toBe(base);
+    expect(suiteDigest(loadedSuite(), "other-model")).not.toBe(base);
+    expect(suiteDigest(loadedSuite(), "suite-model")).toBe(base);
+  });
+
+  test("the run result and baseline snippet carry the suite digest", async () => {
+    const { fs, deps, options } = setup(PASSING);
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.suiteDigest).toBe(suiteDigest(loadedSuite()));
+    expect(fs.readFile(artifact("baseline.yml"))).toContain(`suiteDigest: ${result.suiteDigest}`);
+  });
+
+  test("an unreadable foreign claim also keeps the device untouched", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    deps.deviceClaims = { foreignOwner: async () => ({ unreadable: true }) };
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
+      /claimed by another AutoMobile session \(an unreadable claim\)/,
+    );
+    expect(runner.adbCalls()).toEqual(["devices"]);
+  });
+
+  test("the MCP config repeats the shared claim root for allowlisted server envs", async () => {
+    const { fs, deps, options } = setup(PASSING);
+    deps.env = { PATH: "/bin", AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy" };
+    await runSuite(loadedSuite(), options, deps);
+    const env = JSON.parse(fs.readFile(artifact("mcp-config.json"))).mcpServers["auto-mobile"].env;
+    expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy");
+    expect(env.PATH).toBeUndefined();
   });
 
   test("runs of one suite in the same second get separate directories", async () => {
@@ -318,7 +374,10 @@ describe("agent benchmark harness", () => {
 
   test("a device claimed by another AutoMobile session is never touched", async () => {
     const { runner, launches, fs, deps, options } = setup(PASSING);
-    deps.deviceClaims = { liveOwner: (serial) => (serial === "emulator-5554" ? 4242 : undefined) };
+    deps.deviceClaims = {
+      foreignOwner: async (serial) =>
+        serial === "emulator-5554" ? { pid: 4242, unreadable: false } : undefined,
+    };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /emulator-5554 is claimed by another AutoMobile session \(pid 4242\)/,
     );

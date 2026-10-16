@@ -6,6 +6,7 @@
  * private-daemon teardown all happen outside it. Tool-call counts come only from
  * Claude's stream-json transcript.
  */
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -62,10 +63,13 @@ export interface HarnessFs {
   sha256(path: string): string;
 }
 
-/** The shared AutoMobile device-allocation claims (the same store every daemon uses). */
+/** Who else holds a device, by the same ownership rules every AutoMobile daemon applies. */
 export interface DeviceClaims {
-  /** PID of a live process holding `serial`'s claim, or undefined when it is free. */
-  liveOwner(serial: string): number | undefined;
+  /**
+   * The foreign owner of `serial`: its PID, or `unreadable` when a claim exists that names
+   * nobody readable. Undefined when the device is free.
+   */
+  foreignOwner(serial: string): Promise<{ pid?: number; unreadable: boolean } | undefined>;
 }
 
 export interface HarnessDeps {
@@ -88,6 +92,27 @@ export interface RunOptions {
   claudeCommand: string;
   deviceSerial?: string;
   modelOverride?: string;
+}
+
+/**
+ * A digest of what the agent was asked to do and how: the raw prompt, every suite setting
+ * except the recorded baseline itself, and the requested model. A baseline taken under a
+ * different digest measured a different task, so its deltas are flagged.
+ */
+export function suiteDigest(suite: LoadedSuite, modelOverride?: string): string {
+  // The suite's own (repo-relative) app.apkPath is in the settings; the resolved absolute
+  // path is not, so operators with different checkouts get the same digest.
+  const settings = Object.fromEntries(
+    Object.entries(suite.definition).filter(
+      ([key]) => key !== "baseline" && key !== "baselineToolSequence",
+    ),
+  );
+  const subject = JSON.stringify({
+    prompt: suite.prompt,
+    settings,
+    model: modelOverride ?? suite.definition.claude.model ?? null,
+  });
+  return createHash("sha256").update(subject).digest("hex").slice(0, 16);
 }
 
 /** `2026-10-16T01:02:03.456Z` → `20261016T010203Z`. */
@@ -154,10 +179,11 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
   // Preflight clears app data, so never touch a device another AutoMobile session holds.
   // (Taking the claim here would block the run's own daemon from claiming it later.)
-  const owner = deps.deviceClaims.liveOwner(serial);
+  const owner = await deps.deviceClaims.foreignOwner(serial);
   if (owner !== undefined) {
+    const holder = owner.pid === undefined ? "an unreadable claim" : `pid ${owner.pid}`;
     throw new Error(
-      `${serial} is claimed by another AutoMobile session (pid ${owner}); stop it before benchmarking.`,
+      `${serial} is claimed by another AutoMobile session (${holder}); stop it before benchmarking.`,
     );
   }
   const startedAt = runTimestamp(deps.timer.now());
@@ -170,7 +196,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     serial,
     packageName: definition.app.packageName,
     apkPath: suite.apkPath,
-    apkDigest: suite.apkPath ? deps.fs.sha256(suite.apkPath).slice(0, 16) : undefined,
+    apkDigest: suite.apkPath ? deps.fs.sha256(suite.apkPath) : undefined,
     clearAppData: definition.preflight.clearAppData,
     sharedPreferences: definition.preflight.sharedPreferences,
     launchUri: definition.preflight.launchUri,
@@ -216,7 +242,10 @@ async function launchClaude(
     runDirectory: run.runDirectory,
   };
   const mcpConfigPath = join(run.runDirectory, "mcp-config.json");
-  deps.fs.writeFile(mcpConfigPath, `${JSON.stringify(buildMcpConfig(run.paths), null, 2)}\n`);
+  deps.fs.writeFile(
+    mcpConfigPath,
+    `${JSON.stringify(buildMcpConfig(run.paths, deps.env), null, 2)}\n`,
+  );
   const prompt = fillPlaceholders(suite.prompt, placeholders);
   deps.fs.writeFile(join(run.runDirectory, "prompt.md"), prompt);
   const args = buildClaudeArgs(
@@ -257,6 +286,7 @@ export async function runSuite(
 ): Promise<BenchmarkResult> {
   const { definition } = suite;
   const { startedAt, prepared } = await prepare(suite, options, deps);
+  const digest = suiteDigest(suite, options.modelOverride);
   const version = await claudeVersion(deps, options.claudeCommand);
   let exit: Awaited<ReturnType<typeof launchClaude>>;
   let screen: { screenText?: string; screenError?: string } = {};
@@ -287,6 +317,7 @@ export async function runSuite(
     runDirectory: prepared.runDirectory,
     startedAt,
     deviceSerial: prepared.serial,
+    suiteDigest: digest,
     claude: {
       requestedModel: options.modelOverride ?? definition.claude.model,
       observedModel: audit.observedModel,
@@ -301,7 +332,7 @@ export async function runSuite(
       definition.verify,
       definition.baseline,
       definition.baselineToolSequence,
-      prepared.preflight.appBuild,
+      { appBuild: prepared.preflight.appBuild, suiteDigest: digest },
     ),
   };
   deps.fs.writeFile(

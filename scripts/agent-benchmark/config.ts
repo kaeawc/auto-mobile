@@ -45,6 +45,8 @@ const baselineSchema = z
     tools: z.record(z.number().int().nonnegative()).optional(),
     /** The preflight app fingerprint the baseline was recorded against. */
     appBuild: z.string().min(1).optional(),
+    /** Digest of the prompt and suite settings the baseline was recorded with. */
+    suiteDigest: z.string().min(1).optional(),
   })
   .strict();
 

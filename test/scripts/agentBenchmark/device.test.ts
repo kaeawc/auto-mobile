@@ -135,6 +135,41 @@ describe("agent benchmark preflight", () => {
     );
   });
 
+  test("an apkPath install is checked against the installed base APK", async () => {
+    const digest = "a".repeat(64);
+    const pmPath = `package:/data/app/~~x/${PACKAGE}-1/base.apk\npackage:/data/app/~~x/${PACKAGE}-1/split_config.en.apk\n`;
+    const matching = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: pmPath })
+      .onAdb("pm clear", { stdout: "Success\n" })
+      .onAdb("sha256sum", { stdout: `${digest}  /data/app/~~x/${PACKAGE}-1/base.apk\n` });
+    const { log } = await runPreflight(
+      matching,
+      preflightSpec({ apkPath: "/repo/app.apk", apkDigest: digest }),
+    );
+    expect(matching.adbCalls()).toContain(
+      `-s emulator-5554 shell sha256sum '/data/app/~~x/${PACKAGE}-1/base.apk'`,
+    );
+    expect(log).toContain(`verified ${PACKAGE} is /repo/app.apk`);
+
+    const stale = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: pmPath })
+      .onAdb("sha256sum", { stdout: `${"b".repeat(64)}  base.apk\n` });
+    await expect(
+      runPreflight(stale, preflightSpec({ apkPath: "/repo/other.apk", apkDigest: digest })),
+    ).rejects.toThrow(/is not the APK at \/repo\/other.apk; check that app.apkPath builds/);
+    expect(stale.adbCalls().some((call) => call.includes("pm clear"))).toBe(false);
+
+    const noSha = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: pmPath })
+      .onAdb("pm clear", { stdout: "Success\n" })
+      .onAdb("sha256sum", { exitCode: 127, stderr: "sha256sum: not found" });
+    const unverified = await runPreflight(
+      noSha,
+      preflightSpec({ apkPath: "/repo/app.apk", apkDigest: digest }),
+    );
+    expect(unverified.log).toContain("could not verify the installed APK: sha256sum exited 127");
+  });
+
   test("a pm clear that does not report Success stops the run before seeding", async () => {
     const runner = new FakeCommandRunner()
       .onAdb("pm path", { stdout: "package:/x.apk" })

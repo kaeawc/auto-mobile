@@ -13,7 +13,7 @@ import {
   androidLifecycleDiscoveryIncomplete,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
   type DeviceToolsDependencies,
-} from "./deviceTools";
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
 import type { BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";

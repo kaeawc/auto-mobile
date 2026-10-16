@@ -365,7 +365,8 @@ test("keyboard forwards the exact request signal", async () => {
   const controller = new AbortController();
   let received: AbortSignal | undefined;
   setKeyboardFactory(() => ({
-    execute: async (_action, signal) => {
+    execute: async (_action, call) => {
+      const signal = (call as ActionCall | undefined)?.signal;
       received = signal;
       throwIfAborted(signal);
       return { success: true, open: false, message: "closed" };

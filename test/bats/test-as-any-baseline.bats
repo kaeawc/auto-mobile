@@ -101,3 +101,32 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"refusing to grow"* ]]
 }
+
+@test "a missing test root fails in check and update mode and leaves the baselines intact" {
+  bash "$SCRIPT" --update
+  before_any="$(cat "$TEST_AS_ANY_BASELINE")"
+  before_unknown="$(cat "${TEST_AS_ANY_BASELINE%.txt}.unknown.txt")"
+  export TEST_AS_ANY_ROOT="$TEST_DIR/does-not-exist"
+  run bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not count"* ]]
+  run bash "$SCRIPT" --update
+  [ "$status" -ne 0 ]
+  [ "$(cat "$TEST_AS_ANY_BASELINE")" = "$before_any" ]
+  [ "$(cat "${TEST_AS_ANY_BASELINE%.txt}.unknown.txt")" = "$before_unknown" ]
+}
+
+@test "an unreadable test file fails in check and update mode and leaves the baselines intact" {
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root can read any file"
+  fi
+  bash "$SCRIPT" --update
+  before_any="$(cat "$TEST_AS_ANY_BASELINE")"
+  chmod 000 "$TEST_AS_ANY_ROOT/a.test.ts"
+  run bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  run bash "$SCRIPT" --update
+  [ "$status" -ne 0 ]
+  chmod 644 "$TEST_AS_ANY_ROOT/a.test.ts"
+  [ "$(cat "$TEST_AS_ANY_BASELINE")" = "$before_any" ]
+}

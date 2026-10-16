@@ -1,5 +1,4 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
-import { restartResumeSessionForDevice, admitRestartReservedStart } from "./deviceToolsStartDevice";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -81,10 +80,25 @@ import { type VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecy
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import { classifyDisplayCutout } from "../utils/displayCutout";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
+import { restartResumeSessionForDevice } from "./deviceToolsStartDevice";
 import {
-  type ActiveProvisionDeviceRequest,
+  ActiveProvisionDeviceRequest,
+  DeviceToolsDependencies,
+  PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+  ProvisionDeviceArgs,
+  ProvisionDeviceCleanup,
+  ProvisionDeviceRollbackError,
+  RecordProvisionDeviceLifecycle,
+  StableDeviceTarget,
+  StartDeviceArgs,
+  TeardownDeviceArgs,
+  TeardownToolResponse,
   activeProvisionDeviceRequests,
+  admitRestartReservedStart,
   attachProvisionDeviceLifecycle,
+  bindUndoneIfUndelivered,
   cancelProvisionDeviceRequest,
   cancelUnownedColdBootUnlessRetryable,
   clearColdBootShutdownMarker,
@@ -100,29 +114,18 @@ import {
   lifecycleForProvisionResponseError,
   lifecycleStateForCleanup,
   parseProvisionDeviceArgs,
-  PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
-  ProvisionDeviceCleanup,
   provisionDeviceDeadlineMs,
   provisionDeviceSchema,
-  ProvisionDeviceRollbackError,
   publishWarmDeviceReady,
-  RecordProvisionDeviceLifecycle,
   reserveStableDeviceLifecycle,
   rethrowDeviceLifecycleReservationFailure,
-  bindUndoneIfUndelivered,
   rollBackUndeliveredBoot,
   runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
-  StableDeviceTarget,
-  TeardownDeviceArgs,
-  TeardownToolResponse,
   validatePooledDeviceMapping,
-  waitForProvisionDeviceSettlement,
   waitForProvisionDeviceRequest,
-} from "./deviceTools";
-import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
-import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
-import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
+  waitForProvisionDeviceSettlement,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 import type { CreatedDeviceRollback } from "./deviceToolsStartDevice";
 
 type ProvisioningHooks = {

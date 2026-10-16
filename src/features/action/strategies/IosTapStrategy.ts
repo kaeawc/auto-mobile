@@ -1,9 +1,17 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
+import type {
+  BootedDevice,
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
-import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
+import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
+import { clipIosChromeBounds } from "../swipeon/iosChromeInsets";
+import { isUsableScreenSize } from "../../utility/ElementGeometry";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -39,6 +47,25 @@ export class IosTapStrategy implements TapStrategy {
     );
     attachRawViewHierarchy(filtered, rawHierarchy);
     return filtered;
+  }
+
+  clipNavigationTapBounds(
+    bounds: ElementBounds,
+    hierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    elements: readonly Element[],
+  ): TapBoundsClip {
+    if (!isUsableScreenSize(screenSize)) {
+      return { bounds };
+    }
+    return clipIosChromeBounds({
+      bounds,
+      hierarchy,
+      screen: screenSize,
+      elements,
+      regions: ["navigation bar"],
+      forTapTarget: true,
+    });
   }
 
   async isAccessibilityServiceEnabled(): Promise<boolean> {

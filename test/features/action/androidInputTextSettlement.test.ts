@@ -5,6 +5,7 @@ import {
   TextRequestState,
   runWithTextRequestContext,
 } from "../../../src/features/action/textTransportTimeout";
+import { INPUT_TEXT_HOST_WAIT_PER_CHAR_MS } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
 import {
   buildAndroidInputTextCommand,
   type KeyEventPlan,
@@ -12,7 +13,7 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeGuestInputAdb } from "../../fakes/FakeGuestInputAdb";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import { android, createSendKeysHarness, observer } from "./SendKeysTestHarness";
 
 test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
@@ -74,8 +75,8 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     if (path === "InputText") {
       expect(state.hasPending()).toBe(true);
     }
+    // API 34: the abort must not reach the host adb client (that would kill `cmd`).
     controller.abort(error);
-    adb.host.reject(error);
     let released = false;
     const followUp = (path === "InputText" ? state.settled() : outcome).then(async () => {
       released = true;
@@ -85,14 +86,13 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     expect(settled).toBe(false);
     expect(released).toBe(false);
     expect(adb.wasCommandExecuted("KEYCODE_ENTER")).toBe(false);
-    expect(adb.cleanupCalls.length).toBeGreaterThan(0);
-    expect(adb.cleanupCalls.every(({ args }) => !args[1].includes("kill "))).toBe(true);
-    await drainUntil(() => timer.getPendingSleepCount() > 0, { description: "guest settlement" });
-    expect(timer.getPendingTimeouts()).toContain(3016);
-    timer.advanceTime(75);
+    expect(adb.cleanupCalls).toEqual([]);
+    expect(timer.getPendingTimeouts()).toContain(3000 + 4 * INPUT_TEXT_HOST_WAIT_PER_CHAR_MS);
+    timer.advanceTime(149);
     await drainMicrotasks(50);
     expect(released).toBe(false);
-    timer.advanceTime(75);
+    expect(adb.isTyping()).toBe(true);
+    timer.advanceTime(1);
     expect(await outcome).toBe(error);
     await followUp;
     expect(released).toBe(true);

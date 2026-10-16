@@ -1458,10 +1458,11 @@ export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
 // =============================================================================
 
 /**
- * Typed builders for every Android control-proxy request with a direct (hand-built) send site.
- * Each returns the {@link CtrlProxyRequest} union member for its command; pass the result to
- * {@link serializeCtrlProxyRequest} to get the wire string. Field order matches the pre-migration
- * send sites so the serialized output is byte-identical.
+ * Typed builders for Android control-proxy requests. Delegates that route through the shared
+ * `sendCommand` path pass the equivalent params and tests pin their frames against these builders;
+ * the remaining direct send sites serialize them with {@link serializeCtrlProxyRequest}.
+ * Each returns the {@link CtrlProxyRequest} union member for its command. Field order matches
+ * the pre-migration send sites so the serialized output is byte-identical.
  *
  * Gesture/text commands are absent by design — see the module doc comment (they go through the
  * shared cross-platform path).

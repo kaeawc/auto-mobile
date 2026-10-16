@@ -18,7 +18,6 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
@@ -88,14 +87,12 @@ export class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvid
     if (options?.forceFresh) {
       this.cache.invalidateCache();
     }
-    return this.viewHierarchy.getViewHierarchy(
-      undefined,
-      new NoOpPerformanceTracker(),
-      false,
-      0,
+    return this.viewHierarchy.getViewHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
       signal,
-      options?.timeoutMs,
-    );
+      timeoutMs: options?.timeoutMs,
+    });
   }
 }
 

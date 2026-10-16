@@ -69,13 +69,7 @@ export function createNotificationUIDetector(
   const deps: AndroidNotificationUIDetectorDeps = {
     executeAdbCommand: (command) => {
       throwIfAborted(signal);
-      return getAdb(device, getDependencies).executeCommand(
-        command,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      return getAdb(device, getDependencies).executeCommand(command, { signal });
     },
     getDeviceTimestampMs: () => {
       throwIfAborted(signal);

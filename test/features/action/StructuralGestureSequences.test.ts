@@ -411,11 +411,9 @@ describe("gesture request sequences", () => {
     const service = {
       requestAction: proxy.requestAction.bind(proxy),
       getAccessibilityHierarchy: async (...args: unknown[]) => {
-        expect(args.slice(0, 4)).toEqual([
+        expect(args.slice(0, 2)).toEqual([
           { query: "Selected", containerElementId: undefined },
-          undefined,
-          undefined,
-          undefined,
+          { disableAllFiltering: false },
         ]);
         calls.push("hierarchy");
         lookup.nextElementByText = element;

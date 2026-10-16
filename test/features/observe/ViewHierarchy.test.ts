@@ -845,13 +845,11 @@ describe("ViewHierarchy", function () {
           mockCtrlProxyClient,
         );
         const controller = new AbortController();
-        const pending = viewHierarchyWithMocks.getViewHierarchy(
-          undefined,
-          undefined,
-          false,
-          0,
-          controller.signal,
-        );
+        const pending = viewHierarchyWithMocks.getViewHierarchy(undefined, {
+          skipWaitForFresh: false,
+          minTimestamp: 0,
+          signal: controller.signal,
+        });
         controller.abort();
 
         await expect(pending).rejects.toThrow("Operation cancelled");
@@ -1865,7 +1863,11 @@ describe("Offscreen Node Filtering", function () {
         timer,
         () => manager,
       );
-      const result = await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      const result = await vh.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1000,
+      });
       expect(result.hierarchy.node).toBeDefined();
       expect(reads).toBe(2);
       expect(healthChecks).toBe(2);
@@ -1887,7 +1889,11 @@ describe("Offscreen Node Filtering", function () {
         },
         waitForAccessibilityServiceBinding: async () => "already-bound",
       }));
-      const result = await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      const result = await vh.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1000,
+      });
       expect(result.hierarchy.error).toBeDefined();
       expect(rebinds).toBe(0);
     });
@@ -2008,7 +2014,11 @@ describe("Offscreen Node Filtering", function () {
         },
       } as unknown as AndroidCtrlProxyClient;
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
-      await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      await vh.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1000,
+      });
       expect(reads).toBe(2);
       expect(timer.now()).toBeLessThanOrEqual(1000);
     });
@@ -2032,7 +2042,11 @@ describe("Offscreen Node Filtering", function () {
         isRecoveryInFlight: () => false,
       } as unknown as AndroidCtrlProxyClient;
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
-      await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      await vh.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1000,
+      });
       expect(waitBudget).toBe(1000 - 800 - MIN_RECOVERY_REFETCH_BUDGET_MS);
       expect(timer.now()).toBeLessThanOrEqual(1000);
     });
@@ -2050,14 +2064,11 @@ describe("Offscreen Node Filtering", function () {
         },
       } as unknown as AndroidCtrlProxyClient;
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
-      await vh.getViewHierarchy(
-        undefined,
-        undefined,
-        false,
-        0,
-        undefined,
-        MIN_RECOVERY_REFETCH_BUDGET_MS - 1,
-      );
+      await vh.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: MIN_RECOVERY_REFETCH_BUDGET_MS - 1,
+      });
       expect([starts, waits]).toEqual([0, 0]);
     });
 

@@ -116,10 +116,22 @@ function stumbleSection(result: BenchmarkResult): string[] {
 }
 
 function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
-  const { appBuild, suiteDigest, observedModel, claudeCodeVersion, deviceFingerprint } = comparison;
+  const {
+    appBuild,
+    serverBuild,
+    suiteDigest,
+    observedModel,
+    claudeCodeVersion,
+    deviceFingerprint,
+  } = comparison;
   return [
     ...(appBuild && !appBuild.matches
       ? [`  ! baseline was recorded on ${appBuild.baseline}; deltas compare different app builds`]
+      : []),
+    ...(serverBuild && !serverBuild.matches
+      ? [
+          `  ! baseline was recorded with AutoMobile server ${serverBuild.baseline}; this run used ${serverBuild.current}`,
+        ]
       : []),
     ...(suiteDigest && !suiteDigest.matches
       ? [
@@ -152,6 +164,7 @@ export function renderReport(result: BenchmarkResult): string {
     `${comparison.verdict.toUpperCase()}  ${result.suite}  ${formatDuration(outcome.wallClockSeconds)}`,
     `  device    ${result.deviceSerial} (preflight ${formatDuration(result.preflight.durationSeconds)}, not measured)`,
     `  app       ${result.preflight.appBuild ?? "unknown"}`,
+    `  server    ${result.serverBuild ?? "unknown"}`,
     `  env       ${result.preflight.device ?? "unknown"}`,
     ...baselineWarnings(comparison),
     `  claude    model=${model} version=${result.claude.version ?? "unknown"}`,
@@ -217,6 +230,7 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
   if (result.preflight.appBuild !== "unknown") {
     baseline.appBuild = result.preflight.appBuild;
   }
+  baseline.serverBuild = result.serverBuild;
   baseline.suiteDigest = result.suiteDigest;
   if (audit.observedModel) {
     baseline.observedModel = audit.observedModel;

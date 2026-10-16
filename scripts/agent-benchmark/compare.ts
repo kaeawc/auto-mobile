@@ -51,6 +51,8 @@ export interface Comparison {
   stumbles: number;
   /** Set when the baseline records the app build it was measured against. */
   appBuild?: FingerprintCheck;
+  /** Set when the baseline records the AutoMobile server bundle it was measured against. */
+  serverBuild?: FingerprintCheck;
   /** Set when the baseline records the suite definition it was measured with. */
   suiteDigest?: FingerprintCheck;
   /** Set when the baseline records the model Claude reported running. */
@@ -70,6 +72,7 @@ export interface FingerprintCheck {
 /** What this run was measured against, checked against the baseline's record of the same. */
 export interface RunFingerprints {
   appBuild?: string;
+  serverBuild?: string;
   suiteDigest?: string;
   claudeCodeVersion?: string;
   deviceFingerprint?: string;
@@ -281,6 +284,7 @@ export function compareRun(
     },
     stumbles: audit.toolErrors + audit.patternMatches.length + audit.permissionDenials.length,
     appBuild: fingerprintCheck(baseline?.appBuild, fingerprints.appBuild),
+    serverBuild: fingerprintCheck(baseline?.serverBuild, fingerprints.serverBuild),
     suiteDigest: fingerprintCheck(baseline?.suiteDigest, fingerprints.suiteDigest),
     observedModel: fingerprintCheck(baseline?.observedModel, audit.observedModel),
     claudeCodeVersion: fingerprintCheck(

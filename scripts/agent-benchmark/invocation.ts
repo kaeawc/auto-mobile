@@ -124,6 +124,7 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_MAX_RETRIES",
   "CLAUDE_CODE_RETRY_WATCHDOG",
   // System prompt and tool set
+  "CLAUDE_CODE_SIMPLE",
   "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
   "CLAUDE_CODE_ENABLE_TASKS",
   // Extra context sources

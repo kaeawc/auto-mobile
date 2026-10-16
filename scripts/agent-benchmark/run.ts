@@ -322,13 +322,22 @@ const realDeviceClaims: DeviceClaims = {
     }
     const releaseLock = () => releaseExclusiveLock(lockPath);
     try {
-      const claim = await claimForBenchmark(serial);
-      if ("refused" in claim) {
+      const first = await claimForBenchmark(serial);
+      if ("refused" in first) {
         releaseLock();
-        return claim;
+        return first;
       }
+      let claim: { release(): void } = first;
       return {
         handOff: () => claim.release(),
+        reclaim: async () => {
+          const again = await claimForBenchmark(serial);
+          if ("refused" in again) {
+            return again.refused;
+          }
+          claim = again;
+          return undefined;
+        },
         release: () => {
           claim.release();
           releaseLock();

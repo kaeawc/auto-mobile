@@ -45,6 +45,8 @@ const baselineSchema = z
     tools: z.record(z.number().int().nonnegative()).optional(),
     /** The preflight app fingerprint the baseline was recorded against. */
     appBuild: z.string().min(1).optional(),
+    /** SHA-256 prefix of the AutoMobile server bundle (`dist/src/index.js`) the run used. */
+    serverBuild: z.string().min(1).optional(),
     /** Digest of the prompt and suite settings the baseline was recorded with. */
     suiteDigest: z.string().min(1).optional(),
     /** The model Claude reported running (stream-json init), not the requested selector. */

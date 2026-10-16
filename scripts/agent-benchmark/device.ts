@@ -10,6 +10,8 @@
 
 import { parseStringPromise } from "xml2js";
 import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
+import { readWindowManagerRotation } from "../../src/utils/android-cmdline-tools/readWindowManagerRotation";
+import type { AdbCommandRunner } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { shellQuote } from "../../src/utils/shellQuote";
 
@@ -291,9 +293,47 @@ async function verifyInstalledApk(
 const DEVICE_PROPERTIES =
   'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; wm size; wm density';
 
+/** The shared WindowManager reader, over this harness's command runner. */
+function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
+  return {
+    async executeCommand(command) {
+      // Commands are "shell <device command line>"; adb runs the rest as one shell line.
+      const [subcommand, ...rest] = command.split(" ");
+      const result = await runner.run(
+        "adb",
+        ["-s", serial, subcommand, rest.join(" ")],
+        ADB_TIMEOUT_MS,
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(`adb ${command} exited ${result.exitCode}: ${result.stderr.trim()}`);
+      }
+      const { stdout, stderr } = result;
+      return {
+        stdout,
+        stderr,
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (text: string) => stdout.includes(text),
+      };
+    },
+  };
+}
+
+/** Live WindowManager rotation (0-3), or undefined when the device cannot report it. */
+async function liveRotation(runner: CommandRunner, serial: string): Promise<string | undefined> {
+  try {
+    const rotation = await readWindowManagerRotation(adbCommands(runner, serial));
+    return rotation === null ? undefined : String(rotation);
+  } catch {
+    // Unreadable rotation leaves the fingerprint "unknown", which never matches a baseline.
+    return undefined;
+  }
+}
+
 /**
  * The device environment a run measured against (SDK level, model, locale, screen size,
- * density), since hierarchy shape, scrolling, and timing all depend on it. Best effort:
+ * density, and live rotation, since `wm size` reports the natural size whatever the
+ * orientation), since hierarchy shape, scrolling, and timing all depend on it. Best effort:
  * a device that cannot answer reports "unknown", which never matches a baseline.
  */
 export async function describeDevice(runner: CommandRunner, serial: string): Promise<string> {
@@ -315,8 +355,9 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["locale", lines[2]],
     ["size", lastValue("size")],
     ["density", lastValue("density")],
+    ["rotation", await liveRotation(runner, serial)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-  return result.exitCode === 0 && parts.length === 5
+  return result.exitCode === 0 && parts.length === 6
     ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
     : "unknown";
 }

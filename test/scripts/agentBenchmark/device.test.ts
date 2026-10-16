@@ -161,18 +161,31 @@ describe("agent benchmark preflight", () => {
   });
 
   test("the device fingerprint reads SDK, model, locale, and the effective size/density", async () => {
-    const runner = new FakeCommandRunner().onAdb("getprop", {
-      stdout:
-        "36\nsdk_gphone64_arm64\nen-US\nPhysical size: 1080x2400\nOverride size: 720x1600\nPhysical density: 420\n",
-    });
+    const runner = new FakeCommandRunner()
+      .onAdb("getprop", {
+        stdout:
+          "36\nsdk_gphone64_arm64\nen-US\nPhysical size: 1080x2400\nOverride size: 720x1600\nPhysical density: 420\n",
+      })
+      .onAdb("dumpsys window displays", { stdout: "  mRotation=1\n" });
     expect(await describeDevice(runner, "emulator-5554")).toBe(
-      "sdk=36 model=sdk_gphone64_arm64 locale=en-US size=720x1600 density=420",
+      "sdk=36 model=sdk_gphone64_arm64 locale=en-US size=720x1600 density=420 rotation=1",
     );
+    // wm size reports the natural size in any orientation, so rotation tells the two apart.
+    runner.onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" });
+    expect(await describeDevice(runner, "emulator-5554")).toContain("rotation=0");
+    runner.onAdb("dumpsys window", { exitCode: 1, stderr: "dumpsys failed" });
+    expect(await describeDevice(runner, "emulator-5554")).toBe("unknown");
     expect(await describeDevice(new FakeCommandRunner(), "emulator-5554")).toBe("unknown");
     // The locale falls back to ro.product.locale on the device, in one line.
-    expect(runner.adbCalls().at(-1)).toContain(
-      'l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"',
-    );
+    expect(
+      runner
+        .adbCalls()
+        .some((call) =>
+          call.includes(
+            'l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"',
+          ),
+        ),
+    ).toBe(true);
   });
 
   test("the app build fingerprint comes from dumpsys package", () => {

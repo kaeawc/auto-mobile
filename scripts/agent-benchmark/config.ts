@@ -58,15 +58,22 @@ const baselineSchema = z
   })
   .strict();
 
+// The tool lists follow a variadic flag, so an entry like "--settings" would be parsed as
+// its own Claude option and could undo run isolation.
+const toolRule = z
+  .string()
+  .min(1)
+  .refine((rule) => !rule.startsWith("-"), "a tool rule cannot start with '-'");
+
 const claudeSchema = z
   .object({
     model: z.string().min(1).optional(),
     appendSystemPrompt: z.string().optional(),
-    allowedTools: z.array(z.string().min(1)).default([`mcp__${MCP_SERVER_NAME}`]),
+    allowedTools: z.array(toolRule).default([`mcp__${MCP_SERVER_NAME}`]),
     // Bash is always denied: raw adb would bypass the MCP server being measured. A suite's
     // own list adds to it rather than replacing it.
     disallowedTools: z
-      .array(z.string().min(1))
+      .array(toolRule)
       .default([])
       .transform((tools) => (tools.includes("Bash") ? tools : ["Bash", ...tools])),
     maxBudgetUsd: z.number().positive().optional(),

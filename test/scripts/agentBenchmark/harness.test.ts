@@ -88,6 +88,7 @@ function setup(transcript: string, launchMs = 42_000) {
     .onAdb("exec-out cat", { stdout: SCREEN })
     .onAdb("dumpsys package", { stdout: "versionCode=7 minSdk=26\n    versionName=1.0\n" })
     .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" })
+    .onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
   const launches: ClaudeLaunchSpec[] = [];
   const claims: string[] = [];
@@ -535,7 +536,9 @@ describe("agent benchmark harness", () => {
     });
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");
-    expect(result.preflight.device).toBe("sdk=36 model=pixel locale=en-US size=1x2 density=3");
+    expect(result.preflight.device).toBe(
+      "sdk=36 model=pixel locale=en-US size=1x2 density=3 rotation=0",
+    );
   });
 
   test("a failed preflight releases the device claim", async () => {

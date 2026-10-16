@@ -233,8 +233,10 @@ async function verifyInstalledApk(
   return `verified ${spec.packageName} is ${spec.apkPath}`;
 }
 
+// persist.sys.locale is unset until someone changes the locale (common on emulators), so
+// fall back to ro.product.locale on the device while still printing exactly one line.
 const DEVICE_PROPERTIES =
-  "getprop ro.build.version.sdk; getprop ro.product.model; getprop persist.sys.locale; wm size; wm density";
+  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; wm size; wm density';
 
 /**
  * The device environment a run measured against (SDK level, model, locale, screen size,

@@ -7,7 +7,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
 5652	src/daemon/daemon.ts
-6524	src/daemon/daemonMcpProxy.ts
+6512	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts

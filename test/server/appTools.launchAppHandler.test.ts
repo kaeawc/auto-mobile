@@ -127,8 +127,8 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     let received: string[] | undefined;
     appTools.configure("launchApp", {
       createLaunchApp: () => ({
-        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
-          received = args;
+        execute: async (_appId, launch) => {
+          received = launch.launchArguments;
           return { success: true, packageName: appId, observation: observationForApp(appId) };
         },
       }),
@@ -146,8 +146,8 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     appTools.configure("launchApp", {
       idGenerator: new CountingIdGenerator("secret"),
       createLaunchApp: () => ({
-        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
-          launches.push(args);
+        execute: async (_appId, launch) => {
+          launches.push(launch.launchArguments);
           return { success: true, packageName: appId };
         },
       }),

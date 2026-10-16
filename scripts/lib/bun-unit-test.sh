@@ -5,7 +5,10 @@
 
 bun_test_timeout_ms() {
   local runner_os="$1"
-  if [[ "$runner_os" == macOS ]]; then
+  # macOS and Windows runners import modules and open files far more slowly than Linux, so a
+  # beforeAll that registers every tool or walks the source tree can pass 5 s (bun applies this
+  # value to hooks as well as tests). The 100 ms unit budget is enforced from JUnit time, not here.
+  if [[ "$runner_os" == macOS || "$runner_os" == Windows ]]; then
     printf '%s\n' "${AUTOMOBILE_TEST_TIMEOUT_MS:-20000}"
   else
     printf '%s\n' "${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}"

@@ -8,6 +8,21 @@ import org.junit.Test
 
 class HierarchyPerformanceTest {
 
+  /**
+   * Best wall-clock time of [rounds] runs after one discarded warm-up run. A single cold run folds
+   * JIT compilation and Gradle test-worker contention into the number, so the 100ms budgets below
+   * flaked on loaded CI runners; the minimum of several runs still fails on a real regression
+   * because a slower algorithm is slower in every round.
+   */
+  private fun bestOfMs(rounds: Int = 5, block: () -> Unit): Long {
+    block()
+    return (1..rounds).minOf {
+      val start = System.nanoTime()
+      block()
+      (System.nanoTime() - start) / 1_000_000
+    }
+  }
+
   // Helper to build a tree of given depth and branching factor
   private fun buildTree(depth: Int, branching: Int, prefix: String = "node"): UIElementInfo {
     var counter = 0
@@ -232,9 +247,8 @@ class HierarchyPerformanceTest {
   fun `large tree buildParsedHierarchy is fast`() {
     // 3-branching tree of depth 8 = ~9841 nodes
     val root = buildTree(depth = 8, branching = 3)
-    val start = System.nanoTime()
-    val parsed = buildParsedHierarchy(root)
-    val durationMs = (System.nanoTime() - start) / 1_000_000
+    lateinit var parsed: ParsedHierarchy
+    val durationMs = bestOfMs { parsed = buildParsedHierarchy(root) }
 
     assertTrue(parsed.elementMap.size > 1000, "Tree should have >1000 nodes")
     assertTrue(
@@ -251,11 +265,9 @@ class HierarchyPerformanceTest {
     // Find a deep leaf
     val deepLeaf = parsed.elementMap.values.maxByOrNull { it.depth }!!
 
-    val start = System.nanoTime()
-    repeat(10_000) {
-      getPathFromParentMap(parsed.parentMap, deepLeaf.id)
+    val durationMs = bestOfMs {
+      repeat(10_000) { getPathFromParentMap(parsed.parentMap, deepLeaf.id) }
     }
-    val durationMs = (System.nanoTime() - start) / 1_000_000
 
     assertTrue(durationMs < 100, "10k path lookups should complete in <100ms, took ${durationMs}ms")
   }
@@ -263,9 +275,7 @@ class HierarchyPerformanceTest {
   @Test
   fun `large tree computeMatchingIds is fast`() {
     val root = buildTree(depth = 8, branching = 3)
-    val start = System.nanoTime()
-    computeMatchingIds(root, "View")
-    val durationMs = (System.nanoTime() - start) / 1_000_000
+    val durationMs = bestOfMs { computeMatchingIds(root, "View") }
 
     assertTrue(
       durationMs < 100,

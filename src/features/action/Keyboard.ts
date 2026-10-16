@@ -32,6 +32,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
 import { keyboardNodeClickTargetError } from "./keyboardNodeClickTarget";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -212,7 +213,14 @@ export class Keyboard {
     }
   }
 
-  async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
+  async execute(action: KeyboardAction, call?: ActionCall): Promise<KeyboardResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult>;
+  async execute(
+    action: KeyboardAction,
+    signalOrCall?: AbortSignal | ActionCall,
+  ): Promise<KeyboardResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     throwIfAborted(signal);
     if (this.device.platform === "ios") {
       return this.executeIOS(action, signal);

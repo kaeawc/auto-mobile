@@ -55,17 +55,7 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
   appTools.configure("launchApp", {
     prototypeViewerAttacher: viewerAttacher,
     createLaunchApp: () => ({
-      execute: async (
-        appId,
-        _clear,
-        coldBoot,
-        _activity,
-        _user,
-        _skip,
-        _signal,
-        _args,
-        launchEnvironment,
-      ) => {
+      execute: async (appId, { coldBoot, launchEnvironment }) => {
         launches.push({ coldBoot: coldBoot ?? false, launchEnvironment });
         return (
           options.launchResult ?? { success: true, packageName: appId, pid: 4321, observation }

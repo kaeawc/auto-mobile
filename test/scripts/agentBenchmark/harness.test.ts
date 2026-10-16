@@ -8,6 +8,7 @@ import {
   type HarnessDeps,
   type HarnessFs,
 } from "../../../scripts/agent-benchmark/harness";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCommandRunner } from "./fakeCommandRunner";
 import { TranscriptBuilder } from "./transcriptBuilder";
@@ -16,7 +17,7 @@ const START_MS = Date.UTC(2026, 9, 16, 1, 2, 3);
 const DEVICES = "List of devices attached\nemulator-5554\tdevice\n";
 const SCREEN = '<hierarchy><node text="Expected count: 3"/><node text="A &amp; B"/></hierarchy>';
 // The harness builds paths with path.join, so expectations do too (Windows unit lane).
-const RUN_DIR = join("/out", "demo", "20261016T010203Z");
+const RUN_DIR = join("/out", "demo", "20261016T010203Z-run-1");
 const artifact = (...parts: string[]) => join(RUN_DIR, ...parts);
 
 class MemoryFs implements HarnessFs {
@@ -83,6 +84,7 @@ function setup(transcript: string, launchMs = 42_000) {
   const deps: HarnessDeps = {
     runner,
     timer,
+    idGenerator: new CountingIdGenerator("run"),
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
@@ -131,15 +133,21 @@ describe("agent benchmark harness", () => {
     });
 
     const [launch] = launches;
-    expect(launch.cwd).toBe(RUN_DIR);
+    expect(launch.cwd).toBe("/tmp/amb-cwd-test");
     expect(launch.stdin).toBe("Do it on emulator-5554.");
     expect(launch.args).toContain("suite-model");
     expect(launch.timeoutMs).toBe(60_000);
     expect(launch.env).toEqual({
       PATH: "/bin",
+      AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-test",
+      AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
+      AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",
+      AUTOMOBILE_DB_DIR: artifact("db"),
+      AUTOMOBILE_LOG_DIR: artifact("logs"),
       AUTOMOBILE_AGENT_BENCH_SERIAL: "emulator-5554",
       AUTOMOBILE_AGENT_BENCH_RUN_DIR: RUN_DIR,
     });
+    expect(JSON.parse(fs.readFile(artifact("claude-command.json"))).cwd).toBe("/tmp/amb-cwd-test");
 
     const mcpConfig = JSON.parse(fs.readFile(artifact("mcp-config.json")));
     expect(mcpConfig.mcpServers["auto-mobile"].env.AUTOMOBILE_AUX_SOCKET_DIR).toBe("/tmp/amb-test");
@@ -154,7 +162,7 @@ describe("agent benchmark harness", () => {
     expect(stop?.command).toBe("/usr/bin/bun");
     expect(stop?.args).toEqual(["/repo/dist/src/index.js", "--daemon", "stop"]);
     expect(stop?.env?.AUTOMOBILE_AUX_SOCKET_DIR).toBe("/tmp/amb-test");
-    expect(fs.removed).toEqual(["/tmp/amb-test"]);
+    expect(fs.removed).toEqual(["/tmp/amb-test", "/tmp/amb-cwd-test"]);
   });
 
   test("a failed verification keeps artifacts but writes no baseline snippet", async () => {
@@ -183,7 +191,7 @@ describe("agent benchmark harness", () => {
     };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(/ENOENT/);
     expect(runner.calls.some((call) => call.args.includes("--daemon"))).toBe(true);
-    expect(fs.removed).toEqual(["/tmp/amb-test"]);
+    expect(fs.removed).toEqual(["/tmp/amb-test", "/tmp/amb-cwd-test"]);
   });
 
   test("a missing transcript makes the run incomplete rather than throwing", async () => {
@@ -204,5 +212,37 @@ describe("agent benchmark harness", () => {
     expect(result.claude.version).toBeUndefined();
     expect(logs).toContain("private daemon stop exited 3: no daemon");
     expect(logs).toContain("claude --version failed: spawn claude ENOENT");
+  });
+
+  test("inherited state overrides never reach Claude, the server, or the daemon stop", async () => {
+    const { runner, launches, deps, options } = setup(PASSING);
+    deps.env = {
+      PATH: "/bin",
+      AUTOMOBILE_DB_PATH: "/home/me/.auto-mobile/auto-mobile.db",
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/resident.sock",
+      AUTOMOBILE_DAEMON_PID_FILE_PATH: "/tmp/resident.pid",
+      AUTO_MOBILE_DB_DIR: "/home/me/legacy-db",
+      AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+    };
+    await runSuite(loadedSuite(), options, deps);
+    const stop = runner.calls.find((call) => call.args.includes("--daemon"));
+    for (const env of [launches[0].env, stop?.env ?? {}]) {
+      expect(env.AUTOMOBILE_DB_PATH).toBeUndefined();
+      expect(env.AUTOMOBILE_DAEMON_SOCKET_PATH).toBeUndefined();
+      expect(env.AUTOMOBILE_DAEMON_PID_FILE_PATH).toBeUndefined();
+      expect(env.AUTO_MOBILE_DB_DIR).toBeUndefined();
+      expect(env.AUTOMOBILE_DB_DIR).toBe(artifact("db"));
+      expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
+    }
+  });
+
+  test("runs of one suite in the same second get separate directories", async () => {
+    const first = setup(PASSING);
+    const second = setup(PASSING);
+    second.deps.idGenerator = first.deps.idGenerator;
+    const a = await runSuite(loadedSuite(), first.options, first.deps);
+    const b = await runSuite(loadedSuite(), second.options, second.deps);
+    expect(a.startedAt).toBe(b.startedAt);
+    expect(a.runDirectory).not.toBe(b.runDirectory);
   });
 });

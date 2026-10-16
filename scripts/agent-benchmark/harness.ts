@@ -7,6 +7,7 @@
  * Claude's stream-json transcript.
  */
 import { join } from "node:path";
+import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { compareRun } from "./compare";
@@ -22,7 +23,7 @@ import {
   buildClaudeArgs,
   buildMcpConfig,
   fillPlaceholders,
-  privateServerEnv,
+  isolatedServerEnv,
   systemPromptFor,
   type ServerPaths,
 } from "./invocation";
@@ -53,7 +54,7 @@ export interface HarnessFs {
   writeFile(path: string, content: string): void;
   readFile(path: string): string;
   exists(path: string): boolean;
-  /** Create a short private temp directory (daemon aux sockets live here). */
+  /** Create a short private temp directory outside the repository. */
   makeTempDir(prefix: string): string;
   remove(path: string): void;
 }
@@ -62,6 +63,8 @@ export interface HarnessDeps {
   runner: CommandRunner;
   launcher: ClaudeLauncher;
   timer: Timer;
+  /** Suffixes run directories so same-second runs of one suite never share one. */
+  idGenerator: IdGenerator;
   fs: HarnessFs;
   /** Progress lines; the CLI sends these to stderr so `--json` stdout stays clean. */
   log(line: string): void;
@@ -85,12 +88,6 @@ export function runTimestamp(epochMs: number): string {
     .replace(/\.\d+Z$/, "Z");
 }
 
-function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
-}
-
 async function claudeVersion(deps: HarnessDeps, command: string): Promise<string | undefined> {
   try {
     const result = await deps.runner.run(command, ["--version"], VERSION_TIMEOUT_MS);
@@ -103,7 +100,9 @@ async function claudeVersion(deps: HarnessDeps, command: string): Promise<string
 }
 
 async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: ServerPaths) {
-  const env = { ...definedEnv(deps.env), ...privateServerEnv(paths) };
+  // The same sanitized environment as the run, so an inherited socket or PID override
+  // can never point this stop at the resident daemon.
+  const env = isolatedServerEnv(deps.env, paths);
   try {
     const result = await deps.runner.run(
       options.runtime,
@@ -133,6 +132,8 @@ async function screenAfterRun(deps: HarnessDeps, serial: string, runDirectory: s
 
 interface PreparedRun {
   runDirectory: string;
+  /** Claude's cwd: outside the repository so no ancestor CLAUDE.md or skills load. */
+  claudeCwd: string;
   paths: ServerPaths;
   serial: string;
   preflight: BenchmarkResult["preflight"];
@@ -142,7 +143,8 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   const { definition } = suite;
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
   const startedAt = runTimestamp(deps.timer.now());
-  const runDirectory = join(options.outputRoot, definition.name, startedAt);
+  const runId = deps.idGenerator.next().slice(0, 8);
+  const runDirectory = join(options.outputRoot, definition.name, `${startedAt}-${runId}`);
   deps.fs.mkdir(runDirectory);
   const preflightStart = deps.timer.now();
   deps.log(`[${definition.name}] preflight on ${serial}`);
@@ -174,6 +176,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   deps.fs.mkdir(paths.logDir);
   const prepared: PreparedRun = {
     runDirectory,
+    claudeCwd: deps.fs.makeTempDir("amb-cwd-"),
     paths,
     serial,
     preflight: { log, durationSeconds },
@@ -205,16 +208,16 @@ async function launchClaude(
   );
   deps.fs.writeFile(
     join(run.runDirectory, "claude-command.json"),
-    `${JSON.stringify({ command: options.claudeCommand, args, cwd: run.runDirectory }, null, 2)}\n`,
+    `${JSON.stringify({ command: options.claudeCommand, args, cwd: run.claudeCwd }, null, 2)}\n`,
   );
   deps.log(`[${definition.name}] running claude (timeout ${definition.claude.timeoutSeconds}s)`);
   const start = deps.timer.now();
   const exit = await deps.launcher.launch({
     command: options.claudeCommand,
     args,
-    cwd: run.runDirectory,
+    cwd: run.claudeCwd,
     env: {
-      ...definedEnv(deps.env),
+      ...isolatedServerEnv(deps.env, run.paths),
       AUTOMOBILE_AGENT_BENCH_SERIAL: run.serial,
       AUTOMOBILE_AGENT_BENCH_RUN_DIR: run.runDirectory,
     },
@@ -244,6 +247,7 @@ export async function runSuite(
   } finally {
     await stopPrivateDaemon(deps, options, prepared.paths);
     deps.fs.remove(prepared.paths.auxSocketDir);
+    deps.fs.remove(prepared.claudeCwd);
   }
   const transcriptPath = join(prepared.runDirectory, "claude.jsonl");
   const audit = auditTranscript(

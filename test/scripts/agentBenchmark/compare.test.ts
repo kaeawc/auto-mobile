@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   compareRun,
+  containsBounded,
   diffToolSequence,
   type RunOutcome,
 } from "../../../scripts/agent-benchmark/compare";
@@ -173,5 +174,40 @@ describe("compareRun verdict", () => {
       .result();
     const result = compareRun(audit(builder), OK_OUTCOME, NO_VERIFY, undefined, ["observe"]);
     expect(result.sequenceDiff).toMatchObject({ missing: 0, extra: 0 });
+  });
+});
+
+describe("verification text matching", () => {
+  test("values must end at a boundary, so a prefix of a larger number never matches", () => {
+    expect(containsBounded("EXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2", "expected_count: 3")).toBe(
+      true,
+    );
+    expect(containsBounded("EXPECTED_COUNT: 30", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("XEXPECTED_COUNT: 3", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded('<node text="Expected count: 3" />', "Expected count: 3")).toBe(true);
+    expect(
+      containsBounded("Step 3: Summary and completion.", "Step 3: Summary and completion"),
+    ).toBe(true);
+    expect(containsBounded("a (b) [c] 1.5", "(b) [c] 1.5")).toBe(true);
+  });
+
+  test("an over-tapped run fails both the answer and the screen check", () => {
+    const run = new TranscriptBuilder()
+      .init()
+      .mcp("tapOn")
+      .result({ finalText: "EXPECTED_COUNT: 30\nDISPLAYED_COUNT: 20" });
+    const result = compareRun(
+      audit(run),
+      { ...OK_OUTCOME, screenText: "Expected count: 30" },
+      {
+        answerIncludes: ["EXPECTED_COUNT: 3", "DISPLAYED_COUNT: 2"],
+        screenIncludes: ["Expected count: 3"],
+      },
+    );
+    expect(result.verdict).toBe("failed");
+    expect(result.checks.filter((check) => !check.passed).map((check) => check.name)).toEqual([
+      "final answer",
+      "device screen",
+    ]);
   });
 });

@@ -37,6 +37,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { loadSuite, type LoadedSuite } from "./config";
 import type { CommandRunner } from "./device";
@@ -183,6 +184,9 @@ function createLauncher(timer: Timer): ClaudeLauncher {
         env: spec.env,
         stdio: ["pipe", stdout, stderr],
       });
+      // Claude can exit before reading stdin (bad flag, auth failure); the resulting
+      // EPIPE must not crash the CLI. The child close/error handlers settle the run.
+      child.stdin.on("error", () => undefined);
       child.stdin.end(spec.stdin);
       let timedOut = false;
       let killHandle: NodeJS.Timeout | undefined;
@@ -325,6 +329,7 @@ async function main(argv: string[]): Promise<number> {
     runner: realRunner,
     launcher: createLauncher(defaultTimer),
     timer: defaultTimer,
+    idGenerator: defaultIdGenerator,
     fs: realFs,
     log: (line) => console.error(line),
     env: process.env,

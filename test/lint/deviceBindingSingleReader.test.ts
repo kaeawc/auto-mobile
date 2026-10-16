@@ -66,7 +66,7 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Restart-resume admission target records.
   "src/server/deviceToolsStartDevice.ts": 1,
   // deviceStateResult is a PromiseSettledResult from an ADB command.
-  "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": 2,
+  "src/utils/android-cmdline-tools/EmulatorReadinessPoller.ts": 2,
 };
 
 function memberName(node: MemberExpression): string | undefined {

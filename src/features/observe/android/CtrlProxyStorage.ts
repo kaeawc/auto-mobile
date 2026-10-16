@@ -21,7 +21,7 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
-import { generateSecureId } from "./types";
+import { createTimestampedId } from "../../../utils/IdGenerator";
 import {
   ctrlProxyRequests,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,
@@ -96,7 +96,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `list_preference_files_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "list_preference_files",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<ListPreferenceFilesResult>(
@@ -164,7 +168,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `get_preferences_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "get_preferences",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<GetPreferencesResult>(
@@ -334,7 +342,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `list_data_stores_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "list_data_stores",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       const resultPromise = this.context.requestManager.register<ListPreferenceFilesResult>(
         requestId,
@@ -400,7 +412,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `get_data_store_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "get_data_store",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       const resultPromise = this.context.requestManager.register<GetPreferencesResult>(
         requestId,
@@ -463,7 +479,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `subscribe_storage_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "subscribe_storage",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<SubscribeStorageResult>(
@@ -525,7 +545,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `unsubscribe_storage_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "unsubscribe_storage",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<UnsubscribeStorageResult>(
@@ -622,7 +646,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `get_preference_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "get_preference",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<GetPreferenceResult>(
@@ -695,7 +723,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `set_preference_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "set_preference",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<SetPreferenceResult>(
@@ -771,7 +803,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `remove_preference_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "remove_preference",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<RemovePreferenceResult>(
@@ -840,7 +876,11 @@ export class CtrlProxyStorage {
         throw new Error("Failed to connect to accessibility service");
       }
 
-      const requestId = `clear_preferences_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "clear_preferences",
+        this.context.timer,
+        this.context.idGenerator,
+      );
 
       // Create promise that will be resolved when we receive the result
       const resultPromise = this.context.requestManager.register<ClearPreferencesResult>(

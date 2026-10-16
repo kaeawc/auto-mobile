@@ -61,4 +61,4 @@ export type {
 } from "../shared/types";
 
 // Utility functions
-export { generateSecureId, quoteForAdbArg } from "./types";
+export { quoteForAdbArg } from "./types";

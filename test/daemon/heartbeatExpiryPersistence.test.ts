@@ -29,13 +29,10 @@ test.each([[60_000, "monitor"]] as const)(
     );
 
     try {
-      await manager.createSession(
-        "heartbeat-expired",
-        "emulator-5554",
-        "android",
-        idleTimeoutMs,
-        1_000,
-      );
+      await manager.createSession("heartbeat-expired", "emulator-5554", "android", {
+        timeoutMs: idleTimeoutMs,
+        heartbeatTimeoutMs: 1_000,
+      });
       manager.recordHeartbeat("heartbeat-expired");
       monitor.start();
 
@@ -82,7 +79,10 @@ test("idle expiry before the heartbeat lease lapses keeps its idle diagnostic", 
   const persistence = new FakeDeviceSessionPersistence();
   const manager = new SessionManager(timer, persistence);
   try {
-    await manager.createSession("idle-expired", "emulator-5554", "android", 1_000, 10_000);
+    await manager.createSession("idle-expired", "emulator-5554", "android", {
+      timeoutMs: 1_000,
+      heartbeatTimeoutMs: 10_000,
+    });
     manager.recordHeartbeat("idle-expired");
     timer.advanceTime(11_001);
 
@@ -103,7 +103,10 @@ test("an idle window as short as the lease releases at the idle deadline, withou
   const persistence = new FakeDeviceSessionPersistence();
   const manager = new SessionManager(timer, persistence);
   try {
-    await manager.createSession("idle-at-deadline", "emulator-5554", "android", 1_000, 1_000);
+    await manager.createSession("idle-at-deadline", "emulator-5554", "android", {
+      timeoutMs: 1_000,
+      heartbeatTimeoutMs: 1_000,
+    });
     manager.recordHeartbeat("idle-at-deadline");
     timer.advanceTime(1_000);
     expect(manager.getSession("idle-at-deadline")).not.toBeNull();
@@ -130,7 +133,10 @@ test.each(["lookup", "sweep"])(
     const persistence = new FakeDeviceSessionPersistence();
     const manager = new SessionManager(timer, persistence);
     try {
-      await manager.createSession("lease-lapsed", "emulator-5554", "android", 1_000, 1_000);
+      await manager.createSession("lease-lapsed", "emulator-5554", "android", {
+        timeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+      });
       manager.recordHeartbeat("lease-lapsed");
       timer.advanceTime(1_000 + SUSPECT_GRACE_MS + 1);
 

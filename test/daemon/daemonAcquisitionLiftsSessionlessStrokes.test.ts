@@ -37,9 +37,11 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
     restores.push(() => appearance.mockRestore());
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
   });
 

@@ -50,7 +50,7 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
       },
       timer,
     );
-    await manager.createSession(SESSION, DEVICE, "android", 60_000);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     manager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS);
     monitor.start();
   });

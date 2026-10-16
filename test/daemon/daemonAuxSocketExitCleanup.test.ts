@@ -28,7 +28,7 @@ describe("daemon auxiliary socket exit cleanup", () => {
   function makeDaemon(): { daemon: Daemon; pidFilePath: string } {
     directory = mkdtempSync(join(tmpdir(), "daemon-aux-exit-"));
     testOverrides.auxSocketDir = directory;
-    const daemon = new Daemon({}, undefined, new FakeTimer());
+    const daemon = new Daemon({}, { timer: new FakeTimer() });
     daemon["socketBindCommitted"] = true;
     daemon["pidFileWritten"] = true;
     const pidFilePath = join(directory, "contender.pid");

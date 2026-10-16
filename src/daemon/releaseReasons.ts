@@ -302,6 +302,24 @@ export function outranksReleaseReason(candidate: string, current: string): boole
 }
 
 /**
+ * The reason one release carries once `candidate` is also requested for it. `device-killed` always
+ * wins and is never displaced; `daemon-shutdown` replaces any non-terminal reason; every other
+ * candidate follows {@link outranksReleaseReason}. The one place this precedence lives.
+ */
+export function resolveReleaseReason(current: string, candidate: string): string {
+  if (candidate === "device-killed") {
+    return candidate;
+  }
+  if (current === "device-killed") {
+    return current;
+  }
+  if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(current)) {
+    return candidate;
+  }
+  return outranksReleaseReason(candidate, current) ? candidate : current;
+}
+
+/**
  * Whether a call naming the UUID may issue the session again: the recoverable reasons plus
  * `plan-auto-release` (see {@link SessionReleaseReasonTraits.reissuableByName}). The one
  * admission, claim and claimed-row-fence predicate; startup rehydration and the recoverable list

@@ -152,6 +152,9 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceToolsStartDevice.ts#callerMayReuse": 1,
   "index.ts#executeToolCallBody": 1,
   "index.ts#foreignOwnedExplicitSessionUuid": 1,
+  "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
+  "pipeline/planLifecycle.ts#getCleanupDevices": 1,
+  "pipeline/planLifecycle.ts#releasePlanBaseSession": 1,
   "planDeviceOwnership.ts#ownsDevice": 1,
   "planExecutionOrchestrator.ts#brokerGrantedLabelDevices": 1,
   "planExecutionOrchestrator.ts#buildDeviceMapping": 1,
@@ -169,9 +172,6 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "setActiveDevice.ts#bindRequestedDevice": 1,
   "setActiveDevice.ts#refuseForeignOwnedSession": 1,
   "setActiveDevice.ts#restorePriorDisplayPin": 1,
-  "toolRegistry.ts#getCleanupDevices": 1,
-  "toolRegistry.ts#refuseControlCallBeforeAdmission": 1,
-  "toolRegistry.ts#releasePlanBaseSession": 1,
   "webrtcStreamManager.ts#isDaemonSessionLive": 1,
 };
 

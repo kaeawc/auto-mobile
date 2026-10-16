@@ -112,7 +112,7 @@ import {
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
-import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
+import { dispatchAndroidLongPress } from "./androidLongPress";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -628,43 +628,15 @@ export class TapAnyElement extends BaseVisualChange {
   ): Promise<void> {
     const fence = resolveDisplayFence(fenceOptions);
     throwIfAborted(signal);
-    try {
-      // Match tapOn's touchscreen source and retain the generic input fallback.
-      try {
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence.assertCurrent();
-        const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-        const result = await this.adb.executeCommand(command, {
-          timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-          signal,
-        });
-        assertTouchscreenInputSucceeded(command, result);
-        return;
-      } catch (error) {
-        logger.warn(`[TapAnyElement] touch input swipe failed: ${errorMessage(error)}`, error);
-        this.throwIfLongPressInterrupted(error, durationMs, signal);
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-      }
-      // Only a non-cancellation failure may use the legacy input source.
-      fence.assertCurrent();
-      const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-      const result = await this.adb.executeCommand(command, {
-        timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-        signal,
-      });
-      assertTouchscreenInputSucceeded(command, result);
-      return;
-    } catch (error) {
-      logger.warn(`[TapAnyElement] Android long press failed: ${errorMessage(error)}`, error);
-      this.throwIfLongPressInterrupted(error, durationMs, signal);
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throw toActionableError(error, "Android long press failed");
-    }
+    await dispatchAndroidLongPress({
+      adb: this.adb,
+      x,
+      y,
+      durationMs,
+      signal,
+      assertCurrent: () => fence.assertCurrent(),
+      logTag: "TapAnyElement",
+    });
   }
 
   private throwIfLongPressInterrupted(

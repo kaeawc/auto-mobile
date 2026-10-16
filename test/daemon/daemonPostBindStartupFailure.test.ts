@@ -37,9 +37,11 @@ describe("Daemon post-bind startup failure (#11156)", () => {
   function startableDaemon(timer: FakeTimer, failure: { prebind?: Error; postbind?: Error }) {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const phases = daemon as unknown as DaemonStartPhases;
     const exitFiles = new FakeDaemonExitRecordFileSystem();

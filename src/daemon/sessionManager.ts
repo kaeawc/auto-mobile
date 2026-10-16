@@ -115,6 +115,9 @@ import {
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { RELEASE_PERSIST_TIMEOUT_REASON, SessionReleasePersistTimeoutError } from "./releaseErrors";
+import { UNATTACHED, assertCollaboratorsAttached } from "./daemonAttachedCollaborators";
+export * from "./releaseErrors";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
@@ -186,6 +189,7 @@ import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
+  resolveReleaseReason,
   IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
@@ -694,23 +698,6 @@ export interface SessionReleaseSnapshot {
     timeoutMs: number;
     ageMs: number;
   };
-}
-
-/** A release's `markReleased` write did not settle within its deadline (#10836). */
-export class SessionReleasePersistTimeoutError extends ActionableError {
-  readonly reason = RELEASE_PERSIST_TIMEOUT_REASON;
-
-  constructor(
-    readonly sessionId: string,
-    readonly releaseReason: string,
-    readonly timeoutMs: number,
-  ) {
-    super(
-      `Persisting the ${releaseReason} release of session ${sessionId} did not finish within ` +
-        `${timeoutMs}ms (reason=${RELEASE_PERSIST_TIMEOUT_REASON}).`,
-    );
-    this.name = "SessionReleasePersistTimeoutError";
-  }
 }
 
 /**
@@ -1263,6 +1250,23 @@ function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRec
   );
 }
 
+/** Optional inputs to {@link SessionManager.createSession}. */
+export interface CreateSessionOptions {
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  stableDeviceId?: string;
+  recoveredLiveness?: SessionRecoveryLiveness;
+  initialOwnership?: "owned" | "awaiting-owner";
+  /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
+  persistenceSource?: string;
+}
+
+function withCreateSessionDefaults(
+  options: CreateSessionOptions,
+): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
+  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
+}
+
 export interface RebindSessionOptions {
   /**
    * The runtime behind the same device ID restarted, so device-scoped session
@@ -1406,8 +1410,6 @@ export function getSessionReleaseCleanupWorstCaseMs(
 }
 
 export type { AbandonablePendingDeviceCleanup } from "./deviceCleanupQuarantine";
-/** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
-export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 /**
  * Bound on a session creation's own waits (#10963): a release of the same UUID still in flight,
  * and the creation's DB reads and writes. A device bind runs these under the pool's assignment
@@ -1823,6 +1825,17 @@ export class SessionManager {
   /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
   setSupersededRowReassertBackoff(backoff: BackoffPolicy): void {
     this.supersededRowReassertBackoff = backoff;
+  }
+
+  /** Throws unless the daemon attached every late collaborator (their defaults are silent no-ops). */
+  assertDaemonCollaboratorsAttached(): void {
+    assertCollaboratorsAttached("SessionManager", {
+      daemonSessionId: this.daemonSessionId,
+      activeSessionExecutionChecker: this.activeSessionExecutionChecker,
+      sessionExecutionDeadlineLookup: this.sessionExecutionDeadlineLookup,
+      expiryReleaseExecutionCanceller: this.expiryReleaseExecutionCanceller,
+      deviceAcquisitionExecutionCanceller: this.deviceAcquisitionExecutionCanceller,
+    });
   }
 
   /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
@@ -2619,15 +2632,18 @@ export class SessionManager {
     }
   }
 
-  private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  private activeSessionExecutionChecker: ActiveSessionExecutionChecker =
+    UNATTACHED.activeSessionExecutionChecker;
   private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
   private ownerConnectedAtReader?: OwnerConnectedAtReader;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
-  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
+  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup =
+    UNATTACHED.sessionExecutionDeadlineLookup;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
-  private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller = () => undefined;
-  private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller = () =>
-    undefined;
+  private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller =
+    UNATTACHED.expiryReleaseExecutionCanceller;
+  private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller =
+    UNATTACHED.deviceAcquisitionExecutionCanceller;
   // Session ids whose acquisition cancellation waits for the pool to commit the create (#10905):
   // a create can still be refused or rolled back after publish. Value: the device it published.
   private readonly deferredAcquisitionCancellations = new Map<string, string | undefined>();
@@ -3275,14 +3291,16 @@ export class SessionManager {
     sessionId: string,
     assignedDevice: string,
     platform: Platform,
-    timeoutMs?: number,
-    heartbeatTimeoutMs?: number,
-    stableDeviceId?: string,
-    recoveredLiveness?: SessionRecoveryLiveness,
-    initialOwnership: "owned" | "awaiting-owner" = "owned",
-    /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
-    persistenceSource?: string,
+    options: CreateSessionOptions = {},
   ): Promise<Session> {
+    const {
+      timeoutMs,
+      heartbeatTimeoutMs,
+      stableDeviceId,
+      recoveredLiveness,
+      initialOwnership,
+      persistenceSource,
+    } = withCreateSessionDefaults(options);
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new DaemonSessionCreationRejectedError(sessionId);
@@ -5641,14 +5659,9 @@ export class SessionManager {
     const existing = this.sessions.get(sessionId);
     this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
-      return await this.createSession(
-        sessionId,
-        assignedDevice,
-        platform,
-        undefined,
-        undefined,
-        options.stableDeviceId,
-      );
+      return await this.createSession(sessionId, assignedDevice, platform, {
+        stableDeviceId: options.stableDeviceId,
+      });
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {
       // Generation only: this no-op rebind retains the same serial, connection and incarnation.
@@ -8377,20 +8390,7 @@ export class SessionManager {
   }
 
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
-    if (candidate === "device-killed" && reason.value !== candidate) {
-      reason.value = candidate;
-      return;
-    }
-    if (reason.value === "device-killed") {
-      return;
-    }
-    if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(reason.value)) {
-      reason.value = candidate;
-      return;
-    }
-    if (outranksReleaseReason(candidate, reason.value)) {
-      reason.value = candidate;
-    }
+    reason.value = resolveReleaseReason(reason.value, candidate);
   }
 
   private createReleaseReasonState(sessionId: string, releaseReason: string): ReleaseReasonState {

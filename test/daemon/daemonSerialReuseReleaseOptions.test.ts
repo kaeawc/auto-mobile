@@ -30,9 +30,11 @@ async function fixture() {
   const timer = new FakeTimer();
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+    },
   );
   const sessions = daemon.getSessionManager();
   sessions.stopCleanupTimer();

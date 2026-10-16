@@ -609,12 +609,9 @@ describe("SessionManager", () => {
     });
 
     test("should persist custom timeout on the session", async () => {
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        5000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       expect(session.sessionTimeoutMs).toBe(5000);
       expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
     });
@@ -629,13 +626,10 @@ describe("SessionManager", () => {
 
     test("should mark explicitly provided heartbeat timeout as custom", async () => {
       process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        30_000,
-        15_000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 30_000,
+        heartbeatTimeoutMs: 15_000,
+      });
 
       expect(session.heartbeatTimeoutMs).toBe(15_000);
       expect(session.heartbeatTimeoutSource).toBe("custom");
@@ -941,13 +935,10 @@ describe("SessionManager", () => {
       // Resolving a session for a tool call must count as activity, otherwise an
       // actively-used autolock client (which sends no explicit heartbeats) would
       // be reaped mid-use.
-      const session1 = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        60_000,
-        60_000,
-      );
+      const session1 = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       const initialHeartbeat = session1.lastHeartbeat;
       fakeTimer.advanceTime(30_000);
 
@@ -958,7 +949,9 @@ describe("SessionManager", () => {
     });
 
     test("should preserve custom timeout when getting existing session", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       fakeTimer.advanceTime(4000);
 
       const session = await sessionManager.getOrCreateSession("session-1");
@@ -1055,14 +1048,9 @@ describe("SessionManager", () => {
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
-          await restarted.createSession(
-            sessionId,
-            "emulator-5560",
-            "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-          );
+          await restarted.createSession(sessionId, "emulator-5560", "android", {
+            stableDeviceId: target?.stableDeviceId,
+          });
           return "emulator-5560";
         },
       };
@@ -1384,14 +1372,9 @@ describe("SessionManager", () => {
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
-          await restarted.createSession(
-            sessionId,
-            persisted.device_id,
-            "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-          );
+          await restarted.createSession(sessionId, persisted.device_id, "android", {
+            stableDeviceId: target?.stableDeviceId,
+          });
           return persisted.device_id;
         },
       };
@@ -2033,7 +2016,9 @@ describe("SessionManager", () => {
             0 <= query.sessionClockStartedAtOrBefore),
       );
       sessionManager.onSessionRelease((sessionId) => released.push(sessionId));
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       // Existing work keeps an expired session assigned, and a routing lookup with no
@@ -2096,7 +2081,7 @@ describe("SessionManager", () => {
         },
       };
       try {
-        const session = await manager.createSession("s1", "device-1", "android", 1);
+        const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
         await Promise.resolve();
         activity.length = 0;
@@ -2169,7 +2154,7 @@ describe("SessionManager", () => {
         },
       );
       try {
-        const session = await manager.createSession("s1", "device-1", "android", 1);
+        const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
         fakeTimer.advanceTime(5 * 60 * 1000);
 
@@ -2214,7 +2199,7 @@ describe("SessionManager", () => {
         },
       };
       try {
-        await manager.createSession("s1", "device-1", "android", 1);
+        await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
         fakeTimer.advanceTime(2);
         expect(manager.getSession("s1")).toBeNull();
         await persistenceStarted.promise;
@@ -2242,12 +2227,9 @@ describe("SessionManager", () => {
     });
 
     test("keeps a session when work began before its expiry deadline", async () => {
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        1000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       const resolved = await sessionManager.getOrCreateSession("session-1", undefined, undefined, {
@@ -2267,7 +2249,9 @@ describe("SessionManager", () => {
           (query?.sessionClockStartedAtOrBefore === undefined ||
             0 <= query.sessionClockStartedAtOrBefore),
       );
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       await expect(
@@ -2589,7 +2573,7 @@ describe("SessionManager", () => {
       };
 
       try {
-        await manager.createSession("session-1", "emulator-old", "android", 1_000);
+        await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1_000 });
         manager.setLastHierarchy("session-1", makeHierarchy("old"));
         manager.setKeepScreenAwake("session-1", { applied: true });
         repository.deferNextUpsert();
@@ -2711,7 +2695,7 @@ describe("SessionManager", () => {
       });
 
       try {
-        await manager.createSession("session-1", "emulator-old", "android", 1);
+        await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1 });
         repository.deferNextUpsert();
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
         await repository.waitForUpsert();
@@ -2735,7 +2719,7 @@ describe("SessionManager", () => {
       const manager = new SessionManager(fakeTimer, repository);
 
       try {
-        await manager.createSession("session-1", "emulator-old", "android", 1);
+        await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1 });
         repository.deferNextUpsert();
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
         await repository.waitForUpsert();
@@ -3177,7 +3161,7 @@ describe("SessionManager", () => {
         { barrier: () => new FakeDbWriteBarrier() },
       );
       try {
-        const session = await manager.createSession("s1", "device-1", "android", 1);
+        const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
         const setup = manager.trackSessionSetup(session, () => setupFinished);
         const release = manager.releaseSession("s1", "daemon-shutdown", { allowExpired: true });
 
@@ -3459,7 +3443,9 @@ describe("SessionManager", () => {
 
   describe("recordHeartbeat", () => {
     test("releases a heartbeating session exactly at its idle deadline, with no suspect grace (#11107)", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       fakeTimer.advanceTime(4000);
 
       // A heartbeat does not extend the idle deadline (#10656), and the suspect grace (#10051)
@@ -3520,16 +3506,11 @@ describe("SessionManager", () => {
         barrier: () => new FakeDbWriteBarrier(),
       });
       try {
-        const session = await manager.createSession(
-          "kept-owner",
-          "emulator-5554",
-          "android",
-          60_000,
-          1_000,
-          undefined,
-          undefined,
-          "awaiting-owner",
-        );
+        const session = await manager.createSession("kept-owner", "emulator-5554", "android", {
+          timeoutMs: 60_000,
+          heartbeatTimeoutMs: 1_000,
+          initialOwnership: "awaiting-owner",
+        });
         const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
@@ -3572,16 +3553,11 @@ describe("SessionManager", () => {
         barrier: () => new FakeDbWriteBarrier(),
       });
       try {
-        const session = await manager.createSession(
-          "rollback-owner",
-          "emulator-5554",
-          "android",
-          60_000,
-          1_000,
-          undefined,
-          undefined,
-          "awaiting-owner",
-        );
+        const session = await manager.createSession("rollback-owner", "emulator-5554", "android", {
+          timeoutMs: 60_000,
+          heartbeatTimeoutMs: 1_000,
+          initialOwnership: "awaiting-owner",
+        });
         const before = {
           lastUsedAt: session.lastUsedAt,
           lastHeartbeat: session.lastHeartbeat,
@@ -3634,12 +3610,9 @@ describe("SessionManager", () => {
         barrier: () => new FakeDbWriteBarrier(),
       });
       try {
-        const session = await manager.createSession(
-          "first-heartbeat",
-          "emulator-5554",
-          "android",
-          60_000,
-        );
+        const session = await manager.createSession("first-heartbeat", "emulator-5554", "android", {
+          timeoutMs: 60_000,
+        });
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
         });
@@ -3686,11 +3659,7 @@ describe("SessionManager", () => {
           "awaiting-heartbeat",
           "emulator-5554",
           "android",
-          60_000,
-          1_000,
-          undefined,
-          undefined,
-          "awaiting-owner",
+          { timeoutMs: 60_000, heartbeatTimeoutMs: 1_000, initialOwnership: "awaiting-owner" },
         );
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
@@ -3727,16 +3696,11 @@ describe("SessionManager", () => {
           barrier: () => new FakeDbWriteBarrier(),
         });
         try {
-          const session = await manager.createSession(
-            "success-owner",
-            "emulator-5554",
-            "android",
-            60_000,
-            1_000,
-            undefined,
-            undefined,
-            "awaiting-owner",
-          );
+          const session = await manager.createSession("success-owner", "emulator-5554", "android", {
+            timeoutMs: 60_000,
+            heartbeatTimeoutMs: 1_000,
+            initialOwnership: "awaiting-owner",
+          });
           fakeTimer.advanceTime(10);
           if (operation === "heartbeat") {
             manager.recordHeartbeat(session.sessionId);
@@ -3781,16 +3745,11 @@ describe("SessionManager", () => {
         barrier: () => new FakeDbWriteBarrier(),
       });
       try {
-        const session = await manager.createSession(
-          "pending-owner",
-          "emulator-5554",
-          "android",
-          60_000,
-          1_000,
-          undefined,
-          undefined,
-          "awaiting-owner",
-        );
+        const session = await manager.createSession("pending-owner", "emulator-5554", "android", {
+          timeoutMs: 60_000,
+          heartbeatTimeoutMs: 1_000,
+          initialOwnership: "awaiting-owner",
+        });
         write
           .mockImplementationOnce(async () => {
             firstStarted.resolve();
@@ -3860,11 +3819,7 @@ describe("SessionManager", () => {
           "overlapping-owner",
           "emulator-5554",
           "android",
-          60_000,
-          1_000,
-          undefined,
-          undefined,
-          "awaiting-owner",
+          { timeoutMs: 60_000, heartbeatTimeoutMs: 1_000, initialOwnership: "awaiting-owner" },
         );
         write.mockImplementationOnce(async () => {
           firstStarted.resolve();
@@ -4467,7 +4422,7 @@ describe("SessionManager", () => {
         },
       });
       try {
-        await manager.createSession("net-expiry", "emulator-5554", "android", 1);
+        await manager.createSession("net-expiry", "emulator-5554", "android", { timeoutMs: 1 });
         manager.setNetworkCondition("net-expiry", { initialProfile: "none" });
         fakeTimer.advanceTime(2);
 
@@ -6217,14 +6172,9 @@ describe("SessionManager", () => {
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
-        await restarted.createSession(
-          sessionId,
-          "simulator-uuid",
-          "ios",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restarted.createSession(sessionId, "simulator-uuid", "ios", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "simulator-uuid";
       },
     };
@@ -6314,14 +6264,9 @@ describe("SessionManager", () => {
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
-        await restarted.createSession(
-          sessionId,
-          "emulator-5560",
-          "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restarted.createSession(sessionId, "emulator-5560", "android", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "emulator-5560";
       },
     };
@@ -6475,16 +6420,13 @@ describe("SessionManager", () => {
     const restarted = new SessionManager(fakeTimer, persistence);
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -6585,16 +6527,13 @@ describe("SessionManager", () => {
         if (hung.has(sessionId)) {
           return await new Promise<string>(() => {});
         }
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5556",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5556", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -6770,16 +6709,13 @@ describe("SessionManager", () => {
     );
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-        await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         sessionCreated.resolve();
         await finishRecovery.promise;
         return "emulator-5554";
@@ -6828,16 +6764,13 @@ describe("SessionManager", () => {
     const restarted = new SessionManager(fakeTimer, persistence);
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -6952,16 +6885,13 @@ describe("SessionManager", () => {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         assignments += 1;
         await assignmentReady;
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -7012,16 +6942,13 @@ describe("SessionManager", () => {
         assignments += 1;
         assignmentStarted.resolve();
         await releaseAssignment.promise;
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -7076,16 +7003,13 @@ describe("SessionManager", () => {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         assignments += 1;
         await assignmentReady;
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -7145,16 +7069,13 @@ describe("SessionManager", () => {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         assignments += 1;
         await assignmentReady;
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -7706,14 +7627,9 @@ test.each(["explicit-release", "heartbeat-timeout", "device-killed"])(
     const persistence = new FakeDeviceSessionPersistence();
     const manager = new SessionManager(new FakeTimer(), persistence);
     manager.stopCleanupTimer();
-    const session = await manager.createSession(
-      "owned",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      "Pixel",
-    );
+    const session = await manager.createSession("owned", "emulator-5554", "android", {
+      stableDeviceId: "Pixel",
+    });
     await manager.releaseSession("owned", "device-restart:Pixel");
     expect(await manager.releaseSessionIfOwned("owned", session, "emulator-5554", reason)).toBe(
       "emulator-5554",

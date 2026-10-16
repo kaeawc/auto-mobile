@@ -230,6 +230,25 @@ fling" request rather than exact timing; the effective minimum on each platform 
 yet measured. Verify the resulting velocity on
 a device when a test depends on a pager or dismiss threshold.
 
+`swipeOn.fromEdge` (`left`, `right`, `top`, `bottom`) starts a raw swipe at a screen or
+panel edge and moves inward, for navigation drawers, the iOS interactive swipe-back,
+and edge-pull panels. `direction` must be the inward finger direction (`left` edge ->
+`right`, `right` -> `left`, `top` -> `down`, `bottom` -> `up`; `gestureType:
+"scrollTowardsDirection"` is resolved first). The touch starts `edgeInset` px (iOS
+points) inside the edge, an integer from 0 to 50, default 4, so it stays inside iOS's
+roughly 20 pt swipe-back recognizer zone. `at` (0 to 1, default 0.5) is the position
+along the edge, and the swipe travels 70% of the screen or panel extent. `fromEdge`
+cannot be combined with `container`, `lookFor`, or `autoTarget: true` (an edge swipe
+never auto-targets a scrollable). Without `display` the edge is the content edge (system
+bars excluded) unless `includeSystemInsets: true` selects the physical screen edge; with
+`display`, the selected panel's own edges are used, and omitting `includeSystemInsets`
+keeps the full panel rect while `false` uses its content edge. Android gesture
+navigation reserves a strip at the physical left and right edges for back, and the
+bottom edge for home, so a very-near-edge swipe there may be taken by the system rather
+than the app; prefer the default content-edge mode or a larger `edgeInset` when that
+happens. Named system gestures ("system back") are not provided. `swipeAt` support for
+these options follows once that tool lands.
+
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
 `duration` must be a positive integer from 1 to 10000 ms; the default remains
@@ -1603,6 +1622,19 @@ and `clear` commands send keys and clear the focused field, respectively.
 during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
 a plain pinch. Android and iOS share this convention.
+
+To rotate **without zooming**, keep the finger distance constant: pass
+<code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
+together with <code>rotationDegrees</code>. <code>direction</code> is still a required
+argument but is ignored when the distance does not change, so the fingers never
+drift toward a zoom; equal distances are clamped and (on iOS) rounded together
+so they stay equal. Negative and larger-than-360 values are passed through as
+given. This is a two-finger rotate gesture, not the device <code>rotate</code>
+tool, which changes screen orientation.
+
+```json
+{ "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
+```
 
 </details>
 

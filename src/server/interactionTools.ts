@@ -45,6 +45,12 @@ import {
 } from "../features/action/swipeon/swipeTiming";
 import { SwipeOn } from "../features/action/swipeon";
 import {
+  EDGE_AT_DEFAULT,
+  EDGE_INSET_DEFAULT,
+  EDGE_INSET_MAX,
+  validateEdgeSwipeOptions,
+} from "../features/action/swipeon/edgeSwipe";
+import {
   PinchOn,
   PINCH_DISTANCE_EXCLUSIVE_MIN,
   PINCH_SCALE_EXCLUSIVE_MIN,
@@ -933,6 +939,30 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .describe(
             `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.`,
           ),
+        fromEdge: z
+          .enum(["left", "right", "top", "bottom"])
+          .optional()
+          .describe(
+            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. With Android gesture navigation a very-near-edge swipe may be taken as system back/home",
+          ),
+        edgeInset: z
+          .number()
+          .int()
+          .min(0)
+          .max(EDGE_INSET_MAX)
+          .optional()
+          .describe(
+            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt)`,
+          ),
+        at: z
+          .number()
+          .finite()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe(
+            `With fromEdge: normalized 0-1 position along the edge (default ${EDGE_AT_DEFAULT})`,
+          ),
         layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -950,6 +980,13 @@ export const swipeOnSchema = withJsonSchemaOverride(
         path: [swipeTimingErrorPath(error)],
       });
     }
+    const edgeError = validateEdgeSwipeOptions({
+      ...options,
+      direction: resolveSwipeDirection(options).direction ?? options.direction,
+    });
+    if (edgeError) {
+      context.addIssue({ code: "custom", message: edgeError, path: ["fromEdge"] });
+    }
   }),
   (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
 );
@@ -959,7 +996,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
     z
       .object({
         display: z.string().optional().describe("Target panel key, role, or active"),
-        direction: z.enum(["in", "out"]).describe("Pinch direction"),
+        direction: z
+          .enum(["in", "out"])
+          .describe(
+            "Pinch direction; ignored when the finger distance does not change (rotation only)",
+          ),
         distanceStart: z
           .number()
           .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
@@ -992,7 +1033,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .number()
           .optional()
           .describe(
-            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
           ),
         includeSystemInsets: z
           .boolean()
@@ -1714,12 +1755,19 @@ export async function swipeOnHandler(
     {
       display: args.display,
       container: args.container,
-      autoTarget: args.display === undefined ? (args.autoTarget ?? true) : args.autoTarget,
+      // An edge swipe targets the screen/panel edge, never an auto-selected scrollable.
+      autoTarget:
+        args.display === undefined
+          ? (args.autoTarget ?? args.fromEdge === undefined)
+          : args.autoTarget,
       // SwipeOnArgs requires a direction, and the resolver's inversion map covers all four values.
       direction: resolvedDirection.direction!,
       lookFor: args.lookFor,
       speed: args.speed,
       durationMs: args.durationMs,
+      fromEdge: args.fromEdge,
+      edgeInset: args.edgeInset,
+      at: args.at,
       includeSystemInsets:
         args.display === undefined ? (args.includeSystemInsets ?? false) : args.includeSystemInsets,
       boomerang: args.boomerang,

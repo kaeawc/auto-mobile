@@ -1,4 +1,11 @@
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
+import {
+  DISPATCH_HELD_INPUT_METHODS,
+  GESTURE_FRAME_METHODS,
+  inputRouteFor,
+  type InputRoute,
+  type InputRouteMethod,
+} from "./inputRoutes";
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
@@ -928,17 +935,6 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
-// Stroke frames need no extra hold: no signal reaches their atomic runner command;
-// stroke lift handles cancellation. IDE writes run outside the input queue and remain
-// tracked until their atomic command replies, with no abort listener after send.
-const DISPATCH_HELD_INPUT_METHODS: ReadonlySet<string> = new Set([
-  "input/typeText",
-  "input/key",
-  "input/pressButton",
-  "input/tap",
-  "input/swipe",
-]);
-
 /** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
 const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
   "ide/updateService",
@@ -1012,13 +1008,6 @@ interface InputDeviceGate {
   /** Who sent the frame; only the device's holder may drive a held device (#10698). */
   requester?: () => string | undefined;
 }
-
-/** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
-const GESTURE_FRAME_METHODS = {
-  start: "input/gestureStart",
-  move: "input/gestureMove",
-  end: "input/gestureEnd",
-} as const;
 
 /** What held the device when a `gestureStart` was admitted (#11541). */
 export interface StrokeAdmission {
@@ -1159,15 +1148,7 @@ interface AndroidAppendTextOptions {
   signal?: AbortSignal;
 }
 
-type InputTargetAction =
-  | "input/tap"
-  | "input/swipe"
-  | "input/typeText"
-  | "input/pressButton"
-  | "input/key"
-  | "input/gestureStart"
-  | "input/gestureMove"
-  | "input/gestureEnd";
+type InputTargetAction = InputRouteMethod;
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
@@ -5491,31 +5472,34 @@ export class UnixSocketServer {
         ? this.inputRequester(request, socketSessionId)
         : undefined,
     };
-    if (request.method === "input/tap") {
-      return await this.handleInputTap(request, socketSessionId, input);
-    }
-    if (request.method === "input/swipe") {
-      return await this.handleInputSwipe(request, socketSessionId, input);
-    }
-    if (request.method === "input/typeText") {
-      return await this.handleInputTypeText(request, socketSessionId, input);
-    }
-    if (request.method === "input/pressButton") {
-      return await this.handleInputPressButton(request, socketSessionId, input);
-    }
-    if (request.method === "input/key") {
-      return await this.handleInputKey(request, socketSessionId, input);
-    }
-    if (request.method === "input/gestureStart") {
-      return await this.handleInputGesture(request, "start", socketSessionId, input);
-    }
-    if (request.method === "input/gestureMove") {
-      return await this.handleInputGesture(request, "move", socketSessionId, input);
-    }
-    if (request.method === "input/gestureEnd") {
-      return await this.handleInputGesture(request, "end", socketSessionId, input);
+    const route = inputRouteFor(request.method);
+    if (route) {
+      return await this.dispatchInputRoute(route, request, socketSessionId, input);
     }
     return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
+  }
+
+  /** Runs the handler an `input/*` route table entry names. */
+  private async dispatchInputRoute(
+    route: InputRoute,
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    input: InputRequestContext,
+  ): Promise<any | undefined> {
+    switch (route.handler) {
+      case "tap":
+        return await this.handleInputTap(request, socketSessionId, input);
+      case "swipe":
+        return await this.handleInputSwipe(request, socketSessionId, input);
+      case "typeText":
+        return await this.handleInputTypeText(request, socketSessionId, input);
+      case "pressButton":
+        return await this.handleInputPressButton(request, socketSessionId, input);
+      case "key":
+        return await this.handleInputKey(request, socketSessionId, input);
+      case "gesture":
+        return await this.handleInputGesture(request, route.gestureKind!, socketSessionId, input);
+    }
   }
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */

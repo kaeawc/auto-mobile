@@ -36,7 +36,7 @@ Line numbers below are historical for the remaining manager fields. `U` = keyed 
 | Concern                | Field (line)                                                                                                                                                         | Key         |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
 | Published              | `sessions` (1614)                                                                                                                                                    | U           |
-| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                                                                 | U / device  |
+| Device index           | `deviceSessionMap` (1616)                                                                                                                                            | U / device  |
 | Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                                                                         | U           |
 | Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                                                               | U / S       |
 | Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                                                               | U           |
@@ -309,7 +309,7 @@ Rules:
   `FinalizationRegistry` mechanism, so a long-lived daemon does not accumulate UUIDs. A `fenced`
   record is not evicted by GC: a terminal fence is permanent until lifted, as
   `terminalReleaseSnapshots` is today. That unbounded growth is inherited and out of scope.
-- The device index (`sessionDeviceMap`, `deviceSessionMap`) stays beside the store, maintained by
+- The device index (`deviceSessionMap`) stays beside the store, maintained by
   the same transitions, because it is keyed by device.
 
 ### 3.1 Legal transitions

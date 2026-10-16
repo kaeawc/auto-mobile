@@ -3433,6 +3433,22 @@ describe("private broker acceptance lane", () => {
       starts = 0,
       crashes = 0,
       permits = 0;
+    // A killed disposable owner ends its own grant with the broker's typed owner-exit receipt.
+    const killed = new Set<string>();
+    const hostClient = context.daemonClient;
+    context.daemonClient = {
+      ...hostClient,
+      status: async (requestId, token) => {
+        const receipt = await hostClient.status(requestId, token);
+        return receipt && killed.has(requestId)
+          ? {
+              ...receipt,
+              outcome: "failed",
+              failure: { code: "session_owner_exited", message: "owner exited", retryable: false },
+            }
+          : receipt;
+      },
+    };
     context.preflight = async () => true;
     context.probe = async () => true;
     context.privateDaemon = {
@@ -3467,10 +3483,12 @@ describe("private broker acceptance lane", () => {
         await harness.host.controls.tool("observe", status.sessionUuid!);
       },
       close: async () => {},
-      ownerKill: async () => {
-        throw new Error("unexpected owner kill");
+      ownerKill: async (c) => {
+        const receipt = await hostClient.status(c.config.requestId, c.token);
+        await hostClient.release(receipt!.sessionUuid!, c.token);
+        killed.add(c.config.requestId);
       },
-      proxyClosed: async () => false,
+      proxyClosed: async (c) => killed.has(c.config.requestId),
       tools: async (c) =>
         harness.host.controls.tools(
           (await context.daemonClient.status(c.config.requestId, c.token))!,
@@ -3493,7 +3511,7 @@ describe("private broker acceptance lane", () => {
       close: harness.close,
     };
   }
-  test("runs the four live scenario contracts sequentially and signs one redacted broker evidence file", async () => {
+  test("runs the five live scenario contracts sequentially and signs one redacted broker evidence file", async () => {
     const f = await laneFixture();
     try {
       const args = brokerArgs(["--confirm-live", "--test-owned-devices"]);
@@ -3508,6 +3526,7 @@ describe("private broker acceptance lane", () => {
       expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual([
         "parallel-acquire",
         "release-destroy-verification",
+        "multi-client-crash-isolation",
         "capacity-refusal-and-replay",
         "daemon-restart-with-live-sessions",
       ]);

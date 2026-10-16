@@ -1,4 +1,4 @@
-import type { ObservedChangeOptions } from "./BaseVisualChange";
+import type { ObservedChangeOptions } from "./observedInteractionTypes";
 
 /** The skip/defer/mode booleans of {@link ObservedChangeOptions} that profiles set together. */
 export type ObservedInteractionFlags = Pick<

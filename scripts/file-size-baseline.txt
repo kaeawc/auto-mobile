@@ -7,7 +7,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
 5652	src/daemon/daemon.ts
-6228	src/daemon/daemonMcpProxy.ts
+6071	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts
@@ -29,7 +29,7 @@
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
-1322	src/features/action/BaseVisualChange.ts
+1284	src/features/action/BaseVisualChange.ts
 1107	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2253	src/features/action/LaunchApp.ts
@@ -39,7 +39,7 @@
 1424	src/features/action/TapAtCoordinate.ts
 5407	src/features/action/TapOnElement.ts
 1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
-1435	src/features/action/swipeon/ScrollUntilVisible.ts
+1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1804	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5883	src/features/deviceLifecycle/deviceLifecycleCore.ts

@@ -90,11 +90,14 @@ export interface HarnessDeps {
   /** Progress lines; the CLI sends these to stderr so `--json` stdout stays clean. */
   log(line: string): void;
   env: Record<string, string | undefined>;
+  /** Host OS; only macOS can have iOS simulators or devices for the daemon to discover. */
+  platform: NodeJS.Platform;
   /**
-   * Names of connected physical iOS devices. `simctl` sees only simulators, but the private
-   * daemon also discovers hardware through devicectl; either would make selection ambiguous.
+   * Connected physical iOS devices. `simctl` sees only simulators, but the private daemon
+   * also discovers hardware through devicectl; either would make selection ambiguous.
+   * `complete: false` means the sweep failed, so absence is unproven.
    */
-  physicalIosDevices(): Promise<string[]>;
+  physicalIosDevices(): Promise<{ names: string[]; complete: boolean }>;
 }
 
 export interface RunOptions {
@@ -195,7 +198,7 @@ interface PreparedRun {
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
-  const simulators = await bootedIosSimulators(deps.runner);
+  const simulators = await bootedIosSimulators(deps.runner, deps.platform);
   if (simulators.length > 0) {
     throw new Error(
       `Booted iOS simulator(s) (${simulators.join(", ")}) would also be visible to the ` +
@@ -203,10 +206,17 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     );
   }
   const phones = await deps.physicalIosDevices();
-  if (phones.length > 0) {
+  if (phones.names.length > 0) {
     throw new Error(
-      `Connected iOS device(s) (${phones.join(", ")}) would also be visible to the ` +
+      `Connected iOS device(s) (${phones.names.join(", ")}) would also be visible to the ` +
         "benchmark's AutoMobile server and make device selection ambiguous; disconnect them first.",
+    );
+  }
+  if (!phones.complete) {
+    // A later successful sweep by the daemon could still find one after preflight ran.
+    throw new Error(
+      "Could not list connected iOS devices (devicectl failed); the benchmark needs to know " +
+        "none is connected, so fix devicectl before running.",
     );
   }
   // Preflight clears app data, so hold this device's allocation claim through it: another

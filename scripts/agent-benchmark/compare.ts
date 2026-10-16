@@ -196,9 +196,10 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
 export function containsBounded(haystack: string, needle: string): boolean {
   // Unicode letters and digits bound a match, so 完了 does not match inside 未完了
   // (and COUNT: 3 not inside COUNT: 30). A decimal or grouped continuation (3.5, 3,000) is
-  // a different number, so "." or "," followed by a digit does not end a match either.
+  // a different number, so "." or "," next to a digit does not bound a match on either
+  // side (3 items is not inside 0.3 items or 1,300 items).
   return new RegExp(
-    `(?<![\\p{L}\\p{N}])${RegExp.escape(needle)}(?![\\p{L}\\p{N}]|[.,]\\p{N})`,
+    `(?<![\\p{L}\\p{N}]|\\p{N}[.,])${RegExp.escape(needle)}(?![\\p{L}\\p{N}]|[.,]\\p{N})`,
     "iu",
   ).test(haystack);
 }

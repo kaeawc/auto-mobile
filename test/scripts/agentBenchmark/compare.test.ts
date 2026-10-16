@@ -234,6 +234,9 @@ describe("verification text matching", () => {
     expect(containsBounded("EXPECTED_COUNT: 3,000", "EXPECTED_COUNT: 3")).toBe(false);
     expect(containsBounded("EXPECTED_COUNT: 3.", "EXPECTED_COUNT: 3")).toBe(true);
     expect(containsBounded("EXPECTED_COUNT: 3, then 4", "EXPECTED_COUNT: 3")).toBe(true);
+    expect(containsBounded("RATE: 0.3 items", "3 items")).toBe(false);
+    expect(containsBounded("POPULATION: 1,300 users", "300 users")).toBe(false);
+    expect(containsBounded("Done. 3 items", "3 items")).toBe(true);
   });
 
   test("an over-tapped run fails both the answer and the screen check", () => {

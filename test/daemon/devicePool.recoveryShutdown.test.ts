@@ -1021,6 +1021,8 @@ test.each([
       { controller: AbortController; waiters: number },
       unknown,
       object,
+      unknown,
+      unknown,
       unknown
     >;
     const acquire = (deadline: number | undefined) =>

@@ -1,5 +1,5 @@
-/** Assignment and creation facets retain the legacy maps' identity and insertion order. */
-export class SessionSlots<A, Sh, C, R extends object, Rel> {
+/** Lifecycle facets retain the legacy maps' identity and insertion order. */
+export class SessionSlots<A, Sh, C, R extends object, Rel, Reb, Cleanup> {
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments = new Map<string, A>();
   private readonly sharedSessionAssignments = new Map<string, Sh>();
@@ -11,6 +11,13 @@ export class SessionSlots<A, Sh, C, R extends object, Rel> {
   private readonly claimedRecoverableRows = new WeakSet<R>();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases = new Map<string, Rel>();
+
+  /** Rebinds that a release must await before it can remove the live binding. */
+  private readonly pendingRebinds = new Map<string, Reb>();
+  private readonly deferredCleanupOwners = new Map<
+    Cleanup,
+    { sessionId: string; deviceId: string }
+  >();
 
   get assignments(): ReadonlyMap<string, A> {
     return this.pendingSessionAssignments;
@@ -102,6 +109,39 @@ export class SessionSlots<A, Sh, C, R extends object, Rel> {
 
   deleteReleaseRequest(id: string): boolean {
     return this.pendingSessionReleases.delete(id);
+  }
+
+  get rebinds(): ReadonlyMap<string, Reb> {
+    return this.pendingRebinds;
+  }
+
+  getRebind(id: string): Reb | undefined {
+    return this.pendingRebinds.get(id);
+  }
+
+  hasRebind(id: string): boolean {
+    return this.pendingRebinds.has(id);
+  }
+
+  setRebind(id: string, value: Reb): void {
+    this.pendingRebinds.set(id, value);
+  }
+
+  deleteRebind(id: string): boolean {
+    return this.pendingRebinds.delete(id);
+  }
+
+  /** Live iteration lets cleanup commits delete receipts while a flush is in progress. */
+  get deferredCleanups(): ReadonlyMap<Cleanup, { sessionId: string; deviceId: string }> {
+    return this.deferredCleanupOwners;
+  }
+
+  setDeferredCleanup(cleanup: Cleanup, owner: { sessionId: string; deviceId: string }): void {
+    this.deferredCleanupOwners.set(cleanup, owner);
+  }
+
+  deleteDeferredCleanup(cleanup: Cleanup): boolean {
+    return this.deferredCleanupOwners.delete(cleanup);
   }
 
   markRowClaimed(row: R): void {

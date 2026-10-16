@@ -1711,6 +1711,8 @@ export class SessionManager {
    * release captures it so its write cannot land on a row a later incarnation re-upserted.
    */
   private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** Statements may land before settlement records this incarnation's own generation (#12547). */
+  private readonly inFlightOwnRowWrites = new WeakMap<Session, Set<Promise<unknown>>>();
   private readonly activityRowRePersists = new SingleFlight<Session, void>();
   private readonly retiredCreationRows = new WeakSet<Session>();
   /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
@@ -1803,7 +1805,9 @@ export class SessionManager {
     SharedSessionAssignment,
     PendingSessionCreation,
     DeviceSession,
-    PendingSessionRelease
+    PendingSessionRelease,
+    PendingSessionRebind,
+    DeferredRebindCleanup
   >();
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
@@ -1845,15 +1849,6 @@ export class SessionManager {
    */
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
-  /** Rebinds that a release must await before it can remove the live binding. */
-  private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
-  private readonly deferredRebindCleanups = new Map<
-    DeferredRebindCleanup,
-    {
-      sessionId: string;
-      deviceId: string;
-    }
-  >();
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
   private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
@@ -4751,7 +4746,7 @@ export class SessionManager {
   ): Promise<Session> {
     const { access, requestDeadlineMs, callerExecutionId } =
       this.resolveSessionAcquisitionOptions(accessOptions);
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
       return await this.getOrCreateSession(
@@ -5930,7 +5925,7 @@ export class SessionManager {
       return existing;
     }
 
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
       return await this.rebindSession(sessionId, assignedDevice, platform, options);
@@ -5951,7 +5946,7 @@ export class SessionManager {
       options.deferCleanup,
     );
     const rebind = { session: existing, promise };
-    this.pendingSessionRebinds.set(sessionId, rebind);
+    this.sessionSlots.setRebind(sessionId, rebind);
     this.slotShadowProbe.check(sessionId, "rebind-start");
     try {
       return await promise;
@@ -5961,8 +5956,8 @@ export class SessionManager {
       }
       return await this.rejectRefusedRebind(existing, rebind, error);
     } finally {
-      if (this.pendingSessionRebinds.get(sessionId) === rebind) {
-        this.pendingSessionRebinds.delete(sessionId);
+      if (this.sessionSlots.getRebind(sessionId) === rebind) {
+        this.sessionSlots.deleteRebind(sessionId);
         this.slotShadowProbe.check(sessionId, "rebind-end");
       }
     }
@@ -5976,8 +5971,8 @@ export class SessionManager {
     const sessionId = existing.sessionId;
     // The failed write never published its binding. End a terminal UUID after the rebind's
     // promise has rejected, so the release cannot wait on the very rebind adopting it.
-    if (this.pendingSessionRebinds.get(sessionId) === rebind) {
-      this.pendingSessionRebinds.delete(sessionId);
+    if (this.sessionSlots.getRebind(sessionId) === rebind) {
+      this.sessionSlots.deleteRebind(sessionId);
     }
     const adoption = this.endSessionTerminallyReleasedInRow(existing);
     // Include the row read and any release it starts: the inner rebind already rejected.
@@ -6145,7 +6140,7 @@ export class SessionManager {
 
   /** Flush only matching receipts; release, a later rebind and shutdown all commit once. */
   flushDeferredRebindCleanups(filter: { sessionId?: string; deviceId?: string } = {}): void {
-    for (const [cleanup, owner] of this.deferredRebindCleanups) {
+    for (const [cleanup, owner] of this.sessionSlots.deferredCleanups) {
       if (
         (filter.sessionId === undefined || filter.sessionId === owner.sessionId) &&
         (filter.deviceId === undefined || filter.deviceId === owner.deviceId)
@@ -6177,7 +6172,7 @@ export class SessionManager {
     const finish = () => {
       this.timer.clearTimeout(bound);
       this.iosAppNetworkLeases.stop(leaseKey);
-      this.deferredRebindCleanups.delete(cleanup);
+      this.sessionSlots.deleteDeferredCleanup(cleanup);
     };
     const settle = () => {
       if (resolved) {
@@ -6273,7 +6268,7 @@ export class SessionManager {
       }
     }, capMs);
     deadline.unref?.();
-    this.deferredRebindCleanups.set(cleanup, {
+    this.sessionSlots.setDeferredCleanup(cleanup, {
       sessionId: oldView.sessionId,
       deviceId: oldView.assignedDevice,
     });
@@ -6478,7 +6473,7 @@ export class SessionManager {
     if (session.assignedDevice !== expectedDeviceId) {
       throw new SessionNoLongerOwnsDeviceError(session.sessionId, expectedDeviceId);
     }
-    if (this.pendingSessionRebinds.has(session.sessionId)) {
+    if (this.sessionSlots.hasRebind(session.sessionId)) {
       throw new SessionRebindingError(session.sessionId);
     }
     const existing = this.terminalReleaseReservations.get(session.sessionId);
@@ -6580,7 +6575,7 @@ export class SessionManager {
         pendingAssignments: this.sessionSlots.assignments,
         pendingCreations: this.sessionSlots.creations,
         pendingReleases: this.sessionSlots.releaseRequests,
-        pendingRebinds: this.pendingSessionRebinds,
+        pendingRebinds: this.sessionSlots.rebinds,
         releaseOps: this.releasePromises,
         terminalSnapshots: this.terminalReleaseSnapshots,
         recoveredTerminalIntents: this.recoveredTerminalReleaseIntents,
@@ -6745,7 +6740,7 @@ export class SessionManager {
     const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
     this.slotShadowProbe.check(sessionId, "release-start");
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
@@ -7183,7 +7178,7 @@ export class SessionManager {
   private canStartSessionSetup(session: Session): boolean {
     return (
       !this.releasingSessions.has(session) &&
-      this.pendingSessionRebinds.get(session.sessionId)?.session !== session &&
+      this.sessionSlots.getRebind(session.sessionId)?.session !== session &&
       this.sessions.get(session.sessionId) === session
     );
   }
@@ -8052,13 +8047,33 @@ export class SessionManager {
     releaseOptions: {
       unlessDaemonShutdown?: boolean;
       resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
+      incarnation?: Session;
     } = {},
   ): Promise<T> {
+    const resolveRow = (row: DeviceSession | undefined) => {
+      const withGuard = (current: DeviceSession | undefined) => ({
+        row: current,
+        guard: releaseOptions.resolveRowGeneration
+          ? { ...guard, expectedRowGeneration: releaseOptions.resolveRowGeneration(current) }
+          : guard,
+      });
+      const ownWrites =
+        releaseOptions.resolveRowGeneration &&
+        this.awaitInFlightOwnRowWrites(
+          releaseOptions.incarnation,
+          row,
+          guard.expectedRowGeneration,
+        );
+      // Read first: a statement can settle during that read. The release deadline bounds
+      // this wait; re-read afterwards so later generations and peer ownership stay guarded.
+      return ownWrites
+        ? ownWrites.then(() => this.deviceSessionRepository.getSession(sessionId)).then(withGuard)
+        : withGuard(row);
+    };
     for (let attempt = 0; attempt < 2; attempt++) {
-      const row = await this.deviceSessionRepository.getSession(sessionId);
-      const currentGuard = releaseOptions.resolveRowGeneration
-        ? { ...guard, expectedRowGeneration: releaseOptions.resolveRowGeneration(row) }
-        : guard;
+      const { row, guard: currentGuard } = await resolveRow(
+        await this.deviceSessionRepository.getSession(sessionId),
+      );
       if (
         this.rowWritePermanentlyRefused(
           row,
@@ -8136,7 +8151,7 @@ export class SessionManager {
   }
 
   private isRebindUnderWay(session: Session): boolean {
-    return this.pendingSessionRebinds.get(session.sessionId)?.session === session;
+    return this.sessionSlots.getRebind(session.sessionId)?.session === session;
   }
 
   /**
@@ -8416,7 +8431,7 @@ export class SessionManager {
 
   /** Resolve once the rebind in flight for this incarnation, if any, has ended. Never rejects. */
   private async waitOutRebindOf(session: Session): Promise<void> {
-    const rebind = this.pendingSessionRebinds.get(session.sessionId);
+    const rebind = this.sessionSlots.getRebind(session.sessionId);
     if (rebind?.session !== session) {
       return;
     }
@@ -8763,14 +8778,14 @@ export class SessionManager {
     };
   }
 
-  private async resolveTerminalReleaseWrite(
+  private resolveTerminalReleaseWrite(
     snapshot: SessionReleaseSnapshot,
     precondition: MarkReleasedOptions,
     write: (options: MarkReleasedOptions) => Promise<void>,
     error: DeviceSessionRowNotReleasableError,
   ): Promise<void> {
     const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
-    return await this.retryRefusedRowWrite(
+    return this.retryRefusedRowWrite(
       error,
       snapshot.sessionId,
       {
@@ -8787,6 +8802,7 @@ export class SessionManager {
       snapshot.releaseReason,
       {
         unlessDaemonShutdown: precondition.unlessDaemonShutdown,
+        incarnation: this.releaseRowSessions.get(snapshot)?.deref(),
         resolveRowGeneration: (row) => {
           const incarnation = this.releaseRowSessions.get(snapshot)?.deref();
           const held = this.sessions.get(snapshot.sessionId);
@@ -13246,7 +13262,7 @@ export class SessionManager {
         ...this.sessions.keys(),
         ...this.sessionSlots.creations.keys(),
         ...this.sessionSlots.assignments.keys(),
-        ...this.pendingSessionRebinds.keys(),
+        ...this.sessionSlots.rebinds.keys(),
         ...this.sessionSlots.releaseRequests.keys(),
         ...this.releasePromises.keys(),
       ]),
@@ -13627,12 +13643,22 @@ export class SessionManager {
         this.sessionNow(),
         options,
       );
-      void statement.then((rowGeneration) => {
-        // Record at statement settlement, before release/refusal continuations can observe the
-        // advance, even if the later ownership write fails. Retries use this same boundary.
-        this.recordPersistedRowGeneration(incarnation, rowGeneration);
+      const ownWrites = this.inFlightOwnRowWrites.get(incarnation) ?? new Set<Promise<unknown>>();
+      this.inFlightOwnRowWrites.set(incarnation, ownWrites);
+      ownWrites.add(statement);
+      const settled = () => {
+        ownWrites.delete(statement);
+        if (ownWrites.size === 0) {
+          this.inFlightOwnRowWrites.delete(incarnation);
+        }
         closeJoinableFlight();
-      }, closeJoinableFlight);
+      };
+      void statement.then((rowGeneration) => {
+        // Record before waking terminal releases waiting on this same statement (#12547),
+        // even if the later ownership write fails. Retries use this same boundary.
+        this.recordPersistedRowGeneration(incarnation, rowGeneration);
+        settled();
+      }, settled);
       return statement;
     };
     const guard = upsertOptions?.rewriteOverSupersededRelease;
@@ -13653,6 +13679,35 @@ export class SessionManager {
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );
+  }
+
+  private awaitInFlightOwnRowWrites(
+    incarnation: Session | undefined,
+    row: DeviceSession | undefined,
+    expectedRowGeneration: number | undefined,
+  ): Promise<void> | undefined {
+    if (
+      !incarnation ||
+      row?.stable_identity_generation === expectedRowGeneration ||
+      this.persistedRowGenerations.get(incarnation) === row?.stable_identity_generation
+    ) {
+      return undefined;
+    }
+    const writes = this.inFlightOwnRowWrites.get(incarnation);
+    if (!writes?.size) {
+      return undefined;
+    }
+    return Promise.allSettled(writes).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          // The originating persistence caller handles rejection; release only waits for settlement.
+          logger.debug(
+            "[SessionManager] Own row write rejected during terminal release",
+            result.reason,
+          );
+        }
+      }
+    });
   }
 
   private recordPersistedRowGeneration(incarnation: Session, rowGeneration: number | void): void {

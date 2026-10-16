@@ -57,7 +57,7 @@ describe("freeDeviceBusyReason", () => {
     expect(freeDeviceBusyReason(poolOf([pooled({ status: "busy" })]), DEVICE)).toBe(
       "pooled runtime is busy",
     );
-    expect(freeDeviceBusyReason(poolOf([pooled({ status: "error" })]), DEVICE)).toBe(
+    expect(freeDeviceBusyReason(poolOf([pooled({ health: "error" })]), DEVICE)).toBe(
       "pooled runtime is error",
     );
   });

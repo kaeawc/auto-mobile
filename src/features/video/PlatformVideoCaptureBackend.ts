@@ -509,7 +509,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         logger.info(`[VideoCapture] Device recorder pid ${pid} SIGINT: ${outcome}`);
         return;
       }
-      const pk = await adb.executeCommand("shell pkill -2 screenrecord", 8000);
+      const pk = await adb.executeCommand("shell pkill -2 screenrecord", { timeoutMs: 8000 });
       logger.info(
         `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
       );
@@ -559,10 +559,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
       return "not-ours";
     }
-    const killed = await adb.executeCommand(
-      `shell kill -${signal} ${pid}`,
-      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
-    );
+    const killed = await adb.executeCommand(`shell kill -${signal} ${pid}`, {
+      timeoutMs: SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+    });
     if (killed.error) {
       throw toActionableError(killed.error, `Could not signal recorder pid ${pid}`);
     }
@@ -574,12 +573,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * gone (no /proc entry), so only a transport failure throws.
    */
   private readDeviceRecorderCmdline(adb: AdbExecutor, pid: number): Promise<ExecResult> {
-    return adb.executeCommand(
-      `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`,
-      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
-    );
+    return adb.executeCommand(`shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`, {
+      timeoutMs: SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+      noRetry: true,
+    });
   }
 
   /** Returns a failure description, or undefined when the recorder was handled or skipped. */
@@ -601,7 +598,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     try {
       if (pid === undefined) {
-        await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+        await adb.executeCommand("shell pkill -9 screenrecord", { timeoutMs: 8000 });
       } else {
         await this.signalDeviceRecorder(adb, backendHandle, pid, 9);
       }
@@ -670,12 +667,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     deviceTempPath: string,
   ): Promise<number | null> {
     try {
-      const result = await adb.executeCommand(
-        `shell stat -c %s ${deviceTempPath}`,
-        5000,
-        undefined,
-        true,
-      );
+      const result = await adb.executeCommand(`shell stat -c %s ${deviceTempPath}`, {
+        timeoutMs: 5000,
+        noRetry: true,
+      });
       const parsed = Number.parseInt(result.stdout.trim(), 10);
       return Number.isFinite(parsed) ? parsed : null;
     } catch (error) {
@@ -758,9 +753,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // than masking command/transport failures with `|| true`.
       const result = await adb.executeCommand(
         'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'',
-        5000,
-        undefined,
-        true,
+        { timeoutMs: 5000, noRetry: true },
       );
       return (
         !result.error && result.stderr.trim() === "" && result.stdout.trim() === "pidof-status:1"

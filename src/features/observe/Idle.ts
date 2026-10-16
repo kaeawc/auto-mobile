@@ -191,11 +191,9 @@ export class Idle {
     try {
       // Reset the gfxinfo stats for the package
       await perf.track("adbGfxinfoReset", () =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`, {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       // Wait for measurement period to accumulate data. Use the injected timer
@@ -242,13 +240,11 @@ export class Idle {
   ): Promise<string | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-          options.timeoutMs,
-          DUMPSYS_MAX_BUFFER,
-          undefined,
-          options.signal,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+          timeoutMs: options.timeoutMs,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: options.signal,
+        }),
       );
       if (firstGfxInfoLog) {
         logger.info(`[AwaitIdle] Initial gfxinfo stdout for ${packageName}:\n${stdout}`);

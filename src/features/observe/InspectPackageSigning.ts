@@ -54,13 +54,11 @@ export class AdbPullApkFetcher implements ApkFetcher {
       await fs.rm(workDir, { recursive: true, force: true });
     };
     try {
-      await adb.executeCommand(
-        `pull ${shellQuote(remotePath)} ${shellQuote(localPath)}`,
-        APK_PULL_TIMEOUT_MS,
-        undefined,
-        true,
+      await adb.executeCommand(`pull ${shellQuote(remotePath)} ${shellQuote(localPath)}`, {
+        timeoutMs: APK_PULL_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
       const handle = await fs.open(localPath, "r");
       let size: number;
       try {
@@ -201,13 +199,12 @@ export class InspectPackageSigning {
 
   private async readPresence(appId: string, userId: number, signal?: AbortSignal) {
     try {
-      const result = await this.adb.executeCommand(
-        `shell dumpsys package ${shellQuote(appId)}`,
-        INSPECT_COMMAND_TIMEOUT_MS,
-        DUMPSYS_MAX_BUFFER,
-        true,
+      const result = await this.adb.executeCommand(`shell dumpsys package ${shellQuote(appId)}`, {
+        timeoutMs: INSPECT_COMMAND_TIMEOUT_MS,
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       return parseDumpsysPackagePresence(result.stdout, appId, userId);
     } catch (error) {
       throwIfAborted(signal);
@@ -229,10 +226,7 @@ export class InspectPackageSigning {
     try {
       const paths = await this.adb.executeCommand(
         `shell pm path --user ${userId} ${shellQuote(appId)}`,
-        INSPECT_COMMAND_TIMEOUT_MS,
-        undefined,
-        true,
-        signal,
+        { timeoutMs: INSPECT_COMMAND_TIMEOUT_MS, noRetry: true, signal },
       );
       const apks = parsePmPathOutput(paths.stdout);
       apkPath = apks.find((path) => path.endsWith("/base.apk")) ?? apks[0];

@@ -1792,7 +1792,8 @@ describe("CtrlProxyManager", function () {
 
       let pullTimeoutMs: number | undefined;
       const localFakeAdb: any = {
-        executeCommand: async (command: string, timeoutMs?: number) => {
+        executeCommand: async (command: string, options?: { timeoutMs?: number }) => {
+          const timeoutMs = options?.timeoutMs;
           if (command.includes("shell pm path")) {
             return createExecResult(`package:${expectedApkPath}\n`, "");
           }

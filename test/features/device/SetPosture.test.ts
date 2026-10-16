@@ -1316,14 +1316,8 @@ describe("SetPosture", () => {
           "shell cmd device_state print-states",
           "shell cmd device_state state",
         ]);
-        expect(send.mock.calls[0]).toEqual([command, undefined, undefined, true, undefined]);
-        expect(send.mock.calls[1]).toEqual([
-          "emu sensor get hinge-angle0",
-          undefined,
-          undefined,
-          true,
-          undefined,
-        ]);
+        expect(send.mock.calls[0]).toEqual([command, { noRetry: true }]);
+        expect(send.mock.calls[1]).toEqual(["emu sensor get hinge-angle0", { noRetry: true }]);
         if (angle === 180) {
           expect("warnings" in result).toBe(false);
         } else {

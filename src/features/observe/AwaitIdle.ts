@@ -105,13 +105,11 @@ export class AwaitIdle implements AwaitIdleInterface {
 
     try {
       await withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
-        this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
-          remainingMs,
-          DUMPSYS_MAX_BUFFER,
-          undefined,
-          activeSignal,
-        ),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`, {
+          timeoutMs: remainingMs,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: activeSignal,
+        }),
       );
     } catch (error) {
       signal?.throwIfAborted();
@@ -358,13 +356,11 @@ export class AwaitIdle implements AwaitIdleInterface {
             this.timer,
             signal,
             (activeSignal, remainingMs) =>
-              this.adb.executeCommand(
-                `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
-                remainingMs,
-                DUMPSYS_MAX_BUFFER,
-                undefined,
-                activeSignal,
-              ),
+              this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
+                timeoutMs: remainingMs,
+                maxBuffer: DUMPSYS_MAX_BUFFER,
+                signal: activeSignal,
+              }),
           );
           const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
           if (this.idle.validateFrameData(metrics)) {

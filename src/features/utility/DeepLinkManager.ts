@@ -227,10 +227,7 @@ export async function resolveChooserActivityLabel(
     const query = await awaitWhileRequestIsLive(
       adb.executeCommand(
         `shell cmd package query-activities -a android.intent.action.VIEW -d ${shellQuote(url)}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
+        { signal },
       ),
       signal,
     );
@@ -368,8 +365,7 @@ export class DeepLinkManager implements DeepLinkManager {
       // Use dumpsys package to get detailed package information including intent filters
       const packageInfoResult = await this.adbUtils.executeCommand(
         `shell dumpsys package ${shellQuote(appId)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
+        { maxBuffer: DUMPSYS_MAX_BUFFER },
       );
 
       const hasStderr = packageInfoResult.stderr.trim().length > 0;
@@ -978,13 +974,9 @@ export class DeepLinkManager implements DeepLinkManager {
     const center = this.geometry.getElementCenter(targetElement);
     throwIfAborted(this.chooserSignal);
     const tapResult = await awaitWhileRequestIsLive(
-      this.adbUtils.executeCommand(
-        `shell input tap ${center.x} ${center.y}`,
-        undefined,
-        undefined,
-        undefined,
-        this.chooserSignal,
-      ),
+      this.adbUtils.executeCommand(`shell input tap ${center.x} ${center.y}`, {
+        signal: this.chooserSignal,
+      }),
       this.chooserSignal,
     );
 
@@ -1578,13 +1570,9 @@ export class DeepLinkManager implements DeepLinkManager {
     const [fromY, toY] = direction === "up" ? [lowerY, upperY] : [upperY, lowerY];
     throwIfAborted(this.chooserSignal);
     const swipe = await awaitWhileRequestIsLive(
-      this.adbUtils.executeCommand(
-        `shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`,
-        undefined,
-        undefined,
-        undefined,
-        this.chooserSignal,
-      ),
+      this.adbUtils.executeCommand(`shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`, {
+        signal: this.chooserSignal,
+      }),
       this.chooserSignal,
     );
     if (swipe.stderr?.trim()) {

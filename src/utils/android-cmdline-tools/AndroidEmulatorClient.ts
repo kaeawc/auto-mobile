@@ -1982,13 +1982,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     let diagnostic: ReadinessDiagnostic | undefined;
     const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
     try {
-      const result = await adbWithDevice.executeCommand(
-        "emu avd name",
-        infoTimeoutMs,
-        undefined,
-        true,
+      const result = await adbWithDevice.executeCommand("emu avd name", {
+        timeoutMs: infoTimeoutMs,
+        noRetry: true,
         signal,
-      );
+      });
       const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
       logger.debug(
         `AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
@@ -2016,13 +2014,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
 
     try {
-      const result = await adbWithDevice.executeCommand(
-        "shell getprop ro.boot.qemu.avd_name",
-        remainingMs,
-        undefined,
-        true,
+      const result = await adbWithDevice.executeCommand("shell getprop ro.boot.qemu.avd_name", {
+        timeoutMs: remainingMs,
+        noRetry: true,
         signal,
-      );
+      });
       const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
       logger.debug(
         `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
@@ -2452,13 +2448,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     try {
       const adbWithDevice = this.adbFactory.create(device);
-      const result = await adbWithDevice.executeCommand(
-        "shell getprop ro.product.model",
-        infoTimeoutMs,
-        undefined,
-        true,
+      const result = await adbWithDevice.executeCommand("shell getprop ro.product.model", {
+        timeoutMs: infoTimeoutMs,
+        noRetry: true,
         signal,
-      );
+      });
       const modelName = result.stdout.trim();
       if (!modelName || modelName === "unknown") {
         logger.debug(`No model name found for ${device.deviceId}`);
@@ -2665,13 +2659,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     try {
       const adbWithDevice = this.adbFactory.create(device);
-      const result = await adbWithDevice.executeCommand(
-        "shell getprop ro.product.cpu.abi",
-        infoTimeoutMs,
-        undefined,
-        true,
+      const result = await adbWithDevice.executeCommand("shell getprop ro.product.cpu.abi", {
+        timeoutMs: infoTimeoutMs,
+        noRetry: true,
         signal,
-      );
+      });
       const architecture = result.stdout.trim();
       if (!architecture || architecture === "unknown") {
         logger.debug(`No CPU architecture found for ${device.deviceId}`);
@@ -4963,28 +4955,16 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     signal: AbortSignal | undefined,
   ) {
     return Promise.allSettled([
-      adb.executeCommand("get-state", readinessTimeoutMs, undefined, undefined, signal),
-      adb.executeCommand(
-        "shell pm list packages",
-        readinessTimeoutMs,
-        undefined,
-        undefined,
+      adb.executeCommand("get-state", { timeoutMs: readinessTimeoutMs, signal }),
+      adb.executeCommand("shell pm list packages", { timeoutMs: readinessTimeoutMs, signal }),
+      adb.executeCommand("shell getprop sys.boot_completed", {
+        timeoutMs: readinessTimeoutMs,
         signal,
-      ),
-      adb.executeCommand(
-        "shell getprop sys.boot_completed",
-        readinessTimeoutMs,
-        undefined,
-        undefined,
+      }),
+      adb.executeCommand("shell getprop init.svc.bootanim", {
+        timeoutMs: readinessTimeoutMs,
         signal,
-      ),
-      adb.executeCommand(
-        "shell getprop init.svc.bootanim",
-        readinessTimeoutMs,
-        undefined,
-        undefined,
-        signal,
-      ),
+      }),
     ]);
   }
 

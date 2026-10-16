@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -20,11 +21,9 @@ import type { DeviceSession } from "../../src/db/types";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -135,15 +134,11 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     daemonSessionManager.stopCleanupTimer();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
     const manager = new FakeDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(daemonSessionManager, "new-daemon", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        emulatorLossIncidentStore: incidents,
-      }),
-    );
+    const pool = makePool(daemonSessionManager, "new-daemon", {
+      timer,
+      deviceManager: manager,
+      emulatorLossIncidentStore: incidents,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const targets: (SessionRecoveryTarget | undefined)[] = [];
     const assign = pool.assignDeviceToSession.bind(pool);

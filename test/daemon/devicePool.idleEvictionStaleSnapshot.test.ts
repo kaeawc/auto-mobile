@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -252,7 +253,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
         expect(lockDepth).toBe(1);
         expect(expectedDevice).toBeDefined();
         if (platform === "android") {
-          expect(expectedDevice?.status).toBe("error");
+          expect(statusOf(expectedDevice!)).toBe("error");
         }
         guardedRemovals++;
         await remove(id, awaitCacheCleanup, expectedDevice);

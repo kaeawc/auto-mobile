@@ -1021,7 +1021,12 @@ test.each([
       { controller: AbortController; waiters: number },
       unknown,
       object,
-      unknown
+      unknown,
+      unknown,
+      unknown,
+      object,
+      object,
+      object
     >;
     const acquire = (deadline: number | undefined) =>
       sessions

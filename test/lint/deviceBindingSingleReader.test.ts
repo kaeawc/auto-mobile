@@ -45,9 +45,8 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   "src/daemon/deviceDisconnectHandler.ts": 2,
   // DeviceHoldFacts is an already captured availability projection.
   "src/daemon/deviceHold.ts": 2,
-  // Deferred-release record (1), discovery options (1), and the intentional
-  // SessionAssignmentSnapshot destructure in restoreSessionAssignment (2).
-  "src/daemon/devicePool.ts": 4,
+  // Deferred-release record (1) and discovery options (1).
+  "src/daemon/devicePool.ts": 2,
   // Candidate is a Session identity from pooledSessionIdentities.
   "src/daemon/deviceReservations.ts": 1,
   // existingSession is a Session, not its assigned PooledDevice.
@@ -180,7 +179,7 @@ function scan(file: string, source: string): { reads: string[] } {
             : key.type === "Literal" && typeof key.value === "string"
               ? key.value
               : undefined;
-        if (name === "sessionId" || name === "status") {
+        if (name === "sessionId" || name === "status" || name === "health") {
           report(property.start, name);
         }
         checkPattern(property.value);
@@ -245,10 +244,12 @@ function scan(file: string, source: string): { reads: string[] } {
         const literal = unwrapRead(other);
         if (
           member.type === "MemberExpression" &&
-          memberName(member) === "status" &&
+          ["status", "health"].includes(memberName(member) ?? "") &&
           literal.type === "Literal" &&
           typeof literal.value === "string" &&
-          ["idle", "busy", "error"].includes(literal.value)
+          (memberName(member) === "health" ? ["ok", "error"] : ["idle", "busy", "error"]).includes(
+            literal.value,
+          )
         ) {
           comparisons.add(member);
         }
@@ -257,7 +258,7 @@ function scan(file: string, source: string): { reads: string[] } {
     MemberExpression(node) {
       if (
         !writes.has(node) &&
-        ["sessionId", "status"].includes(memberName(node) ?? "") &&
+        ["sessionId", "status", "health"].includes(memberName(node) ?? "") &&
         (comparisons.has(node) || isDeviceReceiver(node.object, node.start))
       ) {
         report(node.start, source.slice(node.start, node.end));
@@ -325,6 +326,14 @@ describe("device binding single reader", () => {
   });
 
   test.each([
+    "device.health;",
+    'device?.["health"];',
+    '"error" === d.health;',
+    'x.health !== "ok";',
+    "const { health } = device;",
+    "function f({ health }) {}",
+    "function f(device) { const d = device; d.health; }",
+    "getDevice(id)?.health;",
     "device.sessionId;",
     "device?.status;",
     "(device!).sessionId;",
@@ -359,6 +368,10 @@ describe("device binding single reader", () => {
 
   test.each([
     "holderOf(device); statusOf(device); isIdle(device); isBusy(device); isErrored(device);",
+    'device.health = "error";',
+    "delete device.health;",
+    'response.health === "green";',
+    "response.health;",
     'device.status = "x";',
     "device.sessionId++;",
     "delete device?.sessionId;",

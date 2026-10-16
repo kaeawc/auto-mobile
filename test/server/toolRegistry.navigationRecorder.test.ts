@@ -233,15 +233,23 @@ describe("navigation recorder handler outcomes", () => {
 
   describe("app lifecycle tools forget the app's screen (#10193)", () => {
     test.each([
-      ["terminateApp", { appId: "com.x" }],
-      ["crashApp", { appId: "com.x" }],
-      ["uninstallApp", { appId: "com.x" }],
-      ["launchApp", { appId: "com.x", coldBoot: true }],
-      ["launchApp", { appId: "com.x", clearAppData: true }],
+      ["terminateApp", { appId: "com.x" }, { stopsApp: true }],
+      ["crashApp", { appId: "com.x" }, { stopsApp: true }],
+      ["uninstallApp", { appId: "com.x" }, { stopsApp: true }],
+      ["launchApp", { appId: "com.x", coldBoot: true }, {}],
+      ["launchApp", { appId: "com.x", clearAppData: true }, {}],
       // installApp names an artifact, not the app: installing over a running app restarts it.
-      ["installApp", { artifactPath: "/tmp/app.apk" }],
-    ])("%s %j leaves the next transition without an edge", async (tool, args) => {
-      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      ["installApp", { artifactPath: "/tmp/app.apk" }, { replacesProcess: true }],
+      // The behaviour follows the declared trait, not the tool's name.
+      ["someFutureKillTool", { appId: "com.x" }, { stopsApp: true }],
+    ])("%s %j leaves the next transition without an edge", async (tool, args, traits) => {
+      registry.registerDeviceAware(
+        tool,
+        "fake",
+        z.object({}),
+        async () => ({ success: true }),
+        traits,
+      );
       await registry.getTool(tool)!.handler(args);
 
       timer.setCurrentTime(1_011_000);
@@ -296,9 +304,13 @@ describe("navigation recorder handler outcomes", () => {
         timestamp: timer.now(),
         sequenceNumber: 0,
       });
-      registry.registerDeviceAware("installApp", "fake", z.object({}), async () => ({
-        success: true,
-      }));
+      registry.registerDeviceAware(
+        "installApp",
+        "fake",
+        z.object({}),
+        async () => ({ success: true }),
+        { replacesProcess: true },
+      );
 
       await registry
         .getTool("installApp")!

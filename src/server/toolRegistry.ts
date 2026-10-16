@@ -451,7 +451,15 @@ interface SessionlessDeviceRead {
   assertAuthorized(device: BootedDevice): void;
 }
 
-interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
+/** Behaviour a tool declares on its definition instead of the pipeline keying on its name (#11825). */
+interface ToolTraits {
+  /** Always ends an app's process (not `appLifecycle` `killBackgrounded`, the state-preserving kill). */
+  stopsApp?: boolean;
+  /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
+  replacesProcess?: boolean;
+}
+
+interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions, ToolTraits {
   shouldEnsureDevice?: (args: T) => boolean;
   /** Opt-in start admission: holder check before managed slots, held-session requirement after. */
   assertHeldDeviceStart?: (
@@ -497,7 +505,7 @@ interface CachedToolDefinitionSchemas {
 }
 
 // Interface for a registered tool
-export interface RegisteredTool {
+export interface RegisteredTool extends ToolTraits {
   name: string;
   description: string;
   schema: any;
@@ -594,6 +602,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
+    traits?: ToolTraits,
   ): NavigationToolCallHandle | undefined;
 }
 
@@ -2236,30 +2245,13 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
 ]);
 
 /**
- * Tools that always end an app's process. `appLifecycle` `killBackgrounded` is deliberately not
- * here: it is the state-preserving kill, so the app comes back on the screen it was left on.
- */
-const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
-  "terminateApp",
-  "crashApp",
-  "uninstallApp",
-]);
-
-/**
- * Tools that replace a process without naming the app in their arguments: `installApp` takes an
- * artifact path, and installing over a running app restarts it, so every remembered screen is
- * forgotten rather than guessing which app it was (#10206 review).
- */
-const PROCESS_REPLACING_TOOLS: ReadonlySet<string> = new Set(["installApp"]);
-
-/**
  * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
  * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
  * counts when it asks for a cold boot or cleared data.
  */
-function appStoppedByToolCall(name: string, args: any): string | undefined {
+function appStoppedByToolCall(name: string, args: any, traits: ToolTraits): string | undefined {
   const stops =
-    APP_STOPPING_TOOLS.has(name) ||
+    traits.stopsApp === true ||
     (name === "launchApp" && (args?.coldBoot === true || args?.clearAppData === true));
   const appId = args?.appId ?? args?.packageName;
   return stops && typeof appId === "string" && appId.length > 0 ? appId : undefined;
@@ -2271,12 +2263,13 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
+    traits: ToolTraits = {},
   ): NavigationToolCallHandle | undefined {
-    const stoppedApp = appStoppedByToolCall(name, args);
+    const stoppedApp = appStoppedByToolCall(name, args, traits);
     if (stoppedApp) {
       this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
     }
-    if (PROCESS_REPLACING_TOOLS.has(name)) {
+    if (traits.replacesProcess === true) {
       this.navigationManager(sessionUuid).forgetAllAppScreens();
     }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
@@ -3459,15 +3452,16 @@ async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  traits?: ToolTraits;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
-  const { target, name, args, handler, progress, signal } = input;
+  const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
-  const withdraw = input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
+  const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;
@@ -3770,6 +3764,7 @@ export class ToolRegistryClass {
                   signal,
                   auditRunner: this.auditRunner,
                   navigationRecorder: this.navigationToolCallRecorder,
+                  traits: options,
                   isResponseFailure: this.isResponseFailure,
                 });
                 if (resolvedTarget.deviceRead) {
@@ -3847,6 +3842,8 @@ export class ToolRegistryClass {
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
+      stopsApp: options.stopsApp,
+      replacesProcess: options.replacesProcess,
       hidden: options.hidden ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,

@@ -657,6 +657,51 @@ export interface AndroidServiceRecoveryManager {
 
 export type AndroidServiceManagerFactory = (device: BootedDevice) => AndroidServiceRecoveryManager;
 
+export interface AndroidCtrlProxyClientDeps {
+  /** Creates the client's WebSocket transport. */
+  webSocketFactory?: WebSocketFactory;
+  /** Schedules connection and request deadlines. */
+  timer?: Timer;
+  /** Stores installed-app metadata. */
+  installedAppsRepository?: InstalledAppsStore;
+  /** Executes retryable operations. */
+  retryExecutor?: RetryExecutor;
+  /** Records app crash events. */
+  crashEventSink?: CrashEventSink;
+  /** Reports lost device connections. */
+  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
+  /** Ingests SDK telemetry, crash, and ANR events. */
+  sdkEventIngestor?: AndroidSdkEventIngestor;
+  /** Logs client lifecycle and cleanup events. */
+  logger?: Logger;
+  /** Provides certificate file operations. */
+  certificateFileSystem?: CertificateFileSystem;
+  /** Coordinates ownership of the device's CtrlProxy forward. */
+  ctrlProxyForwardLease?: CtrlProxyForwardLease;
+  /** Creates the accessibility-service recovery manager. */
+  serviceManagerFactory?: AndroidServiceManagerFactory;
+  /** Generates client and request identifiers. */
+  idGenerator?: IdGenerator;
+  /** Creates a detached observer without service recovery or auto-reconnect. */
+  transientObserver?: boolean;
+}
+
+type AndroidCtrlProxyClientLegacyTestArgs = [
+  timer?: Timer,
+  installedAppsRepository?: InstalledAppsStore,
+  retryExecutor?: RetryExecutor,
+  crashEventSink?: CrashEventSink,
+  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
+  sdkEventIngestor?: AndroidSdkEventIngestor,
+  loggerInstance?: Logger,
+  certificateFileSystem?: CertificateFileSystem,
+  screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
+  ctrlProxyForwardLease?: CtrlProxyForwardLease,
+  serviceManagerFactory?: AndroidServiceManagerFactory,
+  idGenerator?: IdGenerator,
+  transientObserver?: boolean,
+];
+
 const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (device) =>
   AndroidCtrlProxyManager.getInstance(device);
 
@@ -877,29 +922,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private constructor(
     device: BootedDevice,
     adb: AdbExecutor,
-    webSocketFactory?: WebSocketFactory,
-    timer?: Timer,
-    installedAppsRepository?: InstalledAppsStore,
-    retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink,
-    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-    sdkEventIngestor?: AndroidSdkEventIngestor,
-    loggerInstance: Logger = logger,
-    certificateFileSystem?: CertificateFileSystem,
-    ctrlProxyForwardLease?: CtrlProxyForwardLease,
-    serviceManagerFactory: AndroidServiceManagerFactory = defaultAndroidServiceManagerFactory,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    transientObserver?: boolean,
+    deps: AndroidCtrlProxyClientDeps = {},
   ) {
     super(
-      timer ?? defaultTimer,
-      webSocketFactory ?? defaultWebSocketFactory,
+      deps.timer ?? defaultTimer,
+      deps.webSocketFactory ?? defaultWebSocketFactory,
       { connectionResetMs: AndroidCtrlProxyClient.CONNECTION_RESET_MS },
-      retryExecutor ?? defaultRetryExecutor,
+      deps.retryExecutor ?? defaultRetryExecutor,
     );
+    const {
+      serviceManagerFactory = defaultAndroidServiceManagerFactory,
+      idGenerator = defaultIdGenerator,
+      logger: loggerInstance = logger,
+      transientObserver,
+    } = deps;
     this.forcedRestartBudget = new ForcedRestartBudget(this.timer);
     this.serviceManagerFactory = serviceManagerFactory;
-    this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
+    this.sdkEventIngestorInstance = deps.sdkEventIngestor ?? null;
     this.loggerInstance = loggerInstance;
     this.device = device;
     this.incarnationToken = AndroidCtrlProxyClient.currentIncarnationToken(device.deviceId);
@@ -908,13 +947,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.transientObserver = transientObserver === true;
     this.autoReconnectEnabled = transientObserver !== true;
     this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({ timer: this.timer });
-    this.installedAppsRepository = installedAppsRepository ?? null;
-    this.crashEventSink = crashEventSink ?? new FailureEventRepository();
+    this.installedAppsRepository = deps.installedAppsRepository ?? null;
+    this.crashEventSink = deps.crashEventSink ?? new FailureEventRepository();
     this.deviceConnectionLostNotifier =
-      deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
-    this.certificateFileSystem = certificateFileSystem;
-    this.ctrlProxyForwardLease =
-      ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(device.deviceId);
+      deps.deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
+    this.certificateFileSystem = deps.certificateFileSystem;
+    this.ctrlProxyForwardLease = this.resolveForwardLease(deps.ctrlProxyForwardLease);
     // A detached observer needs its own forward while a disconnected singleton
     // retains the device allocation for a later reconnect.
     this.portAllocationId = portAllocationIdForClient(
@@ -928,6 +966,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     });
     AndroidCtrlProxyManager.getInstance(device);
     AndroidCtrlProxyClient.trackObserver(this);
+  }
+
+  private resolveForwardLease(
+    ctrlProxyForwardLease?: CtrlProxyForwardLease,
+  ): CtrlProxyForwardLease {
+    return ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(this.device.deviceId);
   }
 
   private static trackObserver(client: AndroidCtrlProxyClient): void {
@@ -1010,23 +1054,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     existing?: AndroidCtrlProxyClient,
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(
-      device,
-      adbFactory.create(device),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      logger,
-      undefined,
-      existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,
-      defaultAndroidServiceManagerFactory,
-      defaultIdGenerator,
-      true,
-    );
+    return new AndroidCtrlProxyClient(device, adbFactory.create(device), {
+      ctrlProxyForwardLease:
+        existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,
+      transientObserver: true,
+    });
   }
 
   public connectForObservationRead(): Promise<boolean> {
@@ -1607,25 +1639,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   public static createForTesting(
     device: BootedDevice,
     adb: AdbExecutor,
-    webSocketFactory: (url: string) => WebSocket,
-    timer?: Timer,
-    installedAppsRepository?: InstalledAppsStore,
-    retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink,
-    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-    sdkEventIngestor?: AndroidSdkEventIngestor,
-    loggerInstance?: Logger,
-    certificateFileSystem?: CertificateFileSystem,
-    screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
-    ctrlProxyForwardLease?: CtrlProxyForwardLease,
-    serviceManagerFactory?: AndroidServiceManagerFactory,
-    idGenerator?: IdGenerator,
-    transientObserver = false,
+    deps?: AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler },
+  ): AndroidCtrlProxyClient;
+  /** @deprecated Pass an AndroidCtrlProxyClientDeps object instead of positional dependencies. */
+  public static createForTesting(
+    device: BootedDevice,
+    adb: AdbExecutor,
+    webSocketFactory: WebSocketFactory,
+    ...args: AndroidCtrlProxyClientLegacyTestArgs
+  ): AndroidCtrlProxyClient;
+  public static createForTesting(
+    device: BootedDevice,
+    adb: AdbExecutor,
+    depsOrWebSocketFactory?:
+      | (AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler })
+      | WebSocketFactory,
+    ...args: AndroidCtrlProxyClientLegacyTestArgs
   ): AndroidCtrlProxyClient {
-    const client = new AndroidCtrlProxyClient(
-      device,
-      adb,
-      webSocketFactory,
+    const [
       timer,
       installedAppsRepository,
       retryExecutor,
@@ -1634,18 +1665,50 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       sdkEventIngestor,
       loggerInstance,
       certificateFileSystem,
-      ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
-      serviceManagerFactory ?? defaultAndroidServiceManagerFactory,
+      screenshotBackoffScheduler,
+      ctrlProxyForwardLease,
+      serviceManagerFactory,
       idGenerator,
-      transientObserver,
-    );
+      transientObserver = false,
+    ] = args;
+    // Positional form: a factory, or an explicit `undefined` factory followed by later positional
+    // arguments such as the timer. Anything else is the deps bag.
+    const isPositional =
+      typeof depsOrWebSocketFactory === "function" ||
+      (depsOrWebSocketFactory === undefined && args.length > 0);
+    const deps: AndroidCtrlProxyClientDeps & {
+      screenshotBackoffScheduler?: ScreenshotBackoffScheduler;
+    } = isPositional
+      ? {
+          webSocketFactory:
+            typeof depsOrWebSocketFactory === "function" ? depsOrWebSocketFactory : undefined,
+          timer,
+          installedAppsRepository,
+          retryExecutor,
+          crashEventSink,
+          deviceConnectionLostNotifier,
+          sdkEventIngestor,
+          logger: loggerInstance,
+          certificateFileSystem,
+          screenshotBackoffScheduler,
+          ctrlProxyForwardLease,
+          serviceManagerFactory,
+          idGenerator,
+          transientObserver,
+        }
+      : (depsOrWebSocketFactory ?? {});
+    const client = new AndroidCtrlProxyClient(device, adb, {
+      ...deps,
+      ctrlProxyForwardLease: deps.ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
+      serviceManagerFactory: deps.serviceManagerFactory ?? defaultAndroidServiceManagerFactory,
+    });
     // Unit tests never read the real host's TCP table.
     client.forwardClientProbe = new NoForwardClientConnectionProbe();
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
     // the production getInstance path.
-    if (screenshotBackoffScheduler) {
-      client.screenshotBackoffScheduler = screenshotBackoffScheduler;
+    if (deps.screenshotBackoffScheduler) {
+      client.screenshotBackoffScheduler = deps.screenshotBackoffScheduler;
     }
     return client;
   }
@@ -1657,7 +1720,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     webSocketFactory: WebSocketFactory,
     timer: Timer,
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer);
+    return new AndroidCtrlProxyClient(device, adb, { webSocketFactory, timer });
   }
 
   // ===========================================================================

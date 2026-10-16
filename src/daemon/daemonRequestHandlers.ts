@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { toActionableError } from "../models/ActionableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
@@ -1961,7 +1962,7 @@ function deviceLeaseActivitySourcesFor(state: DaemonStateAccess): DeviceLeaseAct
   const manager = state.getSessionManager();
   return withShutdownActivity(
     daemonDeviceLeaseActivitySources(
-      (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+      (id) => manager.getSessionForDevice?.(id) ?? holderOf(pool.getDevice?.(id)) ?? null,
     ),
     pool,
   );

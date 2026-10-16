@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
@@ -347,7 +348,7 @@ export class EmulatorProcessLifecycle {
     }
 
     const assignmentCountAtExit = device.assignmentCount;
-    const sessionIdAtExit = device.sessionId;
+    const sessionIdAtExit = holderOf(device);
     const sessionAtExit = sessionIdAtExit
       ? this.pool.getSessionManager().getSession(sessionIdAtExit)
       : null;
@@ -362,7 +363,7 @@ export class EmulatorProcessLifecycle {
           if (
             this.pool.getDevices().get(deviceId) !== device ||
             device.assignmentCount !== assignmentCountAtExit ||
-            device.sessionId !== sessionIdAtExit ||
+            holderOf(device) !== sessionIdAtExit ||
             (sessionAtExit !== null &&
               this.pool.getSessionManager().getSession(sessionAtExit.sessionId) !== sessionAtExit)
           ) {

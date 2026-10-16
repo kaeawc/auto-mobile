@@ -500,6 +500,8 @@ New code goes in proposed modules (SessionSlots and SessionRowWriter) so
 | S8  | Its own issue, not part of closing #11798. Split `getSessionInternal` into pure `find` and explicit `expireIfDue`; migrate the 31 in-class readers (`getClock`, `getRotation`, `getNetworkCondition`...) to `find`. `expireIfDue` stays at every site where expiry is observable (routing, admission), so lazy expiry does not silently disappear for the 84 external callers; those migrate directory by directory. | M, then several S      | A lint-guarded test that `find` never schedules a release; the expiry tests move to `expireIfDue`.                                                                                                   |
 | S9  | Hand-off: slot code no longer reads row-facet fields; `rowPending` is the only row signal (stubbed `() => false` until W2). Closes #11798.                                                                                                                                                                                                                                                                           | S                      | Existing row-invariant suites unchanged.                                                                                                                                                             |
 
+S3 landed with `SessionSlots` owning the assignment and creation group as per-facet maps.
+
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.
 

@@ -63,6 +63,7 @@ class RacingRepository extends DeviceSessionRepository {
 class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
   park: Promise<void> | undefined;
   afterReleaseWrite: (() => void) | undefined;
+  failPlainUpserts = 0;
 
   override async markReleased(
     sessionUuid: string,
@@ -84,6 +85,10 @@ class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
     options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
     if (!options.unlessTerminal) {
+      if (this.failPlainUpserts > 0) {
+        this.failPlainUpserts--;
+        throw new Error("SQLITE_BUSY: eager live rewrite failed");
+      }
       await settleMicrotasks(20);
     }
     return await super.upsertActiveSession(record, nowMs, options);
@@ -412,8 +417,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       expect(releases.map((release) => release.reason)).toEqual(["explicit-release"]);
     });
 
-    // #11206: a superseded release's terminal write can land late, under a session that lives
-    // on, and is then rewritten live. That row is this daemon's own, not the end of the UUID.
+    // #11206: a late superseded terminal write is rewritten live, rather than ending its UUID.
     test("a late terminal write of this daemon's superseded release does not end the session it left alive", async () => {
       const store = new LateReleaseWritePersistence();
       const manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
@@ -433,6 +437,8 @@ describe("session persistence guards live in the statement, not in a prior read"
         () => !superseded,
       );
       await settleMicrotasks(100);
+      // Fail the eager rewrite so the late terminal write drives the original activity race.
+      store.failPlainUpserts = 1;
       // The serial is re-observed with a newer identity; the terminal write is still parked.
       superseded = true;
       await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -451,8 +457,9 @@ describe("session persistence guards live in the statement, not in a prior read"
       landReleaseWrite();
       await settleMicrotasks(200);
 
-      // The scenario was driven: the activity write found no active row and was not persisted.
+      // The activity write found the late terminal row before its live rewrite landed.
       expect(outcome).toBe("SessionActivityPersistenceError");
+      expect(store.afterReleaseWrite).toBeUndefined();
       // The session the supersede kept is still held, and its row is live again.
       expect(manager.getSession(SESSION)).not.toBeNull();
       expect(releases).toEqual([]);

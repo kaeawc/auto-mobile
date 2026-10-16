@@ -43,6 +43,8 @@ export interface AdbProcess {
 }
 
 export interface AdbExecuteOptions {
+  /** Observe stdout while the host child is still running (inert when absent). */
+  onStdout?: (chunk: string) => void;
   timeoutMs?: number;
   maxBuffer?: number;
   noRetry?: boolean;

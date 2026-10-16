@@ -919,6 +919,72 @@ bun_test_invocations() {
   [[ "$output" != *"RETRY:"* ]]
   [[ "$output" == *"retried=0"* ]]
   [[ "$output" != *"::error"* ]]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "below-threshold timeout summaries include calibration before a passing retry" {
+  summary="$BATS_TEST_TMPDIR/timeout-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=50 GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 0 ]
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 1); runner probe slowdown 2x (contended threshold 2.5x).' "$summary"
+  [ "$(grep -c 'runner probe slowdown' "$summary")" -eq 1 ]
+}
+
+@test "timeout summaries say when calibration is unavailable" {
+  summary="$BATS_TEST_TMPDIR/timeout-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 124" AUTOMOBILE_RUNNER_CALIBRATION=0 GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 1); no calibration sample.' "$summary"
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 2); no calibration sample.' "$summary"
+  [[ "$output" == *"worst probe slowdown n/a)"* ]]
+}
+
+@test "both below-threshold timeouts emit a lane marker and Actions summary" {
+  summary="$BATS_TEST_TMPDIR/starved-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=50 STUB_PROBE_RETRY_MS=25 \
+    GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  marker='RUNNER-STARVED-SUSPECTED: all 1 unit shards hit the 180 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.'
+  [[ "$output" == *"$marker"* ]]
+  [[ "$output" == *"::error title=Unit lane runner starvation suspected::$marker"* ]]
+  grep -Fx -- "$marker" "$summary"
+  grep -Fx -- '- Unit shard 0 hit its 180s wall-clock budget (attempt 2); runner probe slowdown 1x (contended threshold 2.5x).' "$summary"
+  [ "$(grep -c 'runner probe slowdown' "$summary")" -eq 2 ]
+}
+
+@test "signal kill followed by a below-threshold timeout does not emit a lane marker" {
+  run_retry_lane STUB_BUN_EXITS="137 124" STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"was killed by signal 9 (exit 137)"* ]]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "timeout summary write failures preserve the shard exit status" {
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=50 GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RUNNER-STARVED-SUSPECTED:"* ]]
+}
+
+@test "all two shards must time out twice for the lane marker" {
+  run_retry_lane AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_BUN_EXIT=124 STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RUNNER-STARVED-SUSPECTED: all 2 unit shards"* ]]
+  [ "$(bun_test_invocations)" -eq 4 ]
+
+  : > "$BUN_ARGS_FILE"
+  hook="$BATS_TEST_TMPDIR/partial-timeout.sh"
+  cat > "$hook" <<'EOF'
+case "$AUTOMOBILE_WATCHDOG_LABEL" in
+  "unit shard 0") exit 124 ;;
+  *) exit 0 ;;
+esac
+EOF
+  run_retry_lane AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_SHARD_HOOK="$hook" STUB_PROBE_MS=50
+  [ "$status" -eq 124 ]
+  [[ "$output" != *"RUNNER-STARVED-SUSPECTED:"* ]]
+  [ "$(bun_test_invocations)" -eq 3 ]
 }
 
 @test "contention threshold accepts decimals and includes equality" {

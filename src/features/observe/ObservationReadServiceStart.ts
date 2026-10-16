@@ -1,3 +1,4 @@
+import { isIdle, holderOf } from "../../daemon/deviceBinding";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import type { BootedDevice } from "../../models";
@@ -44,8 +45,8 @@ export const daemonObservationServiceOwnershipGuard: ObservationServiceOwnership
       !getDeviceAcquisitionReadiness(deviceReadinessLockKey(device.platform, device.deviceId)) &&
       pooled?.platform === device.platform &&
       pooled.name === device.name &&
-      pooled.status === "idle" &&
-      !pooled.sessionId &&
+      isIdle(pooled) &&
+      !holderOf(pooled) &&
       pool.isSafeForObservationServiceStart(device.deviceId)
     );
   },

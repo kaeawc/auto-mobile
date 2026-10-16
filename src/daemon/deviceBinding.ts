@@ -6,8 +6,30 @@ export interface BindingFields {
   status: DeviceStatus;
 }
 
-export function holderOf(device: Pick<BindingFields, "sessionId">): string | null {
-  return device.sessionId;
+export function holderOf(device: Pick<BindingFields, "sessionId">): string | null;
+export function holderOf(
+  device: Pick<BindingFields, "sessionId"> | null | undefined,
+): string | null | undefined;
+export function holderOf(
+  device: Pick<BindingFields, "sessionId"> | null | undefined,
+): string | null | undefined {
+  return device?.sessionId;
+}
+
+export function statusOf(device: Pick<BindingFields, "status">): DeviceStatus {
+  return device.status;
+}
+
+export function isIdle(device: Pick<BindingFields, "status"> | null | undefined): boolean {
+  return device?.status === "idle";
+}
+
+export function isBusy(device: Pick<BindingFields, "status"> | null | undefined): boolean {
+  return device?.status === "busy";
+}
+
+export function isErrored(device: Pick<BindingFields, "status"> | null | undefined): boolean {
+  return device?.status === "error";
 }
 
 export function bindDevice(device: BindingFields, sessionId: string): void {

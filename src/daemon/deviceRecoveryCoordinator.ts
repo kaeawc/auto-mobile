@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import type { SessionReleaseReason } from "./releaseReasons";
 import { releasePoolDevice, type SessionReleasePool } from "./releaseSessionAndDevice";
 import type { SessionReleaseOptions } from "./sessionManager";
@@ -175,7 +176,7 @@ export class DeviceRecoveryCoordinator {
     expectedDevice?: PooledDevice,
   ): Promise<SessionPreservingRecoveryResult> {
     const candidateSessionId =
-      expectedDevice?.sessionId ??
+      holderOf(expectedDevice) ??
       expectedDevice?.adbServerResetSessionId ??
       this.pool.getSessionForDevice(deviceId);
     if (candidateSessionId) {
@@ -228,7 +229,7 @@ export class DeviceRecoveryCoordinator {
     incidentId?: string,
     expectedDevice?: PooledDevice,
   ): Promise<SessionPreservingRecoveryResult> {
-    const candidateSessionId = expectedDevice?.sessionId ?? this.pool.getSessionForDevice(deviceId);
+    const candidateSessionId = holderOf(expectedDevice) ?? this.pool.getSessionForDevice(deviceId);
     if (candidateSessionId) {
       const inFlight = this.sessionPreservingRecoveries.get(candidateSessionId);
       if (inFlight) {

@@ -24,11 +24,33 @@ export const IMPLIED_ADD_ONLY_MIN_IOS_MAJOR = 27;
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
+export type PhotosAuthorizationStatus =
+  | "authorized"
+  | "limited"
+  | "denied"
+  | "notDetermined"
+  | "addOnly"
+  | "unobservable";
+
+export interface PhotosAuthorizationVerifier {
+  verifyReadWrite(deviceId: string, appId: string): Promise<PhotosAuthorizationStatus>;
+}
+
+/** Host TCC readback cannot observe the target app's effective PhotoKit status. */
+export class UnobservablePhotosAuthorizationVerifier implements PhotosAuthorizationVerifier {
+  async verifyReadWrite(_deviceId: string, _appId: string): Promise<PhotosAuthorizationStatus> {
+    return "unobservable";
+  }
+}
+
 export interface IosSimulatorPermissionCommandResult {
   permission: string;
   success: boolean;
   applied?: boolean;
   verified?: boolean;
+  code?: "PHOTOS_FULL_ACCESS_UNVERIFIED" | "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED";
+  accessLevel?: "readWrite" | "addOnly";
+  evidence?: "storedTccGrant";
   stdout?: string;
   stderr?: string;
   error?: string;
@@ -190,6 +212,7 @@ export class IosSimulatorPermissions {
     simctl: IosSimulatorPrivacyClient | null = null,
     tccReader: TccPermissionReader | null = null,
     private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
+    private readonly photosVerifier: PhotosAuthorizationVerifier = new UnobservablePhotosAuthorizationVerifier(),
   ) {
     this.device = device;
     this.iosMajor = parseIosMajorVersion(device.iosVersion ?? device.osVersion);
@@ -273,12 +296,28 @@ export class IosSimulatorPermissions {
         const verification =
           action === "grant" &&
           (permission === "all" || tccServiceForPermission(permission) === "kTCCServicePhotos")
-            ? await this.verifyPhotosGrant(
-                normalizedAppId,
-                permission === "all" ? "photos" : permission,
-              )
+            ? await this.verifyPhotosGrant(normalizedAppId)
             : { success: true };
-        results.push({ permission, ...verification, stdout: result.stdout, stderr: result.stderr });
+        if (permission === "all" && !verification.success) {
+          results.push({
+            permission,
+            success: true,
+            applied: true,
+            stdout: result.stdout,
+            stderr: result.stderr,
+          });
+          results.push({ permission: "photos", ...verification });
+          continue;
+        }
+        results.push({
+          permission,
+          ...verification,
+          ...(tccServiceForPermission(permission) === "kTCCServicePhotosAdd"
+            ? { accessLevel: "addOnly" as const }
+            : {}),
+          stdout: result.stdout,
+          stderr: result.stderr,
+        });
       } catch (error) {
         logger.warn("iOS simulator permission command failed", error);
         results.push({
@@ -290,9 +329,7 @@ export class IosSimulatorPermissions {
     }
 
     const failedCount = results.filter((result) => !result.success).length;
-    const commandError = results.find(
-      (result) => !result.success && result.verified !== false,
-    )?.error;
+    const firstError = results.find((result) => !result.success)?.error;
     const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
 
     return {
@@ -305,42 +342,61 @@ export class IosSimulatorPermissions {
       failedCount,
       results,
       ...(warnings.length > 0 ? { warnings } : {}),
-      ...(failedCount > 0
-        ? {
-            error: commandError ?? `One or more iOS simulator permissions failed to ${action}`,
-          }
-        : {}),
+      ...(failedCount > 0 ? { error: firstError } : {}),
     };
   }
 
   private async verifyPhotosGrant(
     appId: string,
-    permission: string,
-  ): Promise<
-    Pick<IosSimulatorPermissionCommandResult, "success" | "applied" | "verified" | "warning">
-  > {
-    const unverified = {
+  ): Promise<Omit<IosSimulatorPermissionCommandResult, "permission">> {
+    const unverified: Omit<IosSimulatorPermissionCommandResult, "permission"> = {
       success: true,
       applied: true,
       verified: false,
+      accessLevel: "readWrite",
+      code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
       warning: PHOTOS_GRANT_UNVERIFIED_WARNING,
     };
+    let evidence: IosSimulatorPermissionCommandResult["evidence"];
     try {
-      const rows = await this.tccReader.readPermissions(this.device.deviceId, appId, [permission]);
+      const rows = await this.tccReader.readPermissions(this.device.deviceId, appId, ["photos"]);
       const classification = classifyIosSimulatorPermission(
         "kTCCServicePhotos",
         rows.find((row) => row.service === "kTCCServicePhotos"),
       );
-      // Success is intentionally unreachable until app-level instrumentation supplies a
-      // verified native status; this branch is the seam for that verification.
-      if (classification.state === "granted" && classification.verified !== false) {
-        return { success: true, applied: true, verified: true };
-      }
+      evidence = classification.evidence === "storedTccGrant" ? classification.evidence : undefined;
     } catch (error) {
-      logger.warn("iOS simulator Photos grant readback failed", error);
-      return unverified;
+      logger.warn(`iOS simulator Photos grant readback failed: ${errorMessage(error)}`, error);
+      // Missing stored-grant evidence only; the native verifier below stays authoritative.
     }
-    return unverified;
+
+    let status: PhotosAuthorizationStatus = "unobservable";
+    try {
+      status = await this.photosVerifier.verifyReadWrite(this.device.deviceId, appId);
+    } catch (error) {
+      logger.warn(
+        `iOS simulator Photos authorization verification failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    const metadata = {
+      applied: true,
+      accessLevel: "readWrite" as const,
+      ...(evidence ? { evidence } : {}),
+    };
+    if (status === "authorized") {
+      return { ...metadata, success: true, verified: true };
+    }
+    if (status === "unobservable") {
+      return { ...unverified, ...metadata };
+    }
+    return {
+      ...metadata,
+      success: false,
+      verified: false,
+      code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+      error: `Photos grant was dispatched via simctl but effective full read/write Photos access was not established (observed ${status}); add-only is insufficient; launch the app and check PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`,
+    };
   }
 
   async getPermissions(

@@ -321,7 +321,11 @@ export interface SimCtl {
   getBootedSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
 
   /** List booted simulators without swallowing discovery failures. */
-  getBootedSimulatorsChecked(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
+  getBootedSimulatorsChecked(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    options?: { bypassCache?: boolean },
+  ): Promise<BootedDevice[]>;
 
   /**
    * {@link getBootedSimulatorsChecked} plus the simulators `simctl` reports `Booting` or

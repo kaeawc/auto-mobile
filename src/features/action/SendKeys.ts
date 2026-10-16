@@ -13,15 +13,15 @@ import {
   ANDROID_FOCUSED_INPUT_ERROR,
   ANDROID_TYPE_FOCUSED_INPUT_ERROR,
   IME_COMMIT_READ_BACK_SETTLE_MS,
-  segmentGraphemes,
   isPrintableAscii,
 } from "./sendkeys/AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./sendkeys/ImeSpan";
 import type { AndroidModeTyper } from "./sendkeys/AndroidModeTyper";
 import { A11yTyper } from "./sendkeys/A11yTyper";
 import { EventOnlyTyper } from "./sendkeys/EventOnlyTyper";
+import { PasswordRouting } from "./sendkeys/PasswordRouting";
+import { IosTyper } from "./sendkeys/IosTyper";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import {
   resolveTextCtrlProxyTimeoutMs,
@@ -69,11 +69,10 @@ import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { imeCommitUnitFields } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { getFocusedTextField, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
+import { getFocusedTextField, getFocusedTextLength } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import {
   focusedFieldIsPassword,
-  focusedImeFieldClass,
   imeFailureFields,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
   LEGACY_IME_PASSWORD_REFUSAL,
@@ -546,6 +545,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
   private readonly clearVerifier: FocusedTextClearVerifier;
+  private readonly passwordRouting: PasswordRouting;
+  private readonly iosTyper: IosTyper;
   // These values intentionally survive commands and concurrent calls on this executor.
   private readonly session = new TypingSession();
   private readonly keyEventSupport: KeyEventSupport;
@@ -606,6 +607,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
     this.timer = dependencies.timer ?? defaultTimer;
     this.clearVerifier = this.createClearVerifier();
+    this.passwordRouting = this.createPasswordRouting();
+    this.iosTyper = this.createIosTyper();
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
     this.keyEventSupport = this.createKeyEventSupport();
@@ -740,6 +743,31 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observer: { execute: (options) => this.observer.execute(options) },
       timer: this.timer,
       clearText: () => this.textClient.clear(),
+    });
+  }
+
+  private createPasswordRouting(): PasswordRouting {
+    return new PasswordRouting({
+      platform: () => this.device.platform,
+      observer: { execute: (options) => this.observer.execute(options) },
+      targetLayer: () => this.targetLayer,
+      resolveMode: (requestedMode) => this.resolveMode(requestedMode),
+      supportsImePasswordCommit: () => this.textClient.supportsImePasswordCommit(),
+      getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
+      hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
+    });
+  }
+
+  private createIosTyper(): IosTyper {
+    return new IosTyper({
+      session: this.session,
+      observer: this.observer,
+      timer: this.timer,
+      targetLayer: () => this.targetLayer,
+      clear: (signal, display) => this.clear(signal, display),
+      insert: (text, options) => this.textClient.insert(text, options),
+      withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
+      markPartialAfterMutation: (result) => markPartialAfterMutation(result),
     });
   }
 
@@ -1083,173 +1111,30 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.device.platform === "ios" ? "xcuiTypeText" : mode;
   }
 
-  private async resolveAutoPasswordMode(
+  private resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<{
-    mode: AndroidSendKeysTypingMode;
-    focusedInputVerified: boolean;
-    verifyPasswordDeliverable: boolean;
-    focusedFieldClass?: string | null;
-    passwordField?: boolean;
-  }> {
-    if (this.device.platform !== "android" || requestedMode !== "auto") {
-      return {
-        mode: this.resolveMode(requestedMode),
-        focusedInputVerified: false,
-        verifyPasswordDeliverable: false,
-      };
-    }
-    let focusedFieldClass: string | null = null;
-    const password = await this.isFocusedAndroidPasswordField(
-      operation,
-      signal,
-      display,
-      (observation) => {
-        focusedFieldClass = focusedImeFieldClass(observation);
-      },
-    );
-    const focusedInputVerified = password !== undefined;
-    if (password && (await this.textClient.supportsImePasswordCommit())) {
-      // The CtrlProxy IME commits and clears password fields like any other field.
-      return {
-        mode: "ime",
-        focusedInputVerified,
-        verifyPasswordDeliverable: false,
-        focusedFieldClass,
-        passwordField: true,
-      };
-    }
-    return {
-      mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
-      focusedInputVerified,
-      verifyPasswordDeliverable: password === true && operation === "insert",
-      focusedFieldClass,
-      ...(password ? { passwordField: true } : {}),
-    };
+  ) {
+    return this.passwordRouting.resolveAutoPasswordMode(requestedMode, operation, signal, display);
   }
 
-  private async verifyPasswordRouting(
+  private verifyPasswordRouting(
     routing: { verifyPasswordDeliverable: boolean },
     text: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (routing.verifyPasswordDeliverable) {
-      await this.requirePasswordTextDeliverable(text, signal);
-    }
+    return this.passwordRouting.verifyPasswordRouting(routing, text, signal);
   }
 
-  /**
-   * Auto insert into a password field is delivered as key events, because CtrlProxy refuses
-   * `request_insert_text` on password fields. A character with no key event (non-ASCII, or an
-   * uppercase letter / shifted symbol below API 31) would be refused mid-run after the earlier
-   * characters were already typed (#9941). Decide up front so nothing is typed in that case.
-   */
-  private async requirePasswordTextDeliverable(text: string, signal?: AbortSignal): Promise<void> {
-    const undeliverable: string[] = [];
-    for (const grapheme of segmentGraphemes(text)) {
-      signal?.throwIfAborted();
-      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
-        undeliverable.push(grapheme);
-      }
-    }
-    if (undeliverable.length === 0) {
-      return;
-    }
-    // Never name the characters: they are part of a password.
-    const nonAscii = undeliverable.filter((grapheme) => !isPrintableAscii(grapheme)).length;
-    const reasons = [
-      ...(nonAscii > 0 ? [`${nonAscii} non-ASCII (no key event exists)`] : []),
-      ...(undeliverable.length > nonAscii
-        ? [
-            `${undeliverable.length - nonAscii} uppercase or shifted (key events need Android 12, API 31, or newer)`,
-          ]
-        : []),
-    ];
-    throw new ActionableError(
-      `Nothing was typed: the text for the focused password field contains ${undeliverable.length} character(s) that cannot be sent as key events on this device (${reasons.join("; ")}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Use operation: "replace" to set the whole value at once.`,
-    );
-  }
-
-  private async isFocusedAndroidPasswordField(
-    operation: SendKeysOperation,
-    signal?: AbortSignal,
-    display?: string,
-    onObservation?: (observation: ObserveResult) => void,
-  ): Promise<boolean | undefined> {
-    const observation = await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      skipScreenshot: true,
-      ...(display === undefined ? {} : { display }),
-    });
-    onObservation?.(observation);
-    const hierarchy = observation.viewHierarchy;
-    if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      // Auto insert already reads focus for password routing. Reject before dispatch
-      // rather than trusting an IME acknowledgement with no readable editable target.
-      if (operation === "insert" && this.targetLayer !== "prototype") {
-        throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
-      }
-      // Replace still dispatches; distinguish absent focus from a focused non-password field.
-      return undefined;
-    }
-    return hasFocusedPasswordField(hierarchy);
-  }
-
-  private async executeIosType(
+  private executeIosType(
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
-    signal?.throwIfAborted();
-    const resolvedMode = "xcuiTypeText" as const;
-    let clearWarning: string | undefined;
-    if (operation === "replace") {
-      const clearResult = await this.clear(signal, display);
-      if (!clearResult.success) {
-        return { ...clearResult, resolvedMode };
-      }
-      clearWarning = clearResult.warning;
-      signal?.throwIfAborted();
-    }
-
-    const before = await readIosTypedTextField(this.observer, this.timer, signal, display);
-    this.session.typingPasswordField = before?.secure === true;
-    signal?.throwIfAborted();
-
-    // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
-    // requested cross-platform mode in metadata, but report the actual mechanism.
-    const deadlineMs = getTextRequestDeadlineMs();
-    const result = await this.textClient.insert(text, {
-      ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(
-        text,
-        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
-      ),
-      abortSignal: signal,
-    });
-    if (!result.success) {
-      return {
-        ...this.withTextWarnings(
-          operation === "replace" ? markPartialAfterMutation(result) : result,
-          [clearWarning],
-        ),
-        resolvedMode,
-      };
-    }
-    return {
-      ...this.withTextWarnings(
-        this.targetLayer === "prototype"
-          ? result
-          : await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
-        [clearWarning],
-      ),
-      resolvedMode,
-    };
+    return this.iosTyper.executeIosType(text, operation, signal, display);
   }
 
   private async executeAndroidType(

@@ -298,6 +298,7 @@ export async function runSuite(
       definition.verify,
       definition.baseline,
       definition.baselineToolSequence,
+      prepared.preflight.appBuild,
     ),
   };
   deps.fs.writeFile(

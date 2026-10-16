@@ -19,7 +19,12 @@ import { TranscriptBuilder } from "./transcriptBuilder";
 
 function result(
   builder: TranscriptBuilder,
-  options: { outcome?: Partial<RunOutcome>; answer?: string[]; sequence?: string[] } = {},
+  options: {
+    outcome?: Partial<RunOutcome>;
+    answer?: string[];
+    sequence?: string[];
+    baselineAppBuild?: string;
+  } = {},
 ): BenchmarkResult {
   const audit = auditTranscript(builder.build(), {
     failurePatterns: ["WAIT_TIMEOUT"],
@@ -45,8 +50,9 @@ function result(
       audit,
       outcome,
       { answerIncludes: options.answer ?? [], screenIncludes: [] },
-      { totalToolCalls: 2, costUsd: 0.01 },
+      { totalToolCalls: 2, costUsd: 0.01, appBuild: options.baselineAppBuild },
       options.sequence,
+      "versionName=1.0 versionCode=7",
     ),
   };
 }
@@ -132,7 +138,24 @@ describe("agent benchmark rendering", () => {
       numTurns: 3,
       costUsd: 0.0123,
       tools: { observe: 1, tapOn: 1 },
+      appBuild: "versionName=1.0 versionCode=7",
     });
     expect(suite.baselineToolSequence).toEqual(["observe", "tapOn"]);
+  });
+
+  test("a baseline from another app build is flagged; a matching one is not", () => {
+    const other = result(passing(), { baselineAppBuild: "versionName=0.9 versionCode=6" });
+    expect(other.comparison.appBuild).toEqual({
+      baseline: "versionName=0.9 versionCode=6",
+      current: "versionName=1.0 versionCode=7",
+      matches: false,
+    });
+    expect(renderReport(other)).toContain(
+      "! baseline was recorded on versionName=0.9 versionCode=6; deltas compare different app builds",
+    );
+    const same = result(passing(), { baselineAppBuild: "versionName=1.0 versionCode=7" });
+    expect(same.comparison.appBuild?.matches).toBe(true);
+    expect(renderReport(same)).not.toContain("baseline was recorded on");
+    expect(result(passing()).comparison.appBuild).toBeUndefined();
   });
 });

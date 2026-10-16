@@ -138,7 +138,7 @@ claude:
   disallowedTools: [Bash] # default
   maxBudgetUsd: 2 # optional hard spend cap per run
   timeoutSeconds: 600 # default 900
-  extraArgs: [] # extra claude flags (not --model)
+  extraArgs: [] # extra claude flags (not --model, --resume, or --continue)
 verify:
   answerIncludes: ["EXPECTED_COUNT: 3"]
   screenIncludes: ["Expected count: 3"]
@@ -150,6 +150,10 @@ baselineToolSequence: [] # optional
 
 The prompt text supports the same `{deviceSerial}`, `{packageName}`, and `{runDirectory}`
 placeholders. The harness always tells Claude which device serial and app to use.
+
+Preference values are written with Android's typed tags. Integers must be safe JavaScript
+integers. Fractions are stored as 32-bit floats, so a nonzero value too small for that type
+(which would be stored as 0) is rejected.
 
 Playground suites seed `onboarding_prefs` and `auth_prefs` after clearing data, because the app
 redirects every Demos deep link to onboarding until onboarding is complete and the user is signed
@@ -166,6 +170,9 @@ When a run passes, the harness writes `<run>/baseline.yml`, which you can paste 
 Record baselines only from clean, passing runs. When establishing one, allow up to three
 attempts. If none passes, leave the suite without a `baseline` block rather than recording a
 failed run.
+
+The snippet also records the app build fingerprint (`baseline.appBuild`). If a later run's
+installed app differs, the report flags that its deltas compare different app builds.
 
 ## Artifacts
 

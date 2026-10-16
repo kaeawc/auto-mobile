@@ -386,6 +386,7 @@ data class PrototypeRowNode(
   override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
+  val swipeActions: PrototypeSwipeActions? = null,
 ) : PrototypeNode()
 
 @SerialName("column")
@@ -407,6 +408,29 @@ data class PrototypeColumnNode(
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
 ) : PrototypeNode()
+
+/**
+ * One swipe-revealed button: [label] is its text and accessibility name, [role] `destructive`
+ * selects error colours, [color] (hex or theme role) overrides the background.
+ */
+@Serializable
+data class PrototypeSwipeAction(
+  val label: String,
+  val icon: String? = null,
+  val role: String? = null,
+  val color: String? = null,
+  val onTap: List<PrototypeAction>,
+)
+
+/**
+ * `start` is revealed by a right swipe, `end` by a left swipe; [fullSwipe] runs the first entry.
+ */
+@Serializable
+data class PrototypeSwipeActions(
+  val start: List<PrototypeSwipeAction>? = null,
+  val end: List<PrototypeSwipeAction>? = null,
+  val fullSwipe: Boolean? = null,
+)
 
 @SerialName("flow")
 @Serializable
@@ -831,6 +855,7 @@ data class PrototypeListItemNode(
   val supporting: String? = null,
   val leadingIcon: String? = null,
   val trailing: PrototypeListItemTrailing? = null,
+  val swipeActions: PrototypeSwipeActions? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 

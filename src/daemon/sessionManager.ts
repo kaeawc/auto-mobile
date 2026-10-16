@@ -8797,8 +8797,8 @@ export class SessionManager {
           const ownAdvance =
             incarnation !== undefined &&
             (!held || held === incarnation) &&
-            !this.pendingSessionCreations.has(snapshot.sessionId) &&
-            !this.pendingSessionAssignments.has(snapshot.sessionId) &&
+            !this.sessionSlots.hasCreation(snapshot.sessionId) &&
+            !this.sessionSlots.hasAssignment(snapshot.sessionId) &&
             row?.stable_identity_generation !== undefined &&
             this.persistedRowGenerations.get(incarnation) === row.stable_identity_generation;
           return ownAdvance ? row!.stable_identity_generation : precondition.expectedRowGeneration;

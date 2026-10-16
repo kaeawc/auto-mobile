@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { describe, expect, it } from "bun:test";
@@ -5,7 +6,7 @@ import {
   FailuresStreamSocketServer,
   type FailuresStreamRepository,
 } from "../../../src/daemon/failuresStreamSocketServer";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../../src/daemon/socketServer/BaseSocketServer";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import {
@@ -168,7 +169,7 @@ describe("auxiliary socket inbound frame limit", () => {
 
 describe("control socket inbound frame limit", () => {
   function connect(socket: FlushingSocket): UnixSocketServer {
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       undefined,
@@ -236,7 +237,7 @@ describe("per-server inbound frame limits", () => {
     expect(CONTROL_SOCKET_MAX_FRAME_BYTES).toBe(256 * 1024 * 1024);
     expect(AUX_SOCKET_MAX_FRAME_BYTES).toBe(1024 * 1024);
     expect(FAILURES_STREAM_MAX_FRAME_BYTES).toBeGreaterThan(AUX_SOCKET_MAX_FRAME_BYTES);
-    const control = new UnixSocketServer(
+    const control = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       undefined,

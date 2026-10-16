@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import {
   chmodSync,
   mkdirSync,
@@ -26,7 +27,6 @@ import {
   test,
 } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { executionTracker } from "../../src/server/executionTracker";
 import { ActionableError } from "../../src/models";
 import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/daemon/types";
@@ -921,7 +921,7 @@ function provider(
   claimed: Record<string, unknown> = { processGenerationToken: token },
 ) {
   let writes = 0;
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     socketPath,
     "http://localhost:0/mcp",
     {

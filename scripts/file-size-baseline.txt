@@ -11,7 +11,7 @@
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8457	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
-4159	src/daemon/manager.ts
+4263	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
 2558	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts

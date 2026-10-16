@@ -69,6 +69,11 @@ export interface HarnessFs {
 export interface DeviceReservation {
   /** Drop the daemon allocation claim so the run's private daemon can take it. */
   handOff(): void;
+  /**
+   * Take the daemon allocation claim back after the private daemon stopped, so nothing
+   * else drives the device during the post-run screen dump. Returns why it could not.
+   */
+  reclaim(): Promise<string | undefined>;
   /** Drop everything, including the benchmark lock that keeps other benchmarks off. */
   release(): void;
 }
@@ -175,6 +180,13 @@ async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: 
 }
 
 async function screenAfterRun(deps: HarnessDeps, run: PreparedRun, packageName: string) {
+  // The private daemon released its claim on stop; another session could take the device
+  // before the dump, so the screen read must happen under the benchmark's own claim again.
+  const refused = await run.reservation.reclaim();
+  if (refused) {
+    deps.log(`post-run screen dump skipped: ${run.serial} ${refused}`);
+    return { screenError: `${run.serial} ${refused} after the run; the screen was not read` };
+  }
   try {
     const xml = await captureScreen(deps.runner, run.serial);
     deps.fs.writeFile(join(run.runDirectory, "screen.xml"), xml);
@@ -192,9 +204,11 @@ interface PreparedRun {
   paths: ServerPaths;
   serial: string;
   preflight: BenchmarkResult["preflight"];
-  /** The reservation held through preflight; both calls are idempotent. */
-  reservation: { handOff: () => void; release: () => void };
+  /** The reservation held through preflight; handOff and release are idempotent. */
+  reservation: RunReservation;
 }
+
+type RunReservation = Pick<DeviceReservation, "handOff" | "release" | "reclaim">;
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
@@ -229,7 +243,11 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   const release = once(() => reservation.release());
   const handOff = once(() => reservation.handOff());
   try {
-    return await prepareReserved(suite, options, deps, serial, { handOff, release });
+    return await prepareReserved(suite, options, deps, serial, {
+      handOff,
+      release,
+      reclaim: () => reservation.reclaim(),
+    });
   } catch (error) {
     release();
     throw error;
@@ -251,7 +269,7 @@ async function prepareReserved(
   options: RunOptions,
   deps: HarnessDeps,
   serial: string,
-  reservation: { handOff: () => void; release: () => void },
+  reservation: RunReservation,
 ) {
   const { definition } = suite;
   const startedAt = runTimestamp(deps.timer.now());
@@ -416,16 +434,23 @@ export async function runSuite(
   const { startedAt, prepared } = await prepare(suite, options, deps);
   const digest = suiteDigest(suite, options.modelOverride);
   const version = await claudeVersion(deps, options.claudeCommand);
+  const serverBuild = `sha256=${deps.fs.sha256(options.serverEntry).slice(0, 16)}`;
   let exit: Awaited<ReturnType<typeof launchClaude>>;
   let screen: { screenText?: string; screenError?: string } = {};
+  let daemonStopped = false;
   try {
     exit = await launchClaude(suite, options, deps, prepared);
+    // Stop the private daemon first so its device claim is free for the benchmark to retake.
+    await stopPrivateDaemon(deps, options, prepared.paths);
+    daemonStopped = true;
     if (definition.verify.screenIncludes.length > 0) {
       screen = await screenAfterRun(deps, prepared, definition.app.packageName);
     }
   } finally {
+    if (!daemonStopped) {
+      await stopPrivateDaemon(deps, options, prepared.paths);
+    }
     prepared.reservation.release();
-    await stopPrivateDaemon(deps, options, prepared.paths);
     deps.fs.remove(prepared.paths.auxSocketDir);
     deps.fs.remove(prepared.claudeCwd);
   }
@@ -447,6 +472,7 @@ export async function runSuite(
     startedAt,
     deviceSerial: prepared.serial,
     suiteDigest: digest,
+    serverBuild,
     claude: {
       requestedModel: options.modelOverride ?? definition.claude.model,
       observedModel: audit.observedModel,
@@ -463,6 +489,7 @@ export async function runSuite(
       definition.baselineToolSequence,
       {
         appBuild: prepared.preflight.appBuild,
+        serverBuild,
         suiteDigest: digest,
         claudeCodeVersion: version,
         deviceFingerprint: prepared.preflight.device,

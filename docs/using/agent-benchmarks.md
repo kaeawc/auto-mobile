@@ -100,7 +100,10 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   starts so the run's own daemon can claim it. If that claim cannot be written, the run stops
   instead of continuing unprotected. A separate benchmark-only lock
   (`<claim file>.agent-benchmark`) is held for the whole run, so a second benchmark on the same
-  device is refused even after the handover; a crashed benchmark's lock is reclaimed.
+  device is refused even after the handover; a crashed benchmark's lock is reclaimed. When Claude
+  exits, the harness stops the run's daemon and takes the allocation claim back before the post-run
+  screen dump. If another session claimed the device in between, the screen is not read and the
+  screen check fails.
 - No iOS simulator may be booted and no physical iOS device connected (checked with
   `xcrun simctl` and `devicectl` on macOS): the benchmark's AutoMobile server discovers iOS too,
   which would make device selection ambiguous. If either check itself fails on macOS, the run stops
@@ -215,7 +218,9 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
 size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
-tool handling) and `baseline.observedModel`, the model Claude reported running. Suites without
+tool handling), `baseline.serverBuild` (a SHA-256 prefix of the `dist/src/index.js` bundle the run
+used, so a stale build after switching commits is flagged rather than silently measured), and
+`baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
 flagged too. A fingerprint that could not be read (`unknown`) is never written into a baseline
 and never counts as a match.

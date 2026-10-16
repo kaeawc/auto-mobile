@@ -28,6 +28,7 @@ function result(
     baselineModel?: string;
     baselineClaudeVersion?: string;
     baselineDevice?: string;
+    baselineServerBuild?: string;
     appBuild?: string;
   } = {},
 ): BenchmarkResult {
@@ -48,6 +49,7 @@ function result(
     startedAt: "20261016T010203Z",
     deviceSerial: "emulator-5554",
     suiteDigest: "suite0123456789a",
+    serverBuild: "sha256=5e5e5e5e5e5e5e5e",
     claude: { requestedModel: "m", observedModel: "claude-test-model", version: "2.1.301" },
     preflight: {
       log: [],
@@ -65,6 +67,7 @@ function result(
         totalToolCalls: 2,
         costUsd: 0.01,
         appBuild: options.baselineAppBuild,
+        serverBuild: options.baselineServerBuild,
         suiteDigest: options.baselineSuiteDigest,
         observedModel: options.baselineModel,
         claudeCodeVersion: options.baselineClaudeVersion,
@@ -73,6 +76,7 @@ function result(
       options.sequence,
       {
         appBuild: options.appBuild ?? "versionName=1.0 versionCode=7",
+        serverBuild: "sha256=5e5e5e5e5e5e5e5e",
         suiteDigest: "suite0123456789a",
         claudeCodeVersion: "2.1.301",
         deviceFingerprint: "sdk=36 model=pixel locale=en-US size=1080x2400 density=420",
@@ -163,6 +167,7 @@ describe("agent benchmark rendering", () => {
       costUsd: 0.0123,
       tools: { observe: 1, tapOn: 1 },
       appBuild: "versionName=1.0 versionCode=7",
+      serverBuild: "sha256=5e5e5e5e5e5e5e5e",
       suiteDigest: "suite0123456789a",
       observedModel: "claude-test-model",
       claudeCodeVersion: "2.1.301",
@@ -185,6 +190,18 @@ describe("agent benchmark rendering", () => {
     expect(same.comparison.appBuild?.matches).toBe(true);
     expect(renderReport(same)).not.toContain("baseline was recorded on");
     expect(result(passing()).comparison.appBuild).toBeUndefined();
+  });
+
+  test("a baseline from another AutoMobile server bundle is flagged; a matching one is not", () => {
+    const stale = result(passing(), { baselineServerBuild: "sha256=0000000000000000" });
+    expect(stale.comparison.serverBuild?.matches).toBe(false);
+    expect(renderReport(stale)).toContain(
+      "! baseline was recorded with AutoMobile server sha256=0000000000000000; this run used sha256=5e5e5e5e5e5e5e5e",
+    );
+    expect(renderReport(stale)).toContain("server    sha256=5e5e5e5e5e5e5e5e");
+    const same = result(passing(), { baselineServerBuild: "sha256=5e5e5e5e5e5e5e5e" });
+    expect(same.comparison.serverBuild?.matches).toBe(true);
+    expect(renderReport(same)).not.toContain("AutoMobile server sha256");
   });
 
   test("a baseline from another suite definition is flagged; a matching one is not", () => {

@@ -99,6 +99,10 @@ function setup(transcript: string, launchMs = 42_000) {
         claims.push(`reserve ${serial}`);
         return {
           handOff: () => claims.push(`hand off ${serial}`),
+          reclaim: async () => {
+            claims.push(`reclaim ${serial}`);
+            return undefined;
+          },
           release: () => claims.push(`release ${serial}`),
         };
       },
@@ -322,6 +326,7 @@ describe("agent benchmark harness", () => {
       CLAUDE_CODE_DISABLE_THINKING: "1",
       CLAUDE_CODE_SUBAGENT_MODEL: "haiku",
       CLAUDE_ADDITIONAL_DIRECTORIES: "/elsewhere",
+      CLAUDE_CODE_SIMPLE: "1",
       CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT: "1",
       CLAUDE_CODE_ENABLE_TASKS: "1",
       DISABLE_PROMPT_CACHING: "1",
@@ -345,6 +350,7 @@ describe("agent benchmark harness", () => {
       "CLAUDE_CODE_DISABLE_THINKING",
       "CLAUDE_CODE_SUBAGENT_MODEL",
       "CLAUDE_ADDITIONAL_DIRECTORIES",
+      "CLAUDE_CODE_SIMPLE",
       "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
       "CLAUDE_CODE_ENABLE_TASKS",
       "DISABLE_PROMPT_CACHING",
@@ -380,6 +386,66 @@ describe("agent benchmark harness", () => {
     expect(fs.readFile(artifact("baseline.yml"))).toContain(`suiteDigest: ${result.suiteDigest}`);
   });
 
+  test("the run result and baseline snippet carry the server bundle digest", async () => {
+    const { fs, deps, options } = setup(PASSING);
+    const hashed: string[] = [];
+    const sha256 = fs.sha256.bind(fs);
+    fs.sha256 = (path: string) => {
+      hashed.push(path);
+      return sha256(path);
+    };
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(hashed).toContain(options.serverEntry);
+    expect(result.serverBuild).toBe("sha256=a1b2c3d4e5f60718");
+    expect(fs.readFile(artifact("baseline.yml"))).toContain("serverBuild: sha256=a1b2c3d4e5f60718");
+  });
+
+  test("the post-run screen is read only after the daemon stops and the claim is retaken", async () => {
+    const { claims, runner, deps, options } = setup(PASSING);
+    const inner = deps.runner;
+    deps.runner = {
+      run: (command, args, timeoutMs, env) => {
+        if (args.includes("--daemon")) {
+          claims.push("daemon stop");
+        } else if (args.includes("exec-out") && claims.includes("launch")) {
+          claims.push("screen dump");
+        }
+        return inner.run(command, args, timeoutMs, env);
+      },
+    };
+    await runSuite(loadedSuite(), options, deps);
+    expect(claims.slice(claims.indexOf("launch"))).toEqual([
+      "launch",
+      "daemon stop",
+      "reclaim emulator-5554",
+      "screen dump",
+      "release emulator-5554",
+    ]);
+    expect(runner.calls.filter((call) => call.args.includes("--daemon"))).toHaveLength(1);
+  });
+
+  test("a device taken by another session after the run fails the screen check unread", async () => {
+    const { claims, runner, logs, deps, options } = setup(PASSING);
+    const reserve = deps.deviceClaims.reserve;
+    deps.deviceClaims = {
+      reserve: async (serial) => {
+        const held = await reserve(serial);
+        return "refused" in held
+          ? held
+          : { ...held, reclaim: async () => "is claimed by another AutoMobile session (pid 4242)" };
+      },
+    };
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("failed");
+    expect(result.outcome.screenError).toBe(
+      "emulator-5554 is claimed by another AutoMobile session (pid 4242) after the run; the screen was not read",
+    );
+    // This suite has no start-screen check, so the only dump would be the skipped one.
+    expect(runner.adbCalls().some((call) => call.includes("exec-out"))).toBe(false);
+    expect(logs.some((line) => line.startsWith("post-run screen dump skipped"))).toBe(true);
+    expect(claims.at(-1)).toBe("release emulator-5554");
+  });
+
   test("the device claim is held through preflight and released before Claude starts", async () => {
     const { claims, runner, deps, options } = setup(PASSING);
     const order: string[] = [];
@@ -398,6 +464,7 @@ describe("agent benchmark harness", () => {
       "reserve emulator-5554",
       "hand off emulator-5554",
       "launch",
+      "reclaim emulator-5554",
       "release emulator-5554",
     ]);
     expect(runner.adbCalls().some((call) => call.includes("pm clear"))).toBe(true);
@@ -541,7 +608,7 @@ describe("agent benchmark harness", () => {
       reserve: async (serial) =>
         serial === "emulator-5554"
           ? { refused: "is claimed by another AutoMobile session (pid 4242)" }
-          : { handOff: () => undefined, release: () => undefined },
+          : { handOff: () => undefined, reclaim: async () => undefined, release: () => undefined },
     };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /emulator-5554 is claimed by another AutoMobile session \(pid 4242\)/,

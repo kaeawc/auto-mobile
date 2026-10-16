@@ -10,6 +10,8 @@ export interface BenchmarkResult {
   deviceSerial: string;
   /** Digest of the prompt, suite settings, and requested model (see suiteDigest). */
   suiteDigest: string;
+  /** `sha256=<prefix>` of the AutoMobile server bundle; a stale build reads as different. */
+  serverBuild: string;
   claude: {
     requestedModel?: string;
     observedModel?: string;

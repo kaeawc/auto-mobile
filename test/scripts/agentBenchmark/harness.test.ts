@@ -87,7 +87,9 @@ function setup(transcript: string, launchMs = 42_000) {
     .onAdb("pm clear", { stdout: "Success\n" })
     .onAdb("exec-out cat", { stdout: SCREEN })
     .onAdb("dumpsys package", { stdout: "versionCode=7 minSdk=26\n    versionName=1.0\n" })
-    .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" })
+    .onAdb("getprop", {
+      stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n",
+    })
     .onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
   const launches: ClaudeLaunchSpec[] = [];
@@ -529,7 +531,9 @@ describe("agent benchmark harness", () => {
       .onAdb("exec-out cat", {
         stdout: '<hierarchy><node package="dev.example" text="Bug repro"/></hierarchy>',
       })
-      .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" });
+      .onAdb("getprop", {
+        stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n",
+      });
     const suite = loadedSuite({
       preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
       verify: { answerIncludes: ["COUNT: 3"], screenIncludes: ["Bug repro"] },
@@ -537,7 +541,7 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");
     expect(result.preflight.device).toBe(
-      "sdk=36 model=pixel locale=en-US size=1x2 density=3 rotation=0",
+      "sdk=36 model=pixel locale=en-US size=1x2 density=3 font=1 rotation=0",
     );
   });
 
@@ -609,6 +613,31 @@ describe("agent benchmark harness", () => {
     runner.on("claude", () => ({ stdout: "1.0.0 (team-wrapper)\n" }));
     const result = await runSuite(loadedSuite(), options, deps);
     expect(result.claude.version).toBe("2.1.301");
+  });
+
+  test("a pass whose model was never observed writes no baseline", async () => {
+    const noModel = PASSING.split("\n")
+      .map((line) => line.replace(/"model":"[^"]*",?/g, ""))
+      .join("\n");
+    const { fs, logs, deps, options } = setup(noModel);
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(result.claude.observedModel).toBeUndefined();
+    expect(fs.exists(artifact("baseline.yml"))).toBe(false);
+    expect(logs).toContain(
+      "[demo] passed, but the model fingerprint is unknown; no baseline.yml written",
+    );
+  });
+
+  test("the Claude version is probed before preflight touches the device", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    await runSuite(loadedSuite(), options, deps);
+    const order = runner.calls.map((call) =>
+      call.command === "claude" ? "version" : call.args.join(" "),
+    );
+    expect(order.indexOf("version")).toBeLessThan(
+      order.findIndex((call) => call.includes("pm clear")),
+    );
   });
 
   test("a pass with no Claude Code version from either source writes no baseline", async () => {

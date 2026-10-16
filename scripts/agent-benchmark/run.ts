@@ -37,6 +37,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { familySync } from "detect-libc";
 import {
   ForwardLeaseForeignDeviceOwnership,
   deviceAllocationClaimPath,
@@ -498,7 +499,9 @@ function serverDigest(): string {
     // bun.lock lists every platform's native sharp build; the host decides which one loads.
     {
       path: "host-platform",
-      read: () => new TextEncoder().encode(`${process.platform}-${process.arch}`),
+      // glibc and musl hosts load different native sharp builds for the same platform/arch.
+      read: () =>
+        new TextEncoder().encode(`${process.platform}-${process.arch}-${familySync() ?? "none"}`),
     },
   ]);
 }

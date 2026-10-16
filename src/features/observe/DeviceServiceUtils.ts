@@ -233,6 +233,8 @@ type CommandFallbackBuilders<T> = [RequiredNonBaseResultKeys<T>] extends [never]
 
 interface SendCommandBaseOptions {
   idPrefix: string;
+  /** Preserve a caller's wire ID convention; invoked after connecting, before registration. */
+  createRequestId?: () => string;
   responseType: string;
   messageType: string;
   params?: Record<string, unknown>;
@@ -276,7 +278,11 @@ interface SendCommandBaseOptions {
   onDispatch?: (requestId: string) => void;
 }
 
-export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
+export type SendCommandOptions<T> = SendCommandBaseOptions &
+  CommandFallbackBuilders<T> & {
+    /** Preserve legacy response-error shaping; null uses the default error result. */
+    responseError?: ((error: string, totalTimeMs: number) => T) | null;
+  };
 
 function notConnectedCommandResult<T>(options: SendCommandOptions<T>, defaultMessage: string): T {
   if (options.notConnectedError) {
@@ -454,7 +460,9 @@ export async function sendCommand<T>(
   if (typeof timeoutMs !== "number") {
     return timeoutMs.result;
   }
-  const requestId = context.requestManager.generateId(options.idPrefix);
+  const requestId = options.createRequestId
+    ? options.createRequestId()
+    : context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
     ? (_id: string, _type: string, timeout: number) => options.timeoutError!(timeout)
@@ -465,13 +473,15 @@ export async function sendCommand<T>(
           error: `${label} timed out after ${timeout}ms`,
         }) as T;
   const responseErrorFactory = (error: string, totalTimeMs: number): T =>
-    options.unsupportedCommandError
-      ? options.unsupportedCommandError(options.messageType, error)
-      : ({
-          success: false,
-          totalTimeMs,
-          error,
-        } as T);
+    options.responseError
+      ? options.responseError(error, totalTimeMs)
+      : options.responseError !== null && options.unsupportedCommandError
+        ? options.unsupportedCommandError(options.messageType, error)
+        : ({
+            success: false,
+            totalTimeMs,
+            error,
+          } as T);
 
   const promise = context.requestManager.register<T>(
     requestId,

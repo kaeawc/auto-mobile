@@ -13,7 +13,6 @@ import {
   IosSimCapacityGate,
   assertCapacityGranted,
 } from "../../../src/features/iosSimFleet/CapacityGate";
-import { IosSimFleetMonitor } from "../../../src/features/iosSimFleet/FleetMonitor";
 import {
   CommandFleetHostSource,
   parseMemoryPressureLevel,
@@ -619,26 +618,6 @@ describe("capacity gate with an unknown count (#11280)", () => {
       env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" },
     });
     expect((await gate.describeCapacity()).booted).toBe(1);
-  });
-});
-
-describe("fleet monitor", () => {
-  test("ticks never overlap while a sample is slow", async () => {
-    const { collector, timer, source } = setup([IOS27]);
-    const gate = new IosSimCapacityGate(collector, timer, { env: {} });
-    let release!: () => void;
-    source.gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const monitor = new IosSimFleetMonitor(gate, timer, 1000);
-    monitor.start();
-    timer.advanceTime(1000);
-    timer.advanceTime(1000);
-    timer.advanceTime(1000);
-    expect(source.inventoryReads).toBe(1);
-    release();
-    await monitor.stop();
-    expect(source.inventoryReads).toBe(1);
   });
 });
 

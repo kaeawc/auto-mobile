@@ -1,5 +1,7 @@
-import type { IosVoiceOverDetector } from "../../src/features/accessibility/interfaces/IosVoiceOverDetector";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios";
+import type {
+  IosVoiceOverDetector,
+  VoiceOverStateClient,
+} from "../../src/features/accessibility/interfaces/IosVoiceOverDetector";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
@@ -74,7 +76,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
 
   async isVoiceOverEnabled(
     _deviceId: string,
-    _client: IOSCtrlProxy,
+    _client: VoiceOverStateClient,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
     _signal?: AbortSignal,
@@ -95,7 +97,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   async isVoiceOverActiveOrUnknown(
     _deviceId: string,
-    _client: IOSCtrlProxy,
+    _client: VoiceOverStateClient,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
     _signal?: AbortSignal,
@@ -112,7 +114,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   async resolveState(
     _deviceId: string,
-    _client: IOSCtrlProxy,
+    _client: VoiceOverStateClient,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number,
     _signal?: AbortSignal,

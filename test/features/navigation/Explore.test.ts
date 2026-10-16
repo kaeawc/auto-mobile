@@ -999,20 +999,12 @@ describe("Explore", () => {
         );
         try {
           registerNavigationTools();
-          const registry = ToolRegistry as unknown as {
-            tools: Map<
-              string,
-              {
-                deviceAwareHandler: (
-                  device: BootedDevice,
-                  args: object,
-                ) => Promise<{
-                  content: Array<{ text: string }>;
-                }>;
-              }
-            >;
+          const response = (await ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!(
+            device,
+            {},
+          )) as {
+            content: Array<{ text: string }>;
           };
-          const response = await registry.tools.get("explore")!.deviceAwareHandler(device, {});
           const output = JSON.parse(response.content[0]!.text);
           expect(output.success).toBe(true);
           expect(output.stopReason).toBe(stopReason);

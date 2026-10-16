@@ -5,7 +5,7 @@ import {
   staticFactsFrom,
   displayFrom,
   capabilityInventory,
-} from "../models/deviceDescription";
+} from "../utils/deviceDescriptionProjection";
 import type {
   DeviceDescription,
   DeviceReadinessState,
@@ -23,7 +23,7 @@ export type {
   DeviceServiceStatusLike,
   ConfiguredImage,
 } from "../models/deviceDescription";
-export { projectConfiguredImage } from "../models/deviceDescription";
+export { projectConfiguredImage } from "../utils/deviceDescriptionProjection";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { z } from "zod/v4";
 import { classifyPoolStatus, type PoolStatusBucket } from "../daemon/devicePool";

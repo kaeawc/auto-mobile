@@ -10,6 +10,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
+import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
@@ -86,9 +87,11 @@ async function focusOnIos(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
+  const iosClip = new IosTapStrategy({ name: "iPhone", platform: "ios", deviceId: "sim" });
   const tapStrategy: TapStrategy = {
     prepareViewHierarchyForResponse: () => null,
     isAccessibilityServiceEnabled: async () => false,
+    clipNavigationTapBounds: (...args) => iosClip.clipNavigationTapBounds(...args),
     shouldRunPreTapStability: () => false,
     retryTapIfNoChange: false,
     longPressDurationMs: 1000,

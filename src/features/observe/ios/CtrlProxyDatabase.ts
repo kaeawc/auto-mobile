@@ -5,6 +5,7 @@
  * so SQLite access happens inside the app process.
  */
 
+import { sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import type {
   DatabaseInfo,
@@ -211,25 +212,28 @@ export class CtrlProxyDatabase {
     }
 
     const requestId = this.context.requestManager.generateId(type);
-    const promise = this.context.requestManager.register<T>(
-      requestId,
+    const promise = sendCommand<T>(this.context, {
+      idPrefix: type,
+      createRequestId: () => requestId,
       responseType,
+      messageType: type,
+      params: payload,
       timeoutMs,
-      (_id, _type, _timeout) =>
+      requireExistingConnection: true,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => {
+        throw new Error("WebSocket not connected");
+      },
+      unsupportedCommandError: (_type, error) => {
+        throw new Error(error);
+      },
+      timeoutError: () =>
         ({
           success: false,
           totalTimeMs: this.context.timer.now() - startTime,
           error: `${operationName} timeout after ${timeoutMs}ms`,
         }) as T,
-    );
-
-    this.context.getWebSocket()?.send(
-      JSON.stringify({
-        type,
-        requestId,
-        ...payload,
-      }),
-    );
+    });
     logger.debug(`[CTRL_PROXY_IOS] Sent ${type} request (requestId: ${requestId})`);
 
     const result = await promise;

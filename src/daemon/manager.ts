@@ -31,6 +31,7 @@ import {
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
+import { isPathInside } from "../utils/filesystem/pathContainment";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   INCOMPLETE_EXTRACTION_CODE,
@@ -248,7 +249,8 @@ export interface ExtractionCleaner {
   removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
 }
 
-function resolveExtractionRootForEntryScript(entryScript: string): string | null {
+/** Exported for tests. */
+export function resolveExtractionRootForEntryScript(entryScript: string): string | null {
   const resolved = resolve(entryScript);
   const parts = resolved.split(sep);
   const nodeModulesIndex = parts.lastIndexOf("node_modules");
@@ -267,7 +269,7 @@ function resolveExtractionRootForEntryScript(entryScript: string): string | null
   }
 
   const tempRoot = resolve(tmpdir());
-  if (!root.startsWith(tempRoot + sep)) {
+  if (!isPathInside(tempRoot, root, { allowEqual: false })) {
     return null;
   }
   return root;

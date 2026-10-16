@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import type WebSocket from "ws";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -657,6 +658,11 @@ describe("iOS app UserDefaults resolution", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
+    // sendCommand now rejects the old silent drop when no socket is attached.
+    // Model the open connection this test advertises before resolving its replies.
+    const socket = createSuccessWebSocketFactory(timer)("ws://fake");
+    await Promise.resolve();
+    client["ws"] = socket as unknown as WebSocket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });
@@ -678,6 +684,7 @@ describe("iOS app UserDefaults resolution", () => {
         await Promise.resolve();
         manager.resolve(manager.getPendingIds()[0]!, { success: true, totalTimeMs: 0 });
         await write;
+        client["ws"] = null;
         connection.mockReturnValue(false);
       } finally {
         connection.mockRestore();

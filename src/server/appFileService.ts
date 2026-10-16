@@ -50,6 +50,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { isPackageInstalledForUser } from "../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../utils/logger";
+import { isPathInside } from "../utils/filesystem/pathContainment";
 import { prepareFileSource } from "./fileSourcePreparation";
 import {
   getSharedStorageService,
@@ -221,11 +222,14 @@ export interface ForegroundAppLookup {
   getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
 }
 
+/** The simctl operations app file transfers use. */
+export type AppFileSimCtl = Pick<SimCtlClient, "executeCommand" | "executeCommandArgs">;
+
 export interface AppFileServiceDependencies {
   timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
   adbFactory?: AdbClientFactory;
-  simctlFactory?: (device: BootedDevice) => SimCtlClient;
+  simctlFactory?: (device: BootedDevice) => AppFileSimCtl;
   fileSystem?: AppFileFileSystem;
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
@@ -1723,8 +1727,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   }
 
   private assertBelow(root: string, target: string, paths: typeof posix = hostPath): void {
-    const path = paths.relative(root, target);
-    if (!path || path === ".." || path.startsWith(`..${paths.sep}`) || paths.isAbsolute(path)) {
+    if (!isPathInside(root, target, { paths, allowEqual: false })) {
       throw new ActionableError(
         "iOS Files fixture destination must remain strictly below its managed namespace root.",
       );
@@ -1839,7 +1842,7 @@ class IosSimulatorAppFileProvider
   private tempIndex = 0;
 
   constructor(
-    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly simctlFactory: (device: BootedDevice) => AppFileSimCtl,
     private readonly fileSystem: AppFileFileSystem,
   ) {}
 

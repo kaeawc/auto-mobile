@@ -254,7 +254,7 @@ describe("OwnerDisconnectRelease execution-end re-arm (#10712)", () => {
       assignedDevice: "emulator-5554",
       livenessPolicy: "heartbeat",
       ownership: "owned",
-    } as unknown as Session;
+    } as Session;
     const attempts: Array<(deferral?: { deferredUntil: number }) => void> = [];
     const release = new OwnerDisconnectRelease(
       {

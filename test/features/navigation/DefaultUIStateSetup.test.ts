@@ -56,11 +56,7 @@ describe("DefaultUIStateSetup alignment order", () => {
         const order: string[] = [];
         const current = { selectedElements: [{ text: "Old" }], modalStack: [] };
         const refreshed = refreshAvailable ? { selectedElements: [{ text: "New" }] } : undefined;
-        const internals = setup as unknown as {
-          getCurrentUIState: DefaultUIStateSetup["getCurrentUIState"];
-          setupModalStack: DefaultUIStateSetup["setupModalStack"];
-          setupMissingSelections: DefaultUIStateSetup["setupMissingSelections"];
-        };
+        const internals = setup;
         let observations = 0;
         const observe = spyOn(internals, "getCurrentUIState").mockImplementation(async () => {
           order.push("observe");
@@ -112,13 +108,23 @@ const bottomSheetHierarchy = (windowId: number): ObserveResult =>
     },
   }) as unknown as ObserveResult;
 
+const fakeAdbBySetup = new WeakMap<DefaultUIStateSetup, FakeAdbClient>();
+
+/** The fake ADB client `makeSetup` injected, so tests can assert the commands it received. */
+function fakeAdbOf(setup: DefaultUIStateSetup): FakeAdbClient {
+  return fakeAdbBySetup.get(setup)!;
+}
+
 function makeSetup(observeScreenProvider?: () => ObserveScreenLike): DefaultUIStateSetup {
-  const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
+  const fake = new FakeAdbClient();
+  const fakeAdb = fake as unknown as AdbClient;
   // Auto-advancing fake timer so the internal `sleep()` delays resolve
   // immediately — keeps these unit tests fast (<100ms) and non-flaky.
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  return new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider, timer);
+  const setup = new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider, timer);
+  fakeAdbBySetup.set(setup, fake);
+  return setup;
 }
 
 describe("DefaultUIStateSetup", () => {
@@ -190,11 +196,7 @@ describe("DefaultUIStateSetup", () => {
 
     function setupWithNoSelections(): DefaultUIStateSetup {
       const setup = makeSetup(selectionObserve);
-      (
-        setup as unknown as {
-          getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
-        }
-      ).getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
+      setup.getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
       return setup;
     }
 
@@ -305,11 +307,7 @@ describe("DefaultUIStateSetup", () => {
       });
 
       const setup = makeSetup(emptyModalObserve);
-      const dismissed = await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal(bottomSheet, "android");
+      const dismissed = await setup.dismissTopModal(bottomSheet, "android");
 
       expect(dismissed).toBe(true);
       expect(swipeOnCalls).toBe(1);
@@ -355,11 +353,7 @@ describe("DefaultUIStateSetup", () => {
       const setup = makeSetup(statefulObserve);
       let dismissed: boolean;
       try {
-        dismissed = await (
-          setup as unknown as {
-            dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-          }
-        ).dismissTopModal(bottomSheet, "android");
+        dismissed = await setup.dismissTopModal(bottomSheet, "android");
       } finally {
         ctrlProxySpy.mockRestore();
       }
@@ -370,7 +364,7 @@ describe("DefaultUIStateSetup", () => {
       expect(observeCalls).toBe(2);
       // Android recovery uses the setup instance's injected dependencies rather
       // than the global interaction registry.
-      const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+      const fakeAdb = fakeAdbOf(setup);
       expect(fakeAdb.getAllCommands()).toEqual(["shell input keyevent 4"]);
     });
 
@@ -385,11 +379,7 @@ describe("DefaultUIStateSetup", () => {
       });
 
       const setup = makeSetup(emptyModalObserve);
-      await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal(bottomSheet, "android");
+      await setup.dismissTopModal(bottomSheet, "android");
 
       expect(legacySwipeCalls).toBe(0);
     });
@@ -411,11 +401,10 @@ describe("DefaultUIStateSetup", () => {
         },
       );
 
-      const dismissed = await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "ios");
+      const dismissed = await setup.dismissTopModal(
+        { type: "popup", layer: 1, windowId: 42 },
+        "ios",
+      );
 
       expect(dismissed).toBe(true);
       expect(backArgs).toMatchObject({
@@ -429,14 +418,13 @@ describe("DefaultUIStateSetup", () => {
     test("preserves Android's coordinate outside-tap recovery for popups", async () => {
       const setup = makeSetup(emptyModalObserve);
 
-      const dismissed = await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "android");
+      const dismissed = await setup.dismissTopModal(
+        { type: "popup", layer: 1, windowId: 42 },
+        "android",
+      );
 
       expect(dismissed).toBe(true);
-      const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+      const fakeAdb = fakeAdbOf(setup);
       expect(fakeAdb.wasCommandExecuted("shell input tap 50 50")).toBe(true);
     });
   });
@@ -456,13 +444,6 @@ describe("DefaultUIStateSetup", () => {
       restoreCtrlProxy();
       ToolRegistry.clearTools();
     });
-
-    type DismissalMethod = (modal: ModalState, platform: string) => Promise<boolean>;
-    type DismissalMethods = {
-      dismissTopModal: DismissalMethod;
-      dismissBottomSheet: DismissalMethod;
-      dismissByTappingOutside: DismissalMethod;
-    };
 
     const paths = [
       {
@@ -551,10 +532,7 @@ describe("DefaultUIStateSetup", () => {
           });
           const modal: ModalState = { type: path.modalType, layer: 1, windowId: 42 };
 
-          const dismissed = await (setup as unknown as DismissalMethods)[path.method](
-            modal,
-            path.platform,
-          );
+          const dismissed = await setup[path.method](modal, path.platform);
 
           const confirmed = observation === "healthy";
           expect(dismissed).toBe(confirmed);
@@ -591,7 +569,7 @@ describe("DefaultUIStateSetup", () => {
           return createStructuredToolResponse({ success: true });
         });
 
-        const dismissed = await (setup as unknown as DismissalMethods).dismissTopModal(
+        const dismissed = await setup.dismissTopModal(
           { type: modalType, layer: 1, windowId: 42 },
           "android",
         );
@@ -599,7 +577,7 @@ describe("DefaultUIStateSetup", () => {
         expect(dismissed).toBe(true);
         expect(observeCalls).toBe(2);
         expect(swipeCalls).toBe(modalType === "bottomsheet" ? 1 : 0);
-        const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+        const fakeAdb = fakeAdbOf(setup);
         expect(fakeAdb.getAllCommands()).toEqual(
           modalType === "popup"
             ? ["shell input tap 50 50", "shell input keyevent 4"]
@@ -625,11 +603,7 @@ describe("DefaultUIStateSetup", () => {
     const dialog: ModalState = { type: "dialog", layer: 1, windowId: 7 };
 
     function tapCloseButtonOf(setup: DefaultUIStateSetup) {
-      return (
-        setup as unknown as {
-          tapCloseButton: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).tapCloseButton;
+      return setup.tapCloseButton;
     }
 
     test("first candidate succeeds (tapped and verified closed) → returns true, later candidates not tried", async () => {
@@ -641,9 +615,8 @@ describe("DefaultUIStateSetup", () => {
       }));
       // getCurrentUIState drives isModalConfirmedDismissed: report the modal gone as
       // soon as any candidate has been tapped.
-      (
-        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
-      ).getCurrentUIState = async () => ({
+      setup.getCurrentUIState = async () => ({
+        selectedElements: [],
         modalStack: dismissedAfterTap ? [] : [dialog],
       });
 
@@ -666,9 +639,8 @@ describe("DefaultUIStateSetup", () => {
       const setup = makeSetup(() => ({
         execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
       }));
-      (
-        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
-      ).getCurrentUIState = async () => ({
+      setup.getCurrentUIState = async () => ({
+        selectedElements: [],
         modalStack: dismissed ? [] : [dialog],
       });
 
@@ -696,9 +668,7 @@ describe("DefaultUIStateSetup", () => {
         execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
       }));
       // Modal never leaves the stack, regardless of what was tapped.
-      (
-        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
-      ).getCurrentUIState = async () => ({ modalStack: [dialog] });
+      setup.getCurrentUIState = async () => ({ selectedElements: [], modalStack: [dialog] });
 
       ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
         tappedTexts.push(args.selector.text);
@@ -718,9 +688,8 @@ describe("DefaultUIStateSetup", () => {
       const setup = makeSetup(() => ({
         execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
       }));
-      (
-        setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
-      ).getCurrentUIState = async () => ({
+      setup.getCurrentUIState = async () => ({
+        selectedElements: [],
         modalStack: dismissed ? [] : [dialog],
       });
 
@@ -871,15 +840,11 @@ describe("DefaultUIStateSetup cancellation", () => {
     });
     const setup = makeSetup(emptyModalObserve);
     await expect(
-      (
-        setup as unknown as {
-          dismissTopModal: (
-            modal: ModalState,
-            platform: string,
-            signal?: AbortSignal,
-          ) => Promise<boolean>;
-        }
-      ).dismissTopModal({ type: "bottomsheet", layer: 1, windowId: 42 }, "ios", controller.signal),
+      setup.dismissTopModal(
+        { type: "bottomsheet", layer: 1, windowId: 42 },
+        "ios",
+        controller.signal,
+      ),
     ).rejects.toThrow("Operation cancelled");
     expect(actions).toEqual(["swipe"]);
   });

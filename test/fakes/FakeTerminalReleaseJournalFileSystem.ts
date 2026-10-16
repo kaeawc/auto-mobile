@@ -5,6 +5,8 @@ import type { TerminalReleaseJournalDirectory } from "../../src/daemon/terminalR
 export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJournalDirectory {
   readonly files = new Map<string, string>();
   readonly appends: string[] = [];
+  readonly syncedDirectories: string[] = [];
+  failDirectorySync: Error | undefined;
   replaces = 0;
   /** While set, the next append throws this (a full disk). */
   failNextAppend: Error | undefined;
@@ -26,7 +28,7 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
     return this.files.get(filePath);
   }
 
-  appendDurable(filePath: string, text: string): void {
+  appendDurable(filePath: string, text: string, syncDirectory = true): void {
     const failure = this.failNextAppend;
     if (failure) {
       this.failNextAppend = undefined;
@@ -34,6 +36,12 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
     }
     this.appends.push(text);
     this.files.set(filePath, (this.files.get(filePath) ?? "") + text);
+    if (syncDirectory) {
+      this.syncedDirectories.push(path.dirname(filePath));
+      if (this.failDirectorySync) {
+        throw this.failDirectorySync;
+      }
+    }
   }
 
   replaceDurable(filePath: string, text: string): void {

@@ -32,8 +32,8 @@ const DEVICE = "emulator-5554";
 const PLAN = "plan-auto-release";
 const RETRY_MS = 700;
 
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 40; turn++) {
+async function settle(turns = 40): Promise<void> {
+  for (let turn = 0; turn < turns; turn++) {
     await Promise.resolve();
   }
 }
@@ -214,7 +214,8 @@ describe("remaining session row writes (#11557)", () => {
 
     await timer.advanceTimeAsync(60);
     firstWrite.resolve();
-    await settle();
+    // Generation resolution re-reads the row before issuing its conditioned retry.
+    await settle(120);
     expect(await row()).toMatchObject({ status: "released", release_reason: reason });
     await timer.advanceTimeAsync(840);
     restoreWrite.resolve();
@@ -810,6 +811,7 @@ describe("remaining session row writes (#11557)", () => {
       record(intent) {
         intents.push(intent);
         recorded.push(intent.reason);
+        return "volatile";
       },
       resolve(_id, reason) {
         resolved.push(reason!);

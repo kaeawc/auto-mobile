@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
+  NoopTerminalReleaseJournal,
   nodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
@@ -30,6 +31,155 @@ function line(sessionId: string, reason: string, at: number): string {
 }
 
 describe("FileTerminalReleaseJournal (#10959)", () => {
+  test("record reports durability and a failed append survives only in memory", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      const journal = new FileTerminalReleaseJournal(FILE, files);
+      const intent = { sessionId: "lost", reason: "explicit-release", at: 1 };
+      files.failNextAppend = new Error("ENOSPC");
+      expect(journal.record(intent)).toBe("volatile");
+      expect(journal.loadUnconfirmed()).toEqual([intent]);
+      expect(new FileTerminalReleaseJournal(FILE, files).loadUnconfirmed()).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(journal.record(intent)).toBe("durable");
+      expect(new FileTerminalReleaseJournal(FILE, files).loadUnconfirmed()).toEqual([intent]);
+      expect(new NoopTerminalReleaseJournal().record()).toBe("volatile");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("only the first append syncs the parent directory", () => {
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const journal = new FileTerminalReleaseJournal(FILE, files);
+    journal.record({ sessionId: "a", reason: "explicit-release", at: 1 });
+    expect(files.syncedDirectories).toEqual([path.dirname(FILE)]);
+    journal.record({ sessionId: "b", reason: "explicit-release", at: 2 });
+    expect(files.syncedDirectories).toEqual([path.dirname(FILE)]);
+  });
+
+  test("a failed first directory sync reports volatile even though the file was written", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      files.failDirectorySync = new Error("directory fsync EIO");
+      const journal = new FileTerminalReleaseJournal(FILE, files);
+      expect(journal.record({ sessionId: "a", reason: "explicit-release", at: 1 })).toBe(
+        "volatile",
+      );
+      expect(files.syncedDirectories).toEqual([path.dirname(FILE)]);
+      expect(journal.loadUnconfirmed()).toHaveLength(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failed directory sync remains volatile until a later append retries it successfully", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      const journal = new FileTerminalReleaseJournal(FILE, files);
+      files.failDirectorySync = new Error("directory fsync EIO");
+      const intent = { sessionId: "a", reason: "explicit-release", at: 1 };
+      expect(journal.record(intent)).toBe("volatile");
+      expect(journal.record(intent)).toBe("volatile");
+      files.failDirectorySync = undefined;
+      expect(journal.record(intent)).toBe("durable");
+      expect(files.syncedDirectories).toEqual(Array(3).fill(path.dirname(FILE)));
+      expect(journal.record(intent)).toBe("durable");
+      expect(files.syncedDirectories).toHaveLength(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("real durable append syncs the file before every newly created directory's parent", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trj-first-"));
+    const openSync = fs.openSync;
+    const fsyncSync = fs.fsyncSync;
+    const paths = new Map<number, string>();
+    const syncedPaths: string[] = [];
+    const open = spyOn(fs, "openSync").mockImplementation((filePath, flags, mode) => {
+      const fd = openSync(filePath, flags, mode);
+      paths.set(fd, String(filePath));
+      return fd;
+    });
+    const sync = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      syncedPaths.push(paths.get(fd)!);
+      fsyncSync(fd);
+    });
+    try {
+      const journalDir = path.join(dir, "new", "nested", "journal");
+      const file = path.join(journalDir, "journal.jsonl");
+      nodeTerminalReleaseJournalFileSystem.appendDurable(file, "first\n");
+      expect(syncedPaths).toEqual(
+        process.platform === "win32"
+          ? [file]
+          : [file, journalDir, dir, path.join(dir, "new"), path.join(dir, "new", "nested")],
+      );
+      syncedPaths.length = 0;
+      nodeTerminalReleaseJournalFileSystem.appendDurable(file, "second\n");
+      expect(syncedPaths).toEqual(process.platform === "win32" ? [file] : [file, journalDir]);
+      expect(fs.readFileSync(file, "utf8")).toBe("first\nsecond\n");
+
+      syncedPaths.length = 0;
+      const unsyncedFile = path.join(dir, "unsynced", "nested", "journal.jsonl");
+      nodeTerminalReleaseJournalFileSystem.appendDurable(unsyncedFile, "third\n", false);
+      expect(syncedPaths).toEqual([unsyncedFile]);
+    } finally {
+      sync.mockRestore();
+      open.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("mid-file corruption retains intents on both sides and compacts only the bad line", () => {
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const writer = new FileTerminalReleaseJournal(FILE, files);
+    writer.record({ sessionId: "before", reason: "explicit-release", at: 1 });
+    writer.record({ sessionId: "after", reason: "heartbeat-timeout", at: 2 });
+    const clean = files.appends.join("");
+    files.files.set(FILE, files.appends[0] + '{"sessionId":"s1","rea\n' + files.appends[1]);
+    expect(new FileTerminalReleaseJournal(FILE, files).loadUnconfirmed()).toEqual([
+      { sessionId: "before", reason: "explicit-release", at: 1 },
+      { sessionId: "after", reason: "heartbeat-timeout", at: 2 },
+    ]);
+    expect(files.files.get(FILE)).toBe(clean);
+  });
+
+  test("corrupt complete lines warn with path and line number, including dead peers; torn tails warn separately", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      const writer = new FileTerminalReleaseJournal(FILE, files);
+      writer.record({ sessionId: "before", reason: "explicit-release", at: 1 });
+      writer.record({ sessionId: "after", reason: "heartbeat-timeout", at: 2 });
+      const corrupt =
+        files.appends[0] + '{"sessionId":"s1","rea\nnull\n' + files.appends[1] + '{"torn';
+      files.files.set(FILE, corrupt);
+      const journal = new FileTerminalReleaseJournal("/data/own.jsonl", files, () => FILE);
+      expect(journal.readDeadDaemon("dead")).toHaveLength(2);
+      expect(files.files.get(FILE)).toBe(corrupt);
+      expect(warn.mock.calls.map((call) => call[0])).toEqual([
+        expect.stringContaining(`line 2 of ${FILE}`),
+        expect.stringContaining(`line 3 of ${FILE}`),
+        expect.stringContaining(`torn tail of ${FILE}`),
+      ]);
+      warn.mockClear();
+      expect(new FileTerminalReleaseJournal(FILE, files).loadUnconfirmed()).toHaveLength(2);
+      expect(warn.mock.calls.map((call) => call[0])).toEqual([
+        expect.stringContaining(`line 2 of ${FILE}`),
+        expect.stringContaining(`line 3 of ${FILE}`),
+        expect.stringContaining(`torn tail of ${FILE}`),
+      ]);
+      expect(String(warn.mock.calls[2][0])).not.toContain("line ");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("an intent is appended durably before anything else and survives a new journal", () => {
     const fs = new FakeTerminalReleaseJournalFileSystem();
     new FileTerminalReleaseJournal(FILE, fs).record({

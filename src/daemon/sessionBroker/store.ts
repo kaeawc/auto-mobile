@@ -10,6 +10,8 @@ export interface BrokerRequestRecord {
   fingerprint: string;
   parameters: unknown;
   owner: BindingProcessIdentity;
+  /** The owner relinquished this active session to a restarted provider (graceful shutdown). */
+  restartHandoff?: true;
   state: BrokerRequestState;
   resourceId: string | null;
   sessionId: string | null;

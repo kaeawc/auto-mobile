@@ -33,11 +33,15 @@ function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boole
 }
 
 function requestRecord(row: Selectable<BrokerRequestsTable>): BrokerRequestRecord {
+  const { restartHandoff, ...owner } = JSON.parse(row.owner_json) as BindingProcessIdentity & {
+    restartHandoff?: unknown;
+  };
   return {
     requestId: row.request_id,
     fingerprint: row.fingerprint,
     parameters: JSON.parse(row.parameters_json),
-    owner: JSON.parse(row.owner_json),
+    owner,
+    ...(restartHandoff === true ? { restartHandoff: true as const } : {}),
     state: row.state,
     resourceId: row.resource_id,
     sessionId: row.session_id,
@@ -81,6 +85,16 @@ function ownsReadyBinding(
     binding.exec_owner_pid === owner.pid &&
     binding.exec_owner_process_token === (owner.processGenerationToken ?? null),
   );
+}
+
+function ownerIdentity(owner: BindingProcessIdentity): BindingProcessIdentity {
+  return {
+    daemonId: owner.daemonId,
+    pid: owner.pid,
+    ...(owner.processGenerationToken === undefined
+      ? {}
+      : { processGenerationToken: owner.processGenerationToken }),
+  };
 }
 
 function requireValue<T>(value: T | undefined | null, message: string): T {
@@ -692,6 +706,66 @@ export class SqliteSessionBrokerStore {
         error_code: "session_owner_exited",
       });
       return ticket;
+    });
+  }
+
+  /**
+   * Graceful shutdown keeps an active session's device for the restarted provider (#12451). The
+   * request stays active and owned by this process; the durable mark tells the successor that the
+   * owner relinquished it on purpose, which a crashed owner never records.
+   */
+  async relinquishForRestart(
+    requestId: string,
+    owner: BindingProcessIdentity,
+  ): Promise<BrokerRequestRecord> {
+    return this.db.transaction().execute(async (trx) => {
+      const request = await this.ownedRequest(trx, requestId, owner);
+      if (request.state !== "active" || request.restartHandoff) {
+        return request;
+      }
+      return this.updateRequest(trx, requestId, {
+        owner_json: JSON.stringify({ ...ownerIdentity(request.owner), restartHandoff: true }),
+      });
+    });
+  }
+
+  /**
+   * A successor adopts a gracefully relinquished session only once the native layer has re-owned
+   * its exact binding for the same session UUID. Until then the receipt is left untouched for a
+   * later pass; it is never converted into a release or a replacement device.
+   */
+  async adoptRestartHandoff(
+    requestId: string,
+    owner: BindingProcessIdentity,
+  ): Promise<"adopted" | "pending" | "not-handoff"> {
+    return this.db.transaction().execute(async (trx) => {
+      const request = requireValue(
+        await this.readRequest(trx, requestId),
+        "Unknown session request",
+      );
+      if (!request.restartHandoff || request.state !== "active" || !request.sessionId) {
+        return "not-handoff";
+      }
+      if (sameOwner(request.owner, owner)) {
+        return "adopted";
+      }
+      if (this.isOwnerLive(request.owner)) {
+        return "pending";
+      }
+      const resource = await this.ownedResource(trx, request);
+      const binding = await trx
+        .selectFrom("slot_assignments")
+        .selectAll()
+        .where("scope_key", "=", resource.scopeKey)
+        .where("slot_index", "=", resource.allocationIndex)
+        .executeTakeFirst();
+      if (resource.state !== "active" || !ownsReadyBinding(binding, request.sessionId, owner)) {
+        return "pending";
+      }
+      await this.updateRequest(trx, requestId, {
+        owner_json: JSON.stringify(ownerIdentity(owner)),
+      });
+      return "adopted";
     });
   }
 

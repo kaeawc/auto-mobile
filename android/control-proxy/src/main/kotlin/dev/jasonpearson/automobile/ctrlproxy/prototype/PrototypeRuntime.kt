@@ -501,8 +501,12 @@ class PrototypeRuntime(
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         else ->
-          writes[index]?.let { (key, spec) ->
-            writeInteractionSpec(spec)
+          writes[index]?.let { (key, planned) ->
+            // An earlier data write in this list may have added rows that bind this key, so the
+            // value planned against the old data is checked again against the data as it is now.
+            writeInteractionSpec(
+              validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
+            )
             touched += key
           }
       }

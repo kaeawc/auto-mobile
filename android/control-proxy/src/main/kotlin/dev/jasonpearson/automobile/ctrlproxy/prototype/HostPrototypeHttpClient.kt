@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRequestError
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestFrame
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
+import dev.jasonpearson.automobile.protocol.PrototypeRequests
 import dev.jasonpearson.automobile.protocol.PrototypeResponseFrame
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
@@ -67,7 +68,7 @@ class HostPrototypeHttpClient(
             method = request.method,
             url = request.url,
             headers = request.headers.takeIf { it.isNotEmpty() },
-            body = request.body,
+            body = request.body?.let(PrototypeRequests::sortedKeys),
             timeoutMs = request.timeoutMs,
           ),
         )

@@ -1026,10 +1026,15 @@ object PrototypeSpecValidator {
     at: String,
     field: String,
   ): PrototypeSpecError? {
+    val seenHeaders = HashSet<String>()
     for ((name, value) in (entries as? JsonObject).orEmpty()) {
       val entryPath = keyPath("$at.$field", name)
       if (field == "headers" && !headerNamePattern.matches(name)) {
         return fail(entryPath, "Invalid header name")
+      }
+      // Header names are case-insensitive: X-Test and x-test are one header.
+      if (field == "headers" && !seenHeaders.add(name.lowercase())) {
+        return fail(entryPath, "Duplicate header name (names are case-insensitive)")
       }
       val literal = (value as? JsonObject)?.get("value")
       if (

@@ -39,6 +39,10 @@ import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtoco
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
 import { maxObservationAgeMs } from "../observationFreshness";
 import { isAndroidPackageRunning } from "../../../utils/android-cmdline-tools/androidProcessState";
+import {
+  resolveAccessibilityHierarchyArgs,
+  type AccessibilityHierarchyRequest,
+} from "../hierarchyReadArgs";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -679,13 +683,28 @@ export class CtrlProxyHierarchy {
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    disableAllFiltering: boolean = false,
-    signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
+    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
+    skipWaitForFreshArg?: boolean,
+    minTimestampArg?: number,
+    disableAllFilteringArg?: boolean,
+    signalArg?: AbortSignal,
+    readOptionsArg?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null> {
+    const {
+      perf = new NoOpPerformanceTracker(),
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      disableAllFiltering = false,
+      signal,
+      readOptions,
+    } = resolveAccessibilityHierarchyArgs(
+      perfOrRequest,
+      skipWaitForFreshArg,
+      minTimestampArg,
+      disableAllFilteringArg,
+      signalArg,
+      readOptionsArg,
+    );
     const { timeoutMs, requireFreshExtraction } = this.getHierarchyReadPolicy(readOptions);
     const startTime = this.context.timer.now();
     const cachedHierarchy = this.context.getCachedHierarchy();

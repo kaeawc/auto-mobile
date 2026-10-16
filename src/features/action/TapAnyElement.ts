@@ -458,11 +458,12 @@ export class TapAnyElement extends BaseVisualChange {
           readCached: (request) =>
             this.viewHierarchy.getViewHierarchy(
               {},
-              undefined,
-              true,
-              request.minTimestamp ?? 0,
-              request.signal,
-              request.timeoutMs,
+              {
+                skipWaitForFresh: true,
+                minTimestamp: request.minTimestamp ?? 0,
+                signal: request.signal,
+                timeoutMs: request.timeoutMs,
+              },
             ),
           readFresh: async (request) => {
             if (request.displayId !== undefined) {

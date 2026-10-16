@@ -381,7 +381,25 @@ interface TraversalResult extends DeviceOperationResult {
  * platform-specific result shapes.
  */
 
+/** Options form of `getAccessibilityHierarchy`, replacing its positional tail. */
+export interface AccessibilityHierarchyRequest {
+  perf?: PerformanceTracker;
+  skipWaitForFresh?: boolean;
+  minTimestamp?: number;
+  disableAllFiltering?: boolean;
+  signal?: AbortSignal;
+  /** Overall read budget. */
+  timeoutMs?: number;
+  /** Re-extract an Android cache hit. */
+  requireFreshExtraction?: boolean;
+}
+
 export interface CtrlProxyClient extends DeviceService {
+  getAccessibilityHierarchy(
+    queryOptions?: ViewHierarchyQueryOptions,
+    request?: AccessibilityHierarchyRequest,
+  ): Promise<ViewHierarchyResult | null>;
+  /** @deprecated Pass an {@link AccessibilityHierarchyRequest} instead of positional arguments. */
   getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
     perf?: PerformanceTracker,

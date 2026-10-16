@@ -498,7 +498,11 @@ describe("Clipboard iOS", () => {
       expect((await action.execute("paste")).success).toBe(true);
       expect(invalidations).toHaveLength(2);
       expect(read).toHaveBeenCalledTimes(2);
-      expect(read.mock.calls[0]?.slice(2)).toEqual([false, 0, undefined, 1500]);
+      expect(read.mock.calls[0]?.[1]).toEqual({
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        timeoutMs: 1500,
+      });
     } finally {
       ios.mockRestore();
       read.mockRestore();

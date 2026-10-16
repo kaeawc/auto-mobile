@@ -7,7 +7,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
 5652	src/daemon/daemon.ts
-6524	src/daemon/daemonMcpProxy.ts
+6512	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts
@@ -34,7 +34,7 @@
 1528	src/features/action/InstallApp.ts
 2258	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
-2026	src/features/action/SendKeys.ts
+1791	src/features/action/SendKeys.ts
 1897	src/features/action/SetUIState.ts
 1981	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts

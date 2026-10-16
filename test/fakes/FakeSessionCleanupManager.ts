@@ -13,6 +13,9 @@ export type SessionCleanupSurface = Pick<
 type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
 type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
 type ReleaseReason = Parameters<ReleaseCallback>[2];
+/** The full bound the real manager accepts: a trusted numeric cap or a manager-capped descriptor. */
+export type PendingCleanupBound = Parameters<SessionManager["registerPendingDeviceCleanup"]>[2];
+type AcquisitionCleanupCap = Parameters<SessionManager["registerAcquisitionDeviceCleanup"]>[2];
 
 export interface FakeSessionCleanupManagerOptions {
   /** Reason reported to release callbacks; defaults to "explicit-release". */
@@ -21,10 +24,16 @@ export interface FakeSessionCleanupManagerOptions {
   terminal?: boolean;
 }
 
-interface RecordedCleanup {
+interface RecordedPendingCleanup {
   deviceId: string;
   cleanup: Promise<unknown>;
-  capMs?: number;
+  bound?: PendingCleanupBound;
+}
+
+interface RecordedAcquisitionCleanup {
+  deviceId: string;
+  cleanup: Promise<unknown>;
+  capMs?: AcquisitionCleanupCap;
 }
 
 /**
@@ -36,8 +45,8 @@ export class FakeSessionCleanupManager implements SessionCleanupSurface {
   holders = new Map<string, string>();
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
-  pendingCleanups: RecordedCleanup[] = [];
-  acquisitionCleanups: RecordedCleanup[] = [];
+  pendingCleanups: RecordedPendingCleanup[] = [];
+  acquisitionCleanups: RecordedAcquisitionCleanup[] = [];
 
   private readonly releaseReason: ReleaseReason;
   private readonly terminal: boolean;
@@ -59,14 +68,18 @@ export class FakeSessionCleanupManager implements SessionCleanupSurface {
     this.unboundCallbacks.push(callback);
   }
 
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>, capMs?: number): void {
-    this.pendingCleanups.push({ deviceId, cleanup, capMs });
+  registerPendingDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    bound?: PendingCleanupBound,
+  ): void {
+    this.pendingCleanups.push({ deviceId, cleanup, bound });
   }
 
   registerAcquisitionDeviceCleanup(
     deviceId: string,
     cleanup: Promise<unknown>,
-    capMs?: number,
+    capMs?: AcquisitionCleanupCap,
   ): void {
     this.acquisitionCleanups.push({ deviceId, cleanup, capMs });
   }

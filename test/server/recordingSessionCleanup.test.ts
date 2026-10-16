@@ -290,7 +290,7 @@ describe("registerRecordingSessionCleanup", () => {
     manager.release("session-a", "SIM-1");
     await manager.settle();
 
-    expect(manager.pendingCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
+    expect(manager.pendingCleanups.map((entry) => entry.bound)).toEqual([125_000]);
   });
 
   test("release captures the recording ids it finalizes before stopping them, once", async () => {
@@ -372,7 +372,7 @@ describe("registerRecordingSessionCleanup", () => {
     try {
       manager.release("session-a", "SIM-1");
       await drainUntilQuiescent(recordings.timer);
-      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
       let settled = false;
       const done = manager.settle().then(() => {
         settled = true;
@@ -489,7 +489,7 @@ describe("registerRecordingSessionCleanup", () => {
         if (retained) {
           expect(force).toHaveBeenCalledWith("rec-session-a");
           expect(settled).toBe(false);
-          expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+          expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
           await recordings.timer.advanceTimeAsync(2_999, () =>
             drainUntilQuiescent(recordings.timer),
           );
@@ -910,7 +910,7 @@ describe("registerRecordingSessionCleanup", () => {
       });
       await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
       await drainUntilQuiescent(recordings.timer);
-      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
       await recordings.timer.advanceTimeAsync(2_999, () => drainUntilQuiescent(recordings.timer));
       expect(settled).toBe(false);
       expect(recordings.giveUps).toEqual([]);

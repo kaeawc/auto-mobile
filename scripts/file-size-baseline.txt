@@ -53,7 +53,7 @@
 1839	src/features/observe/android/ctrlProxyProtocol.ts
 1114	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
-4564	src/features/observe/ios/IOSCtrlProxyClient.ts
+4569	src/features/observe/ios/IOSCtrlProxyClient.ts
 2118	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts
@@ -92,7 +92,7 @@
 1424	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1868	src/utils/android-cmdline-tools/AdbClient.ts
-4966	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
+4289	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3185	src/utils/ios-cmdline-tools/SimCtlClient.ts

@@ -3873,7 +3873,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "dragPath",
-    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android).",
+    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     dragPathSchema,
     dragPathHandler,
     { defaultEnabled: false, supportsProgress: true },

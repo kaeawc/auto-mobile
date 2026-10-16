@@ -1486,7 +1486,7 @@
   },
   {
     "name": "dragPath",
-    "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android).",
+    "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1576,7 +1576,7 @@
       },
       "required": ["points"],
       "additionalProperties": false,
-      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android). Use for drawing, unlock patterns, sliders, and long press then drag."
+      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag."
     }
   },
   {

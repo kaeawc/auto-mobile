@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { DragPath } from "../../../src/features/action/DragPath";
 import {
   DRAG_PATH_MAX_TOTAL_MS,
+  dragPathTimeline,
   assertDragPathFitsRequestBudget,
   planDragPath,
   resolveDragPathPoints,
@@ -11,6 +12,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { observation } from "../../helpers/tapAtCoordinate";
@@ -137,6 +139,47 @@ describe("resolveDragPathPoints", () => {
       "android",
     );
     expect("error" in resolved && resolved.error).toContain("points[1]");
+  });
+});
+
+describe("dragPathTimeline", () => {
+  test("repeats the start for the hold and the end for the release hold", () => {
+    const plan = planDragPath(
+      [
+        { x: 0, y: 0 },
+        { x: 4, y: 0 },
+      ],
+      {
+        points: [
+          { x: 0, y: 0 },
+          { x: 0, y: 0, durationMs: 50 },
+        ],
+        holdMs: 100,
+        releaseHoldMs: 20,
+      },
+    );
+    expect(dragPathTimeline(plan)).toEqual([
+      { x: 0, y: 0, offsetMs: 0 },
+      { x: 0, y: 0, offsetMs: 100 },
+      { x: 4, y: 0, offsetMs: 150 },
+      { x: 4, y: 0, offsetMs: 170 },
+    ]);
+  });
+
+  test("without holds it is just down and the timed moves", () => {
+    const plan = planDragPath(
+      [
+        { x: 0, y: 0 },
+        { x: 2, y: 2 },
+      ],
+      {
+        points: [
+          { x: 0, y: 0 },
+          { x: 0, y: 0, durationMs: 50 },
+        ],
+      },
+    );
+    expect(dragPathTimeline(plan).map((p) => p.offsetMs)).toEqual([0, 50]);
   });
 });
 
@@ -297,16 +340,69 @@ describe("DragPath", () => {
     expect(frames).toEqual([]);
   });
 
-  test("iOS is refused with a clear platform error", async () => {
-    const timer = new FakeTimer();
-    const { client } = fakeClient(timer);
-    await expect(
-      create(ios, client, timer).execute({
+  describe("iOS", () => {
+    function createIos(timer: FakeTimer, ios: FakeIOSCtrlProxy) {
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(observation(100, 200, "frame-7"));
+      const dragPath = new DragPath(ios_, new FakeAdbExecutor(), { timer, iosClient: ios });
+      dragPath.window = new FakeWindow() as unknown as Window;
+      dragPath.observeScreen = observe;
+      return dragPath;
+    }
+    const ios_ = ios;
+
+    test("sends the whole timed path in one request with the frame context", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeIOSCtrlProxy();
+      const result = await createIos(timer, fake).execute({
+        points: [
+          { x: 10, y: 10 },
+          { x: 10, y: 100, durationMs: 100 },
+        ],
+        holdMs: 300,
+        releaseHoldMs: 50,
+      });
+      expect(result.success).toBe(true);
+      expect(result.moveCount).toBe(2);
+      const [call] = fake.getPathGestureHistory();
+      expect(call.frameContext).toBe("frame-7");
+      expect(call.points).toEqual([
+        { x: 10, y: 10, offsetMs: 0 },
+        { x: 10, y: 10, offsetMs: 300 },
+        { x: 10, y: 55, offsetMs: 350 },
+        { x: 10, y: 100, offsetMs: 400 },
+        { x: 10, y: 100, offsetMs: 450 },
+      ]);
+    });
+
+    test("reports a runner refusal and the unconfirmed case", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeIOSCtrlProxy();
+      fake.setPathGestureResult({ success: false, totalTimeMs: 0, error: "synthesis failed" });
+      const result = await createIos(timer, fake).execute({
         points: [
           { x: 1, y: 1 },
           { x: 2, y: 2 },
         ],
-      }),
-    ).rejects.toThrow("dragPath");
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("synthesis failed");
+    });
+
+    test("an out-of-bounds point sends nothing", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeIOSCtrlProxy();
+      const result = await createIos(timer, fake).execute({
+        points: [
+          { x: 1, y: 1 },
+          { x: 500, y: 2 },
+        ],
+      });
+      expect(result.success).toBe(false);
+      expect(fake.getPathGestureHistory()).toEqual([]);
+    });
   });
 });

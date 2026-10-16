@@ -97,6 +97,28 @@ export function planDragPath(
   };
 }
 
+/**
+ * The plan as a timed point list for runners that follow a whole path in one request: down at
+ * the first point, the hold as a repeat of it, each move at hold + its offset, and the release
+ * hold as a repeat of the last point. Offsets are whole milliseconds from touch down.
+ */
+export function dragPathTimeline(
+  plan: DragPathPlan,
+): Array<{ x: number; y: number; offsetMs: number }> {
+  const timeline = [{ x: plan.start.x, y: plan.start.y, offsetMs: 0 }];
+  if (plan.holdMs > 0) {
+    timeline.push({ x: plan.start.x, y: plan.start.y, offsetMs: plan.holdMs });
+  }
+  for (const step of plan.moves) {
+    timeline.push({ x: step.x, y: step.y, offsetMs: plan.holdMs + step.atMs });
+  }
+  const last = timeline[timeline.length - 1];
+  if (plan.releaseHoldMs > 0) {
+    timeline.push({ x: last.x, y: last.y, offsetMs: last.offsetMs + plan.releaseHoldMs });
+  }
+  return timeline;
+}
+
 /** Reject a path before any input when it cannot finish inside the remaining request budget. */
 export function assertDragPathFitsRequestBudget(
   totalMs: number,

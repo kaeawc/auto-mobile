@@ -167,6 +167,26 @@
       }
     },
     {
+      "name" : "path_gesture_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "path_gesture_result"
+      }
+    },
+    {
       "name" : "set_text_result",
       "wire" : {
         "perfTiming" : {
@@ -1201,6 +1221,7 @@
     "list_tables_result",
     "magic_tap_result",
     "multi_finger_swipe_result",
+    "path_gesture_result",
     "pinch_result",
     "preference_files",
     "preferences",

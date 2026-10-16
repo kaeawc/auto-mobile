@@ -33,6 +33,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_multi_finger_swipe",
   "request_drag",
   "request_pinch",
+  "request_path_gesture",
 
   // Text input
   "request_set_text",

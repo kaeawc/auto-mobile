@@ -8,8 +8,8 @@
  */
 import type { ViewHierarchyResult } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
-import { rawNodeString, rawResourceId } from "../../features/utility/elementProperties";
-import { SearchableHierarchy } from "../../features/utility/SearchableNode";
+import { rawNodeString, rawResourceId } from "../utility/elementProperties";
+import { SearchableHierarchy } from "../utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 

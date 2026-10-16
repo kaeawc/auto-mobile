@@ -4,7 +4,7 @@ import {
   intersectDumpsysRecordsForRow,
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
-} from "../../../src/server/system-tray/notificationDumpsys";
+} from "../../../src/features/systemTray/notificationDumpsys";
 
 const dump = (...lines: string[]): string => lines.join("\n");
 

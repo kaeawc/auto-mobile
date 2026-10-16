@@ -7,7 +7,7 @@ import {
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_PACKAGE,
   matchesNotificationResourceId,
-} from "../../../src/server/system-tray/notificationHints";
+} from "../../../src/features/systemTray/notificationHints";
 import type { ViewHierarchyResult } from "../../../src/models";
 
 /** Build a ViewHierarchyResult wrapping an arbitrary hierarchy shape. */

@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  registerAppTools,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-} from "../../src/server/appTools";
+import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
@@ -23,6 +17,9 @@ import {
 } from "../fakes/FakePrototypeAgentInjection";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 const SIMULATOR: BootedDevice = {
   deviceId: "11111111-2222-3333-4444-555555555555",
@@ -55,7 +52,7 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
   const observation = {
     activeWindow: { appId: APP, activityName: "Main", layoutSeqSum: 1 },
   } as ObserveResult;
-  setLaunchAppToolDependencies({
+  appTools.configure("launchApp", {
     prototypeViewerAttacher: viewerAttacher,
     createLaunchApp: () => ({
       execute: async (
@@ -115,16 +112,12 @@ describe("launchApp prototype:true (#10567)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     SessionReleaseBroadcaster.clearForTesting();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
+    appTools.clear();
     SessionReleaseBroadcaster.clearForTesting();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
   });
 
   test("a normal launch injects nothing and never resolves the agent", async () => {
@@ -222,7 +215,7 @@ describe("launchApp prototype:true (#10567)", () => {
 
   test("terminateApp drops the record, closes the connection and frees the port", async () => {
     const h = setup();
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({ success: true, packageName: APP, wasRunning: true }),
       }),
@@ -238,7 +231,7 @@ describe("launchApp prototype:true (#10567)", () => {
 
   test("a failed terminateApp keeps the agent record and connection", async () => {
     const h = setup();
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({ success: false, error: "devicectl failed" }),
       }),

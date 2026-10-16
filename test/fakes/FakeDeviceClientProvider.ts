@@ -1,6 +1,8 @@
-import { DeviceClientProvider } from "../../src/devices/DeviceSessionManager";
+import type {
+  DeviceClientProvider,
+  DeviceClientSimctl,
+} from "../../src/devices/DeviceSessionManager";
 import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";
 import { CtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
@@ -34,7 +36,7 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
   constructor(
     private readonly fakeAdb: AdbExecutor,
     private readonly fakeDeviceUtils: PlatformDeviceManager,
-    private readonly fakeSimctl?: SimCtlClient,
+    private readonly fakeSimctl?: DeviceClientSimctl,
     private readonly options: FakeDeviceClientProviderOptions = {},
   ) {}
 
@@ -52,7 +54,7 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
     return this.fakeAdb;
   }
 
-  getSimctl(): SimCtlClient | undefined {
+  getSimctl(): DeviceClientSimctl | undefined {
     return this.fakeSimctl;
   }
 

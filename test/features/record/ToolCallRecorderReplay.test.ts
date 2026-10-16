@@ -16,7 +16,7 @@ import {
 import { createJSONToolResponse } from "../../../src/utils/toolUtils";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../../src/utils/plan/PlanExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 
@@ -38,7 +38,7 @@ afterEach(() => {
  * device-bound so PlanExecutor re-injects the session exactly as it does for the
  * real tool.
  */
-function registerResetKeychain(simctl: FakeSimCtlClient): void {
+function registerResetKeychain(simctl: FakeSimctl): void {
   ToolRegistry.register(
     "resetKeychain",
     "Fake resetKeychain over a fake simctl",
@@ -73,7 +73,7 @@ function recordResetKeychain(): Plan {
 
 describe("resetKeychain replay of a recorded plan (#10052)", () => {
   test("the recorded step stops at the tool's own confirmation refusal and wipes nothing", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     registerResetKeychain(simctl);
     const plan = recordResetKeychain();
 
@@ -97,7 +97,7 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
   });
 
   test("once the author sets confirm: true by hand the replay runs the reset", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     registerResetKeychain(simctl);
     const plan = recordResetKeychain();
     plan.steps[0].params!.confirm = true;

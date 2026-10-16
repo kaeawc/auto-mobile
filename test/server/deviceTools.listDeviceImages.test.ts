@@ -13,7 +13,6 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -318,11 +317,7 @@ describe("listDeviceImages", function () {
         },
       ],
     } as unknown as AndroidEmulatorClient;
-    const deviceManager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      undefined,
-      emulator,
-    );
+    const deviceManager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, emulator);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => new FakeAvdManager(),

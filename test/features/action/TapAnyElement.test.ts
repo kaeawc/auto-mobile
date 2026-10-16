@@ -1,10 +1,7 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
-import {
-  AdbClient,
-  AdbCommandTimeoutError,
-} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
@@ -827,7 +824,7 @@ describe("tapAny long press safety", () => {
     const displayLookup = mock(() => undefined);
     const action = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "tap-any-long-press-bound" },
-      adb as unknown as AdbClient,
+      adb,
       {
         timer,
         elementSelector: new FakeElementSelector(element),

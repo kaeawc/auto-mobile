@@ -755,3 +755,29 @@ export function createDevicePoolSuite() {
   });
   return { devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager };
 }
+
+/** A shut-down, available iOS simulator image; `extra` overrides or adds fields (iosVersion, state, ...). */
+export function iosSimulatorImage(
+  name: string,
+  deviceId: string,
+  extra: Partial<DeviceInfo> = {},
+): DeviceInfo {
+  return {
+    name,
+    platform: "ios",
+    isRunning: false,
+    deviceId,
+    state: "Shutdown",
+    isAvailable: true,
+    ...extra,
+  };
+}
+
+/** A not-running Android image; `extra` overrides or adds fields. */
+export function androidDeviceImage(
+  name: string,
+  deviceId: string,
+  extra: Partial<DeviceInfo> = {},
+): DeviceInfo {
+  return { name, platform: "android", isRunning: false, deviceId, ...extra };
+}

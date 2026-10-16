@@ -18,20 +18,9 @@
 
 import { Tiktoken } from "js-tiktoken/lite";
 import cl100k_base from "js-tiktoken/ranks/cl100k_base";
+import { registerAllTools } from "../src/server/registerAllTools";
 import { ToolRegistry } from "../src/server/toolRegistry";
 import { ResourceRegistry } from "../src/server/resourceRegistry";
-
-// Import all tool registration functions to populate the registry
-import { registerObserveTools } from "../src/server/observeTools";
-import { registerInteractionTools } from "../src/server/interactionTools";
-import { registerAppTools } from "../src/server/appTools";
-import { registerAppFileTools } from "../src/server/appFileTools";
-import { registerUtilityTools } from "../src/server/utilityTools";
-import { registerDeviceTools } from "../src/server/deviceTools";
-import { registerDeepLinkTools } from "../src/server/deepLinkTools";
-import { registerNavigationTools } from "../src/server/navigationTools";
-import { registerPlanTools } from "../src/server/planTools";
-import { registerDoctorTools } from "../src/server/doctorTools";
 
 // Import resource registration functions
 import { registerObservationResources } from "../src/server/observationResources";
@@ -96,26 +85,6 @@ function estimateTokens(text: string): number {
     console.error(`Error encoding text: ${error}`);
     return 0;
   }
-}
-
-/**
- * Register all tools in the registry
- */
-function registerAllTools(): void {
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerAppFileTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerPlanTools();
-  registerDoctorTools();
-
-  // Only register debug tools if debug mode is enabled
-  // For estimation purposes, we'll skip them to match typical production usage
-  // registerDebugTools();
 }
 
 /**
@@ -351,7 +320,7 @@ async function main() {
   console.log("Initializing MCP server components...");
 
   // Register all tools and resources
-  registerAllTools();
+  registerAllTools({ daemonMode: true, includeDoctor: true });
   registerAllResources();
 
   console.log("Estimating token usage...\n");

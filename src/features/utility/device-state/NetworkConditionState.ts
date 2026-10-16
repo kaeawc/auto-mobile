@@ -2,8 +2,8 @@ import { z } from "zod/v4";
 import {
   networkFilterNextStep,
   type NetworkFilterState,
-} from "../../network-filter/NetworkFilterBridge";
-import { IOS_APP_NETWORK_RULE_LEASE_MS } from "../../network-filter/IosAppNetworkRuleClient";
+} from "../../networkFilter/NetworkFilterBridge";
+import { IOS_APP_NETWORK_RULE_LEASE_MS } from "../../networkFilter/IosAppNetworkRuleClient";
 
 /**
  * Documented device-wide network-condition profiles. Distinct from the in-app

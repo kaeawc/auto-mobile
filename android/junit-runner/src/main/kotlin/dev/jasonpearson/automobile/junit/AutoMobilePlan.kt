@@ -17,10 +17,16 @@ package dev.jasonpearson.automobile.junit
  * }
  * ```
  */
-class AutoMobilePlan(
+class AutoMobilePlan
+internal constructor(
   private val planPath: String,
+  private val collaborators: PlanExecutorCollaborators,
   private val parameters: ParameterBuilder.() -> Unit = {},
 ) {
+  constructor(
+    planPath: String,
+    parameters: ParameterBuilder.() -> Unit = {},
+  ) : this(planPath, PlanExecutorCollaborators(), parameters)
 
   private val parameterMap = mutableMapOf<String, Any>()
 
@@ -53,9 +59,9 @@ class AutoMobilePlan(
     }
 
     // Ensure device availability is checked
-    AutoMobileSharedUtils.deviceChecker.checkDeviceAvailability()
+    collaborators.deviceChecker.checkDeviceAvailability()
 
-    return AutoMobilePlanExecutor.execute(planPath, parameterMap, options)
+    return AutoMobilePlanExecutor.execute(planPath, parameterMap, options, collaborators)
   }
 
   /** Builder class for constructing parameter maps using a DSL-like syntax. */

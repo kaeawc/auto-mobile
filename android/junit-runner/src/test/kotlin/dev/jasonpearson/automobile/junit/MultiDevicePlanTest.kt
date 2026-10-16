@@ -29,24 +29,25 @@ import org.junit.runners.model.FrameworkMethod
 class TwoDevicePlainPlanTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var capturingClient: MultiDeviceCapturingFakeDaemonToolClient
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var runner: AutoMobileRunner
   private lateinit var notifier: MultiDeviceRecordingRunNotifier
 
   @Before
   fun setup() {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
-    DaemonSocketClientManager.testClient = capturingClient
-    AutoMobileSharedUtils.testDeviceChecker = TwoDeviceFakeChecker()
-    DaemonHeartbeat.testController = MultiDeviceFakeDaemonHeartbeat()
-    runner = AutoMobileRunner(TwoDevicePlainTestTarget::class.java)
+    collaborators =
+      PlanExecutorCollaborators(
+        deviceChecker = TwoDeviceFakeChecker(),
+        daemon = capturingClient,
+        heartbeat = MultiDeviceFakeDaemonHeartbeat(),
+      )
+    runner = AutoMobileRunner(TwoDevicePlainTestTarget::class.java, collaborators)
     notifier = MultiDeviceRecordingRunNotifier()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
@@ -67,6 +68,7 @@ class TwoDevicePlainPlanTest {
       "test-plans/dual-device-plain.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = false),
+      collaborators = collaborators,
     )
 
     val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
@@ -84,6 +86,7 @@ class TwoDevicePlainPlanTest {
       "test-plans/dual-device-plain.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = false),
+      collaborators = collaborators,
     )
 
     val decoded =
@@ -125,6 +128,7 @@ class TwoDevicePlainPlanTest {
         "test-plans/dual-device-plain.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators = collaborators,
       )
 
     assertTrue("Execution should succeed for two-device run", result.success)
@@ -159,6 +163,7 @@ class TwoDevicePlainPlanTest {
         "test-plans/dual-device-plain.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators = collaborators,
       )
 
     assertFalse("Execution should fail", result.success)
@@ -226,24 +231,25 @@ class TwoDevicePlainPlanTest {
 class TwoDeviceCriticalSectionPlanTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var capturingClient: MultiDeviceCapturingFakeDaemonToolClient
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var runner: AutoMobileRunner
   private lateinit var notifier: MultiDeviceRecordingRunNotifier
 
   @Before
   fun setup() {
     capturingClient = MultiDeviceCapturingFakeDaemonToolClient()
-    DaemonSocketClientManager.testClient = capturingClient
-    AutoMobileSharedUtils.testDeviceChecker = TwoDeviceFakeChecker()
-    DaemonHeartbeat.testController = MultiDeviceFakeDaemonHeartbeat()
-    runner = AutoMobileRunner(TwoDeviceCriticalSectionTestTarget::class.java)
+    collaborators =
+      PlanExecutorCollaborators(
+        deviceChecker = TwoDeviceFakeChecker(),
+        daemon = capturingClient,
+        heartbeat = MultiDeviceFakeDaemonHeartbeat(),
+      )
+    runner = AutoMobileRunner(TwoDeviceCriticalSectionTestTarget::class.java, collaborators)
     notifier = MultiDeviceRecordingRunNotifier()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
@@ -257,6 +263,7 @@ class TwoDeviceCriticalSectionPlanTest {
       "test-plans/dual-device-critical-section.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = false),
+      collaborators = collaborators,
     )
 
     val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
@@ -275,6 +282,7 @@ class TwoDeviceCriticalSectionPlanTest {
       "test-plans/dual-device-critical-section.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = false),
+      collaborators = collaborators,
     )
 
     val decoded =
@@ -343,6 +351,7 @@ class TwoDeviceCriticalSectionPlanTest {
         "test-plans/dual-device-critical-section.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators = collaborators,
       )
 
     assertTrue("Execution should succeed for criticalSection plan", result.success)
@@ -377,6 +386,7 @@ class TwoDeviceCriticalSectionPlanTest {
         "test-plans/dual-device-critical-section.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators = collaborators,
       )
 
     assertFalse("Execution should fail", result.success)

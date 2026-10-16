@@ -22,7 +22,7 @@ import {
 import { setDeviceStateSchema } from "../../../src/server/utilityTools";
 import { addDeviceTargetingToSchema } from "../../../src/server/toolSchemaHelpers";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -321,7 +321,7 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
   });
 
   test("reports iOS connectivity as unsupported without issuing a simctl command", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const deviceState = new DeviceState(iosSimulator, { simctl });
 
     const result = await deviceState.getState(["connectivity"]);
@@ -552,7 +552,7 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
   });
 
   test("reports iOS connectivity writes as unsupported without issuing simctl", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const result = await new DeviceState(iosSimulator, { simctl }).setState({
       connectivity: { wifiEnabled: false },
     });

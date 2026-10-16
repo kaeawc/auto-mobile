@@ -108,6 +108,16 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
       "Read-only managed-slot config source (inline JSON or file path); explicitly unset by clients.",
   },
   {
+    name: "AUTOMOBILE_SESSION_CONFIG",
+    kind: "input",
+    reason: "Read-only session request source (inline JSON or file path).",
+  },
+  {
+    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    kind: "input",
+    reason: "Read-only operator configuration file for the experimental session broker.",
+  },
+  {
     name: "AUTOMOBILE_FFMPEG",
     kind: "input",
     reason: "Read-only executable path or command name.",

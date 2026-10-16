@@ -19,7 +19,7 @@ import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 
@@ -908,7 +908,7 @@ describe("iOS app UserDefaults resolution", () => {
     expect(simctl.calls).toEqual([]);
   });
   test("missing global domain gives appId guidance and separate route", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(
       `spawn ${device.deviceId} defaults read globalSuite k`,
       new Error("Domain 'globalSuite' not found"),
@@ -967,7 +967,7 @@ describe("real plutil fixtures and route type consistency", () => {
       sdk.sdk.entry = { key, type: sdkType, value: serialized };
       const plist = harness("absent");
       plist.plist.xml = fixtureXml;
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(
         `spawn ${device.deviceId} defaults read globalSuite ${key}`,
         `${serialized}\n`,
@@ -1171,7 +1171,7 @@ describe("SDK redaction and collection encoding", () => {
     const result = await plist.preferences.getPreference(input);
     expect(result).toMatchObject({ value: IOS_SDK_REDACTED_VALUE, type: "string" });
     expect(result.redacted).toBeUndefined();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `spawn ${device.deviceId} defaults read globalSuite ${input.key}`,
       `${IOS_SDK_REDACTED_VALUE}\n`,

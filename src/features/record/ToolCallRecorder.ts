@@ -292,40 +292,52 @@ export class ToolCallRecorder {
         `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
       );
     }
-    const context = args.__tapAtRecordingContext as
-      | import("../../models/TapAtGeometry").TapAtPlanContext
-      | undefined;
-    const geometry = toolName === "tapAt" ? context?.recordedGeometry : undefined;
-    if (toolName === "tapAt" && context && !geometry) {
-      const warning =
-        "tapAt was recorded without geometry: native geometry provenance is unavailable; observe with rotation metadata and record again to capture provenance";
-      logger.warn(`[ToolCallRecorder] ${warning}`);
-      this.warnings.push(warning);
-    }
-    if (toolName === "swipeAt") {
-      this.recordSwipeAt(recorded, args.__swipeAtRecordingContext);
-      return;
-    }
-    if (geometry) {
-      const nativeParams = { ...recorded };
-      delete nativeParams.image;
-      delete nativeParams.coordinateSpace;
-      this.steps.push({
-        tool: toolName,
-        params: { ...nativeParams, x: geometry.x, y: geometry.y },
-        geometry,
-      });
-    } else {
-      this.steps.push({ tool: toolName, params: recorded });
-    }
+    this.steps.push(this.stepFor(toolName, recorded, args));
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 
+  /** The step for a call whose coordinates replay differently by screen: tapAt and swipeAt. */
+  private stepFor(
+    toolName: string,
+    recorded: Record<string, unknown>,
+    args: Record<string, unknown>,
+  ) {
+    if (toolName === "tapAt") {
+      return this.tapAtStep(recorded, args.__tapAtRecordingContext);
+    }
+    if (toolName === "swipeAt") {
+      return this.swipeAtStep(recorded, args.__swipeAtRecordingContext);
+    }
+    return { tool: toolName, params: recorded };
+  }
+
+  private tapAtStep(recorded: Record<string, unknown>, rawContext: unknown): PlanStep {
+    const context = rawContext as import("../../models/TapAtGeometry").TapAtPlanContext | undefined;
+    const geometry = context?.recordedGeometry;
+    if (!geometry) {
+      if (context) {
+        const warning =
+          "tapAt was recorded without geometry: native geometry provenance is unavailable; observe with rotation metadata and record again to capture provenance";
+        logger.warn(`[ToolCallRecorder] ${warning}`);
+        this.warnings.push(warning);
+      }
+      return { tool: "tapAt", params: recorded };
+    }
+    const nativeParams = { ...recorded };
+    delete nativeParams.image;
+    delete nativeParams.coordinateSpace;
+    return {
+      tool: "tapAt",
+      params: { ...nativeParams, x: geometry.x, y: geometry.y },
+      geometry,
+    };
+  }
+
   /**
-   * Record a swipeAt as fractions of the screen it resolved against. Absolute pixels would swipe
-   * the wrong place on another screen size, and unlike tapAt there is no geometry check on replay.
+   * A swipeAt as fractions of the screen it resolved against. Absolute pixels would swipe the
+   * wrong place on another screen size, and unlike tapAt there is no geometry check on replay.
    */
-  private recordSwipeAt(params: Record<string, unknown>, rawContext: unknown): void {
+  private swipeAtStep(params: Record<string, unknown>, rawContext: unknown): PlanStep {
     const context = rawContext as SwipeAtRecordingContext | undefined;
     const resolved = context?.recorded;
     if (!resolved) {
@@ -335,17 +347,15 @@ export class ToolCallRecorder {
         logger.warn(`[ToolCallRecorder] ${warning}`);
         this.warnings.push(warning);
       }
-      this.steps.push({ tool: "swipeAt", params });
-      return;
+      return { tool: "swipeAt", params };
     }
     const rest = Object.fromEntries(
       Object.entries(params).filter(([key]) => !SWIPE_AT_POSITION_PARAMS.has(key)),
     );
-    this.steps.push({
+    return {
       tool: "swipeAt",
       params: { ...rest, ...recordedSwipeAtParams(resolved, resolved.screenSize) },
-    });
-    logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: swipeAt`);
+    };
   }
 
   private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {

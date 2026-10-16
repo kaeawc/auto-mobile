@@ -109,6 +109,11 @@ export interface RunOptions {
   outputRoot: string;
   runtime: string;
   serverEntry: string;
+  /**
+   * Digest of the built server (`dist/`): the entry bundle plus the sidecars it loads at
+   * runtime, such as the plan schemas. A stale or different build reads as different.
+   */
+  serverBuild: string;
   claudeCommand: string;
   deviceSerial?: string;
   modelOverride?: string;
@@ -434,7 +439,7 @@ export async function runSuite(
   const { startedAt, prepared } = await prepare(suite, options, deps);
   const digest = suiteDigest(suite, options.modelOverride);
   const version = await claudeVersion(deps, options.claudeCommand);
-  const serverBuild = `sha256=${deps.fs.sha256(options.serverEntry).slice(0, 16)}`;
+  const { serverBuild } = options;
   let exit: Awaited<ReturnType<typeof launchClaude>>;
   let screen: { screenText?: string; screenError?: string } = {};
   let daemonStopped = false;

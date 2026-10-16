@@ -197,12 +197,15 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
  * side, so `EXPECTED_COUNT: 3` does not match `EXPECTED_COUNT: 30`.
  */
 export function containsBounded(haystack: string, needle: string): boolean {
-  // Unicode letters and digits bound a match, so 完了 does not match inside 未完了
-  // (and COUNT: 3 not inside COUNT: 30). A decimal or grouped continuation (3.5, 3,000) is
-  // a different number, so "." or "," next to a digit does not bound a match on either
-  // side (3 items is not inside 0.3 items or 1,300 items).
+  // Unicode letters, digits, and combining marks bound a match, so 完了 does not match
+  // inside 未完了, COUNT: 3 not inside COUNT: 30, and Cafe not inside a decomposed Café.
+  // A decimal or grouped continuation (3.5, 3,000) is a different number, so "." or ","
+  // next to a digit does not bound a match on either side (3 items is not inside 0.3 items
+  // or 1,300 items). A needle that starts with a digit also rejects a leading sign, which
+  // would make it the opposite number (-3 items).
+  const signed = /^\p{N}/u.test(needle) ? "|[+\\-\u2212]" : "";
   return new RegExp(
-    `(?<![\\p{L}\\p{N}]|\\p{N}[.,])${RegExp.escape(needle)}(?![\\p{L}\\p{N}]|[.,]\\p{N})`,
+    `(?<![\\p{L}\\p{N}\\p{M}]|\\p{N}[.,]${signed})${RegExp.escape(needle)}(?![\\p{L}\\p{N}\\p{M}]|[.,]\\p{N})`,
     "iu",
   ).test(haystack);
 }

@@ -218,8 +218,9 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
 size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
-tool handling), `baseline.serverBuild` (a SHA-256 prefix of the `dist/src/index.js` bundle the run
-used, so a stale build after switching commits is flagged rather than silently measured), and
+tool handling), `baseline.serverBuild` (a SHA-256 prefix over the built `dist/` the run used: the
+bundle plus the schemas and vendor tools it loads at runtime, so a stale build after switching
+commits is flagged rather than silently measured), and
 `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
 flagged too. A fingerprint that could not be read (`unknown`) is never written into a baseline

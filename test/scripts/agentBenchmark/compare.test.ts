@@ -237,6 +237,15 @@ describe("verification text matching", () => {
     expect(containsBounded("RATE: 0.3 items", "3 items")).toBe(false);
     expect(containsBounded("POPULATION: 1,300 users", "300 users")).toBe(false);
     expect(containsBounded("Done. 3 items", "3 items")).toBe(true);
+    // Combining marks continue a word, so decomposed text bounds like precomposed text.
+    expect(containsBounded("Cafe\u0301", "Cafe")).toBe(false);
+    expect(containsBounded("Cafe\u0301 open", "Cafe\u0301")).toBe(true);
+    // A sign belongs to a number that the needle starts with; elsewhere a hyphen is text.
+    expect(containsBounded("COUNT: -3 items", "3 items")).toBe(false);
+    expect(containsBounded("COUNT: +3 items", "3 items")).toBe(false);
+    expect(containsBounded("COUNT: \u22123 items", "3 items")).toBe(false);
+    expect(containsBounded("COUNT: -3 items", "-3 items")).toBe(true);
+    expect(containsBounded("Status -Done", "Done")).toBe(true);
   });
 
   test("an over-tapped run fails both the answer and the screen check", () => {

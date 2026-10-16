@@ -1137,14 +1137,7 @@ export class Explore extends BaseVisualChange {
       container ? "swipeOn" : null,
       container ? { container, direction: "up", speed: "slow" } : {},
       observation,
-      () =>
-        swipeOn.execute(
-          element,
-          "up",
-          { duration: 600 }, // Slow swipe
-          progress,
-          signal,
-        ),
+      () => swipeOn.execute(element, "up", { duration: 600 }, { progress, signal }),
     );
     return result.success;
   }
@@ -1170,15 +1163,13 @@ export class Explore extends BaseVisualChange {
       ? await this.runRecorded("tapOn", publicTapOnArgs(selector), observation, () =>
           new TapOnElement(this.device, this.adb).execute(
             { ...selector, action: "tap" },
-            progress,
-            signal,
+            { progress, signal },
           ),
         )
       : await this.runRecorded("tapAt", { ...coordinates!, action: "tap" }, observation, () =>
           new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
             { ...coordinates!, action: "tap" },
-            progress,
-            signal,
+            { progress, signal },
           ),
         );
     return result.success;
@@ -1412,12 +1403,7 @@ export class Explore extends BaseVisualChange {
       // Same injected transport and timer as the home press above.
       const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
         packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        signal,
+        { clearAppData: false, coldBoot: false, signal },
       );
       if (!result.success) {
         throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);

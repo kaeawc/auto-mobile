@@ -22,7 +22,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   setSystemTrayDependencies,
   resetSystemTrayDependencies,
-} from "../../src/server/systemTrayHelpers";
+} from "../../src/features/systemTray/systemTrayHelpers";
 import { RequestManager } from "../../src/utils/RequestManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";

@@ -90,9 +90,6 @@ src/daemon/foreignDeviceOwnership.ts	ADB_SERVER_SOCKET
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_ADDRESS
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_PORT
 src/daemon/liveAcceptanceCapability.ts	AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET
-src/daemon/managedSlots/defaultAbandonedScopeReclaimer.ts	NODE_ENV
-src/daemon/managedSlots/defaultFreeDeviceReclaimer.ts	NODE_ENV
-src/daemon/managedSlots/managedSlotResourceBudget.ts	AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_LOCK_FILE_PATH
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_PID_FILE_PATH
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_SOCKET_PATH
@@ -203,7 +200,6 @@ src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_TOKEN
 src/index.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/index.ts	AUTOMOBILE_DISABLED_TOOLS
 src/index.ts	AUTOMOBILE_ENABLED_TOOLS
-src/models/managedSlotConfig.ts	AUTOMOBILE_MANAGED_SLOT_CONFIG
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_BACKUP
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
 src/server/planHealthSummary.ts	AUTOMOBILE_PLAN_HEALTH_DIR
@@ -218,15 +214,11 @@ src/utils/android-cmdline-tools/AdbServerLifecycle.ts	AUTO_MOBILE_MANAGED_ADB_SE
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_SDK_HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_SDK_ROOT
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	AUTOMOBILE_EMULATOR_ARGS
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	AUTOMOBILE_EMULATOR_AUDIO
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	AUTOMOBILE_EMULATOR_HEADLESS
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	DISPLAY
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	EMULATOR_POLLING_INTERVAL_MS
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	PATH
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	USERPROFILE
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	WAYLAND_DISPLAY
 src/utils/android-cmdline-tools/AvdConfigReader.ts	ANDROID_AVD_HOME
 src/utils/android-cmdline-tools/AvdConfigReader.ts	ANDROID_EMULATOR_HOME
 src/utils/android-cmdline-tools/AvdConfigReader.ts	ANDROID_SDK_HOME
@@ -237,6 +229,10 @@ src/utils/android-cmdline-tools/AvdManagerClient.ts	COMSPEC
 src/utils/android-cmdline-tools/AvdManagerClient.ts	ComSpec
 src/utils/android-cmdline-tools/AvdManagerClient.ts	HOME
 src/utils/android-cmdline-tools/AvdManagerClient.ts	USERPROFILE
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	AUTOMOBILE_EMULATOR_HEADLESS
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	DISPLAY
+src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	WAYLAND_DISPLAY
+src/utils/android-cmdline-tools/EmulatorLauncher.ts	AUTOMOBILE_EMULATOR_ARGS
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	LOGNAME
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	USER
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	XDG_RUNTIME_DIR

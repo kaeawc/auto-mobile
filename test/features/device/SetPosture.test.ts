@@ -23,7 +23,7 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import { FakeAndroidHingeAngleConsole } from "../../fakes/FakeAndroidHingeAngleConsole";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import type { AppleDevice } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -801,7 +801,7 @@ describe("SetPosture", () => {
     observations: ObserveResult[] = [observation],
   ) {
     const client = new FakeIOSCtrlProxy();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setDeviceInfo(device.deviceId, simulatorInfo);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -849,7 +849,7 @@ describe("SetPosture", () => {
 
   describe("session simulator foldability lookup", () => {
     test("Android validation never looks up simulator metadata", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const feature = new SetPosture(makeDevice("physical-android", ["opened"]), { simctl });
       await expect(feature.execute("closed")).rejects.toThrow("not supported by this device");
       expect(await feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" });
@@ -1316,14 +1316,8 @@ describe("SetPosture", () => {
           "shell cmd device_state print-states",
           "shell cmd device_state state",
         ]);
-        expect(send.mock.calls[0]).toEqual([command, undefined, undefined, true, undefined]);
-        expect(send.mock.calls[1]).toEqual([
-          "emu sensor get hinge-angle0",
-          undefined,
-          undefined,
-          true,
-          undefined,
-        ]);
+        expect(send.mock.calls[0]).toEqual([command, { noRetry: true }]);
+        expect(send.mock.calls[1]).toEqual(["emu sensor get hinge-angle0", { noRetry: true }]);
         if (angle === 180) {
           expect("warnings" in result).toBe(false);
         } else {

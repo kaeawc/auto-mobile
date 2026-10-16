@@ -1,4 +1,3 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -8,7 +7,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
   DeferredDiscoveryFakeDeviceManager,
@@ -27,9 +26,11 @@ describe("DevicePool", () => {
   let fakeTimer: FakeTimer;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeDeviceManager: FakeDeviceManager;
-  const { initializeLiveDevices } = devicePoolSuiteActions(() => ({
+  const { initializeLiveDevices, makePool } = devicePoolSuiteActions(() => ({
     devicePool,
     sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
     fakeDeviceManager,
   }));
 
@@ -66,15 +67,7 @@ describe("DevicePool", () => {
 
     test("a stale disconnect does not remove an intentionally-stopped device that is still booted", async () => {
       await withRebootOnDeath(async () => {
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: fakeDeviceManager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            recoveryPolicy: { onLoss: true, maxAttempts: 2 },
-          }),
-        );
+        devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
         await devicePool.addDevice(
           createBootedDevice("emulator-5554", "android", "Pixel 8"),
           androidImage,
@@ -103,15 +96,10 @@ describe("DevicePool", () => {
       await withRebootOnDeath(async () => {
         const deferred = new DeferredDiscoveryFakeDeviceManager();
         fakeDeviceManager = deferred;
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: deferred,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-            recoveryPolicy: { onLoss: true, maxAttempts: 2 },
-          }),
-        );
+        devicePool = makePool({
+          deviceManager: deferred,
+          recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+        });
         await devicePool.addDevice(
           createBootedDevice("emulator-5554", "android", "Pixel 8"),
           androidImage,
@@ -180,25 +168,19 @@ describe("DevicePool", () => {
       );
       const transportAwareDeviceManager = new TransportAwareFakeDeviceManager();
       fakeDeviceManager = transportAwareDeviceManager;
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => {
-            const pooled = devicePool.getDevice(deviceId);
-            if (pooled) {
-              registry.onDeviceConnected({
-                deviceId: pooled.id,
-                platform: pooled.platform,
-                incarnation: pooled.incarnation,
-              });
-            }
-          },
-          onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
-        }),
-      );
+      devicePool = makePool({
+        onDeviceReady: (deviceId) => {
+          const pooled = devicePool.getDevice(deviceId);
+          if (pooled) {
+            registry.onDeviceConnected({
+              deviceId: pooled.id,
+              platform: pooled.platform,
+              incarnation: pooled.incarnation,
+            });
+          }
+        },
+        onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+      });
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const reconnected = { ...firstConnection };
       await initializeLiveDevices([firstConnection]);
@@ -236,25 +218,19 @@ describe("DevicePool", () => {
         new FakeIdGenerator(["uuid-a", "uuid-b"]),
       );
       fakeDeviceManager = new TransportAwareFakeDeviceManager();
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          onDeviceReady: (deviceId) => {
-            const pooled = devicePool.getDevice(deviceId);
-            if (pooled) {
-              registry.onDeviceConnected({
-                deviceId: pooled.id,
-                platform: pooled.platform,
-                incarnation: pooled.incarnation,
-              });
-            }
-          },
-          onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
-        }),
-      );
+      devicePool = makePool({
+        onDeviceReady: (deviceId) => {
+          const pooled = devicePool.getDevice(deviceId);
+          if (pooled) {
+            registry.onDeviceConnected({
+              deviceId: pooled.id,
+              platform: pooled.platform,
+              incarnation: pooled.incarnation,
+            });
+          }
+        },
+        onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+      });
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const reconnected = { ...firstConnection, name: "Pixel 9" };
       await initializeLiveDevices([firstConnection]);
@@ -282,14 +258,7 @@ describe("DevicePool", () => {
         [reconnected],
       );
       fakeDeviceManager = outOfOrderManager;
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool();
       await initializeLiveDevices([firstConnection]);
 
       const olderRefresh = devicePool.refreshDevices();

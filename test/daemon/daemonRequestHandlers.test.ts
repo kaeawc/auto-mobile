@@ -262,11 +262,31 @@ describe("handleDaemonRequest", () => {
           "input/typeText.mode:append",
           "input/gestureStream",
           "daemon/registerSession",
-          // Advertised once the proxy acquires managed slots (#11173).
-          "managed-slots/v1",
-          "managed-slots/v1.deviceFamily",
         ],
       },
+    });
+  });
+
+  test("session broker mode advertises its contract and rejects legacy allocation before dispatch", async () => {
+    const state = Object.assign(
+      new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({
+          total: 0,
+          idle: 0,
+          assigned: 0,
+          error: 0,
+        }),
+      ),
+      { isSessionBrokerMode: () => true },
+    );
+    const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
+    expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1"); // Legacy capability is absent after upgrade.
+    // A provider that has not completed broker startup cannot grant a session.
+    expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
+      success: false,
+      code: "session_broker_unavailable",
     });
   });
 

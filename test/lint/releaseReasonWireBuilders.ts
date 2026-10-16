@@ -16,9 +16,8 @@ export interface ReleaseReasonSerialisation {
 
 export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/server/proxyServer.ts#noActiveDeviceSessionPayload",
-  "src/server/proxyServer.ts#managedSlotsResourceView",
+  "src/server/proxyServer.ts#brokerSessionEndedPayload",
   "src/server/planExecutionOrchestrator.ts#planBaseEndFields",
-  "src/server/deviceSessionResult.ts#managedExecutionEndedPayload",
   "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
   "src/server/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",
@@ -30,10 +29,6 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
 ];
 export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, string]> = [
-  [
-    "src/server/proxyServer.ts#managedEndedPayload",
-    "Passes sessionUuid and reason into managedExecutionEndedPayload, which builds the wire envelope.",
-  ],
   [
     "src/server/proxyServer.ts#boundSessionOwnershipLostPayload",
     "Passes the bound-session error reason into sessionOwnershipLostPayload, which builds the wire envelope.",
@@ -81,6 +76,10 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
   [
     "src/daemon/cli/runDaemonCommand.ts#daemonQueryFailureJson",
     "Relays typed error fields built by the daemon client with releasedSessionNotFoundFields, including idle.",
+  ],
+  [
+    "src/daemon/cli/sessionBrokerCommands.ts#redactError",
+    "Redacts the owner token from a typed upstream error while preserving its existing releaseReason and idle fields for the CLI serializer.",
   ],
   [
     "src/daemon/sessionManager.ts",

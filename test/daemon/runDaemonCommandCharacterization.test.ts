@@ -47,6 +47,7 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  start                 Start the daemon"],
           ["stdout", "  stop                  Stop the daemon"],
           ["stdout", "  status                Check daemon status"],
+          ["stdout", "  capabilities --json   Query the existing daemon's capability contract"],
           ["stdout", "  restart               Restart the daemon"],
           ["stdout", "  health                Check daemon health"],
           ["stdout", "  diagnose              Run full diagnostics"],
@@ -54,9 +55,18 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  active-sessions       List held sessions and why each holds its device"],
           ["stdout", "  session-info <id>     Get information about a session"],
           ["stdout", "  release-session <id>  Release a session and free its device"],
+          ["stdout", "  session-request-status <request-id> --liveness-owner-token <token> --json"],
           [
             "stdout",
-            "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+            "  abandon-session-request <request-id> --liveness-owner-token <token> --json",
+          ],
+          [
+            "stdout",
+            "  release-broker-session <session-uuid> --liveness-owner-token <token> --json",
+          ],
+          [
+            "stdout",
+            "  (capabilities requires --json; status, available-devices, active-sessions, session-info and release-session accept --json)",
           ],
           [
             "stdout",
@@ -65,10 +75,6 @@ describe("daemon command characterization with fake I/O", () => {
           [
             "stdout",
             "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
-          ],
-          [
-            "stdout",
-            "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
           ],
           ["stdout", "\nOptions:"],
           [

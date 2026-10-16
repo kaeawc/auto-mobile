@@ -4,7 +4,7 @@ import {
   restoreIosSettings,
   IOS_SETTINGS_KEYS,
 } from "../../../src/utils/ios-cmdline-tools/iosSettings";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
 
@@ -14,7 +14,7 @@ describe("iosSettings", () => {
   });
 
   test("captureIosSettings reads allowlisted keys + UI state", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(
       ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "nl_BE\n",
@@ -29,7 +29,7 @@ describe("iosSettings", () => {
   });
 
   test("captureIosSettings skips unset keys (defaults read non-zero) without throwing", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsError(
       ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       new Error("does not exist"),
@@ -42,7 +42,7 @@ describe("iosSettings", () => {
   });
 
   test("restoreIosSettings replays per-key defaults write + ui commands", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     await restoreIosSettings(simctl as any, UDID, {
       values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
       ui: { appearance: "dark", contentSize: "large" },
@@ -57,14 +57,14 @@ describe("iosSettings", () => {
   });
 
   test("capture -> restore round-trips the locale value", async () => {
-    const capSim = new FakeSimCtlClient();
+    const capSim = new FakeSimctl();
     capSim.setCommandArgsResult(
       ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "en_US",
     );
     const snapshot = await captureIosSettings(capSim as any, UDID);
 
-    const restoreSim = new FakeSimCtlClient();
+    const restoreSim = new FakeSimctl();
     await restoreIosSettings(restoreSim as any, UDID, snapshot);
 
     const argvCommands = restoreSim.getMethodCalls("executeCommandArgs").map((c) => c.args);
@@ -80,7 +80,7 @@ describe("iosSettings", () => {
   });
 
   test("restoreIosSettings is non-fatal when a single key write fails", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsError(
       ["spawn", UDID, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"],
       new Error("boom"),

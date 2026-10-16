@@ -13,7 +13,6 @@ import {
   resetForeignCtrlProxyForwardEvidenceForTesting,
 } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import type { ExecResult } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -69,7 +68,7 @@ function harness(
     } as unknown as AndroidCtrlProxy);
   const appearance = mock(async () => {});
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, devices, new FakeSimctl() as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, devices, new FakeSimctl(), {
       window,
       ctrlProxyManager: actualCtrlProxyManager,
       ctrlProxyClient,

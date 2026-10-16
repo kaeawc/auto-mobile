@@ -102,10 +102,16 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Test preload isolation marker, not a state destination.",
   },
   {
-    name: "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    name: "AUTOMOBILE_SESSION_CONFIG",
     kind: "input",
-    reason:
-      "Read-only managed-slot config source (inline JSON or file path); explicitly unset by clients.",
+    owner: "harness",
+    reason: "Harness-owned session request source; stripped from inherited client env.",
+  },
+  {
+    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    kind: "input",
+    owner: "harness",
+    reason: "Harness-owned operator configuration file; stripped from inherited client env.",
   },
   {
     name: "AUTOMOBILE_FFMPEG",
@@ -213,7 +219,6 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_LOG_LEVEL",
   "AUTOMOBILE_LOG_SINK",
   "AUTOMOBILE_MANAGED_ADB_SERVER",
-  "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
   "AUTOMOBILE_MAX_OBSERVATION_AGE_MS",
   "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
   "AUTOMOBILE_MIGRATION_RECOVERY",

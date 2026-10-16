@@ -93,9 +93,9 @@ const scenarios: Scenario[] = [
     name: "generic identity vs unrepresented managed hold",
     pooledRows: [booted(WIRELESS)],
     serial: generic,
-    managedSlotStableId: "Absent-Phone",
+    bindingStableId: "Absent-Phone",
     target: WIRELESS,
-    expected: "device_assigned_to_managed_slot",
+    expected: "device_assigned_to_binding",
   },
   {
     name: "wireless-shaped iOS id vs Android holder",

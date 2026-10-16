@@ -1,10 +1,8 @@
+import type { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
-import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
-import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
-import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
-import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
-import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
+import { BrokerConnectionScopes } from "./sessionBroker/connectionScope";
+import type { SessionBrokerService } from "./sessionBroker/service";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -34,11 +32,16 @@ export class DaemonState implements DaemonStateLike {
   private devicePool: DevicePool | null = null;
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
   private unregisterSessionReadinessListener: (() => void) | null = null;
-  private managedExecutionRelease: ManagedExecutionRelease | null = null;
-  private slotScopeReset: SlotScopeReset | null = null;
-  private readonly managedConnectionScopes = new ManagedConnectionScopes();
-  private managedSlotAcquisition: ManagedSlotAcquisition | null = null;
-  private managedExecutionReowner: ManagedExecutionReowner | null = null;
+  private readonly brokerConnectionScopes = new BrokerConnectionScopes();
+  private sessionBrokerService: SessionBrokerService | undefined;
+  private sessionBrokerMode = false;
+  private brokerExecutionReowner: ManagedExecutionReowner | null = null;
+  setBrokerExecutionReowner(reowner: ManagedExecutionReowner | null): void {
+    this.brokerExecutionReowner = reowner;
+  }
+  getBrokerExecutionReowner(): ManagedExecutionReowner | undefined {
+    return this.brokerExecutionReowner ?? undefined;
+  }
 
   private constructor() {}
 
@@ -105,45 +108,25 @@ export class DaemonState implements DaemonStateLike {
     });
   }
 
-  /** Publish the managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
-  setManagedExecutionRelease(release: ManagedExecutionRelease | null): void {
-    this.managedExecutionRelease = release;
+  /** Socket sessions bound to broker bindings, confined to their binding devices (#11178). */
+  getBrokerConnectionScopes(): BrokerConnectionScopes {
+    return this.brokerConnectionScopes;
   }
 
-  getManagedExecutionRelease(): ManagedExecutionRelease | undefined {
-    return this.managedExecutionRelease ?? undefined;
+  setSessionBrokerMode(enabled: boolean): void {
+    this.sessionBrokerMode = enabled;
   }
 
-  /** Publish the managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
-  setSlotScopeReset(reset: SlotScopeReset | null): void {
-    this.slotScopeReset = reset;
+  isSessionBrokerMode(): boolean {
+    return this.sessionBrokerMode;
   }
 
-  getSlotScopeReset(): SlotScopeReset | undefined {
-    return this.slotScopeReset ?? undefined;
+  setSessionBrokerService(service: SessionBrokerService | undefined): void {
+    this.sessionBrokerService = service;
   }
 
-  /** Socket sessions bound to managed slots, confined to their slot devices (#11178). */
-  getManagedConnectionScopes(): ManagedConnectionScopes {
-    return this.managedConnectionScopes;
-  }
-
-  /** Publish the managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
-  setManagedSlotAcquisition(acquisition: ManagedSlotAcquisition | null): void {
-    this.managedSlotAcquisition = acquisition;
-  }
-
-  getManagedSlotAcquisition(): ManagedSlotAcquisition | undefined {
-    return this.managedSlotAcquisition ?? undefined;
-  }
-
-  /** Publish the re-owner a re-bound managed connection re-stamps its slots through (#11275). */
-  setManagedExecutionReowner(reowner: ManagedExecutionReowner | null): void {
-    this.managedExecutionReowner = reowner;
-  }
-
-  getManagedExecutionReowner(): ManagedExecutionReowner | undefined {
-    return this.managedExecutionReowner ?? undefined;
+  getSessionBrokerService(): SessionBrokerService | undefined {
+    return this.sessionBrokerService;
   }
 
   getObserverSessionRegistry(): ObserverSessionStore | undefined {
@@ -197,11 +180,10 @@ export class DaemonState implements DaemonStateLike {
   reset(): void {
     this.observerSessionRegistry?.dispose();
     this.observerSessionRegistry = null;
-    this.managedExecutionRelease = null;
-    this.slotScopeReset = null;
-    this.managedConnectionScopes.clear();
-    this.managedSlotAcquisition = null;
-    this.managedExecutionReowner = null;
+    this.brokerExecutionReowner = null;
+    this.brokerConnectionScopes.clear();
+    this.sessionBrokerService = undefined;
+    this.sessionBrokerMode = false;
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

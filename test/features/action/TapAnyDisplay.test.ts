@@ -368,7 +368,7 @@ test("tapAny TalkBack on, display 0: a cancellation after a completed double tap
     return result;
   };
   await expect(
-    h.action.execute({ action: "doubleTap", display: "inner" }, undefined, controller.signal),
+    h.action.execute({ action: "doubleTap", display: "inner" }, { signal: controller.signal }),
   ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   // One atomic request delivered both touches; no partial-application error result.
   expect(h.talkBackDriver.doubleTapHistory).toHaveLength(1);

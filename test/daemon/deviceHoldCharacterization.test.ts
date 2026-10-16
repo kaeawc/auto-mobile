@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -14,10 +14,8 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { assignManagedSlotDevice } from "./managedSlots/managedSlotFixtures";
 
 interface Answers {
   availability: ReturnType<DevicePool["genericAvailability"]>;
@@ -41,7 +39,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
   let sessions: SessionManager;
   let pool: DevicePool;
   let markers: InMemoryDeviceHealthMarkers;
-  let registry: FakeSlotRegistry;
+  let brokerHeld: boolean;
   let lifecycle: InMemoryVirtualDeviceLifecycleCoordinator;
   let booted: BootedDevice;
   let canRecover: (deviceId: string) => boolean;
@@ -59,7 +57,23 @@ describe("device hold current-behavior characterization (#11803)", () => {
       () => new FakeDbWriteBarrier(),
     );
     markers = new InMemoryDeviceHealthMarkers(timer);
-    registry = new FakeSlotRegistry(timer);
+    brokerHeld = false;
+    const bindings: BindingExclusion = {
+      refresh: async () => {},
+      holderOf: ({ stableIds }) =>
+        brokerHeld && stableIds.includes(booted.deviceId)
+          ? {
+              platform: booted.platform,
+              stableDeviceId: booted.deviceId,
+              holder: "session_broker",
+              scopeKey: "scope",
+              bindingIndex: 0,
+              scopeState: null,
+              execSessionUuid: "binding-exec",
+            }
+          : undefined,
+      stableIdsFor: () => new Set(brokerHeld ? [booted.deviceId] : []),
+    };
     lifecycle = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     const manager = new FakeDeviceUtils();
     manager.setBootedDevices(booted.platform, [booted]);
@@ -78,7 +92,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
           deviceManager: manager,
           installedAppsRepository: new FakeInstalledAppsRepository(),
           deviceHealthMarkers: markers,
-          managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+          bindingExclusion: bindings,
           foreignDeviceOwnership: ownership,
           lifecycleCoordinator: lifecycle,
           retryExecutor: new DefaultRetryExecutor(timer),
@@ -277,15 +291,14 @@ describe("device hold current-behavior characterization (#11803)", () => {
         idleAllocation: false,
       },
     },
-    // CURRENT-BEHAVIOR PIN: sites disagree; observation and health recovery ignore managed-slot holds.
+    // CURRENT-BEHAVIOR PIN: sites disagree; observation and health recovery ignore broker-binding holds.
     {
-      name: "managed-slot holder",
+      name: "broker-binding holder",
       setup: async () => {
-        await assignManagedSlotDevice(registry, booted.platform, booted.name);
-        await pool.managedSlotStableIds(booted.platform);
+        brokerHeld = true;
       },
       expected: {
-        availability: "managed_slot",
+        availability: "session_broker",
         bucket: "assigned",
         observation: true,
         healthRecovery: true,

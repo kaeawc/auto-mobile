@@ -24,9 +24,6 @@ src/models/TapOnElementResult.ts	src/features/talkback/TalkBackTapStrategy
 src/models/TapOnElementResult.ts	src/utils/DebugContextBuilder
 src/models/UninstallAppResult.ts	src/utils/PerformanceTracker
 src/models/ViewHierarchyResult.ts	src/features/prototype/prototypeHidden
-src/models/managedSlotConfig.ts	src/daemon/sessionLivenessWindows
-src/models/managedSlotConfig.ts	src/server/provisionDeviceSpecSchemas
-src/models/managedSlotConfig.ts	src/utils/describeUnknownError
-src/models/managedSlotConfig.ts	src/utils/deviceTimeouts
-src/models/managedSlotConfig.ts	src/utils/fileLock
-src/models/managedSlotConfig.ts	src/utils/logger
+src/models/executionOwnerIdentity.ts	src/utils/describeUnknownError
+src/models/executionOwnerIdentity.ts	src/utils/fileLock
+src/models/executionOwnerIdentity.ts	src/utils/logger

@@ -28,20 +28,9 @@
  *   1 - One or more regressions detected or error occurred
  */
 
+import { registerAllTools } from "../src/server/registerAllTools";
 import { ToolRegistry } from "../src/server/toolRegistry";
 import { BootedDevice } from "../src/models";
-
-// Import all tool registration functions
-import { registerObserveTools } from "../src/server/observeTools";
-import { registerInteractionTools } from "../src/server/interactionTools";
-import { registerAppTools } from "../src/server/appTools";
-import { registerAppFileTools } from "../src/server/appFileTools";
-import { registerUtilityTools } from "../src/server/utilityTools";
-import { registerDeviceTools } from "../src/server/deviceTools";
-import { registerDeepLinkTools } from "../src/server/deepLinkTools";
-import { registerNavigationTools } from "../src/server/navigationTools";
-import { registerPlanTools } from "../src/server/planTools";
-import { registerDoctorTools } from "../src/server/doctorTools";
 
 import {
   installDeviceToolFixture,
@@ -270,22 +259,6 @@ async function benchmarkTool(
 }
 
 /**
- * Register all tools in the registry
- */
-function registerAllTools(): void {
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerAppFileTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerPlanTools();
-  registerDoctorTools();
-}
-
-/**
  * Get all tools to benchmark (excludes snapshot operations)
  */
 function getToolsToBenchmark(): string[] {
@@ -343,7 +316,7 @@ async function runBenchmarks(
   console.log("Initializing MCP server components...");
 
   // Register all tools
-  registerAllTools();
+  registerAllTools({ daemonMode: true, includeDoctor: true });
 
   const mockDevice = createMockDevice();
   const toolsToBenchmark = getToolsToBenchmark().filter(

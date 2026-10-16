@@ -1,3 +1,9 @@
+import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
+  getCliSessionIdleTimeoutMs,
+} from "../constants";
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
 import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
@@ -5,12 +11,6 @@ import { handleDaemonRequest, refuseCliKeeperOnProxySession } from "../daemonReq
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
-import {
-  CLI_KEEPER_LIVENESS_OWNER_KIND,
-  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
-  CLI_SESSION_LIVENESS_POLICY,
-  getCliSessionIdleTimeoutMs,
-} from "../constants";
 import {
   getDaemonHealthReport,
   formatHealthReport,
@@ -42,22 +42,29 @@ import {
 } from "./daemonArgs";
 import {
   findValueOperand,
-  findValueOperands,
   parseBooleanFlagValue,
   readBooleanFlag,
   readValueOperand,
   splitFlagToken,
 } from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
-import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../constants";
-import {
-  SLOT_SCOPE_RESET_DEFAULT_WAIT_MS,
-  SLOT_SCOPE_RESET_MAX_WAIT_MS,
-} from "../managedSlots/slotScopeReset";
 import {
   ALLOW_SHARED_NAMESPACE_FLAG,
   assertDaemonNamespaceMatchesState,
 } from "../sharedNamespaceGuard";
+import {
+  abandonBrokerSessionRequest,
+  queryBrokerSessionRequestStatus,
+  releaseBrokerSession,
+  sessionBrokerCommandArgsAreValid,
+  sessionBrokerCommandUsage,
+  type SessionBrokerCliCommand,
+} from "./sessionBrokerCommands";
+import {
+  DAEMON_CAPABILITIES_COMMAND_USAGE,
+  daemonCapabilitiesCommandArgsAreValid,
+  queryExistingDaemonCapabilities,
+} from "./daemonCapabilitiesCommand";
 
 /** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
 export const DAEMON_JSON_FLAG = "--json";
@@ -148,151 +155,6 @@ export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeat
   }
 
   return { sessionId, livenessOwnerToken, claimLivenessOwnership };
-}
-
-export interface ResetSlotScopeCommandArgs {
-  runnerNamespace: string;
-  runnerIncarnation: string;
-  managedHostScope?: string;
-  waitMs?: number;
-  force?: boolean;
-}
-
-/**
- * Parse `--daemon reset-slot-scope --runner-namespace <ns> --incarnation <id>
- * [--managed-host-scope <scope>] [--wait-ms <ms>] [--force]` (#11174, #11336).
- */
-export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
-  const read = (flag: string, required: boolean): string | undefined => {
-    const operands = findValueOperands(args, [flag]);
-    if (operands.length === 0) {
-      if (required) {
-        throw new ActionableError(`reset-slot-scope requires ${flag} <value>`);
-      }
-      return undefined;
-    }
-    const values = operands.map((operand) => operand.value?.trim());
-    if (values.some((value) => !value)) {
-      throw new ActionableError(`${flag} requires a non-empty value`);
-    }
-    if (new Set(values).size > 1) {
-      // Two different values for one option: neither can be silently dropped.
-      throw new ActionableError(`${flag} was given more than once with different values`);
-    }
-    return values[0];
-  };
-  const runnerNamespace = read("--runner-namespace", true)!;
-  const runnerIncarnation = read("--incarnation", true)!;
-  const managedHostScope = read("--managed-host-scope", false);
-  const waitText = read("--wait-ms", false);
-  let waitMs: number | undefined;
-  if (waitText !== undefined) {
-    waitMs = Number(waitText);
-    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > SLOT_SCOPE_RESET_MAX_WAIT_MS) {
-      throw new ActionableError(
-        `--wait-ms must be an integer between 0 and ${SLOT_SCOPE_RESET_MAX_WAIT_MS}`,
-      );
-    }
-  }
-  const force = readBooleanFlag(args, ["--force"]) === true;
-  return {
-    runnerNamespace,
-    runnerIncarnation,
-    ...(managedHostScope === undefined ? {} : { managedHostScope }),
-    ...(waitMs === undefined ? {} : { waitMs }),
-    ...(force ? { force: true } : {}),
-  };
-}
-
-/** Socket budget for the reset RPC: its settle wait plus room for the registry work. */
-const RESET_SLOT_SCOPE_CALL_MARGIN_MS = 5_000;
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-/**
- * The stderr lines saying why `--force` left each slot alone (#11545): one per `forceRefusals`
- * entry of the reset result, with its typed reason, the time remaining when the daemon gave one,
- * and its message. The result crossed the daemon socket, so it is read defensively: anything that
- * is not a well-formed refusal is skipped (the full result is still on stdout).
- */
-export function resetSlotScopeForceRefusalLines(result: unknown): string[] {
-  const scopes = isObject(result) && Array.isArray(result.scopes) ? result.scopes : [];
-  const lines = scopes.flatMap((scope: unknown): string[] => {
-    if (!isObject(scope) || !Array.isArray(scope.forceRefusals)) {
-      return [];
-    }
-    const scopeKey = typeof scope.scopeKey === "string" ? scope.scopeKey : "(unknown scope)";
-    return scope.forceRefusals.flatMap((refusal: unknown): string[] => {
-      if (
-        !isObject(refusal) ||
-        typeof refusal.slotIndex !== "number" ||
-        typeof refusal.reason !== "string" ||
-        typeof refusal.message !== "string"
-      ) {
-        return [];
-      }
-      const remaining =
-        typeof refusal.remainingMs === "number" ? `, remainingMs=${refusal.remainingMs}` : "";
-      return [
-        `  ${scopeKey} slot ${refusal.slotIndex} [${refusal.reason}${remaining}]: ${refusal.message}`,
-      ];
-    });
-  });
-  return lines.length === 0 ? [] : [`--force left ${lines.length} slot(s) alone:`, ...lines];
-}
-
-/**
- * `--daemon reset-slot-scope`: invalidate one runner incarnation's managed slot scope (#11174).
- * Prints the daemon's JSON result; exits 2 when the scope is still waiting on owners or cleanup
- * (retry later), naming on stderr every slot `--force` left alone and why, and 1 when no scope
- * matched or the call failed.
- */
-async function resetSlotScope(args: string[], manager: DaemonManager): Promise<void> {
-  let outcome: unknown;
-  let refusalLines: string[] = [];
-  try {
-    const request = parseResetSlotScopeCommandArgs(args);
-    const client = manager.createClient();
-    let result: unknown;
-    try {
-      await client.connect();
-      result = await client.callDaemonMethod(DAEMON_RESET_SLOT_SCOPE_METHOD, request, {
-        timeoutMs:
-          (request.waitMs ?? SLOT_SCOPE_RESET_DEFAULT_WAIT_MS) + RESET_SLOT_SCOPE_CALL_MARGIN_MS,
-      });
-      await client.close();
-    } catch (error) {
-      throw new ActionableError(`Failed to reset slot scope: ${errorMessage(error)}`);
-    }
-    console.log(JSON.stringify(result));
-    outcome =
-      result !== null && typeof result === "object" && "outcome" in result
-        ? result.outcome
-        : undefined;
-    refusalLines = resetSlotScopeForceRefusalLines(result);
-  } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
-  }
-  if (outcome === "pending") {
-    console.error(
-      "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
-    );
-    for (const line of refusalLines) {
-      console.error(line);
-    }
-    process.exit(2);
-  }
-  if (outcome === "not_found") {
-    console.error("No managed slot scope matches that runner namespace and incarnation.");
-    process.exit(1);
-  }
 }
 
 export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
@@ -904,6 +766,18 @@ async function queryActiveSessions(args: string[], manager: DaemonManager): Prom
   }
 }
 
+async function queryDaemonCapabilities(args: string[], manager: DaemonManager): Promise<void> {
+  try {
+    const result = await queryExistingDaemonCapabilities(args, () => manager.createClient());
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    exitWithDaemonQueryFailure(
+      new DaemonCommandRefusal("Failed to query daemon capabilities", error),
+      true,
+    );
+  }
+}
+
 async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): Promise<void> {
   const { json, rest: args } = takeJsonFlag(rawArgs);
   const printReleased = (alreadyReleased: boolean, message: string, device?: string) => {
@@ -984,6 +858,31 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
     return;
   } catch (error) {
     exitWithDaemonQueryFailure(error, json);
+  }
+}
+
+async function runSessionBrokerCommand(
+  command: SessionBrokerCliCommand,
+  args: string[],
+  manager: DaemonManager,
+): Promise<void> {
+  try {
+    const createClient = () => manager.createClient();
+    const result =
+      command === "session-request-status"
+        ? await queryBrokerSessionRequestStatus(args, createClient)
+        : command === "abandon-session-request"
+          ? await abandonBrokerSessionRequest(args, createClient)
+          : await releaseBrokerSession(args, createClient);
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    const context =
+      command === "session-request-status"
+        ? "Failed to query broker session request status"
+        : command === "abandon-session-request"
+          ? "Failed to abandon broker session request"
+          : "Failed to release broker session";
+    exitWithDaemonQueryFailure(new DaemonCommandRefusal(context, error), true);
   }
 }
 
@@ -1137,14 +1036,6 @@ const ACCEPTANCE_SESSION_RESTART_FLAGS = [
   "--expires-at",
 ];
 
-/** The options of `reset-slot-scope` (#11174). */
-const RESET_SLOT_SCOPE_FLAGS = [
-  "--runner-namespace",
-  "--incarnation",
-  "--managed-host-scope",
-  "--wait-ms",
-];
-
 /**
  * Daemon commands with the options and positional words each accepts (none by default). The
  * commands are strict (#11252, #11612): a stray word or a misspelled option is refused rather
@@ -1160,20 +1051,40 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
     valueFlags: ACCEPTANCE_SESSION_RESTART_FLAGS,
   },
   status: { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  capabilities: { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG] },
   health: { launchFlags: true },
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
-  "reset-slot-scope": {
-    launchFlags: true,
-    valueFlags: RESET_SLOT_SCOPE_FLAGS,
-    booleanFlags: ["--force"],
-  },
   // One session id each, optionally with --json: `release-session a b` would free only `a`
   // and `session-info a --jsno` would drop the typo'd flag (#11612).
   "session-info": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
   "release-session": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
+  "session-request-status": {
+    launchFlags: false,
+    valueFlags: ["--liveness-owner-token"],
+    booleanFlags: [DAEMON_JSON_FLAG],
+    positionals: 1,
+  },
+  "abandon-session-request": {
+    launchFlags: false,
+    valueFlags: ["--liveness-owner-token"],
+    booleanFlags: [DAEMON_JSON_FLAG],
+    positionals: 1,
+  },
+  "release-broker-session": {
+    launchFlags: false,
+    valueFlags: ["--liveness-owner-token"],
+    booleanFlags: [DAEMON_JSON_FLAG],
+    positionals: 1,
+  },
 };
+
+function isSessionBrokerCommand(command: string): command is SessionBrokerCliCommand {
+  return ["session-request-status", "abandon-session-request", "release-broker-session"].includes(
+    command,
+  );
+}
 
 /**
  * The usage error for a no-argument daemon command given a stray positional word or an unknown
@@ -1189,7 +1100,16 @@ export function daemonCommandArgumentError(command: string, args: string[]): str
   }
   const invalid = invalidDaemonCommandArgument(args, spec);
   if (!invalid) {
+    if (command === "capabilities" && !daemonCapabilitiesCommandArgsAreValid(args)) {
+      return DAEMON_CAPABILITIES_COMMAND_USAGE;
+    }
+    if (isSessionBrokerCommand(command) && !sessionBrokerCommandArgsAreValid(command, args)) {
+      return sessionBrokerCommandUsage(command);
+    }
     return undefined;
+  }
+  if (isSessionBrokerCommand(command)) {
+    return sessionBrokerCommandUsage(command);
   }
   if (invalid.kind === "positional") {
     return `Unexpected argument for daemon ${command}: ${invalid.argument}`;
@@ -1206,6 +1126,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  start                 Start the daemon");
     console.log("  stop                  Stop the daemon");
     console.log("  status                Check daemon status");
+    console.log("  capabilities --json   Query the existing daemon's capability contract");
     console.log("  restart               Restart the daemon");
     console.log("  health                Check daemon health");
     console.log("  diagnose              Run full diagnostics");
@@ -1213,17 +1134,17 @@ function printDaemonUsageError(message: string): void {
     console.log("  active-sessions       List held sessions and why each holds its device");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
+    console.log("  session-request-status <request-id> --liveness-owner-token <token> --json");
+    console.log("  abandon-session-request <request-id> --liveness-owner-token <token> --json");
+    console.log("  release-broker-session <session-uuid> --liveness-owner-token <token> --json");
     console.log(
-      "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+      "  (capabilities requires --json; status, available-devices, active-sessions, session-info and release-session accept --json)",
     );
     console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
     );
     console.log(
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
-    );
-    console.log(
-      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
     );
     console.log("\nOptions:");
     console.log(
@@ -1251,8 +1172,9 @@ const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
   "restart-admitted",
   "restart-acceptance-session",
   "release-session",
+  "abandon-session-request",
+  "release-broker-session",
   "release-liveness-ownership",
-  "reset-slot-scope",
 ]);
 
 function refuseSharedNamespaceAction(
@@ -1293,15 +1215,21 @@ export async function runDaemonCommand(
     "restart-admitted": () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-acceptance-session": () => runDaemonLifecycleCommand(command, args, options, manager),
     status: () => runDaemonDiagnosticsCommand(command, args, manager),
+    capabilities: () => queryDaemonCapabilities(args, manager),
     health: () => runDaemonDiagnosticsCommand(command, args, manager),
     diagnose: () => runDaemonDiagnosticsCommand(command, args, manager),
     "available-devices": () => queryAvailableDevices(args, manager),
     "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
+    "session-request-status": () =>
+      runSessionBrokerCommand("session-request-status", args, manager),
+    "abandon-session-request": () =>
+      runSessionBrokerCommand("abandon-session-request", args, manager),
+    "release-broker-session": () =>
+      runSessionBrokerCommand("release-broker-session", args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),
     "release-liveness-ownership": () => releaseDaemonLivenessOwnership(args, manager),
-    "reset-slot-scope": () => resetSlotScope(args, manager),
   };
   const handler = Object.hasOwn(handlers, command) ? handlers[command] : undefined;
   if (!handler) {

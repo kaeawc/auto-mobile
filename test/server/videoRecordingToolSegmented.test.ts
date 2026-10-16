@@ -25,12 +25,9 @@ import {
   type ActiveVideoRecording,
 } from "../../src/features/video";
 import {
-  registerVideoRecordingTools,
-  setRecordingRequesterResolverForTesting,
   resetSegmentedSessions,
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
-  setVideoRecordingDeviceDetectorForTesting,
   stopSegmentedVideoRecordingsForOwner,
   finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
   segmentedVideoRecordingHandlesForOwner,
@@ -50,6 +47,9 @@ import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { parseArgs } from "../../src/cli/parseArgs";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 
@@ -132,7 +132,7 @@ describe("videoRecording tool segmentation branch", () => {
 
   beforeAll(async () => {
     if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
+      videoRecording.register();
     }
     archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-tool-"));
   });
@@ -149,7 +149,7 @@ describe("videoRecording tool segmentation branch", () => {
     // that resolves the connected device synchronously with no subprocess.
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([androidDevice]);
-    setVideoRecordingDeviceDetectorForTesting(fakeDeviceSessionManager);
+    videoRecording.configure({ deviceDetector: fakeDeviceSessionManager });
     segmentStarts = [];
     segmentStops = [];
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
@@ -179,13 +179,13 @@ describe("videoRecording tool segmentation branch", () => {
   let writeFileSpy: ReturnType<typeof spyOn<typeof fsPromises, "writeFile">> | undefined;
 
   afterEach(() => {
-    setRecordingRequesterResolverForTesting(undefined);
+    videoRecording.clear();
     writeFileSpy?.mockRestore();
     writeFileSpy = undefined;
     displayTransitions.reset("tool-foldable");
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
-    setVideoRecordingDeviceDetectorForTesting(undefined);
+    videoRecording.clear();
   });
 
   afterAll(async () => {
@@ -587,10 +587,12 @@ describe("videoRecording tool segmentation branch", () => {
       (response.recordings as Array<{ recordingId: string }>).map((r) => r.recordingId);
 
     test("the base session and a sibling label session read a derived session's finalized single recording; nobody else", async () => {
-      setRecordingRequesterResolverForTesting({
-        baseSessionUuid: (uuid) => uuid.split(":")[0],
-        connectionOwnsDeviceSession: () => false,
-        isDeviceHeld: () => true,
+      videoRecording.configure({
+        requesterResolver: {
+          baseSessionUuid: (uuid) => uuid.split(":")[0],
+          connectionOwnsDeviceSession: () => false,
+          isDeviceHeld: () => true,
+        },
       });
       const recordingId = await finalizeSingle("plan-base:pixel");
       const stopsBefore = fakeBackend.stopCalls.length;
@@ -612,13 +614,15 @@ describe("videoRecording tool segmentation branch", () => {
 
     test("a proxy-bound requester whose connection holds the owner's device session reads it; another connection does not", async () => {
       const seen: Array<[string, string, string]> = [];
-      setRecordingRequesterResolverForTesting({
-        baseSessionUuid: (uuid) => uuid.split(":")[0],
-        connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
-          seen.push([mcp, deviceId, ownerBase]);
-          return mcp === "mcp-owner";
+      videoRecording.configure({
+        requesterResolver: {
+          baseSessionUuid: (uuid) => uuid.split(":")[0],
+          connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
+            seen.push([mcp, deviceId, ownerBase]);
+            return mcp === "mcp-owner";
+          },
+          isDeviceHeld: () => true,
         },
-        isDeviceHeld: () => true,
       });
       const recordingId = await finalizeSingle("plan-base:pixel");
 
@@ -639,10 +643,12 @@ describe("videoRecording tool segmentation branch", () => {
     });
 
     test("the base session reads a derived session's finalized segmented recording; another base does not", async () => {
-      setRecordingRequesterResolverForTesting({
-        baseSessionUuid: (uuid) => uuid.split(":")[0],
-        connectionOwnsDeviceSession: () => false,
-        isDeviceHeld: () => true,
+      videoRecording.configure({
+        requesterResolver: {
+          baseSessionUuid: (uuid) => uuid.split(":")[0],
+          connectionOwnsDeviceSession: () => false,
+          isDeviceHeld: () => true,
+        },
       });
       const start = parse(
         await handler()(androidDevice, {
@@ -703,10 +709,12 @@ describe("videoRecording tool segmentation branch", () => {
       });
 
       test("the base session may stop a recording owned by its derived label session", async () => {
-        setRecordingRequesterResolverForTesting({
-          baseSessionUuid: (uuid) => uuid.split(":")[0],
-          connectionOwnsDeviceSession: () => false,
-          isDeviceHeld: () => true,
+        videoRecording.configure({
+          requesterResolver: {
+            baseSessionUuid: (uuid) => uuid.split(":")[0],
+            connectionOwnsDeviceSession: () => false,
+            isDeviceHeld: () => true,
+          },
         });
         const active = await startVideoRecording({
           device: androidDevice,
@@ -726,13 +734,15 @@ describe("videoRecording tool segmentation branch", () => {
 
       test("a proxy bound to a different session may stop when its connection owns the holder session", async () => {
         const seen: Array<[string, string, string]> = [];
-        setRecordingRequesterResolverForTesting({
-          baseSessionUuid: (uuid) => uuid,
-          connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
-            seen.push([mcp, deviceId, ownerBase]);
-            return mcp === "mcp-owner";
+        videoRecording.configure({
+          requesterResolver: {
+            baseSessionUuid: (uuid) => uuid,
+            connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
+              seen.push([mcp, deviceId, ownerBase]);
+              return mcp === "mcp-owner";
+            },
+            isDeviceHeld: () => true,
           },
-          isDeviceHeld: () => true,
         });
         const active = await startVideoRecording({
           device: androidDevice,
@@ -755,10 +765,12 @@ describe("videoRecording tool segmentation branch", () => {
       });
 
       test("a different owner is still refused", async () => {
-        setRecordingRequesterResolverForTesting({
-          baseSessionUuid: (uuid) => uuid.split(":")[0],
-          connectionOwnsDeviceSession: () => false,
-          isDeviceHeld: () => true,
+        videoRecording.configure({
+          requesterResolver: {
+            baseSessionUuid: (uuid) => uuid.split(":")[0],
+            connectionOwnsDeviceSession: () => false,
+            isDeviceHeld: () => true,
+          },
         });
         const active = await startVideoRecording({
           device: androidDevice,
@@ -1011,15 +1023,17 @@ describe("videoRecording tool segmentation branch", () => {
     const discoveryStarted = new Promise<void>((resolve) => {
       markDiscoveryStarted = resolve;
     });
-    setVideoRecordingDeviceDetectorForTesting({
-      detectConnectedPlatforms: async (signal) => {
-        receivedSignal = signal;
-        markDiscoveryStarted?.();
-        await new Promise<void>((resolve) => {
-          signal?.addEventListener("abort", resolve, { once: true });
-        });
-        signal?.throwIfAborted();
-        return [];
+    videoRecording.configure({
+      deviceDetector: {
+        detectConnectedPlatforms: async (signal) => {
+          receivedSignal = signal;
+          markDiscoveryStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          signal?.throwIfAborted();
+          return [];
+        },
       },
     });
 

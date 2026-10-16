@@ -9,7 +9,7 @@ import { matchRunningReadTarget } from "../../src/devices/runningReadTarget";
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import type { IosBootInstrumentation } from "../../src/features/iosSimFleet/IosBootInstrumentation";
@@ -48,7 +48,6 @@ import { executionTracker } from "../../src/server/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -162,7 +161,7 @@ function harness(
   }
   const lifecycle = new FakeVirtualDeviceLifecycleCoordinator();
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, discovery, simctl as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, discovery, simctl, {
       window,
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
@@ -768,16 +767,16 @@ for (const platform of ["android", "ios"] as const) {
           }
           if (column === "held-slot-name") {
             expect(daemon.pool.getDevice(h.device.deviceId)).toBeNull();
-            const original = daemon.pool.assertNotAssignedToManagedSlot;
-            const gate = spyOn(daemon.pool, "assertNotAssignedToManagedSlot").mockImplementation(
+            const original = daemon.pool.assertNotAssignedToBinding;
+            const gate = spyOn(daemon.pool, "assertNotAssignedToBinding").mockImplementation(
               async (input) => {
                 if (input.deviceId === h!.device.name) {
-                  throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+                  throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
                     platform: "android",
                     stableDeviceId: h!.device.name,
-                    holder: "slot",
+                    holder: "session_broker",
                     scopeKey: "scope",
-                    slotIndex: 0,
+                    bindingIndex: 0,
                     scopeState: null,
                     execSessionUuid: "slot-exec",
                   });
@@ -786,7 +785,7 @@ for (const platform of ["android", "ios"] as const) {
             );
             restoreGate = () => {
               gate.mockRestore();
-              expect(daemon.pool.assertNotAssignedToManagedSlot).toBe(original);
+              expect(daemon.pool.assertNotAssignedToBinding).toBe(original);
             };
           }
           if (column === "ambiguous") {

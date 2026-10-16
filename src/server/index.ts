@@ -1,6 +1,6 @@
 import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
-import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import { brokerConnectionPlatformRefusal } from "../daemon/sessionBroker/connectionScope";
 import {
   getLiveDeadlineMs,
   getLiveTextRequestState,
@@ -41,7 +41,7 @@ import {
 } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
-import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "../daemon/sessionBroker/provisioning/executionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -318,46 +318,12 @@ async function awaitWithCancellation<T>(
   }
 }
 
-// Import all tool registration functions
-import { registerObserveTools } from "./observeTools";
-import { registerInteractionTools } from "./interactionTools";
-import { registerAppTools } from "./appTools";
-import { registerUtilityTools } from "./utilityTools";
-import { registerDeviceTools } from "./deviceTools";
-import { registerDeepLinkTools } from "./deepLinkTools";
-import { registerNavigationTools } from "./navigationTools";
-import { registerNotificationTools } from "./notificationTools";
-import { registerPlanTools } from "./planTools";
-import { registerCriticalSectionTools } from "./criticalSectionTools";
-import { registerBarrierTools } from "./barrierTools";
-import { registerVideoRecordingTools } from "./videoRecordingTools";
-import { registerSnapshotTools } from "./snapshotTools";
-import { registerSnapshotOfTools } from "./snapshotOfTools";
-import { registerBiometricTools } from "./biometricTools";
-import { registerTelephonyTools } from "./telephonyTools";
-import { registerPrototypeTools } from "./prototypeTools";
-import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
-import {
-  CompositePrototypeAgentConnections,
-  prototypeViewerConnections,
-} from "../features/prototype/ios/prototypeViewerAttach";
-import { registerHighlightTools } from "./highlightTools";
-import { registerDatabaseTools } from "./databaseTools";
-import { registerStorageTools } from "./storageTools";
-import { registerPreferenceTools } from "./preferenceTools";
-import { registerAppFileTools } from "./appFileTools";
-import { registerSessionLogTools } from "./sessionLogTools";
-import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
-import { registerFormTools } from "./formTools";
-import { registerAccessibilityTools } from "./accessibilityTools";
-import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
-import { registerNetworkTools } from "./networkTools";
+import { registerAllTools } from "./registerAllTools";
 import {
   applyToolSelection,
   assertUserConfigurableToolNames,
   listEnabledToolNames,
   requestedToolNamesFromSetToolEnabledArgs,
-  registerToolSelectionTools,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "./toolSelectionTools";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
@@ -419,7 +385,7 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
-import { assertManagedConnectionPlainToolCall } from "./managedConnectionToolGate";
+import { assertBrokerConnectionPlainToolCall } from "./brokerConnectionToolGate";
 import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
@@ -661,47 +627,7 @@ export { formatToolParamError };
  */
 export function registerMcpTools(daemonMode: boolean): void {
   installDefaultProvisionedDeviceTransportFence();
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerNotificationTools();
-  // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)
-  // registered outside the daemonMode gate so tool call recording works in stdio mode
-  // (the standard MCP transport agents use). executePlan multi-device allocation
-  // still requires daemon and throws a clear error without it.
-  // Critical section tools remain daemon-only (DaemonState lock manager).
-  registerPlanTools();
-  if (daemonMode) {
-    registerCriticalSectionTools();
-    registerBarrierTools();
-  }
-  registerVideoRecordingTools();
-  registerSnapshotTools();
-  registerSnapshotOfTools();
-  registerBiometricTools();
-  registerTelephonyTools();
-  registerHighlightTools();
-  registerPrototypeTools({
-    agentConnections: new CompositePrototypeAgentConnections(
-      prototypeViewerConnections,
-      prototypeAgentRegistry,
-    ),
-  });
-  registerDatabaseTools();
-  registerStorageTools();
-  registerPreferenceTools();
-  registerAppFileTools();
-  registerSessionLogTools();
-  registerDownloadsFixtureTools();
-  registerFormTools();
-  registerAccessibilityTools();
-  registerAccessibilityFocusTools();
-  registerNetworkTools();
-  registerToolSelectionTools();
+  registerAllTools({ daemonMode });
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
@@ -1077,7 +1003,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // Refused here, before session routing: a bound session that does not match the target would
       // otherwise surface as a generic routing error instead of the typed refusal (#11268).
       const rawSessionArg = (toolParams as Record<string, unknown>)?.sessionUuid;
-      assertManagedConnectionPlainToolCall({
+      assertBrokerConnectionPlainToolCall({
         daemonMode,
         requiresDevice: false,
         toolName: name,
@@ -1127,9 +1053,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       } else {
         const managedBinding =
           daemonMode && daemonState.isInitialized()
-            ? daemonState.getManagedConnectionScopes().get(requestMcpSessionId)
+            ? daemonState.getBrokerConnectionScopes().get(requestMcpSessionId)
             : undefined;
-        const refusal = managedConnectionPlatformRefusal({
+        const refusal = brokerConnectionPlatformRefusal({
           binding:
             !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
               ? managedBinding
@@ -1139,7 +1065,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             rawArgs.platform === "android" || rawArgs.platform === "ios"
               ? rawArgs.platform
               : undefined,
-          slotPlatformOf: (sessionUuid) => {
+          grantedPlatformOf: (sessionUuid) => {
             const session = daemonState.getSessionManager().peekSession(sessionUuid);
             return session?.assignedDevice
               ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
@@ -1171,7 +1097,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             (tool.isDeviceReadOnlyCall?.(toolParams) === true ||
               (daemonMode &&
                 daemonState.isInitialized() &&
-                daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
+                daemonState.getBrokerConnectionScopes().get(requestMcpSessionId) !== undefined)),
           tool.isDeviceReadOnlyCall?.(toolParams) === true,
         );
       }
@@ -1364,8 +1290,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       );
     }
 
-    // A managed connection controls only its own slots (#11178).
-    assertManagedConnectionPlainToolCall({
+    // A managed connection controls only its own bindings (#11178).
+    assertBrokerConnectionPlainToolCall({
       daemonMode,
       requiresDevice: tool.requiresDevice === true,
       toolName: name,

@@ -133,8 +133,7 @@ for (const platform of ["android", "ios"] as const) {
       const controller = new AbortController();
       const pending = pinch.execute(
         { direction: "in", autoTarget: false, duration: 10000 },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       const rejected = pending.then(
         () => {
@@ -163,8 +162,7 @@ for (const platform of ["android", "ios"] as const) {
       const controller = new AbortController();
       await pinch.execute(
         { direction: "in", autoTarget: false, duration: 300 },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       expect(ios.getPinchHistory()[0]?.signal).toBe(controller.signal);
     });

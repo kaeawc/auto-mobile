@@ -27,7 +27,7 @@ describe("DeviceSessionManager platform scan status", () => {
       adb.setDevices([android]);
       simctl.setBootedSimulators([ios]);
       const manager = DeviceSessionManager.createInstance(
-        new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), simctl as never),
+        new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), simctl),
       );
       const pinned = failedPlatform === "android" ? android : ios;
       manager.setExplicitDevicePin(pinned);
@@ -69,7 +69,7 @@ describe("DeviceSessionManager platform scan status", () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([android]);
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl() as never),
+      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl()),
     );
     manager.setExplicitDevicePin(android);
     // Mirror AdbClient: a missing binary yields [] unless the caller opts into the throw.

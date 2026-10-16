@@ -11,7 +11,7 @@ import { OpenURL } from "../../src/features/action/OpenURL";
 import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
 import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyProvider";
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import {
   resetKeyboardFactory,
@@ -25,11 +25,12 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
-} from "../../src/server/systemTrayHelpers";
+} from "../../src/features/systemTray/systemTrayHelpers";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 const device: BootedDevice = { platform: "android", deviceId: "test", name: "Test" };
 const captured = JSON.parse(
@@ -74,13 +75,11 @@ test.each(["keyboard", "openLink", "systemTray"])(
         return { success: true, open: false, message: "closed" };
       },
     );
-    const open = spyOn(OpenURL.prototype, "execute").mockImplementation(
-      async (url, ...rest: [AbortSignal?]) => {
-        throwIfAborted(rest[0]);
-        dispatches++;
-        return { success: true, url };
-      },
-    );
+    const open = spyOn(OpenURL.prototype, "execute").mockImplementation(async (url, call) => {
+      throwIfAborted((call as ActionCall | undefined)?.signal);
+      dispatches++;
+      return { success: true, url };
+    });
     restores.push(
       () => keyboard.mockRestore(),
       () => open.mockRestore(),
@@ -209,7 +208,7 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
   const adb = new FakeAdbExecutor();
   const hierarchy = new FakeKeyboardHierarchyProvider();
   const launcher = new FakeDeviceUrlLauncher();
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   setKeyboardFactory(() => new Keyboard(target, { create: () => adb }, hierarchy, timer));
   setOpenUrlFactory(() => new UnobservedOpenURL(target, adb, simctl, launcher, timer));
   let gestures = 0;
@@ -303,8 +302,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
   let reads = 0;
   let received: AbortSignal | undefined;
   setOpenUrlFactory(() => ({
-    execute: async (url, signal) => {
-      received = signal;
+    execute: async (url, call) => {
+      received = (call as ActionCall | undefined)?.signal;
       return { success: true, url };
     },
   }));
@@ -385,7 +384,7 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
   const timer = new FakeTimer();
   const { started, sleep } = pausedSleep(timer);
   restores.push(() => sleep.mockRestore());
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const open = new UnobservedOpenURL(target, new FakeAdbExecutor(), simctl, null, timer);

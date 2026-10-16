@@ -15,7 +15,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCa
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const android: BootedDevice = { name: "android", platform: "android", deviceId: "test-android" };
@@ -191,7 +191,7 @@ describe("app restart cache generation", () => {
     async (device) => {
       for (const fails of [false, true]) {
         const events: string[] = [];
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setContainerPath(appId, "/fake/container");
         const { invalidator, store } = clearInvalidationHarness(events);
         const action = new ClearAppData(device, undefined, {
@@ -253,7 +253,9 @@ describe("app restart cache generation", () => {
     fakeAndroidProxy();
     const h = androidInstallHarness();
     const invalidator = new FakeDeviceWindowCacheInvalidator(() => h.events.push("invalidate"));
-    expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(true);
+    expect((await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success).toBe(
+      true,
+    );
     expect(invalidator.calls).toEqual([android]);
     const index = h.events.indexOf("invalidate");
     expect(h.events[index - 1]).toBe('settled:install --user 0 -r "/fake/app.apk"');
@@ -270,7 +272,9 @@ describe("app restart cache generation", () => {
       ]);
       h.adb.setCommandResponse("uninstall ", execResult("Success"));
       const invalidator = new FakeDeviceWindowCacheInvalidator(() => h.events.push("invalidate"));
-      expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(succeeds);
+      expect(
+        (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success,
+      ).toBe(succeeds);
       expect(invalidator.calls).toEqual(succeeds ? [android, android] : [android]);
       const preceding = h.events.flatMap((event, i) =>
         event === "invalidate" ? [h.events[i - 1]] : [],
@@ -291,11 +295,13 @@ describe("app restart cache generation", () => {
       const invalidator = new FakeDeviceWindowCacheInvalidator();
       if (output === "throw") {
         h.adb.setCommandError("install --user", new Error("install failed"));
-        await expect(h.makeAction(invalidator).execute("/fake/app.apk", 0)).rejects.toThrow(
-          "install failed",
-        );
+        await expect(
+          h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 }),
+        ).rejects.toThrow("install failed");
       } else {
-        expect((await h.makeAction(invalidator).execute("/fake/app.apk", 0)).success).toBe(false);
+        expect(
+          (await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 })).success,
+        ).toBe(false);
       }
       expect(invalidator.calls).toEqual([]);
     },
@@ -357,7 +363,7 @@ describe("app restart cache generation", () => {
                 { create: () => h.adb },
                 { cacheInvalidator: invalidator },
               ).execute(appId, 0)
-            : await h.makeAction(invalidator).execute("/fake/app.apk", 0);
+            : await h.makeAction(invalidator).execute("/fake/app.apk", { userId: 0 });
         expect(result.success).toBe(true);
         await store.put(android.deviceId, stale, generation);
         expect(store.getRecentInMemoryForDevice(android.deviceId)).toEqual(

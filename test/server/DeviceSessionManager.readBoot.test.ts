@@ -19,7 +19,6 @@ import type {
   IosBootInstrumentation,
   IosBootRequest,
 } from "../../src/features/iosSimFleet/IosBootInstrumentation";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
@@ -111,12 +110,10 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     applyOnConnect: false,
   }));
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(
-      adb,
-      devices,
-      simctlAvailable ? (simctl as unknown as SimCtlClient) : undefined,
-      { window, ctrlProxyManager: new FakeCtrlProxyManager() },
-    ),
+    new FakeDeviceClientProvider(adb, devices, simctlAvailable ? simctl : undefined, {
+      window,
+      ctrlProxyManager: new FakeCtrlProxyManager(),
+    }),
     { create: () => adb },
     {
       runnerReadinessTimer: timer,

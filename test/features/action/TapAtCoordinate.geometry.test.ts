@@ -11,7 +11,7 @@ for (const platform of ["android", "ios"] as const) {
     const point = platform === "android" ? { x: 2, y: 3 } : { x: 2.125, y: 3.75 };
     const context = {};
     const first = createTapAt(device);
-    await first.tapAt.execute(point, undefined, undefined, context);
+    await first.tapAt.execute(point, { planContext: context });
     const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("tapAt", {
@@ -33,8 +33,10 @@ for (const platform of ["android", "ios"] as const) {
     );
     expect(plan.steps[0]).toEqual(step);
     const replay = createTapAt(device);
-    const result = await replay.tapAt.execute(point, undefined, undefined, {
-      geometry: plan.steps[0].geometry,
+    const result = await replay.tapAt.execute(point, {
+      planContext: {
+        geometry: plan.steps[0].geometry,
+      },
     });
     expect(result.success).toBe(true);
     expect(platform === "android" ? replay.androidDispatches : replay.iosDispatches).toMatchObject([
@@ -71,10 +73,10 @@ for (const mismatch of ["platform", "dimensions", "orientation", "point"] as con
       geometry.x = 1;
     }
     observeScreen.setObserveResult(observation(10, 10));
-    await expect(tapAt.execute({ x: 2, y: 3 }, undefined, undefined, { geometry })).rejects.toThrow(
+    await expect(tapAt.execute({ x: 2, y: 3 }, { planContext: { geometry } })).rejects.toThrow(
       ActionableError,
     );
-    await expect(tapAt.execute({ x: 2, y: 3 }, undefined, undefined, { geometry })).rejects.toThrow(
+    await expect(tapAt.execute({ x: 2, y: 3 }, { planContext: { geometry } })).rejects.toThrow(
       mismatch,
     );
     expect(androidDispatches).toHaveLength(0);
@@ -95,7 +97,7 @@ test("recording persists resolved native pixels instead of image or normalized i
   const fake = createTapAt({ deviceId: "test", name: "test", platform: "android" });
   const context = {};
   const input = { x: 0.25, y: 0.5, coordinateSpace: "normalized" as const };
-  await fake.tapAt.execute(input, undefined, undefined, context);
+  await fake.tapAt.execute(input, { planContext: context });
   const recorder = new ToolCallRecorder();
   recorder.start();
   recorder.record("tapAt", { ...input, snapshotId: "ephemeral", __tapAtRecordingContext: context });
@@ -111,7 +113,7 @@ test("missing rotation evidence records a legacy tap with an actionable warning"
   delete before.viewHierarchy?.rotation;
   fake.observeScreen.setObserveResult(before);
   const context = {};
-  await fake.tapAt.execute({ x: 2, y: 3 }, undefined, undefined, context);
+  await fake.tapAt.execute({ x: 2, y: 3 }, { planContext: context });
   const recorder = new ToolCallRecorder();
   recorder.start();
   recorder.record("tapAt", { x: 2, y: 3, __tapAtRecordingContext: context });

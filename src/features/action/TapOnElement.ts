@@ -222,6 +222,7 @@ import {
   iosTapOwnershipErrorMessage,
   resolveIosOwnedTapPoint,
 } from "./iosTapTargetOwnership";
+import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -632,11 +633,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           readCached: (request) =>
             this.viewHierarchy.getViewHierarchy(
               {},
-              undefined,
-              true,
-              request.minTimestamp,
-              request.signal,
-              request.timeoutMs,
+              {
+                skipWaitForFresh: true,
+                minTimestamp: request.minTimestamp,
+                signal: request.signal,
+                timeoutMs: request.timeoutMs,
+              },
             ),
           readFresh: async (request) => {
             if (request.displayId !== undefined) {
@@ -3983,13 +3985,29 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @param progress - Optional progress callback
    * @returns Result of the command
    */
+  async execute(options: TapOnElementOptions, call?: TapOnCall): Promise<TapOnFocusResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: TapOnElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
     recovery?: { throwOnKeyboardOcclusion?: boolean },
     request?: { requestDeadlineMs?: number },
+  ): Promise<TapOnFocusResult>;
+  async execute(
+    options: TapOnElementOptions,
+    progressOrCall?: ProgressCallback | TapOnCall,
+    signalArg?: AbortSignal,
+    recoveryArg?: { throwOnKeyboardOcclusion?: boolean },
+    requestArg?: { requestDeadlineMs?: number },
   ): Promise<TapOnFocusResult> {
+    const { progress, signal, recovery, deadlineMs } = resolveTapOnCall(
+      progressOrCall,
+      signalArg,
+      recoveryArg,
+      requestArg,
+    );
+    const request = deadlineRequest(deadlineMs);
     return withObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal, recovery, request),
     );

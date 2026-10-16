@@ -190,7 +190,7 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
-import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+import { createNotificationUIDetector } from "../features/systemTray/createNotificationUIDetector";
 
 import {
   SystemTrayObserver,
@@ -220,7 +220,7 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-} from "./systemTrayHelpers";
+} from "../features/systemTray/systemTrayHelpers";
 
 // Re-export types for backward compatibility
 export type {
@@ -1707,8 +1707,7 @@ export async function swipeOnHandler(
       returnSpeed: args.returnSpeed,
       layer: args.layer,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const response = createStructuredToolResponse({
@@ -1773,8 +1772,7 @@ export async function pinchOnHandler(
       autoTarget: args.autoTarget,
       layer: args.layer,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const response = createJSONToolResponse({
@@ -2175,8 +2173,7 @@ export async function acceptIosAppOpenAlert(
 
   const result = await tapOnElementFactory(device).execute(
     { text: "Open", action: "tap" },
-    progress,
-    signal,
+    { progress, signal },
   );
   if (!result.success) {
     throw new ActionableError(
@@ -2288,10 +2285,7 @@ export async function tapOnHandler(
       subtext: args.subtext,
       layer: args.layer,
     },
-    progress,
-    signal,
-    undefined,
-    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -2333,9 +2327,7 @@ export async function tapAtHandler(
       durationMs: args.durationMs,
       layer: args.layer,
     },
-    progress,
-    signal,
-    args.__tapAtPlanContext ?? args.__tapAtRecordingContext,
+    { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -2421,9 +2413,7 @@ export async function tapAnyHandler(
       searchUntil: args.searchUntil,
       layer: args.layer,
     },
-    progress,
-    signal,
-    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);
@@ -2480,8 +2470,7 @@ export async function dragAndDropHandler(
       dragDurationMs: args.dragDurationMs,
       holdDurationMs: args.holdDurationMs,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const message = result.success
@@ -3492,11 +3481,10 @@ export function registerInteractionTools() {
     const transportDeadlineMs = (args as Record<string, unknown>)[
       INTERNAL_MCP_REQUEST_DEADLINE_PARAM
     ];
-    const result = await wakeAndUnlock.execute(
-      args.pin,
-      typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
+    const result = await wakeAndUnlock.execute(args.pin, {
+      deadlineMs: typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
       signal,
-    );
+    });
     const message = result.success
       ? result.wasLocked
         ? "Device unlocked"
@@ -3527,7 +3515,7 @@ export function registerInteractionTools() {
     }
 
     const openUrl = openUrlFactory(device);
-    const opened = await openUrl.execute(args.url, signal);
+    const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
       ? await selectAndroidOpenLinkChooser(

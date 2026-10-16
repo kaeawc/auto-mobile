@@ -66,6 +66,7 @@ import {
   parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
 } from "./launcherActivityParsing";
+import type { ActionCall } from "./ActionCall";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -186,6 +187,31 @@ interface AndroidLaunchOptions {
   skipUiStability?: boolean;
   signal?: AbortSignal;
 }
+
+/** Launch request for {@link LaunchApp.execute}: what to launch and how, beside the call context. */
+export interface LaunchAppCall extends ActionCall {
+  clearAppData: boolean;
+  coldBoot: boolean;
+  /** Activity name to launch (Android only). */
+  activityName?: string;
+  /** Android user ID (auto-detected if not provided). */
+  userId?: number;
+  skipUiStability?: boolean;
+  launchArguments?: string[];
+  /** `SIMCTL_CHILD_*` variables for a fresh iOS simulator process. */
+  launchEnvironment?: Record<string, string>;
+}
+
+/** The deprecated positional parameters of {@link LaunchApp.execute} after `clearAppData`. */
+type LaunchAppPositionalTail = [
+  coldBoot?: boolean,
+  activityName?: string,
+  userId?: number,
+  skipUiStability?: boolean,
+  signal?: AbortSignal,
+  launchArguments?: string[],
+  launchEnvironment?: Record<string, string>,
+];
 
 export class LaunchApp extends BaseVisualChange {
   private simctl: SimCtlClient;
@@ -353,9 +379,9 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
       const result = perf
         ? await perf.track(`activityApproach_${index + 1}`, () =>
-            this.adb.executeCommand(command, undefined, undefined, undefined, signal),
+            this.adb.executeCommand(command, { signal }),
           )
-        : await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+        : await this.adb.executeCommand(command, { signal });
       this.assertLaunchNotAborted(signal);
       logger.info(
         `[LaunchApp] Approach ${index + 1} result: ${result.stdout.length} chars of output`,
@@ -382,21 +408,9 @@ export class LaunchApp extends BaseVisualChange {
     try {
       const simpleResult = perf
         ? await perf.track("activityFallback", () =>
-            this.adb.executeCommand(
-              `shell pm dump ${shellQuote(packageName)}`,
-              undefined,
-              undefined,
-              undefined,
-              signal,
-            ),
+            this.adb.executeCommand(`shell pm dump ${shellQuote(packageName)}`, { signal }),
           )
-        : await this.adb.executeCommand(
-            `shell pm dump ${shellQuote(packageName)}`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          );
+        : await this.adb.executeCommand(`shell pm dump ${shellQuote(packageName)}`, { signal });
       this.assertLaunchNotAborted(signal);
       const activities = parseLauncherActivitiesFromPackageDump(simpleResult.stdout, packageName);
       for (const activity of activities) {
@@ -420,6 +434,8 @@ export class LaunchApp extends BaseVisualChange {
    * @param skipUiStability - Whether to skip UI stability checks
    * @param launchEnvironment - `SIMCTL_CHILD_*` variables for a fresh iOS simulator process
    */
+  async execute(packageName: string, launch: LaunchAppCall): Promise<LaunchAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     packageName: string,
     clearAppData: boolean,
@@ -430,6 +446,49 @@ export class LaunchApp extends BaseVisualChange {
     signal?: AbortSignal,
     launchArguments?: string[],
     launchEnvironment?: Record<string, string>,
+  ): Promise<LaunchAppResult>;
+  async execute(
+    packageName: string,
+    clearAppDataOrCall: boolean | LaunchAppCall,
+    ...positional: LaunchAppPositionalTail
+  ): Promise<LaunchAppResult> {
+    const [
+      coldBoot,
+      activityName,
+      userId,
+      skipUiStability,
+      signal,
+      launchArguments,
+      launchEnvironment,
+    ] = positional;
+    const launch: LaunchAppCall =
+      typeof clearAppDataOrCall === "object"
+        ? clearAppDataOrCall
+        : {
+            clearAppData: clearAppDataOrCall,
+            coldBoot: coldBoot ?? false,
+            activityName,
+            userId,
+            skipUiStability,
+            signal,
+            launchArguments,
+            launchEnvironment,
+          };
+    return this.executeLaunch(packageName, launch);
+  }
+
+  private async executeLaunch(
+    packageName: string,
+    {
+      clearAppData,
+      coldBoot,
+      activityName,
+      userId,
+      skipUiStability,
+      signal,
+      launchArguments,
+      launchEnvironment,
+    }: LaunchAppCall,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
     signal?.throwIfAborted();
@@ -1628,13 +1687,9 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     try {
-      await this.adb.executeCommand(
-        "shell cmd statusbar collapse",
-        undefined,
-        undefined,
-        undefined,
-        combineWithAmbientAbort(signal),
-      );
+      await this.adb.executeCommand("shell cmd statusbar collapse", {
+        signal: combineWithAmbientAbort(signal),
+      });
     } catch (error) {
       logger.warn(
         `[LaunchApp] Failed to collapse notification shade: ${errorMessage(error)}`,
@@ -2097,9 +2152,9 @@ export class LaunchApp extends BaseVisualChange {
 
       const checkResult = perf
         ? await perf.track("dumpsysCheck", () =>
-            this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER),
+            this.adb.executeCommand(cmd, { maxBuffer: DUMPSYS_MAX_BUFFER }),
           )
-        : await this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER);
+        : await this.adb.executeCommand(cmd, { maxBuffer: DUMPSYS_MAX_BUFFER });
 
       const output = (checkResult && checkResult.stdout ? checkResult.stdout : "").trim();
       logger.info(`[LaunchApp] Dumpsys check output: "${output}" (${output.length} chars)`);

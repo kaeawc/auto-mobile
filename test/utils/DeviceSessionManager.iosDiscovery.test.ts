@@ -114,7 +114,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
         new FakeDeviceClientProvider(
           new FakeAdbExecutor(),
           new FakeDeviceUtils(),
-          new FakeSimctl() as never,
+          new FakeSimctl(),
           { iosPhysicalDeviceLister: lister },
         ),
       );

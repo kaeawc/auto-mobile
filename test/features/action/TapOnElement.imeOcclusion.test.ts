@@ -336,9 +336,7 @@ async function executeAt(
       layer,
       searchUntil: { duration: 100 },
     },
-    undefined,
-    undefined,
-    throwOnKeyboardOcclusion ? { throwOnKeyboardOcclusion: true } : undefined,
+    { recovery: throwOnKeyboardOcclusion ? { throwOnKeyboardOcclusion: true } : undefined },
   );
   return { result, points, actionError };
 }

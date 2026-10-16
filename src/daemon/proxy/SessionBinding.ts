@@ -55,7 +55,7 @@ export interface SessionBindingDependencies {
   ownedDeviceSessions: Set<string>;
   sessionPlatforms: Map<string, "android" | "ios">;
   sessionDeviceIds: Map<string, string>;
-  managedExecutionSessions: Set<string>;
+  sessionBrokerSessions: ReadonlyMap<string, string>;
   plainRestartSessionLosses: Map<string, string>;
   pendingHeldSessionPlatformLosses: Map<
     string,
@@ -304,7 +304,7 @@ export class SessionBinding {
     return (
       this.deps.state.claimableSessions.has(sessionUuid) &&
       sessionUuid !== this.deps.initialSessionUuid()?.trim() &&
-      !this.deps.managedExecutionSessions.has(sessionUuid)
+      !this.deps.sessionBrokerSessions.has(sessionUuid)
     );
   }
 

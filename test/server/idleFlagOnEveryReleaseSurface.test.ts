@@ -2,9 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  livenessHandoverNotificationPayloads,
-  managedEndedPayload,
-  managedSlotsResourceView,
+  brokerSessionEndedPayload,
   noActiveDeviceSessionResult,
 } from "../../src/server/proxyServer";
 import {
@@ -25,11 +23,7 @@ import {
 } from "../../src/daemon/types";
 import { UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
-import {
-  readyManagedSlotsResult,
-  REFUSAL_FIXTURES_DIR,
-  REFUSAL_SURFACES_DIR,
-} from "../helpers/refusalWireFixtures";
+import { REFUSAL_FIXTURES_DIR, REFUSAL_SURFACES_DIR } from "../helpers/refusalWireFixtures";
 
 import {
   handleDaemonRequest,
@@ -38,7 +32,6 @@ import {
 import { RELEASE_REASON_WIRE_BUILDERS } from "../lint/releaseReasonWireBuilders";
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
-const slots = readyManagedSlotsResult(SESSION);
 type Holder = { reason?: unknown; releaseReason?: unknown; idle?: unknown };
 const snapshot = (reason: string): SessionReleaseSnapshot => ({
   sessionId: SESSION,
@@ -110,36 +103,28 @@ const surfaces: Surface[] = [
     },
   },
   {
-    name: "managed tool result",
-    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
-    reasonKey: "reason",
-    holder: (reason) => managedEndedPayload(slots, SESSION, reason)!.error,
-  },
-  {
-    name: "managed liveness logging notification",
-    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
+    name: "session broker tool result",
+    builders: ["src/server/proxyServer.ts#brokerSessionEndedPayload"],
     reasonKey: "reason",
     holder: (reason) =>
-      livenessHandoverNotificationPayloads(
+      brokerSessionEndedPayload(
         {
-          code: "proxy_stalled",
-          sessions: [
-            { sessionUuid: SESSION, deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 0 },
-          ],
-          attempts: 1,
-          lastAcknowledgedHeartbeatAt: 0,
-          action: "reacquire_lost_sessions",
-          releaseReasons: { [SESSION]: reason },
+          contractVersion: 1,
+          requestId: "broker-request",
+          outcome: "ready",
+          sessionUuid: SESSION,
+          cleanupPending: false,
+          profile: {
+            platform: "ios",
+            metadataState: "current",
+            simulatorDeviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+            runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+            osVersion: "26.5",
+          },
         },
-        slots,
-      )[0].error as Holder,
-  },
-  {
-    name: "managed slots resource",
-    builders: ["src/server/proxyServer.ts#managedSlotsResourceView"],
-    reasonKey: "reason",
-    holder: (reason) =>
-      managedSlotsResourceView(slots, { sessionUuid: SESSION, reason }).slots[0].executionEnded!,
+        SESSION,
+        reason,
+      )!.error,
   },
   {
     name: "ownership lost",
@@ -316,7 +301,7 @@ const ends: string[] = [
   "explicit-release",
   "daemon-shutdown",
   "owner-disconnected",
-  "managed-slot-ownership-lost",
+  "binding-ownership-lost",
   "session-not-found",
   "unknown",
 ];

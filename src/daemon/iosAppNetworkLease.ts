@@ -4,7 +4,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import type {
   IosAppNetworkRenewResult,
   IosAppNetworkRule,
-} from "../features/network-filter/IosAppNetworkRuleClient";
+} from "../features/networkFilter/IosAppNetworkRuleClient";
 
 /** Narrow seam the session manager uses for iOS Simulator per-app network rules (#10264). */
 export interface IosAppNetworkRuleRestorer {

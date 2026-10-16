@@ -1,6 +1,9 @@
 import { TypingSession } from "./sendkeys/TypingSession";
 import { KeyEventSupport } from "./sendkeys/KeyEventSupport";
-import { readBackWithSettle } from "./sendkeys/readBackWithSettle";
+import {
+  FocusedTextClearVerifier,
+  checkAbort as checkAbortCheckpoint,
+} from "./sendkeys/FocusedTextClearVerifier";
 import { EventLastTyper } from "./sendkeys/EventLastTyper";
 import { EventAllTyper } from "./sendkeys/EventAllTyper";
 import { ImeCommitTyper } from "./sendkeys/ImeCommitTyper";
@@ -10,26 +13,22 @@ import {
   ANDROID_FOCUSED_INPUT_ERROR,
   ANDROID_TYPE_FOCUSED_INPUT_ERROR,
   IME_COMMIT_READ_BACK_SETTLE_MS,
-  segmentGraphemes,
   isPrintableAscii,
 } from "./sendkeys/AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./sendkeys/ImeSpan";
 import type { AndroidModeTyper } from "./sendkeys/AndroidModeTyper";
 import { A11yTyper } from "./sendkeys/A11yTyper";
 import { EventOnlyTyper } from "./sendkeys/EventOnlyTyper";
+import { PasswordRouting } from "./sendkeys/PasswordRouting";
+import { TargetFocus } from "./sendkeys/TargetFocus";
+import { TargetState } from "./sendkeys/TargetState";
+import { SendKeysRequestBudget, isSendKeysBudgetExhausted } from "./sendkeys/SendKeysRequestBudget";
+import { FocusKeyboardRecovery } from "./sendkeys/FocusKeyboardRecovery";
+import { IosTyper } from "./sendkeys/IosTyper";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
-import {
-  resolveTextCtrlProxyTimeoutMs,
-  getTextRequestDeadlineMs,
-  TEXT_MCP_REQUEST_HEADROOM_MS,
-} from "./textTransportTimeout";
-import { combineAbortSignals, getRequestContext } from "../../utils/AbortContext";
+import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { ActionableError } from "../../models/ActionableError";
-import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { selectablePanels, type DisplayPanel } from "../../models/DisplayPanel";
-import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -48,7 +47,6 @@ import {
 } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { scopeObserveResultToLayer } from "../observe/hierarchyLayer";
 import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
@@ -60,17 +58,15 @@ import {
   type PrototypeTextTargetReader,
   type PrototypeTextReading,
 } from "../prototype/prototypeTextTarget";
-import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { imeCommitUnitFields } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { getFocusedTextField, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
+import { getFocusedTextField, getFocusedTextLength } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import {
   focusedFieldIsPassword,
-  focusedImeFieldClass,
   imeFailureFields,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
   LEGACY_IME_PASSWORD_REFUSAL,
@@ -87,10 +83,9 @@ import {
   type TapOnFocusResult,
 } from "./TapOnElement";
 import { Keyboard } from "./Keyboard";
-import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { toSearchable } from "../utility/SearchableNode";
 import {
   AUTO_MOBILE_IME_ID,
   type ImeSubtypeSnapshot,
@@ -106,21 +101,6 @@ export {
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
 
-/** The field still shows its pre-clear text after the full settle poll (#9943). */
-const CLEAR_UNCHANGED_WARNING =
-  "The field still shows its pre-clear text after the clear was acknowledged; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.";
-
-class SendKeysBudgetError extends Error {
-  constructor() {
-    super(
-      "sendKeys request budget exhausted; stopping to allow cancellation and keyboard restoration",
-    );
-  }
-}
-
-function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
-  return signal?.aborted === true && signal.reason instanceof SendKeysBudgetError;
-}
 import type { KeyEventPlan } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
 
@@ -343,7 +323,7 @@ export interface SendKeysResult extends BaseActionResult {
   warning?: string;
 }
 
-interface SendKeysFailure {
+export interface SendKeysFailure {
   index: number;
   error: string;
 }
@@ -434,7 +414,7 @@ export interface SendKeysDependencies {
   timer?: Timer;
 }
 
-interface SendKeysRouting extends SendKeysFocusOptions {
+export interface SendKeysRouting extends SendKeysFocusOptions {
   onCommandStart?: () => void;
   onDispatch?: () => void;
   onCommandResult?: (result: SendKeysCommandResult) => void;
@@ -504,8 +484,6 @@ export interface SendKeysTextClient {
   ): Promise<TextActionResult>;
 }
 
-type AndroidClearState = { kind: "applied" } | { kind: "pending" } | { kind: "unreadable" };
-
 export interface SendKeysInputKey {
   press(
     key: InputKeyName,
@@ -549,6 +527,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
+  private readonly clearVerifier: FocusedTextClearVerifier;
+  private readonly passwordRouting: PasswordRouting;
+  private readonly iosTyper: IosTyper;
   // These values intentionally survive commands and concurrent calls on this executor.
   private readonly session = new TypingSession();
   private readonly keyEventSupport: KeyEventSupport;
@@ -608,6 +589,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };
     this.timer = dependencies.timer ?? defaultTimer;
+    this.clearVerifier = this.createClearVerifier();
+    this.passwordRouting = this.createPasswordRouting();
+    this.iosTyper = this.createIosTyper();
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
     this.keyEventSupport = this.createKeyEventSupport();
@@ -735,6 +719,39 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         activateCommitIme: (wasEnabled) => this.activateCommitIme(wasEnabled),
       },
     );
+  }
+
+  private createClearVerifier(): FocusedTextClearVerifier {
+    return new FocusedTextClearVerifier({
+      observer: { execute: (options) => this.observer.execute(options) },
+      timer: this.timer,
+      clearText: () => this.textClient.clear(),
+    });
+  }
+
+  private createPasswordRouting(): PasswordRouting {
+    return new PasswordRouting({
+      platform: () => this.device.platform,
+      observer: { execute: (options) => this.observer.execute(options) },
+      targetLayer: () => this.targetLayer,
+      resolveMode: (requestedMode) => this.resolveMode(requestedMode),
+      supportsImePasswordCommit: () => this.textClient.supportsImePasswordCommit(),
+      getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
+      hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
+    });
+  }
+
+  private createIosTyper(): IosTyper {
+    return new IosTyper({
+      session: this.session,
+      observer: this.observer,
+      timer: this.timer,
+      targetLayer: () => this.targetLayer,
+      clear: (signal, display) => this.clear(signal, display),
+      insert: (text, options) => this.textClient.insert(text, options),
+      withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
+      markPartialAfterMutation: (result) => markPartialAfterMutation(result),
+    });
   }
 
   private createKeyEventSupport(): KeyEventSupport {
@@ -1026,149 +1043,23 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.eventOnlyTyper.clearEventOnlyForReplace(textLength, signal, display);
   }
 
-  /**
-   * set_text("") is acknowledged before the app applies it; a following a11y insert plans from a
-   * fresh node snapshot and would otherwise write old + new text (#9884). The text read before the
-   * clear is what an unapplied clear still shows. Shared by the `clear` command and the clear that
-   * precedes an eventAll/eventLast replace (#9940).
-   */
-  private async clearAndVerifyAndroid(
+  private clearAndVerifyAndroid(
     signal?: AbortSignal,
     display?: string,
-    clear: () => Promise<TextActionResult> = () => this.textClient.clear(),
+    clear?: () => Promise<TextActionResult>,
     passwordField = false,
   ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
-    const preClearText = await this.readTextBeforeClear(signal, display, passwordField);
-    this.checkAbort(signal);
-    const result = await clear();
-    if (!result.success) {
-      return { result };
-    }
-    const unchangedWarning = await this.verifyAndroidClearApplied(preClearText, signal, display);
-    return { result, ...(unchangedWarning === undefined ? {} : { unchangedWarning }) };
+    return this.clearVerifier.clearAndVerifyAndroid(signal, display, clear, passwordField);
   }
 
-  /**
-   * Focused text before a clear, or undefined when there is nothing to verify (empty field, or an
-   * unreadable one, which is logged). Hint-aware: placeholder text counts as empty.
-   */
-  private async readTextBeforeClear(
-    signal?: AbortSignal,
-    display?: string,
-    passwordField = false,
-  ): Promise<string | undefined> {
-    try {
-      const snapshot = this.readFocusedTextSnapshot(
-        await this.readFreshObservation(signal, display),
-      );
-      if (snapshot === undefined && passwordField) {
-        // A password field is masked by design; an unverifiable clear is expected, not a fault.
-        logger.debug("[SendKeys] Password field is masked; the clear will not be verified");
-      } else if (snapshot === undefined) {
-        logger.warn(
-          "[SendKeys] Focused text is unreadable before the clear; it will not be verified",
-        );
-      }
-      return snapshot && snapshot.length > 0 ? snapshot.text : undefined;
-    } catch (error) {
-      this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] Pre-clear read unavailable: ${errorMessage(error)}`, error);
-      return undefined;
-    }
+  private readFreshObservation(signal?: AbortSignal, display?: string): Promise<ObserveResult> {
+    return this.clearVerifier.readFreshObservation(signal, display);
   }
 
-  /**
-   * Poll until the acknowledged clear is visible, i.e. the field no longer shows the pre-clear
-   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. Text that
-   * is still unchanged after the full poll is a settled state (a mask or permanent prefix already
-   * at its cleared content, or a refused clear), so the clear stays successful with a warning
-   * rather than failing the call (#9943). An unreadable field is retried, then passes.
-   */
-  private verifyAndroidClearApplied(
-    preClearText: string | undefined,
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<string | undefined> {
-    if (preClearText === undefined) {
-      return Promise.resolve(undefined);
-    }
-    return readBackWithSettle(
-      () => this.readClearState(preClearText, signal, display),
-      (state) => state.kind === "applied",
-      {
-        timer: this.timer,
-        finish: (state) => {
-          if (state?.kind === "applied") {
-            return undefined;
-          }
-          if (state?.kind === "pending") {
-            logger.warn(`[SendKeys] ${CLEAR_UNCHANGED_WARNING}`);
-            return CLEAR_UNCHANGED_WARNING;
-          }
-          logger.warn(
-            "[SendKeys] The clear could not be verified: the focused field stayed unreadable",
-          );
-          return undefined;
-        },
-      },
-    );
-  }
-
-  private async readClearState(
-    preClearText: string,
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<AndroidClearState> {
-    try {
-      const snapshot = this.readFocusedTextSnapshot(
-        await this.readFreshObservation(signal, display),
-      );
-      if (snapshot === undefined) {
-        return { kind: "unreadable" };
-      }
-      return snapshot.length === 0 || snapshot.text !== preClearText
-        ? { kind: "applied" }
-        : { kind: "pending" };
-    } catch (error) {
-      this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
-      return { kind: "unreadable" };
-    }
-  }
-
-  private async readFreshObservation(
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<ObserveResult> {
-    this.checkAbort(signal);
-    const observation = await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      skipScreenshot: true,
-      ...(display === undefined ? {} : { display }),
-    });
-    this.checkAbort(signal);
-    return observation;
-  }
-
-  /** Hint-aware length plus the text; undefined when the field cannot be read. */
   private readFocusedTextSnapshot(
     observation: ObserveResult,
   ): { text: string; length: number } | undefined {
-    const hierarchy = observation.viewHierarchy;
-    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
-      return undefined;
-    }
-    // Hint-aware, like ClearText.verifyKeyEventClear: placeholder text counts as empty.
-    const length = getFocusedTextLength(hierarchy);
-    if (length === undefined) {
-      return undefined;
-    }
-    const text = this.readFocusedText(observation);
-    if (length === 0) {
-      return { text: text ?? "", length };
-    }
-    return text === undefined ? undefined : { text, length };
+    return this.clearVerifier.readFocusedTextSnapshot(observation);
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -1203,173 +1094,30 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.device.platform === "ios" ? "xcuiTypeText" : mode;
   }
 
-  private async resolveAutoPasswordMode(
+  private resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<{
-    mode: AndroidSendKeysTypingMode;
-    focusedInputVerified: boolean;
-    verifyPasswordDeliverable: boolean;
-    focusedFieldClass?: string | null;
-    passwordField?: boolean;
-  }> {
-    if (this.device.platform !== "android" || requestedMode !== "auto") {
-      return {
-        mode: this.resolveMode(requestedMode),
-        focusedInputVerified: false,
-        verifyPasswordDeliverable: false,
-      };
-    }
-    let focusedFieldClass: string | null = null;
-    const password = await this.isFocusedAndroidPasswordField(
-      operation,
-      signal,
-      display,
-      (observation) => {
-        focusedFieldClass = focusedImeFieldClass(observation);
-      },
-    );
-    const focusedInputVerified = password !== undefined;
-    if (password && (await this.textClient.supportsImePasswordCommit())) {
-      // The CtrlProxy IME commits and clears password fields like any other field.
-      return {
-        mode: "ime",
-        focusedInputVerified,
-        verifyPasswordDeliverable: false,
-        focusedFieldClass,
-        passwordField: true,
-      };
-    }
-    return {
-      mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
-      focusedInputVerified,
-      verifyPasswordDeliverable: password === true && operation === "insert",
-      focusedFieldClass,
-      ...(password ? { passwordField: true } : {}),
-    };
+  ) {
+    return this.passwordRouting.resolveAutoPasswordMode(requestedMode, operation, signal, display);
   }
 
-  private async verifyPasswordRouting(
+  private verifyPasswordRouting(
     routing: { verifyPasswordDeliverable: boolean },
     text: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (routing.verifyPasswordDeliverable) {
-      await this.requirePasswordTextDeliverable(text, signal);
-    }
+    return this.passwordRouting.verifyPasswordRouting(routing, text, signal);
   }
 
-  /**
-   * Auto insert into a password field is delivered as key events, because CtrlProxy refuses
-   * `request_insert_text` on password fields. A character with no key event (non-ASCII, or an
-   * uppercase letter / shifted symbol below API 31) would be refused mid-run after the earlier
-   * characters were already typed (#9941). Decide up front so nothing is typed in that case.
-   */
-  private async requirePasswordTextDeliverable(text: string, signal?: AbortSignal): Promise<void> {
-    const undeliverable: string[] = [];
-    for (const grapheme of segmentGraphemes(text)) {
-      signal?.throwIfAborted();
-      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
-        undeliverable.push(grapheme);
-      }
-    }
-    if (undeliverable.length === 0) {
-      return;
-    }
-    // Never name the characters: they are part of a password.
-    const nonAscii = undeliverable.filter((grapheme) => !isPrintableAscii(grapheme)).length;
-    const reasons = [
-      ...(nonAscii > 0 ? [`${nonAscii} non-ASCII (no key event exists)`] : []),
-      ...(undeliverable.length > nonAscii
-        ? [
-            `${undeliverable.length - nonAscii} uppercase or shifted (key events need Android 12, API 31, or newer)`,
-          ]
-        : []),
-    ];
-    throw new ActionableError(
-      `Nothing was typed: the text for the focused password field contains ${undeliverable.length} character(s) that cannot be sent as key events on this device (${reasons.join("; ")}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Use operation: "replace" to set the whole value at once.`,
-    );
-  }
-
-  private async isFocusedAndroidPasswordField(
-    operation: SendKeysOperation,
-    signal?: AbortSignal,
-    display?: string,
-    onObservation?: (observation: ObserveResult) => void,
-  ): Promise<boolean | undefined> {
-    const observation = await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      skipScreenshot: true,
-      ...(display === undefined ? {} : { display }),
-    });
-    onObservation?.(observation);
-    const hierarchy = observation.viewHierarchy;
-    if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      // Auto insert already reads focus for password routing. Reject before dispatch
-      // rather than trusting an IME acknowledgement with no readable editable target.
-      if (operation === "insert" && this.targetLayer !== "prototype") {
-        throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
-      }
-      // Replace still dispatches; distinguish absent focus from a focused non-password field.
-      return undefined;
-    }
-    return hasFocusedPasswordField(hierarchy);
-  }
-
-  private async executeIosType(
+  private executeIosType(
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
-    signal?.throwIfAborted();
-    const resolvedMode = "xcuiTypeText" as const;
-    let clearWarning: string | undefined;
-    if (operation === "replace") {
-      const clearResult = await this.clear(signal, display);
-      if (!clearResult.success) {
-        return { ...clearResult, resolvedMode };
-      }
-      clearWarning = clearResult.warning;
-      signal?.throwIfAborted();
-    }
-
-    const before = await readIosTypedTextField(this.observer, this.timer, signal, display);
-    this.session.typingPasswordField = before?.secure === true;
-    signal?.throwIfAborted();
-
-    // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
-    // requested cross-platform mode in metadata, but report the actual mechanism.
-    const deadlineMs = getTextRequestDeadlineMs();
-    const result = await this.textClient.insert(text, {
-      ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(
-        text,
-        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
-      ),
-      abortSignal: signal,
-    });
-    if (!result.success) {
-      return {
-        ...this.withTextWarnings(
-          operation === "replace" ? markPartialAfterMutation(result) : result,
-          [clearWarning],
-        ),
-        resolvedMode,
-      };
-    }
-    return {
-      ...this.withTextWarnings(
-        this.targetLayer === "prototype"
-          ? result
-          : await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
-        [clearWarning],
-      ),
-      resolvedMode,
-    };
+    return this.iosTyper.executeIosType(text, operation, signal, display);
   }
 
   private async executeAndroidType(
@@ -1458,56 +1206,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private readFocusedText(observation: ObserveResult): string | undefined {
-    const detector = new FieldTypeDetector();
-    const focused = observation.focusedElement;
-    if (focused && String(focused.focused) === "true" && detector.detect(focused) === "text") {
-      if (detector.isPasswordField(focused)) {
-        return undefined;
-      }
-      return this.searchableText(focused);
-    }
-    if (!observation.viewHierarchy || !hasFocusedTextInput(observation.viewHierarchy)) {
-      return undefined;
-    }
-    // ClearText already selects focused editable controls, including custom editors
-    // with set_text actions, and preserves password metadata for unreadable values.
-    const editable = getFocusedTextField(observation.viewHierarchy);
-    if (editable !== undefined) {
-      return editable.secure ? undefined : editable.value;
-    }
-    const parser = new DefaultElementParser();
-    for (const root of parser.extractRootNodes(observation.viewHierarchy)) {
-      let found: string | undefined;
-      parser.traverseNode(root, (node) => {
-        const element = parser.extractNodeProperties(node);
-        if (element.focused === true || element.focused === "true") {
-          if (detector.isPasswordField(element)) {
-            return;
-          }
-          found = this.searchableText(element);
-        }
-      });
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  }
-
-  private searchableText(element: Parameters<typeof toSearchable>[0]): string | undefined {
-    const searchable = toSearchable(element);
-    return (
-      searchable.textSources.value ??
-      searchable.textSources.text ??
-      (searchable.capturedTextLength === 0 ? "" : undefined)
-    );
+    return this.clearVerifier.readFocusedText(observation);
   }
 
   private checkAbort(signal?: AbortSignal, error?: unknown): void {
-    signal?.throwIfAborted();
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
-    }
+    checkAbortCheckpoint(signal, error);
   }
 
   private pinImeUser(signal?: AbortSignal): ReturnType<ImeRestore["pinImeUser"]> {
@@ -1757,7 +1460,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
 export class SendKeys {
   private readonly prototypeTextTarget: PrototypeTextTargetReader;
-  private prototypeTargetIdentifiers: readonly string[] = [];
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
   private readonly keyboard?: SendKeysKeyboard;
@@ -1766,9 +1468,10 @@ export class SendKeys {
   private readonly timer: Timer;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly displayTransitionReader: DisplayTransitionReader;
-  /** The selector resolved to a password field during the current execute. */
-  private focusedPasswordTarget = false;
-  private effectiveTargetLayer: HierarchyLayer | undefined;
+  private readonly requestBudget: SendKeysRequestBudget;
+  private readonly focusRecovery: FocusKeyboardRecovery;
+  private readonly target = new TargetState();
+  private readonly targetFocus: TargetFocus;
 
   constructor(
     private readonly device: BootedDevice,
@@ -1828,6 +1531,34 @@ export class SendKeys {
           };
         },
       } satisfies SendKeysTargetFocuser);
+    this.requestBudget = new SendKeysRequestBudget({
+      platform: () => this.device.platform,
+      timer: this.timer,
+      executeUnbounded: (commands, selector, progress, signal, routing) =>
+        this.executeUnbounded(commands, selector, progress, signal, routing),
+    });
+    this.focusRecovery = new FocusKeyboardRecovery({
+      platform: () => this.device.platform,
+      focuser: this.focuser,
+      keyboard: () =>
+        this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer),
+      observer: { execute: (options) => this.observer.execute(options) },
+    });
+    this.targetFocus = new TargetFocus({
+      device: this.device,
+      adb: () => this.adbFactory.create(this.device),
+      observer: this.observer,
+      timer: this.timer,
+      lastRenderedObservation: () => this.lastRenderedObservation,
+      displayTransitionReader: this.displayTransitionReader,
+      target: this.target,
+      isSemanticKey: (key) => isSemanticKey(key),
+      focusWithKeyboardRecovery: (selector, signal, display, options) =>
+        this.focusWithKeyboardRecovery(selector, signal, display, options),
+      setTargetLayer: (layer) => this.executor.setTargetLayer?.(layer),
+      setTargetPasswordField: (passwordField) =>
+        this.executor.setTargetPasswordField?.(passwordField),
+    });
   }
 
   async execute(
@@ -1838,12 +1569,12 @@ export class SendKeys {
     display?: string,
     options?: SendKeysFocusOptions,
   ): Promise<SendKeysResult> {
-    this.focusedPasswordTarget = false;
-    this.prototypeTargetIdentifiers = [selector?.elementId, selector?.testTag].filter(
+    this.target.focusedPassword = false;
+    this.target.prototypeIdentifiers = [selector?.elementId, selector?.testTag].filter(
       (id): id is string => !!id,
     );
-    this.effectiveTargetLayer = options?.layer;
-    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
+    this.target.effectiveLayer = options?.layer;
+    this.executor.setTargetLayer?.(this.target.effectiveLayer);
     this.executor.setTargetPasswordField?.(false);
     const result = await this.executeFocused(
       commands,
@@ -1853,7 +1584,7 @@ export class SendKeys {
       display,
       options,
     );
-    return redactPasswordCommandResults(result, commands, this.focusedPasswordTarget);
+    return redactPasswordCommandResults(result, commands, this.target.focusedPassword);
   }
 
   private async executeFocused(
@@ -1918,7 +1649,7 @@ export class SendKeys {
     return this.executeWithRequestBudget(commands, { selector, progress, signal, routing });
   }
 
-  private async executeWithRequestBudget(
+  private executeWithRequestBudget(
     commands: SendKeysCommand[],
     options: {
       selector?: SendKeysSelector;
@@ -1927,105 +1658,7 @@ export class SendKeys {
       routing: SendKeysRouting;
     },
   ): Promise<SendKeysResult> {
-    const { selector, progress, signal, routing } = options;
-    // Capture the live accessor while request context is active; timers may run outside it.
-    const getDeadlineMs = getRequestContext()?.getDeadlineMs;
-    const deadlineMs = getTextRequestDeadlineMs(getDeadlineMs);
-    if (this.device.platform !== "android" || deadlineMs === undefined) {
-      return this.executeUnbounded(commands, selector, progress, signal, routing);
-    }
-    const controller = new AbortController();
-    const remainingMs = deadlineMs - this.timer.now() - TEXT_MCP_REQUEST_HEADROOM_MS;
-    let handle: NodeJS.Timeout | undefined;
-    const expireOrRearm = () => {
-      const liveRemainingMs =
-        (getTextRequestDeadlineMs(getDeadlineMs) ?? deadlineMs) -
-        this.timer.now() -
-        TEXT_MCP_REQUEST_HEADROOM_MS;
-      if (liveRemainingMs > 0) {
-        handle = this.timer.setTimeout(expireOrRearm, liveRemainingMs);
-      } else {
-        controller.abort(new SendKeysBudgetError());
-      }
-    };
-    expireOrRearm();
-    const combined = combineAbortSignals(signal, controller.signal);
-    const results: SendKeysCommandResult[] = [];
-    let pending = false;
-    try {
-      return await this.executeUnbounded(commands, selector, progress, combined, {
-        ...routing,
-        onCommandStart: () => {
-          pending = true;
-        },
-        onCommandResult: (result) => {
-          pending = false;
-          results.push(result);
-        },
-      });
-    } catch (error) {
-      if (!isImeRestorationFailure(error)) {
-        signal?.throwIfAborted();
-      }
-      if (!isSendKeysBudgetExhausted(combined)) {
-        // Preserve the same error identity as the no-deadline path.
-        throw error;
-      }
-      logger.warn("[SendKeys] Request budget exhausted", error);
-      const result = this.budgetResult(commands.length, results, pending, remainingMs <= 0);
-      if (isImeRestorationFailure(error)) {
-        result.success = false;
-        result.error = `${result.error ?? "Text commit succeeded, but"} ${errorMessage(error)}`;
-      }
-      return result;
-    } finally {
-      if (handle !== undefined) {
-        this.timer.clearTimeout(handle);
-      }
-    }
-  }
-
-  private budgetResult(
-    commandCount: number,
-    results: SendKeysCommandResult[],
-    indeterminate: boolean,
-    refusedAtAdmission: boolean,
-  ): SendKeysResult {
-    const completedCommands = results.filter((result) => result.success).length;
-    const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
-    if (completedCommands === commandCount) {
-      return {
-        success: true,
-        completedCommands,
-        commands: results,
-        warning: [
-          ...warnings,
-          "All commands were delivered; the request budget expired before final observation completed.",
-        ].join(" "),
-      };
-    }
-    const firstUnconfirmed = results.length;
-    const notSent = commandCount - firstUnconfirmed - (indeterminate ? 1 : 0);
-    const error =
-      `sendKeys request budget exhausted: ${completedCommands} command(s) delivered; ` +
-      `${notSent} command(s) not sent.` +
-      (indeterminate
-        ? ` Command ${firstUnconfirmed} outcome is indeterminate: it may have been sent but was not acknowledged. Do not retry automatically; observe before retrying.`
-        : refusedAtAdmission
-          ? " no request budget remained at admission; no commands were sent."
-          : " No further commands were dispatched.");
-    return {
-      success: false,
-      completedCommands,
-      failedIndex: firstUnconfirmed,
-      commands: results,
-      error,
-      warning: [
-        ...warnings,
-        "Partial application: already delivered commands are not rolled back.",
-      ].join(" "),
-      retryable: false,
-    };
+    return this.requestBudget.executeWithRequestBudget(commands, options);
   }
 
   private validateFocusOptions(
@@ -2058,96 +1691,17 @@ export class SendKeys {
     );
   }
 
-  private async prepareExplicitDisplay(
+  private prepareExplicitDisplay(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     display: string,
     signal?: AbortSignal,
     options: SendKeysFocusOptions = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
-    const target = await prepareTargetDisplayAction(
-      this.device,
-      display,
-      { execute: (options) => this.observer.execute({ ...options, skipScreenshot: true }) },
-      this.adbFactory.create(this.device),
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
-    );
-    if (
-      this.device.platform === "android" &&
-      !selector &&
-      commands.some((command) => command.action !== "key" || isSemanticKey(command.key))
-    ) {
-      await this.assertFocusedDisplay(target.observation, signal);
-    }
-    if (selector && this.device.platform === "android") {
-      const focused = await this.focusSelector(selector, signal, display, options);
-      if (!focused.success) {
-        throw new Error(focused.error ?? "Unable to focus target field");
-      }
-      return { displayId: target.displayId, assertCurrent: target.assertCurrent };
-    }
-    return { displayId: target.displayId, selector, assertCurrent: target.assertCurrent };
+    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, signal, options);
   }
 
-  private async assertFocusedDisplay(
-    observation: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (selectablePanels(this.device.displays).length === 1) {
-      return;
-    }
-    // An explicitly captured panel (and its focused node) does not establish global input focus.
-    const focusedWindow = observation.viewHierarchy?.windows?.find((window) => window.isFocused);
-    const focusedPanel = focusedWindow
-      ? await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
-          this.device,
-          this.adbFactory.create(this.device),
-          focusedWindow.displayId,
-          signal,
-          focusedWindow.panelUniqueId,
-        )
-      : undefined;
-    if (focusedPanel?.key === observation.display.key) {
-      return;
-    }
-    // CtrlProxy only returns the pinned display's windows, so an unfocused pin cannot see which
-    // display holds focus. Ask the system, on this refusal path only.
-    const namedPanel = focusedPanel ?? (await this.topFocusedPanel(signal));
-    const retarget = namedPanel
-      ? ` Target it with setActiveDevice {display: "${namedPanel.key}"}, or use`
-      : " Use";
-    throw new ActionableError(
-      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${namedPanel ? `"${namedPanel.key}"` : "unknown"}.${retarget} tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
-    );
-  }
-
-  private async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
-    try {
-      const adb = this.adbFactory.create(this.device);
-      const result = await adb.executeCommand(
-        "shell dumpsys window | grep mTopFocusedDisplayId",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
-      const displayId = parseTopFocusedDisplayId(result.stdout);
-      return await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
-        this.device,
-        adb,
-        displayId,
-        signal,
-      );
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`sendKeys top focused display lookup failed: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-  }
-
-  private async executeBoundedIosIme(
+  private executeBoundedIosIme(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     progress: ProgressCallback | undefined,
@@ -2155,74 +1709,14 @@ export class SendKeys {
     key: SendKeysSemanticKey,
     target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
   ): Promise<SendKeysResult> {
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) {
-      controller.abort();
-    }
-    let dispatched = false;
-    let actionResult: SendKeysCommandResult | undefined;
-    const deadline = Symbol("IME action deadline");
-    let interaction!: Promise<SendKeysResult>;
-    const startInteraction = () =>
-      (interaction = this.executeUnbounded(commands, selector, progress, controller.signal, {
-        onDispatch: () => {
-          dispatched = true;
-        },
-        onCommandResult: (result) => {
-          actionResult = result;
-        },
-        ...target,
-      }));
-    try {
-      try {
-        return await raceWithDeadline(startInteraction, {
-          timer: this.timer,
-          timeoutMs: 5000,
-          label: "iOS IME interaction",
-          timeoutError: () => deadline,
-        });
-      } catch (error) {
-        if (error !== deadline) {
-          throw error;
-        }
-      }
-      controller.abort();
-      void interaction.catch((error) => {
-        // The timed-out interaction can still settle while the connection recovers.
-        logger.debug(
-          `[SendKeys] iOS IME interaction settled after deadline: ${errorMessage(error)}`,
-        );
-      });
-      if (actionResult) {
-        return {
-          success: actionResult.success,
-          completedCommands: actionResult.success ? 1 : 0,
-          ...(!actionResult.success ? { failedIndex: 0, error: actionResult.error } : {}),
-          commands: [actionResult],
-          ...(actionResult.success
-            ? {
-                warning:
-                  "Post-action observation did not complete within 5000ms; the IME action was already applied.",
-              }
-            : {}),
-        };
-      }
-      const error = dispatched
-        ? `IME action '${key}' outcome is indeterminate: the request was dispatched but no result was received within 5000ms. Do not retry automatically.`
-        : `IME action '${key}' timed out before dispatch after 5000ms.`;
-      return {
-        success: false,
-        completedCommands: 0,
-        failedIndex: 0,
-        commands: [{ index: 0, action: "key", key, success: false, error, retryable: !dispatched }],
-        error,
-        retryable: !dispatched,
-      };
-    } finally {
-      signal?.removeEventListener("abort", abort);
-    }
+    return this.requestBudget.executeBoundedIosIme(
+      commands,
+      selector,
+      progress,
+      signal,
+      key,
+      target,
+    );
   }
 
   private async executeUnbounded(
@@ -2339,125 +1833,30 @@ export class SendKeys {
     return undefined;
   }
 
-  private async focusTarget(
+  private focusTarget(
     selector?: SendKeysSelector,
     signal?: AbortSignal,
     routing: SendKeysRouting = {},
   ): Promise<SendKeysFailure | undefined> {
-    if (!selector) {
-      return undefined;
-    }
-    signal?.throwIfAborted();
-    const result = await this.focusSelector(selector, signal, routing.display, {
-      container: routing.container,
-      selectionStrategy: routing.selectionStrategy,
-      layer: routing.layer,
-    });
-    return result.success
-      ? undefined
-      : {
-          index: 0,
-          error: result.error ?? "Failed to focus the target element before sending keys",
-        };
+    return this.targetFocus.focusTarget(selector, signal, routing);
   }
 
-  private async focusSelector(
+  private focusSelector(
     selector: SendKeysSelector,
     signal?: AbortSignal,
     display?: string,
     options: SendKeysFocusOptions = {},
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
-    signal?.throwIfAborted();
-    this.effectiveTargetLayer = options.layer ?? result.layer ?? this.effectiveTargetLayer;
-    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
-    this.focusedPasswordTarget ||= result.passwordField === true;
-    this.executor.setTargetPasswordField?.(this.focusedPasswordTarget);
-    this.prototypeTargetIdentifiers = [
-      ...this.prototypeTargetIdentifiers,
-      ...(result.identifiers ?? []),
-    ];
-    if (!result.success && result[tapFocusFailure]) {
-      return {
-        ...result,
-        error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,
-      };
-    }
-    return result;
+    return this.targetFocus.focusSelector(selector, signal, display, options);
   }
 
-  private async focusWithKeyboardRecovery(
+  private focusWithKeyboardRecovery(
     selector: SendKeysSelector,
     signal?: AbortSignal,
     display?: string,
     options?: SendKeysFocusOptions,
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    signal?.throwIfAborted();
-    try {
-      return await this.focuser.focus(selector, signal, display, options);
-    } catch (error) {
-      signal?.throwIfAborted();
-      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
-        throw error;
-      }
-      // Keyboard.close cannot target a display. Never dismiss on an ambient display
-      // when this action is explicitly routed (including display "0").
-      if (display !== undefined) {
-        logger.warn("[SendKeys] Display-routed target is covered by the IME", error);
-        return { success: false, error: error.message };
-      }
-      logger.warn("[SendKeys] Target is covered by the IME; closing the keyboard", error);
-      try {
-        return await this.retryFocusAfterKeyboardClose(selector, error, signal, options);
-      } catch (recoveryError) {
-        signal?.throwIfAborted();
-        logger.warn(
-          `[SendKeys] IME focus recovery failed: ${errorMessage(recoveryError)}`,
-          recoveryError,
-        );
-        return { success: false, error: errorMessage(recoveryError) };
-      }
-    }
-  }
-
-  private async retryFocusAfterKeyboardClose(
-    selector: SendKeysSelector,
-    occlusion: KeyboardOcclusionError,
-    signal?: AbortSignal,
-    options?: SendKeysFocusOptions,
-  ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    const keyboard =
-      this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
-    let dismissal: Awaited<ReturnType<SendKeysKeyboard["execute"]>>;
-    try {
-      dismissal = await keyboard.execute("close", signal);
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`[SendKeys] Keyboard close failed: ${errorMessage(error)}`, error);
-      return { success: false, error: occlusion.message };
-    }
-    signal?.throwIfAborted();
-    if (!dismissal.success) {
-      return { success: false, error: occlusion.message };
-    }
-    // Mirror SetUIState's fresh observation and verified-focus requirement. Each
-    // focus execution re-resolves the selector against the refreshed hierarchy.
-    await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      minTimestamp: 0,
-      skipScreenshot: true,
-    });
-    signal?.throwIfAborted();
-    const retry = await this.focuser.focus(selector, signal, undefined, options);
-    signal?.throwIfAborted();
-    if (retry.success && retry.focusVerified !== true) {
-      return {
-        success: false,
-        error: "Failed to confirm focus on target field after closing the keyboard",
-      };
-    }
-    return retry;
+    return this.focusRecovery.focusWithKeyboardRecovery(selector, signal, display, options);
   }
 
   private async executeCommands(
@@ -2580,16 +1979,16 @@ export class SendKeys {
     signal?: AbortSignal,
   ): Promise<PrototypeTextReading | undefined> {
     if (
-      this.effectiveTargetLayer !== "prototype" ||
+      this.target.effectiveLayer !== "prototype" ||
       command.action !== "type" ||
       !command.text ||
-      this.focusedPasswordTarget
+      this.target.focusedPassword
     ) {
       return undefined;
     }
     try {
       return await this.prototypeTextTarget.read(
-        { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+        { identifiers: this.target.prototypeIdentifiers, display: routing.display },
         signal,
       );
     } catch (error) {
@@ -2607,18 +2006,18 @@ export class SendKeys {
     before?: PrototypeTextReading,
   ): Promise<SendKeysCommandResult> {
     if (
-      this.effectiveTargetLayer !== "prototype" ||
+      this.target.effectiveLayer !== "prototype" ||
       command.action !== "type" ||
       !command.text ||
       !result.success ||
-      this.focusedPasswordTarget ||
+      this.target.focusedPassword ||
       this.executor.isPasswordTarget?.()
     ) {
       return result;
     }
     const verification = await verifyPrototypeTextTarget({
       reader: this.prototypeTextTarget,
-      target: { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+      target: { identifiers: this.target.prototypeIdentifiers, display: routing.display },
       text: command.text,
       operation: command.operation ?? "insert",
       timer: this.timer,

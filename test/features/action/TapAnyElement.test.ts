@@ -1,10 +1,7 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
-import {
-  AdbClient,
-  AdbCommandTimeoutError,
-} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
@@ -827,7 +824,7 @@ describe("tapAny long press safety", () => {
     const displayLookup = mock(() => undefined);
     const action = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "tap-any-long-press-bound" },
-      adb as unknown as AdbClient,
+      adb,
       {
         timer,
         elementSelector: new FakeElementSelector(element),
@@ -872,9 +869,10 @@ describe("tapAny long press safety", () => {
     [60000, 120000],
   ])("budget admission accepts duration %s with remaining %s", async (duration, remaining) => {
     const h = setup();
-    const result = await h.action.execute({ action: "longPress", duration }, undefined, undefined, {
-      requestDeadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining,
-    });
+    const result = await h.action.execute(
+      { action: "longPress", duration },
+      { deadlineMs: remaining === undefined ? undefined : h.timer.now() + remaining },
+    );
     expect(result.success).toBe(true);
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
@@ -891,9 +889,7 @@ describe("tapAny long press safety", () => {
       const observe = spyOn(h.action, "observedInteraction");
       const result = await h.action.execute(
         { action: "longPress", duration: 20000, display: "1" },
-        undefined,
-        undefined,
-        { requestDeadlineMs: h.timer.now() + remaining },
+        { deadlineMs: h.timer.now() + remaining },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -926,8 +922,7 @@ describe("tapAny long press safety", () => {
       try {
         const result = await h.action.execute(
           { action: "longPress", duration: 1500 },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         expect(result.success).toBe(false);
         expect(result.error).toContain("press may still be held on the device for up to 1500 ms");

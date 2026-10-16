@@ -1205,7 +1205,12 @@ describe("Keyboard", () => {
       await provider.getViewHierarchy(controller.signal, { timeoutMs: 2000, forceFresh: true });
       expect(selections).toEqual([platform]);
       expect(invalidations).toEqual([platform]);
-      expect(reads[0]?.slice(2)).toEqual([false, 0, controller.signal, 2000]);
+      expect(reads[0]?.[1]).toEqual({
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        signal: controller.signal,
+        timeoutMs: 2000,
+      });
       await provider.getViewHierarchy();
       expect(invalidations).toEqual([platform]);
     },

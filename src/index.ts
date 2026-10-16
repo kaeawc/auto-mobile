@@ -53,13 +53,8 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
-import {
-  assertManagedSlotOwnerIdentity,
-  assertManagedSlotOwnerRunning,
-  assertManagedSlotsSupported,
-  type ManagedSlotConfig,
-} from "./models/managedSlotConfig";
-import type { ManagedSlotsResult } from "./models/managedSlotsResult";
+import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./devices/sessionConfig";
+import type { SessionBrokerResult } from "./devices/sessionBrokerResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
 import { sweepNativeHelperOrphans } from "./utils/nativeHelpers/sweepNativeHelperOrphans";
@@ -256,7 +251,7 @@ async function main() {
       daemonHost,
       initialSessionUuid,
       livenessOwnerToken,
-      managedSlotConfig,
+      sessionConfig,
       debugPerf,
       debug,
       strictPort,
@@ -303,28 +298,20 @@ async function main() {
       return;
     }
     let ownerGenerationToken: string | undefined;
-    // Refuse before any daemon or device work rather than run unmanaged (#11208).
-    assertManagedSlotsSupported(managedSlotConfig);
-    // Only the STDIO proxy has an execution owner; daemon and CLI calls may run after it exited (#11286).
     if (
       !cliMode &&
       !daemonMode &&
       !daemonRequested &&
-      managedSlotConfig?.executionOwnerPid !== undefined
+      sessionConfig?.executionOwnerPid !== undefined
     ) {
       const [{ isProcessRunning }, { defaultLockOwnerGenerationProbe }] = await Promise.all([
         import("./utils/processLiveness"),
         import("./daemon/lockOwnerGeneration"),
       ]);
-      assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
-      const ownerIdentityVerdict = assertManagedSlotOwnerIdentity(
-        managedSlotConfig,
-        (pid, recorded) => defaultLockOwnerGenerationProbe.compare(pid, recorded),
-      );
-      ownerGenerationToken =
-        ownerIdentityVerdict === "same"
-          ? managedSlotConfig.executionOwnerStartIdentity
-          : defaultLockOwnerGenerationProbe.current(managedSlotConfig.executionOwnerPid);
+      ownerGenerationToken = resolveSessionOwnerGenerationToken(sessionConfig, {
+        isProcessRunning: (pid) => isProcessRunning(pid),
+        probe: defaultLockOwnerGenerationProbe,
+      });
     }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
@@ -781,10 +768,10 @@ async function main() {
         stdioTransport.stopSending("stdout write failed"),
       );
 
-      // A managed slot proxy reads stdin from the start, so EOF during its acquisition shuts it
+      // A broker binding proxy reads stdin from the start, so EOF during its acquisition shuts it
       // down (aborting the acquisition), while initialize waits for the acquisition's result.
       const earlyTransport =
-        useProxyMode && managedSlotConfig
+        useProxyMode && sessionConfig
           ? new (await import("./server/earlyStartTransport")).EarlyStartTransport(stdioTransport)
           : undefined;
       await earlyTransport?.startEarly();
@@ -803,17 +790,17 @@ async function main() {
           });
           // Published first, so shutdown (stdin EOF, SIGTERM) closes it and aborts an acquisition.
           stdioProxy = proxy;
-          const managedSlots = managedSlotConfig
-            ? await acquireManagedSlotsBeforeServing(
+          const session = sessionConfig
+            ? await acquireBrokerSessionBeforeServing(
                 proxy,
-                managedSlotConfig,
+                sessionConfig,
                 launchParentPid,
                 ownerGenerationToken,
               )
             : undefined;
           const result = createProxyMcpServer({
             proxy,
-            ...(managedSlots ? { managedSlots } : {}),
+            ...(session ? { session } : {}),
           });
           server = result.server;
           proxyToClaimInitialSession = result.proxy;
@@ -851,29 +838,24 @@ async function main() {
   }
 }
 
-/**
- * Acquire a managed slot execution's slots before the MCP server exists (#11173), so `initialize`
- * and `tools/list` are answered only with the result: it rides in initialize and the
- * `automobile:managed-slots` resource, and a failure serves no tools. The owner watch starts first
- * (#11176): owner exit or re-parenting shuts the proxy down, which aborts the acquisition.
- */
-async function acquireManagedSlotsBeforeServing(
-  proxy: { acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> },
-  config: ManagedSlotConfig,
+/** Prepare one durable broker request while stdin and owner-loss cancellation are already armed. */
+async function acquireBrokerSessionBeforeServing(
+  proxy: { acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult> },
+  config: SessionConfig,
   launchParentPid: number,
   ownerGenerationToken?: string,
-): Promise<ManagedSlotsResult> {
+): Promise<SessionBrokerResult> {
   await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid, ownerGenerationToken);
-  const result = await proxy.acquireManagedSlots(config);
+  const result = await proxy.acquireBrokerSession(config);
   const { logger } = await import("./utils/logger");
   logger.info(
-    `[ManagedSlots] Acquisition ${result.outcome}` +
+    `[SessionBroker] Acquisition ${result.outcome}` +
       (result.failure ? ` (${result.failure.code})` : ""),
   );
   return result;
 }
 
-/** Watch the managed slot execution's owner (by default the launching parent) (#11176). */
+/** Watch the broker binding execution's owner (by default the launching parent) (#11176). */
 async function startExecutionOwnerWatch(
   launchParentPid: number,
   ownerPid?: number,

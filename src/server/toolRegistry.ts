@@ -60,6 +60,7 @@ import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { UnissuedSessionError, type Session, type SessionManager } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
@@ -74,12 +75,12 @@ import {
 } from "../daemon/frameDeviceIdentity";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import {
-  managedConnectionControlRefusal,
-  managedConnectionPlainToolRefusal,
-} from "../daemon/managedSlots/managedConnectionScope";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
-import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
-import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+  brokerConnectionControlRefusal,
+  brokerConnectionPlainToolRefusal,
+} from "../daemon/sessionBroker/connectionScope";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
+import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
@@ -450,9 +451,17 @@ interface SessionlessDeviceRead {
   assertAuthorized(device: BootedDevice): void;
 }
 
-interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
+/** Behaviour a tool declares on its definition instead of the pipeline keying on its name (#11825). */
+interface ToolTraits {
+  /** Always ends an app's process (not `appLifecycle` `killBackgrounded`, the state-preserving kill). */
+  stopsApp?: boolean;
+  /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
+  replacesProcess?: boolean;
+}
+
+interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions, ToolTraits {
   shouldEnsureDevice?: (args: T) => boolean;
-  /** Opt-in start admission: holder check before managed slots, held-session requirement after. */
+  /** Opt-in start admission: holder check before broker bindings, held-session requirement after. */
   assertHeldDeviceStart?: (
     deviceId: string | undefined,
     sessionUuid: string | undefined,
@@ -496,7 +505,7 @@ interface CachedToolDefinitionSchemas {
 }
 
 // Interface for a registered tool
-export interface RegisteredTool {
+export interface RegisteredTool extends ToolTraits {
   name: string;
   description: string;
   schema: any;
@@ -593,6 +602,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
+    traits?: ToolTraits,
   ): NavigationToolCallHandle | undefined;
 }
 
@@ -820,7 +830,7 @@ function readRestartReservation(deviceIds: readonly string[], platform: unknown)
     return undefined;
   }
   const pool = state.getDevicePool();
-  for (const p of managedSlotPlatformsFor(undefined, platform)) {
+  for (const p of bindingPlatformsFor(undefined, platform)) {
     const reservation = pool.restartReservationForStart?.(p, deviceIds, {});
     if (reservation) {
       return reservation;
@@ -1108,13 +1118,13 @@ function multipleDevicesError(
 
 /**
  * Whether a sessionless READ's target is someone else's (#11641): a local session or autolock
- * holder, a managed slot (idle or not), a restart reservation, or a device another daemon claims.
+ * holder, a broker binding (idle or not), a restart reservation, or a device another daemon claims.
  * Such a read watches the
  * device through the read-only path and is never refused; readiness (the current-device pin,
  * appearance and settings writes) on a held target is the holder's alone.
  * A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
  * (owner decision 2026-10-12, #11964)
- * The slot and foreign-daemon verdicts are the pool gates a control call is refused by,
+ * The binding and foreign-daemon verdicts are the pool gates a control call is refused by,
  * with their one-second snapshots. An ownership state
  * that cannot be read counts as held: a read must not risk writing to someone else's device.
  * False outside daemon mode, where nothing can hold a device.
@@ -1149,25 +1159,25 @@ async function isSessionlessReadTargetHeld(
     ) {
       return true;
     }
-    for (const platform of managedSlotPlatformsFor(
+    for (const platform of bindingPlatformsFor(
       pool.getDevice(deviceId)?.platform,
       requestedPlatform,
     )) {
-      await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+      await bindingPoolGate(pool).assertNotAssignedToBinding?.({
         action: toolName,
         deviceId,
         platform,
-        maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+        maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
       });
       await assertControlNotOnForeignDaemonDevice({ deviceId, platform, gate: pool });
     }
     return false;
   } catch (error) {
     if (
-      error instanceof DeviceAssignedToManagedSlotError ||
+      error instanceof DeviceAssignedToBindingError ||
       error instanceof DeviceOwnedByOtherDaemonError
     ) {
-      // A slot or another daemon holds the device: an expected verdict, so the read watches it.
+      // A broker binding or another daemon holds the device: an expected verdict, so the read watches it.
       logger.debug(
         `[ToolRegistry] ${toolName} on ${deviceId} is read-only: ${errorMessage(error)}`,
       );
@@ -1203,7 +1213,7 @@ function gatedReadSessionDevice(sessionUuid: string | undefined): string | undef
   const state = DaemonState.getInstance();
   return sessionUuid &&
     state.isInitialized() &&
-    state.getDevicePool().managedSlotOwnershipGate(sessionUuid)
+    state.getDevicePool().bindingOwnershipGate(sessionUuid)
     ? state.getSessionManager().getSession(sessionUuid)?.assignedDevice
     : undefined;
 }
@@ -1325,7 +1335,7 @@ function isDeviceIdControlCall(
 
 /**
  * A device-aware call's `deviceId` as the pool's canonical id, resolved ONCE before any holder,
- * managed-slot, routing, admission or queue decision: everything after this line, the handler
+ * broker binding, routing, admission or queue decision: everything after this line, the handler
  * included, sees only the canonical id. A call that resolves no device probes nothing.
  */
 function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | undefined {
@@ -1642,7 +1652,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     // An explicit target held by another session is refused before admission or any device work,
     // so a non-holder (including an observer-only or sessionless caller) gets the typed code.
-    const managedSlotAccess = {
+    const bindingAccess = {
       toolName: name,
       readOnly,
       sessionUuid,
@@ -1650,11 +1660,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       platform: args.platform,
     };
     options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid, false);
-    await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: providedDeviceId });
-    await assertToolControlTargetIdentity(
-      { ...managedSlotAccess, deviceId: providedDeviceId },
-      signal,
-    );
+    await assertBindingControlAccess({ ...bindingAccess, deviceId: providedDeviceId });
+    await assertToolControlTargetIdentity({ ...bindingAccess, deviceId: providedDeviceId }, signal);
     assertToolCallerHoldsDevice(name, readOnly, providedDeviceId, sessionUuid, autolockEnabled);
     if (providedDeviceId && !sessionUuid) {
       options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid);
@@ -1695,8 +1702,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           sessionUuid,
           false,
         );
-        await assertManagedSlotControlAccess({
-          ...managedSlotAccess,
+        await assertBindingControlAccess({
+          ...bindingAccess,
           deviceId: admittedSession.assignedDevice || providedDeviceId,
         });
         options.assertHeldDeviceStart(admittedSession.assignedDevice || undefined, sessionUuid);
@@ -1826,7 +1833,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // A sessionless read that would land on a held device (its explicit deviceId, or the device
         // readiness would select) watches it through the read-only path: no readiness, pin or
         // settings work on the holder's device (#10830, #10970). The holder may also be a managed
-        // slot or another daemon (#11641). Check the raw id before discovery: a slot may know
+        // broker binding or another daemon (#11641). Check the raw id before discovery: a broker binding may know
         // only the AVD name, and a held serial needs no discovery scan.
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
         // (owner decision 2026-10-12, #11964)
@@ -1884,15 +1891,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // A read is marked for its readiness phase only (#10970); once ready it watches.
         if (readinessTarget !== providedDeviceId) {
           options.assertHeldDeviceStart?.(readinessTarget, sessionUuid, false);
-          await assertManagedSlotControlAccess({
-            ...managedSlotAccess,
+          await assertBindingControlAccess({
+            ...bindingAccess,
             deviceId: readinessTarget,
             remedy: !providedDeviceId
               ? "This call named no device and the device it would use is driven by another AutoMobile daemon: pass the deviceId of a device this daemon may drive, or acquire one with getAndroid/getApple and pass its sessionUuid."
               : undefined,
           });
           await assertToolControlTargetIdentity(
-            { ...managedSlotAccess, deviceId: readinessTarget },
+            { ...bindingAccess, deviceId: readinessTarget },
             signal,
           );
         }
@@ -1944,13 +1951,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     // The resolved target too: a call without a deviceId can land on a held device.
     if (device && device.deviceId !== providedDeviceId) {
       options.assertHeldDeviceStart?.(device.deviceId, sessionUuid, false);
-      await assertManagedSlotControlAccess({
-        ...managedSlotAccess,
+      await assertBindingControlAccess({
+        ...bindingAccess,
         deviceId: device.deviceId,
         platform: device.platform,
       });
       await assertToolControlTargetIdentity(
-        { ...managedSlotAccess, deviceId: device.deviceId, platform: device.platform, device },
+        { ...bindingAccess, deviceId: device.deviceId, platform: device.platform, device },
         signal,
       );
     }
@@ -2235,30 +2242,13 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
 ]);
 
 /**
- * Tools that always end an app's process. `appLifecycle` `killBackgrounded` is deliberately not
- * here: it is the state-preserving kill, so the app comes back on the screen it was left on.
- */
-const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
-  "terminateApp",
-  "crashApp",
-  "uninstallApp",
-]);
-
-/**
- * Tools that replace a process without naming the app in their arguments: `installApp` takes an
- * artifact path, and installing over a running app restarts it, so every remembered screen is
- * forgotten rather than guessing which app it was (#10206 review).
- */
-const PROCESS_REPLACING_TOOLS: ReadonlySet<string> = new Set(["installApp"]);
-
-/**
  * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
  * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
  * counts when it asks for a cold boot or cleared data.
  */
-function appStoppedByToolCall(name: string, args: any): string | undefined {
+function appStoppedByToolCall(name: string, args: any, traits: ToolTraits): string | undefined {
   const stops =
-    APP_STOPPING_TOOLS.has(name) ||
+    traits.stopsApp === true ||
     (name === "launchApp" && (args?.coldBoot === true || args?.clearAppData === true));
   const appId = args?.appId ?? args?.packageName;
   return stops && typeof appId === "string" && appId.length > 0 ? appId : undefined;
@@ -2270,12 +2260,13 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
+    traits: ToolTraits = {},
   ): NavigationToolCallHandle | undefined {
-    const stoppedApp = appStoppedByToolCall(name, args);
+    const stoppedApp = appStoppedByToolCall(name, args, traits);
     if (stoppedApp) {
       this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
     }
-    if (PROCESS_REPLACING_TOOLS.has(name)) {
+    if (traits.replacesProcess === true) {
       this.navigationManager(sessionUuid).forgetAllAppScreens();
     }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
@@ -2874,15 +2865,15 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // release cannot leave the others holding their devices (#11091).
       const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
       // A plan run owns the derived label sessions it created and its base session, with one
-      // exception: a managed connection's slot session belongs to the connection for its
-      // lifetime (#11421). Its slot set is fixed and a `plan-auto-release` UUID is not reusable,
+      // exception: a managed connection's binding session belongs to the connection for its
+      // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
       // so releasing it would strand the connection. A generic connection's base session is
       // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
       if (
-        DaemonState.getInstance().getManagedConnectionScopes().forSlotSession(releaseSessionUuid)
+        DaemonState.getInstance().getBrokerConnectionScopes().forGrantedSession(releaseSessionUuid)
       ) {
         logger.info(
-          `[PlanLifecycle] Keeping managed slot session ${releaseSessionUuid} and its device ` +
+          `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
             "after executePlan: it belongs to its connection",
         );
       } else if (
@@ -3143,7 +3134,7 @@ async function reconciledUnidentifiedToolTargetRow(
   return rows.find((row) => row.deviceId === synthetic.deviceId) ?? synthetic;
 }
 
-/** Async identity gate beside managed-slot checks; the synchronous holder/mark turn stays intact. */
+/** Async identity gate beside broker binding checks; the synchronous holder/mark turn stays intact. */
 async function assertToolControlTargetIdentity(
   input: ToolTargetIdentityInput & { toolName: string; readOnly: boolean; sessionUuid?: string },
   signal?: AbortSignal,
@@ -3209,14 +3200,14 @@ function assertToolCallerHoldsDevice(
 }
 
 /**
- * Managed slots (#11178), beside the session-holder check: a control call may not act on a device
- * another managed slot holds, idle or not, unless it runs as that slot's execution
- * (`device_assigned_to_managed_slot`); and a managed connection may control only its own slot
- * devices and sessions (`device_outside_managed_slots`). Nor may it act on a device no local session
+ * Broker bindings (#11178), beside the session-holder check: a control call may not act on a device
+ * another broker binding holds, idle or not, unless it runs as that binding's execution
+ * (`device_assigned_to_binding`); and a managed connection may control only its own binding
+ * devices and sessions (`device_outside_broker_grant`). Nor may it act on a device no local session
  * holds while another daemon claims it (`device_owned_by_other_daemon`, #11349). Reads stay open
  * everywhere (Q6).
  */
-async function assertManagedSlotControlAccess(input: {
+async function assertBindingControlAccess(input: {
   toolName: string;
   readOnly: boolean;
   deviceId: string | undefined;
@@ -3234,17 +3225,17 @@ async function assertManagedSlotControlAccess(input: {
     ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ?? input.sessionUuid)
     : undefined;
   // An internal call (plan step, nested tool) carries no socket session id: its connection is
-  // recognized by the slot session it runs on (#11397).
-  const connectionScopes = daemonState.getManagedConnectionScopes();
-  const connectionRefusal = managedConnectionControlRefusal({
+  // recognized by the broker session it runs on (#11397).
+  const connectionScopes = daemonState.getBrokerConnectionScopes();
+  const connectionRefusal = brokerConnectionControlRefusal({
     binding:
       connectionScopes.get(input.mcpSessionId) ??
-      connectionScopes.forSlotSession(requesterSessionUuid),
+      connectionScopes.forGrantedSession(requesterSessionUuid),
     action: input.toolName,
     deviceId: input.deviceId,
     requesterSessionUuid,
-    slotDeviceOf: (slotSessionUuid) =>
-      sessionManager.getSession(slotSessionUuid)?.assignedDevice ?? undefined,
+    grantedDeviceOf: (grantedSessionUuid) =>
+      sessionManager.getSession(grantedSessionUuid)?.assignedDevice ?? undefined,
   });
   if (connectionRefusal) {
     throw connectionRefusal;
@@ -3254,16 +3245,13 @@ async function assertManagedSlotControlAccess(input: {
     return;
   }
   const pool = daemonState.getDevicePool();
-  for (const platform of managedSlotPlatformsFor(
-    pool.getDevice(deviceId)?.platform,
-    input.platform,
-  )) {
-    await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+  for (const platform of bindingPlatformsFor(pool.getDevice(deviceId)?.platform, input.platform)) {
+    await bindingPoolGate(pool).assertNotAssignedToBinding?.({
       action: input.toolName,
       deviceId,
       platform,
       requesterSessionUuid,
-      maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+      maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
     });
     // A device no local session holds may be another daemon's (#11349).
     await assertControlNotOnForeignDaemonDevice({
@@ -3311,12 +3299,12 @@ function refuseInternalControlOnForeignOwnedSession(
 
 /**
  * The managed-connection gate for internal calls (#11397). The MCP ingress refuses a managed
- * connection's lifecycle tools and off-slot `setActiveDevice`, but a plan step or nested tool call
- * never passes the ingress and carries no socket session id. It is recognized by the slot session
- * it runs on, so a plan on a slot session cannot acquire, boot, stop or delete a device either.
- * Slot acquisition's own provisioning runs on no slot session and is unaffected.
+ * connection's lifecycle tools and off-binding `setActiveDevice`, but a plan step or nested tool call
+ * never passes the ingress and carries no socket session id. It is recognized by the binding session
+ * it runs on, so a plan on a binding session cannot acquire, boot, stop or delete a device either.
+ * Binding acquisition's own provisioning runs on no binding session and is unaffected.
  */
-function assertInternalCallWithinManagedSlots(
+function assertInternalCallWithinBrokerGrant(
   toolName: string,
   invocation: { args: Record<string, unknown>; routingSessionUuid?: string },
 ): void {
@@ -3328,13 +3316,13 @@ function assertInternalCallWithinManagedSlots(
   const requesterSessionUuid =
     resolveToolSelectionBaseSessionUuid(invocation.routingSessionUuid, sessionManager) ??
     invocation.routingSessionUuid;
-  const refusal = managedConnectionPlainToolRefusal({
-    binding: daemonState.getManagedConnectionScopes().forSlotSession(requesterSessionUuid),
+  const refusal = brokerConnectionPlainToolRefusal({
+    binding: daemonState.getBrokerConnectionScopes().forGrantedSession(requesterSessionUuid),
     toolName,
     args: invocation.args,
     requesterSessionUuid,
-    slotDeviceOf: (slotSessionUuid) =>
-      sessionManager.getSession(slotSessionUuid)?.assignedDevice ?? undefined,
+    grantedDeviceOf: (grantedSessionUuid) =>
+      sessionManager.getSession(grantedSessionUuid)?.assignedDevice ?? undefined,
   });
   if (refusal) {
     throw refusal;
@@ -3342,7 +3330,7 @@ function assertInternalCallWithinManagedSlots(
 }
 
 /** The platforms a target may be on: the pool's record, else the call's platform, else both. */
-function managedSlotPlatformsFor(
+function bindingPlatformsFor(
   pooledPlatform: "android" | "ios" | undefined,
   requestedPlatform: unknown,
 ): Array<"android" | "ios"> {
@@ -3458,15 +3446,16 @@ async function invokeResolvedDeviceHandler(input: {
   signal?: AbortSignal;
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
+  traits?: ToolTraits;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
-  const { target, name, args, handler, progress, signal } = input;
+  const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
-  const withdraw = input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
+  const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;
@@ -3638,7 +3627,10 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler,
+      handler: async (args, progress, signal) => {
+        await assertSessionBrokerToolCall(name, false, args);
+        return handler(args, progress, signal);
+      },
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
@@ -3717,6 +3709,7 @@ export class ToolRegistryClass {
         typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined;
 
       try {
+        await assertSessionBrokerToolCall(name, true, handlerArgs);
         const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
           name,
           args: handlerArgs,
@@ -3765,6 +3758,7 @@ export class ToolRegistryClass {
                   signal,
                   auditRunner: this.auditRunner,
                   navigationRecorder: this.navigationToolCallRecorder,
+                  traits: options,
                   isResponseFailure: this.isResponseFailure,
                 });
                 if (resolvedTarget.deviceRead) {
@@ -3817,18 +3811,12 @@ export class ToolRegistryClass {
           }),
         );
       } finally {
-        void Promise.resolve()
-          .then(() =>
-            this.toolCallRepository.recordToolCall({
-              toolName: name,
-              timestamp: toolCallTimestamp,
-              sessionUuid,
-              durationMs: toolDurationMs ?? this.timer.now() - toolStartMs,
-            }),
-          )
-          .catch((error: unknown) => {
-            logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
-          });
+        this.recordCompletedCall(
+          name,
+          toolCallTimestamp,
+          sessionUuid,
+          toolDurationMs ?? this.timer.now() - toolStartMs,
+        );
       }
     };
 
@@ -3848,12 +3836,34 @@ export class ToolRegistryClass {
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
+      stopsApp: options.stopsApp,
+      replacesProcess: options.replacesProcess,
       hidden: options.hidden ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
       ...deviceReadOnlyMetadata(options.deviceReadOnly, options.deviceReadOnlyArgs),
     });
+  }
+
+  private recordCompletedCall(
+    name: string,
+    timestamp: string,
+    sessionUuid: string | undefined,
+    durationMs: number,
+  ): void {
+    void Promise.resolve()
+      .then(() =>
+        this.toolCallRepository.recordToolCall({
+          toolName: name,
+          timestamp,
+          sessionUuid,
+          durationMs,
+        }),
+      )
+      .catch((error: unknown) => {
+        logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
+      });
   }
 
   // Get all registered tools
@@ -3959,7 +3969,7 @@ export class ToolRegistryClass {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
     // A device-aware tool resolves its own `deviceId` in the execution-target resolver; a plain
-    // tool (`setActiveDevice`, `killDevice`, `startDevice`) never reaches it, and the managed-slot
+    // tool (`setActiveDevice`, `killDevice`, `startDevice`) never reaches it, and the broker binding
     // gate below reads the same arguments.
     const callArgs = resolved.requiresDevice
       ? args
@@ -3972,7 +3982,12 @@ export class ToolRegistryClass {
       callArgs instanceof Promise ? await callArgs : callArgs,
       options,
     );
-    assertInternalCallWithinManagedSlots(resolved.name, invocation);
+    await assertSessionBrokerToolCall(
+      resolved.name,
+      resolved.requiresDevice === true,
+      invocation.args,
+    );
+    assertInternalCallWithinBrokerGrant(resolved.name, invocation);
     refuseInternalControlOnForeignOwnedSession(
       resolved,
       nonBlankSessionUuid(args.sessionUuid),

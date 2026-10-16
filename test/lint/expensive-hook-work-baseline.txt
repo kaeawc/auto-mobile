@@ -20,7 +20,6 @@ test/daemon/deviceBindingWriters.test.ts	heavy-harness
 test/daemon/deviceGestureRecordingSocketServerStartOwnership.test.ts	heavy-harness
 test/daemon/deviceHoldCharacterization.test.ts	heavy-harness
 test/daemon/deviceLeaseOwnerQuery.test.ts	recursive-rm
-test/daemon/devicePool.assignDevice.test.ts	heavy-harness
 test/daemon/devicePool.autolock.test.ts	heavy-harness
 test/daemon/devicePool.criteriaRollback.test.ts	heavy-harness
 test/daemon/devicePool.evictionCatch.test.ts	heavy-harness
@@ -30,7 +29,6 @@ test/daemon/devicePool.multiDeviceAllocationContention.test.ts	heavy-harness
 test/daemon/devicePool.multiDeviceScheduling.test.ts	heavy-harness
 test/daemon/devicePool.ownerDisconnectRelease.test.ts	heavy-harness
 test/daemon/devicePool.recoveryOutsideMutex.test.ts	heavy-harness
-test/daemon/devicePool.refreshDevices.test.ts	heavy-harness
 test/daemon/devicePool.removeDeviceLeaks.test.ts	heavy-harness
 test/daemon/devicePool.selectionPresenceSweep.test.ts	heavy-harness
 test/daemon/devicePool.statsBuckets.test.ts	heavy-harness
@@ -41,13 +39,13 @@ test/daemon/foreignDeviceOwnership.test.ts	recursive-rm
 test/daemon/idleProxyHeartbeatIdleRelease.test.ts	heavy-harness
 test/daemon/implicitRoutingForeignOwnedSession.test.ts	heavy-harness
 test/daemon/loggerPrune.test.ts	recursive-rm
-test/daemon/managedSlots/slotsOwnExecutionStaleSnapshot.test.ts	heavy-harness
-test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts	heavy-harness
 test/daemon/manager.test.ts	recursive-rm
 test/daemon/manager.test.ts	temp-dir
 test/daemon/ownerDisconnectReleaseRearm.test.ts	heavy-harness
 test/daemon/perSourceIosLiveness.test.ts	heavy-harness
 test/daemon/rehydrationReservationAutolock.test.ts	heavy-harness
+test/daemon/sessionBroker/provisioning/bindingsOwnExecutionStaleSnapshot.test.ts	heavy-harness
+test/daemon/sessionBroker/provisioning/bindingsUnresolvedEmulatorIdentityGate.test.ts	heavy-harness
 test/daemon/socketServerDirectFrameTransportAlias.test.ts	heavy-harness
 test/daemon/socketServerFramerInteractions.test.ts	recursive-rm
 test/daemon/socketServerFramerInteractions.test.ts	temp-dir
@@ -94,6 +92,7 @@ test/server/ToolExecutionContext.test.ts	heavy-harness
 test/server/accessibilityTools.test.ts	heavy-harness
 test/server/androidSegmentedPlanManifestComposition.test.ts	recursive-rm
 test/server/androidSegmentedPlanManifestComposition.test.ts	temp-dir
+test/server/bindingLifecycleExclusion.test.ts	heavy-harness
 test/server/derivedLabelSessionForeignConnection.test.ts	heavy-harness
 test/server/derivedLabelSessionRestoreOwnership.test.ts	heavy-harness
 test/server/deviceLabelMapping.test.ts	heavy-harness
@@ -103,8 +102,8 @@ test/server/deviceTools.bootRollbackSparesHeldDevice.test.ts	heavy-harness
 test/server/deviceTools.cancelDuringCrossDaemonClaim.test.ts	heavy-harness
 test/server/deviceTools.createIfMissing.test.ts	heavy-harness
 test/server/deviceTools.deleteDeviceTypedRefusals.test.ts	heavy-harness
-test/server/deviceTools.nameStartSkipsManagedSlot.test.ts	heavy-harness
-test/server/deviceTools.provisionDevice.managedSlotPreBoot.test.ts	heavy-harness
+test/server/deviceTools.nameStartSkipsBrokerBinding.test.ts	heavy-harness
+test/server/deviceTools.provisionDevice.bindingPreBoot.test.ts	heavy-harness
 test/server/deviceTools.queuedStartAlreadyRunning.test.ts	heavy-harness
 test/server/deviceTools.startDevice.anrCreatedRollback.test.ts	heavy-harness
 test/server/deviceTools.startDevice.anrRunningBeforeKept.test.ts	heavy-harness
@@ -112,7 +111,6 @@ test/server/deviceTools.undeliveredAcquisition.test.ts	heavy-harness
 test/server/exportPlanHolderCheck.test.ts	heavy-harness
 test/server/foreignOwnedSessionRefusal.test.ts	heavy-harness
 test/server/lifecycleDeviceOwnership.test.ts	heavy-harness
-test/server/managedSlotLifecycleExclusion.test.ts	heavy-harness
 test/server/midCallCloseDeadOwner.test.ts	heavy-harness
 test/server/namedForeignSessionActivity.test.ts	heavy-harness
 test/server/nestedPlainToolForeignOwnedSession.test.ts	heavy-harness
@@ -139,10 +137,10 @@ test/server/setActiveDevice.refusedBeforeResume.test.ts	heavy-harness
 test/server/setActiveDevice.sessionlessOwnership.test.ts	heavy-harness
 test/server/setActiveDeviceDiscoveryIncompleteWire.test.ts	heavy-harness
 test/server/snapshotOfTools.test.ts	recursive-rm
+test/server/toolRegistry.bindingEnforcement.test.ts	heavy-harness
 test/server/toolRegistry.deviceOwnership.test.ts	heavy-harness
 test/server/toolRegistry.foreignDaemonControl.test.ts	heavy-harness
 test/server/toolRegistry.holderConnection.test.ts	heavy-harness
-test/server/toolRegistry.managedSlotEnforcement.test.ts	heavy-harness
 test/server/toolRegistry.readOnlyDeviceAccess.test.ts	heavy-harness
 test/server/toolRegistry.sessionDeviceRouting.test.ts	heavy-harness
 test/server/toolRegistry.sessionlessReadHeldElsewhere.test.ts	heavy-harness

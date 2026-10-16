@@ -148,14 +148,11 @@ describe("tapOn cached element resolution", () => {
     launch.window = new FakeWindow();
     h.adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     h.adb.setCommandResponse("shell am start --user 0", { stdout: "Starting: Intent", stderr: "" });
-    const launched = await launch.execute(
-      "com.example.app",
-      false,
-      false,
-      undefined,
-      undefined,
-      true,
-    );
+    const launched = await launch.execute("com.example.app", {
+      clearAppData: false,
+      coldBoot: false,
+      skipUiStability: true,
+    });
     expect(launched.success).toBe(true);
     const cached = await cache.getMostRecent(device.deviceId);
     expect(cached?.settled).toBeUndefined();
@@ -858,8 +855,8 @@ function revalidationHarness(tool: "tapOn" | "tapAny") {
       };
       const request = { requestDeadlineMs };
       return tool === "tapOn"
-        ? on.tap.execute(options, undefined, undefined, undefined, request)
-        : any.tap.execute(options, undefined, undefined, request);
+        ? on.tap.execute(options, { deadlineMs: request?.requestDeadlineMs })
+        : any.tap.execute(options, { deadlineMs: request?.requestDeadlineMs });
     },
   };
 }

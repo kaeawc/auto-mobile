@@ -45,6 +45,7 @@ import { checkSigningIdentity, type PackageSigningInspector } from "./SigningIde
 import { SigningGuardError } from "../../models/SigningGuardError";
 import { withAndroidPackageMutationLock } from "../../utils/androidPackageMutationLock";
 import { normalizeSignerSet } from "../../utils/signingIdentity";
+import type { ActionCall } from "./ActionCall";
 
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
@@ -56,6 +57,13 @@ export interface UninstallAppOptions {
   performanceTrackerFactory?: () => PerformanceTracker;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   signingInspector?: PackageSigningInspector;
+}
+
+/** Call context for {@link UninstallApp.execute}. */
+export interface UninstallAppCall extends ActionCall {
+  keepData?: boolean;
+  userId?: number;
+  guard?: UninstallGuardOptions;
 }
 
 /** Opt-in guard for Android uninstall; omitted means the historical unguarded behavior. */
@@ -107,13 +115,30 @@ export class UninstallApp {
    * @param keepData - Whether to keep app data (Android only, ignored on iOS)
    * @param userId - Optional Android user ID (auto-detected if not provided)
    */
+  async execute(packageName: string, call?: UninstallAppCall): Promise<UninstallAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     packageName: string,
-    keepData: boolean = false,
+    keepData?: boolean,
     userId?: number,
     signal?: AbortSignal,
     guard?: UninstallGuardOptions,
+  ): Promise<UninstallAppResult>;
+  async execute(
+    packageName: string,
+    keepDataOrCall?: boolean | UninstallAppCall,
+    userIdArg?: number,
+    signalArg?: AbortSignal,
+    guardArg?: UninstallGuardOptions,
   ): Promise<UninstallAppResult> {
+    const {
+      keepData = false,
+      userId,
+      signal,
+      guard,
+    } = typeof keepDataOrCall === "object"
+      ? keepDataOrCall
+      : { keepData: keepDataOrCall, userId: userIdArg, signal: signalArg, guard: guardArg };
     const nested = hasAmbientPerfTracker();
     const perf = nested ? getPerfTracker() : this.createPerformanceTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
@@ -396,10 +421,7 @@ export class UninstallApp {
       // Whether the app was running before uninstall is not checked.
       await this.adb.executeCommand(
         `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        false,
-        signal,
+        { noRetry: false, signal },
       );
 
       const cmd = keepData
@@ -407,7 +429,11 @@ export class UninstallApp {
         : `shell pm uninstall --user ${targetUserId} ${shellQuote(packageName)}`;
 
       try {
-        await this.adb.executeCommand(cmd, ANDROID_UNINSTALL_TIMEOUT_MS, undefined, true, signal);
+        await this.adb.executeCommand(cmd, {
+          timeoutMs: ANDROID_UNINSTALL_TIMEOUT_MS,
+          noRetry: true,
+          signal,
+        });
       } catch (error) {
         throwIfAborted(signal);
         if (error instanceof AdbCommandTimeoutError) {
@@ -524,13 +550,11 @@ export class UninstallApp {
     );
     let retryTimedOut = false;
     try {
-      await this.adb.executeCommand(
-        command,
-        ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
-        undefined,
-        true,
+      await this.adb.executeCommand(command, {
+        timeoutMs: ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
     } catch (error) {
       throwIfAborted(signal);
       if (!(error instanceof AdbCommandTimeoutError)) {

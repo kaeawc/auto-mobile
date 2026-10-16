@@ -972,7 +972,7 @@ const noRawSelectorFieldReadRule = {
   create(context) {
     const filename = context.filename.replaceAll("\\", "/");
     if (
-      !/(?:^|\/)src\/(?:features\/(?:action|debug)|server)\//.test(filename) &&
+      !/(?:^|\/)src\/(?:features\/(?:action|debug|systemTray)|server)\//.test(filename) &&
       !/(?:^|\/)src\/features\/(?:accessibility\/SetAccessibilityFocus|observe\/ConditionPredicates|utility\/DeepLinkManager)\.ts$/.test(
         filename,
       ) &&

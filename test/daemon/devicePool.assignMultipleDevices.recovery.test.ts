@@ -1,6 +1,6 @@
 import { statusOf } from "../../src/daemon/deviceBinding";
 import { drainUntil, settleWithFakeTime } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -8,7 +8,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -23,9 +23,11 @@ import {
   FakeDeviceManagerWithStubbornFailingReadiness,
   FakeDeviceManagerWithStubbornProcess,
   RunningProbeCountingFakeDeviceManager,
+  androidDeviceImage,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  iosSimulatorImage,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -36,9 +38,11 @@ describe("DevicePool", () => {
   let fakeTimer: FakeTimer;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeDeviceManager: FakeDeviceManager;
-  const { initializeLiveDevices } = devicePoolSuiteActions(() => ({
+  const { initializeLiveDevices, makePool } = devicePoolSuiteActions(() => ({
     devicePool,
     sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
     fakeDeviceManager,
   }));
 
@@ -56,23 +60,8 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
@@ -102,24 +91,8 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManagerWithStubbornChild();
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          lifecycleCoordinator: lifecycleCoordinator,
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -162,24 +135,8 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManagerWithStubbornChild();
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          lifecycleCoordinator: lifecycleCoordinator,
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -231,23 +188,8 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -278,23 +220,8 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManagerWithStubbornChild();
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -333,23 +260,8 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManagerWithStubbornFailingReadiness();
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
+      devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -388,25 +300,11 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new FakeDeviceManagerWithStubbornProcess([
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ]);
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
       let childExited = false;
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          lifecycleCoordinator: lifecycleCoordinator,
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -455,23 +353,12 @@ describe("DevicePool", () => {
     test("same-serial rediscovery clears suppression for the authoritative AVD name", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
       const manager = new FakeDeviceManager([image]);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          androidDeviceReboot: { run: async () => false },
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        androidDeviceReboot: { run: async () => false },
+      });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -510,23 +397,12 @@ describe("DevicePool", () => {
     test("same-serial rediscovery keeps suppression for a different AVD", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
       const manager = new FakeDeviceManager([image]);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          androidDeviceReboot: { run: async () => false },
-        }),
-      );
+      devicePool = makePool({
+        deviceManager: manager,
+        androidDeviceReboot: { run: async () => false },
+      });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         await devicePool.releaseDevice("emulator-5554", "session-1");
@@ -559,23 +435,10 @@ describe("DevicePool", () => {
 
     test("cancels the boot (kills the spawned handle) when a pool cold-boot fails readiness", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithFailingReadiness(images);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
 
       // No pre-booted devices: the pool must cold-boot one, readiness then fails.
       // Allocation cannot be satisfied (throws), but the half-booted device must
@@ -587,24 +450,10 @@ describe("DevicePool", () => {
     });
 
     test("retains a failed pool-start lease until the stubborn emulator exits", async () => {
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
       const manager = new FakeDeviceManagerWithStubbornFailingReadiness([image]);
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          lifecycleCoordinator: lifecycleCoordinator,
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       const allocationOutcome = allocation.then(
@@ -648,24 +497,10 @@ describe("DevicePool", () => {
     });
 
     test("retains a cancelled pool-start launch's lease until its emulator exits (#10075)", async () => {
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
       const manager = new FakeDeviceManagerWithCancelledLaunch([image]);
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          lifecycleCoordinator: lifecycleCoordinator,
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       const allocationOutcome = allocation.then(
@@ -705,22 +540,9 @@ describe("DevicePool", () => {
     });
 
     test("bounds a pending pool cold-boot readiness wait by the allocation deadline", async () => {
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
       const manager = new FakeDeviceManagerWithPendingReadiness([image]);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -746,14 +568,7 @@ describe("DevicePool", () => {
         source: "local",
       };
       const manager = new FakeDeviceManagerWithPendingStart([image]);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "ios");
 
@@ -771,23 +586,10 @@ describe("DevicePool", () => {
 
     test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Pixel 8"),
       ]);
@@ -801,23 +603,10 @@ describe("DevicePool", () => {
 
     test("boots criteria replacement emulator after stale matching pooled emulator is evicted", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Pixel 8"),
       ]);
@@ -834,33 +623,11 @@ describe("DevicePool", () => {
 
     test("should auto-start iOS simulators when pool is short", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
-        },
-        {
-          name: "iPhone 15",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-2",
-          state: "Shutdown",
-          isAvailable: true,
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-1"),
+        iosSimulatorImage("iPhone 15", "sim-2"),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       const assignments = await devicePool.assignMultipleDevices(
         ["session-a", "session-b"],
@@ -879,21 +646,9 @@ describe("DevicePool", () => {
     });
 
     test("selects a known-not-running image without a per-image running probe", async () => {
-      const image: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-      };
+      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554");
       const manager = new RunningProbeCountingFakeDeviceManager([image]);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-        }),
-      );
+      devicePool = makePool({ deviceManager: manager });
 
       const assignments = await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -902,26 +657,9 @@ describe("DevicePool", () => {
     });
 
     test("should boot a platform replacement when a stale pooled iOS simulator masked the shortage", async () => {
-      const images: DeviceInfo[] = [
-        {
-          name: "iPhone 16",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-replacement",
-          state: "Shutdown",
-          isAvailable: true,
-        },
-      ];
+      const images: DeviceInfo[] = [iosSimulatorImage("iPhone 16", "sim-replacement")];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
       await devicePool.initializeWithDevices([createBootedDevice("sim-stale", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [];
 
@@ -936,53 +674,17 @@ describe("DevicePool", () => {
 
     test("should boot shutdown iOS simulator matching allocation criteria", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-wrong-type",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.5",
-        },
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-wrong-version",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.4",
-        },
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-unavailable",
+        iosSimulatorImage("iPhone 15", "sim-wrong-type", { iosVersion: "17.5" }),
+        iosSimulatorImage("iPhone 15 Pro", "sim-wrong-version", { iosVersion: "17.4" }),
+        iosSimulatorImage("iPhone 15 Pro", "sim-unavailable", {
           state: "Unavailable",
           isAvailable: false,
           iosVersion: "17.5",
-        },
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.5",
-        },
+        }),
+        iosSimulatorImage("iPhone 15 Pro", "sim-1", { iosVersion: "17.5" }),
       ];
       const fakeDeviceManager = new FakeDeviceManager(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [
@@ -1002,26 +704,10 @@ describe("DevicePool", () => {
 
     test("should use osVersion as iOS criteria metadata after booting a shutdown simulator", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
-          osVersion: "17.5",
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-1", { osVersion: "17.5" }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [
@@ -1039,26 +725,12 @@ describe("DevicePool", () => {
 
     test("should use runtime as iOS criteria metadata after booting a shutdown simulator", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
+        iosSimulatorImage("iPhone 15 Pro", "sim-1", {
           runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-5",
-        },
+        }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [
@@ -1076,27 +748,13 @@ describe("DevicePool", () => {
 
     test("should preserve deviceType matching metadata after booting a custom-named simulator", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "QA Phone",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
+        iosSimulatorImage("QA Phone", "sim-1", {
           iosVersion: "17.5",
           deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
-        },
+        }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [
@@ -1115,26 +773,10 @@ describe("DevicePool", () => {
 
     test("should boot replacement simulator when matching pooled simulator is in error", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-replacement",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.5",
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-replacement", { iosVersion: "17.5" }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
       await devicePool.initializeWithDevices([
         createBootedDevice("sim-failed", "ios", "iPhone 15 Pro", "17.5"),
       ]);
@@ -1161,26 +803,10 @@ describe("DevicePool", () => {
 
     test("should boot a criteria replacement when a stale pooled iOS simulator matched first", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-replacement",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.5",
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-replacement", { iosVersion: "17.5" }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
       await devicePool.initializeWithDevices([
         createBootedDevice("sim-stale", "ios", "iPhone 15 Pro", "17.5"),
       ]);
@@ -1205,26 +831,10 @@ describe("DevicePool", () => {
 
     test("should recover errored pooled simulator when its own image is rebooted", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Shutdown",
-          isAvailable: true,
-          iosVersion: "17.5",
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-1", { iosVersion: "17.5" }),
       ];
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
       await devicePool.initializeWithDevices([
         createBootedDevice("sim-1", "ios", "iPhone 15 Pro", "17.5"),
       ]);
@@ -1251,26 +861,14 @@ describe("DevicePool", () => {
 
     test("should fail criteria allocation without starting unavailable iOS simulators", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-unavailable",
+        iosSimulatorImage("iPhone 15 Pro", "sim-unavailable", {
           state: "Unavailable",
           isAvailable: false,
           iosVersion: "17.5",
-        },
+        }),
       ];
       const fakeDeviceManager = new FakeDeviceManager(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       await expect(
         devicePool.assignMultipleDevicesByCriteria(
@@ -1289,25 +887,10 @@ describe("DevicePool", () => {
 
     test("should fail iOS platform allocation without starting unavailable simulators", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "iPhone 15 Pro",
-          platform: "ios",
-          isRunning: false,
-          deviceId: "sim-1",
-          state: "Unavailable",
-          isAvailable: false,
-        },
+        iosSimulatorImage("iPhone 15 Pro", "sim-1", { state: "Unavailable", isAvailable: false }),
       ];
       const fakeDeviceManager = new FakeDeviceManager(images);
-      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: retryExecutor,
-        }),
-      );
+      devicePool = makePool({ deviceManager: fakeDeviceManager });
 
       await expect(
         devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "ios"),

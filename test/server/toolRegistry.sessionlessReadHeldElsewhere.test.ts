@@ -4,14 +4,13 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { isSessionlessDeviceRead } from "../../src/features/toolSelection/toolSelectionContext";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
@@ -25,7 +24,7 @@ import { FakeWindow } from "../fakes/FakeWindow";
 
 /**
  * A sessionless READ through the tool pipeline never readies a device someone else holds without a
- * local session: an idle managed slot's device, or a device another daemon claims (#11641).
+ * local session: an idle broker binding's device, or a device another daemon claims (#11641).
  * Readiness is not a read: it pins the current device, applies the host appearance
  * (`cmd uimode night …`) and writes `settings put secure stylus_handwriting_enabled 0`. Such a
  * read takes the read-only device path instead, as `request_observation` does
@@ -93,7 +92,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
       applyOnConnect: true,
     };
     devices = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as unknown as SimCtlClient, {
+      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
         window,
         ctrlProxyManager: new FakeCtrlProxyManager(),
       }),
@@ -182,15 +181,15 @@ describe("a sessionless read never readies a device held outside this daemon's s
     expect(deviceWrites()).toEqual([]);
   });
 
-  test("a read on another execution's idle managed-slot device is answered without a device write", async () => {
-    pool.assertNotAssignedToManagedSlot = async (input) => {
+  test("a read on another execution's idle binding device is answered without a device write", async () => {
+    pool.assertNotAssignedToBinding = async (input) => {
       if (input.deviceId === theirs.deviceId && input.requesterSessionUuid !== "slot-exec") {
-        throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+        throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
           platform: "android",
           stableDeviceId: "Pixel_B",
-          holder: "slot",
+          holder: "session_broker",
           scopeKey: "scope",
-          slotIndex: 0,
+          bindingIndex: 0,
           scopeState: null,
           execSessionUuid: "slot-exec",
         });
@@ -198,7 +197,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
     };
     await expect(
       call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
-    ).rejects.toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    ).rejects.toBeInstanceOf(DeviceAssignedToBindingError);
     expect(deviceWrites()).toEqual([]);
 
     await call("readProbe", { platform: "android", deviceId: theirs.deviceId });

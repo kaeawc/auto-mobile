@@ -3,7 +3,7 @@ import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
 
 /**
@@ -136,7 +136,7 @@ describe("openLink passes the URL to simctl as its own argv element (issue #4213
 
   test.each(hostileUrls)("ios simulator argv: %s", async (_label, url) => {
     stubObservedInteraction();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const openURL = new OpenURL(
       iosSimulator,
       new FakeAdbExecutor() as unknown as any,

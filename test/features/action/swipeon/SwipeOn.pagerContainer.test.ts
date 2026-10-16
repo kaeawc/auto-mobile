@@ -8,7 +8,6 @@ import type {
 } from "../../../../src/features/observe/android/types";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import launcherHome from "../../../fixtures/android-launcher/launcher-home-emulator-5602.json";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -60,7 +59,7 @@ function harness(
   const gesture = new FakeGestureExecutor();
   const action = new SwipeOn(
     { name: "fake", platform: "android", deviceId: "pager-swipe" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
       observeScreen: observe,

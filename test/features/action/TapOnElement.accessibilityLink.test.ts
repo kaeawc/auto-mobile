@@ -103,8 +103,7 @@ describe("tapOn semantic link outcomes", () => {
                   ? { text: "Owner", subtext: { text: "Terms" } }
                   : { accessibilityLink: "Terms" }),
               },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
             expect(outcome.success).toBe(mode === "success");
             if (unconfirmed) {

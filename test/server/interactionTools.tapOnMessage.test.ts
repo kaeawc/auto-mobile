@@ -39,6 +39,7 @@ import type {
 } from "../../src/models";
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { ActionableError } from "../../src/models/ActionableError";
+import type { TapOnCall } from "../../src/features/action/ActionCall";
 
 const test = warmedTests(() => {
   resetTapAtElementFactory();
@@ -716,12 +717,12 @@ describe("tapOn handler transport deadline", () => {
   test.each([undefined, 123456])(
     "forwards transport deadline %s through internal context",
     async (deadline) => {
-      let received: { requestDeadlineMs?: number } | undefined;
+      let received: number | undefined;
       let recoveryPolicy: { throwOnKeyboardOcclusion?: boolean } | undefined;
       setTapOnElementFactory(() => ({
-        execute: async (_options, _progress, _signal, recovery, request) => {
-          received = request;
-          recoveryPolicy = recovery;
+        execute: async (_options, call) => {
+          received = (call as TapOnCall | undefined)?.deadlineMs;
+          recoveryPolicy = (call as TapOnCall | undefined)?.recovery;
           return { success: true, action: "longPress", element: { text: "Target" } };
         },
       }));
@@ -731,7 +732,7 @@ describe("tapOn handler transport deadline", () => {
         __mcpRequestDeadlineMs: deadline,
       };
       await tapOnHandler({ deviceId: "handler-deadline", name: "Test", platform: "android" }, args);
-      expect(received).toEqual({ requestDeadlineMs: deadline });
+      expect(received).toBe(deadline);
       expect(recoveryPolicy).toBeUndefined();
     },
   );

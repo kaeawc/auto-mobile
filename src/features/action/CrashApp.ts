@@ -28,6 +28,7 @@ import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 export type { SimulatorCrashCommandRunner } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 
@@ -98,7 +99,11 @@ export class CrashApp {
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
-  async execute(appId: string, signal?: AbortSignal): Promise<CrashAppResult> {
+  async execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(appId: string, signal?: AbortSignal): Promise<CrashAppResult>;
+  async execute(appId: string, signalOrCall?: AbortSignal | ActionCall): Promise<CrashAppResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     const timestamp = this.timer.now();
     try {
       signal?.throwIfAborted();

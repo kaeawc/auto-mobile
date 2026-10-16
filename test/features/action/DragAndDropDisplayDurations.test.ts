@@ -11,7 +11,6 @@ import { prepareTargetDisplayAction } from "../../../src/features/action/TargetD
 import { throwIfAborted } from "../../../src/utils/toolUtils";
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -69,7 +68,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string; autoAdva
   if (options.autoAdvance !== false) {
     timer.enableAutoAdvance();
   }
-  const action = new DragAndDrop(device, adb as unknown as AdbClient, timer, {
+  const action = new DragAndDrop(device, adb, timer, {
     lastRenderedObservation: () => observation,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy),
   });
@@ -115,7 +114,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
     restorers.push(() => preflight.mockRestore());
 
     await expect(
-      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+      action.execute({ ...endpoints, display: "external" }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(preflight).toHaveBeenCalledTimes(1);
     expect(capability).not.toHaveBeenCalled();
@@ -135,7 +134,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
     });
 
     await expect(
-      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+      action.execute({ ...endpoints, display: "external" }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(capability).toHaveBeenCalledWith("gesture_display_id_v1");
     expect(drag).not.toHaveBeenCalled();
@@ -163,7 +162,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
       });
 
       await expect(
-        action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+        action.execute({ ...endpoints, display: "external" }, { signal: controller.signal }),
       ).rejects.toThrow("Operation cancelled");
       expect(drag).toHaveBeenCalledTimes(1);
       expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
@@ -188,7 +187,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
     restorers.push(() => input.mockRestore());
 
     await expect(
-      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+      action.execute({ ...endpoints, display: "external" }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(input).toHaveBeenCalledTimes(1);
     expect(drag).not.toHaveBeenCalled();
@@ -206,8 +205,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
 
     const result = await action.execute(
       { ...endpoints, display: "external" },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     expect(controller.signal.aborted).toBe(false);
     expect(result).toEqual({ success: false, duration: 0, distance: 0, error: "boom" });
@@ -232,8 +230,7 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
 
     const result = await action.execute(
       { ...endpoints, display: "external" },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     expect(controller.signal.aborted).toBe(false);
     expect(result).toEqual({
@@ -558,7 +555,7 @@ describe("Android drag dispatch outcomes", () => {
           ready.resolve();
           return pending;
         });
-        const pending = action.execute({ ...endpoints, display }, undefined, controller.signal);
+        const pending = action.execute({ ...endpoints, display }, { signal: controller.signal });
         await ready.promise;
         expect(timer.getPendingTimeoutCount()).toBe(dispatched ? 2 : 1);
         timer.advanceTime(25);
@@ -582,7 +579,7 @@ test("explicit-display helper throws an indeterminate ActionableError after disp
     device,
     "external",
     observe,
-    adb as unknown as AdbClient,
+    adb,
     () => observation,
   );
   drag.mockImplementation(async (...args) => {

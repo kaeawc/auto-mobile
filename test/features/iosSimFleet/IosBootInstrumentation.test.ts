@@ -14,7 +14,7 @@ import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExha
 import type { CapacityDecision } from "../../../src/features/iosSimFleet/CapacityGate";
 import { deviceResourceProfileFingerprint } from "../../../src/utils/deviceResourceDrift";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -132,7 +132,7 @@ describe("FleetBootInstrumentation", () => {
 
 describe("createIosSimCapacityGate", () => {
   function gateFor(env: NodeJS.ProcessEnv) {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["list", "devices", "--json"], '{"devices":{}}');
     const gate = createIosSimCapacityGate({
       simctl,

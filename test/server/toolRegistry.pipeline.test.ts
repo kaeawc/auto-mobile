@@ -427,10 +427,12 @@ describe("ToolRegistry device-aware pipeline", () => {
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
-    (registry as any).deviceSessionManager = fakeDeviceSessionManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
+    });
     (AndroidCtrlProxyClient as any).getInstance = () => ({
       bindSession() {
         throw new Error("bind unavailable");
@@ -472,10 +474,12 @@ describe("ToolRegistry device-aware pipeline", () => {
     const controller = new AbortController();
     const fakeManager = new FakeDeviceSessionManager();
     fakeManager.setConnectedDevices([device]);
-    (registry as any).deviceSessionManager = fakeManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
+    });
 
     registry.registerDeviceAware(
       "readinessProbe",
@@ -523,10 +527,12 @@ describe("ToolRegistry device-aware pipeline", () => {
       await resolutionGate;
       return device;
     };
-    (registry as any).deviceSessionManager = fakeManager;
-    (registry as any).toolCallRepository = {
-      async recordToolCall(): Promise<void> {},
-    };
+    registry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    registry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
+    });
     registry.registerDeviceAware(
       "abortResolutionProbe",
       "Abort resolution probe",

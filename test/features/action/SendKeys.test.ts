@@ -4401,8 +4401,7 @@ describe("SendKeys IME focus regression", () => {
           focus: async (selector, signal, display, options) => {
             const result = await tap.execute(
               { ...selector, ...options, action: "focus", display },
-              undefined,
-              signal,
+              { signal },
             );
             return { success: result.success, error: result.error };
           },

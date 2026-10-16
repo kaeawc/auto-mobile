@@ -3,6 +3,7 @@ import type {
   ViewHierarchy,
 } from "../../src/features/observe/interfaces/ViewHierarchy";
 import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/models";
+import { resolveViewHierarchyReadArgs } from "../../src/features/observe/hierarchyReadArgs";
 
 /**
  * Fake implementation of ViewHierarchy for testing.
@@ -25,12 +26,19 @@ export class FakeViewHierarchy implements ViewHierarchy {
    */
   async getViewHierarchy(
     _queryOptions?: any,
-    _perf?: any,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    _signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
+    perfOrRequest?: any,
+    skipWaitForFreshArg?: boolean,
+    minTimestampArg?: number,
+    signalArg?: AbortSignal,
+    readOptionsArg?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult> {
+    const { skipWaitForFresh, minTimestamp, readOptions } = resolveViewHierarchyReadArgs(
+      perfOrRequest,
+      skipWaitForFreshArg,
+      minTimestampArg,
+      signalArg,
+      readOptionsArg,
+    );
     if (this.shouldFail && this.failureError) {
       throw this.failureError;
     }

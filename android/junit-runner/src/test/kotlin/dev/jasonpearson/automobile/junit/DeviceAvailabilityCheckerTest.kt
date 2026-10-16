@@ -111,7 +111,7 @@ class DeviceAvailabilityCheckerTest {
 
   @Test
   fun runnerIgnoresEveryChildWithoutSdk() {
-    AutoMobileSharedUtils.testDeviceChecker = unsetEnvironmentChecker()
+    val collaborators = PlanExecutorCollaborators(deviceChecker = unsetEnvironmentChecker())
     try {
       val ignored = mutableListOf<Description>()
       val failures = mutableListOf<Failure>()
@@ -132,7 +132,7 @@ class DeviceAvailabilityCheckerTest {
           }
         },
       )
-      val runner = AutoMobileRunner(RunnerTestTarget::class.java)
+      val runner = AutoMobileRunner(RunnerTestTarget::class.java, collaborators)
       val children = runner.description.children
       assertEquals(2, children.size)
       runner.run(notifier)
@@ -141,7 +141,6 @@ class DeviceAvailabilityCheckerTest {
       assertTrue(failures.isEmpty())
       assertTrue(started.isEmpty())
     } finally {
-      AutoMobileSharedUtils.testDeviceChecker = null
       SystemPropertyCache.clear()
       TestTimingCache.clear()
     }
@@ -174,7 +173,7 @@ class DeviceAvailabilityCheckerTest {
 
   @Test
   fun runnerFailsClassWhenDeviceCheckFailed() {
-    AutoMobileSharedUtils.testDeviceChecker =
+    val checker =
       object : DeviceChecker {
         override fun checkDeviceAvailability() = Unit
 
@@ -201,12 +200,15 @@ class DeviceAvailabilityCheckerTest {
           }
         },
       )
-      AutoMobileRunner(RunnerTestTarget::class.java).run(notifier)
+      AutoMobileRunner(
+          RunnerTestTarget::class.java,
+          PlanExecutorCollaborators(deviceChecker = checker),
+        )
+        .run(notifier)
       assertEquals(1, failures.size)
       assertTrue(failures[0].message.contains("ADB device check failed (exit code 1)"))
       assertTrue(ignored.isEmpty())
     } finally {
-      AutoMobileSharedUtils.testDeviceChecker = null
       SystemPropertyCache.clear()
       TestTimingCache.clear()
     }

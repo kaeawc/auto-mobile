@@ -38,6 +38,21 @@ function fixture() {
   };
 }
 const input = JSON.stringify({ calls: [], allowSelector: false });
+test.each([
+  "AUTOMOBILE_SESSION_BROKER_CONFIG",
+  "AUTOMOBILE_SESSION_CONFIG",
+  "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+  "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
+])("resolve scrubs inherited harness-owned %s", async (key) => {
+  const { deps } = fixture();
+  deps.env[key] = "/inherited/config";
+  const result = await runHarnessGuard("resolve", input, deps);
+  expect(result.ok).toBe(true);
+  if (!result.ok) {
+    throw new Error(result.message);
+  }
+  expect(JSON.parse(result.stdout).env).not.toHaveProperty(key);
+});
 test("resolve emits only the server entry point and sanitized env", async () => {
   const { deps, probes } = fixture();
   const result = await runHarnessGuard("resolve", input, deps);

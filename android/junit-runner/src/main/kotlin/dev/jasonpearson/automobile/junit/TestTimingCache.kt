@@ -72,7 +72,10 @@ internal object TestTimingCache : TestTimingSource {
   fun clear() = store.clear()
 }
 
-internal class TestTimingStore(private val ciMode: () -> Boolean = ::isCiMode) : TestTimingSource {
+internal class TestTimingStore(
+  private val ciMode: () -> Boolean = ::isCiMode,
+  private val collaborators: PlanExecutorCollaborators = PlanExecutorCollaborators(),
+) : TestTimingSource {
   private companion object {
     private const val TEST_TIMING_RESOURCE_URI = "automobile:test-timings"
     private const val DEFAULT_LOOKBACK_DAYS = 90
@@ -152,7 +155,7 @@ internal class TestTimingStore(private val ciMode: () -> Boolean = ::isCiMode) :
       return false
     }
     // Skip timing fetch if no devices are available - tests will be skipped anyway
-    if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
+    if (!collaborators.deviceChecker.areDevicesAvailable()) {
       return false
     }
     return SystemPropertyCache.getBoolean("automobile.junit.timing.enabled", true)
@@ -161,7 +164,7 @@ internal class TestTimingStore(private val ciMode: () -> Boolean = ::isCiMode) :
   private fun loadFromDaemon() {
     try {
       val uri = buildRequestUri()
-      val response = DaemonSocketClientManager.readResource(uri, resolveTimeoutMs())
+      val response = collaborators.daemon.readResource(uri, resolveTimeoutMs())
       val payload = extractResourcePayload(response)
       if (payload.isNullOrBlank()) {
         return

@@ -7,7 +7,7 @@ import { typeScriptFiles, relativePosix } from "./astGuard";
 
 const ROOT = path.join(import.meta.dir, "../..");
 const BASELINE_FILE = path.join(import.meta.dir, "tool-registry-isolation-baseline.txt");
-const BASELINE_CEILING = 97;
+const BASELINE_CEILING = 94;
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 const UPDATE_COMMAND =
   "UPDATE_TOOL_REGISTRY_ISOLATION_BASELINE=1 bun test test/lint/toolRegistryIsolation.test.ts";

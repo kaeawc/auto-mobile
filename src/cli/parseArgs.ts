@@ -4,11 +4,11 @@ import { parsePort, parsePositiveNumber, type ParseLogger } from "./numericValid
 import { parseBooleanFlagValue, splitFlagToken } from "../utils/flagTokens";
 import type { VideoRecordingConfigInput } from "../models";
 import {
-  MANAGED_SLOT_CONFIG_ENV,
-  MANAGED_SLOT_CONFIG_FLAG,
-  ManagedSlotConfigError,
-  resolveManagedSlotConfig,
-} from "../models/managedSlotConfig";
+  SESSION_CONFIG_ENV,
+  SESSION_CONFIG_FLAG,
+  SessionConfigError,
+  resolveSessionConfig,
+} from "../devices/sessionConfig";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {
@@ -182,13 +182,10 @@ export function parseArgs(
   const cliIndex = args.indexOf("--cli");
   const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
   const scalarOptions = parseValueOptions(args, log, video, runnerReadinessTimeoutMs);
-  // Throws a typed ManagedSlotConfigError before any daemon or device work (#11173).
-  const managedSlotConfig = resolveManagedSlotConfig({
-    flagValue: scalarOptions.managedSlotConfigValue,
-    // The env var is per-proxy launch state: daemon and CLI invocations that merely inherit it
-    // must not parse it (#11286). The explicit flag stays honored.
+  const sessionConfig = resolveSessionConfig({
+    flagValue: scalarOptions.sessionConfigValue,
     envValue:
-      cliMode || daemonMode || daemonRequested ? undefined : environment[MANAGED_SLOT_CONFIG_ENV],
+      cliMode || daemonMode || daemonRequested ? undefined : environment[SESSION_CONFIG_ENV],
     readFile,
     hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
     noProxy,
@@ -202,7 +199,7 @@ export function parseArgs(
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
     livenessOwnerToken: scalarOptions.livenessOwnerToken,
-    managedSlotConfig,
+    sessionConfig,
     debugPerf,
     debug,
     strictPort,
@@ -378,7 +375,7 @@ interface ScalarOptions {
   daemonHost?: string;
   initialSessionUuid?: string;
   livenessOwnerToken?: string;
-  managedSlotConfigValue?: string;
+  sessionConfigValue?: string;
   a11yLevel?: string;
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
@@ -572,9 +569,9 @@ function parseSessionBindingOption(
     options.initialSessionUuid = args[i + 1];
     return i + 1;
   }
-  const managed = parseManagedSlotConfigOption(args, i, log, options);
-  if (managed !== undefined) {
-    return managed;
+  const session = parseSessionConfigOption(args, i, options);
+  if (session !== undefined) {
+    return session;
   }
   if (arg === "--liveness-owner-token") {
     if (!hasValue) {
@@ -587,27 +584,23 @@ function parseSessionBindingOption(
   return undefined;
 }
 
-/** `--managed-slot-config <json|path>` or `--managed-slot-config=<json|path>`. */
-function parseManagedSlotConfigOption(
+/** `--session-config <json|path>` or `--session-config=<json|path>`. */
+function parseSessionConfigOption(
   args: string[],
   i: number,
-  log: ParseLogger,
   options: ScalarOptions,
 ): number | undefined {
   const arg = args[i];
-  if (arg === MANAGED_SLOT_CONFIG_FLAG) {
+  if (arg === SESSION_CONFIG_FLAG) {
     const value = args[i + 1]?.trim();
     if (!value || (value.startsWith("--") && !value.startsWith("{"))) {
-      throw new ManagedSlotConfigError(
-        "managed_slot_config_invalid",
-        `${MANAGED_SLOT_CONFIG_FLAG} requires inline JSON or a file path`,
-      );
+      throw new SessionConfigError(`${SESSION_CONFIG_FLAG} requires inline JSON or a file path`);
     }
-    options.managedSlotConfigValue = value;
+    options.sessionConfigValue = value;
     return i + 1;
   }
-  if (arg.startsWith(`${MANAGED_SLOT_CONFIG_FLAG}=`)) {
-    options.managedSlotConfigValue = arg.slice(MANAGED_SLOT_CONFIG_FLAG.length + 1);
+  if (arg.startsWith(`${SESSION_CONFIG_FLAG}=`)) {
+    options.sessionConfigValue = arg.slice(SESSION_CONFIG_FLAG.length + 1);
     return i;
   }
   return undefined;

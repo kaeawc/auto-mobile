@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { join } from "node:path";
 import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
+import { BrokerDeviceInfoRefusedError } from "../../scripts/manual-test/brokerDeviceLedger";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import type { HostBaseline } from "../../scripts/manual-test/privateDaemonDevices";
@@ -46,19 +47,25 @@ function row(
       deviceId: id,
       lifecycle: { state: "booted" },
       poolStatus: "idle",
-      heldBy: undefined as "managed_slot" | "other_daemon" | undefined,
+      heldBy: undefined as string | undefined,
     },
   };
 }
 async function deviceFixture(protectedDevices: string[] = []) {
   const f = fixture();
-  await runPrivateDaemonCommand(
+  const initCode = await runPrivateDaemonCommand(
     {
       op: "init",
       options: { ...options, ...(protectedDevices.length ? { protectedDevices } : {}) },
     },
     f.deps,
   );
+  const manifest = f.files.get(join(options.batchDir, "batch.json"));
+  if (initCode !== 0 || manifest === undefined) {
+    throw new Error(
+      `fixture init failed (exit ${initCode}); logs: ${f.logs.join(" | ")}; files: ${[...f.files.keys()].join(", ")}`,
+    );
+  }
   f.files.set(
     baselinePath,
     JSON.stringify({ recordedAt: "2026-10-13T00:00:00.000Z", android: ["preexisting"], ios: [] }),
@@ -141,6 +148,36 @@ test("F1 positive and negative evidence override baseline; missing evidence uses
     expect(classifyDevice(device, baseline, [], evidence).provenance).toBe(provenance);
   }
 });
+test.each(["ambroker-039fd12f-0-g1-nonce", "amslot-039fd12f-0-g1-nonce"])(
+  "broker name %s is display evidence and never authorizes shutdown",
+  async (name) => {
+    for (const state of ["inferred", "preexisting", "protected", "batch-evidence"]) {
+      const f = await deviceFixture(state === "protected" ? [name] : []);
+      const device = row("sim-broker", name, "ios");
+      inventoryRows(f, [device]);
+      if (state === "preexisting") {
+        f.files.set(baselinePath, JSON.stringify({ android: [], ios: ["sim-broker"] }));
+      }
+      if (state === "batch-evidence") {
+        // Android can supply positive process evidence; naming must still not grant permission.
+        inventoryRows(f, [row("emulator-5556", name)]);
+      }
+      expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+      expect(document(f).devices[0]).toMatchObject({
+        provenance: "broker-owned",
+        protected: state === "protected",
+      });
+      const id = state === "batch-evidence" ? "emulator-5556" : "sim-broker";
+      expect(
+        await runPrivateDaemonCommand(command("shutdown-devices", "--device", id), f.deps),
+      ).toBe(1);
+      expect(document(f).results[0].outcome).toBe(
+        state === "protected" ? "protected" : "not-batch-booted",
+      );
+      expect(killFrames(f)).toEqual([]);
+    }
+  },
+);
 test("F1 default shutdown stops only positive emulator and reports inferred simulator", async () => {
   const f = await deviceFixture();
   inventoryRows(f, [row(), row("sim", "simulator", "ios")]);
@@ -519,41 +556,60 @@ test("F2 fallback still reports unprotected snapshot devices held by another dae
   });
   expect(killFrames(f)).toEqual([]);
 });
-test("F2 another daemon's hold is retained when only the second view exposes it", async () => {
-  const f = await deviceFixture();
-  const request = f.deps.requestSocket;
-  f.deps.requestSocket = async (path, frame) => {
-    if (path === derivePrivateDaemonBatch(options)[1].socketPath) {
-      return {
-        success: true,
-        result: {
-          structuredContent: {
-            devices: [{ ...row(), runtime: { ...row().runtime, heldBy: "other_daemon" } }],
+test.each(["other_daemon", "session_broker", "future_holder", ""])(
+  "F2 second view's hold %s is retained",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    const request = f.deps.requestSocket;
+    f.deps.requestSocket = async (path, frame) => {
+      if (path === derivePrivateDaemonBatch(options)[1].socketPath) {
+        return {
+          success: true,
+          result: {
+            structuredContent: {
+              devices: [{ ...row(), runtime: { ...row().runtime, heldBy } }],
+            },
           },
-        },
-      };
-    }
-    return request(path, frame);
+        };
+      }
+      return request(path, frame);
+    };
+    expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+    expect(document(f).results[0].outcome).toBe(
+      heldBy === "other_daemon" ? "held-by-other-daemon" : "broker-held",
+    );
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+test("F2 unknown snapshot hold is parsed and never suggests stopping by PID", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "future_holder" } }]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.deps.requestSocket = async () => {
+    throw new Error("daemon dead");
   };
   expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
-  expect(document(f).results[0].outcome).toBe("held-by-other-daemon");
+  expect(document(f).results[0]).toMatchObject({ outcome: "broker-held" });
+  expect(document(f).results[0].message).not.toContain("PID");
   expect(killFrames(f)).toEqual([]);
 });
-test("F2 managed-slot inventory reaches the product refusal", async () => {
-  const f = await deviceFixture();
-  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "managed_slot" } }]);
-  const request = f.deps.requestSocket;
-  f.deps.requestSocket = async (path, frame) => {
-    if ((frame.params as { name: string }).name !== "killDevice") {
-      return request(path, frame);
+test.each(["session_broker", "managed_slot", "future_holder", ""])(
+  "F2 any broker hold %s is parsed and refused without a stop frame",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy } }]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0].heldBy).toBe(heldBy);
+    for (const flags of [[], ["--device", "emulator-5556"], ["--dry-run"]]) {
+      expect(await runPrivateDaemonCommand(command("shutdown-devices", ...flags), f.deps)).toBe(1);
+      expect(document(f).results[0]).toMatchObject({
+        outcome: "broker-held",
+        message: expect.stringContaining("broker-held"),
+      });
     }
-    f.frames.push({ path, ...frame });
-    return { success: false, code: "managed_slot", error: "managed slot refused" };
-  };
-  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
-  expect(killFrames(f)).toHaveLength(1);
-  expect(document(f).results[0]).toMatchObject({ outcome: "refused", code: "managed_slot" });
-});
+    expect(killFrames(f)).toEqual([]);
+  },
+);
 test.each([
   ["devices", "inventory refused"],
   ["shutdown-devices", "inventory refused"],
@@ -1018,3 +1074,119 @@ test.each(["booting", "booted", "shutting-down"])(
     expect(document(f).devices).toHaveLength(1);
   },
 );
+
+async function addBrokerLedger(f: Awaited<ReturnType<typeof deviceFixture>>) {
+  const { BrokerDeviceLedger } = await import("../../scripts/manual-test/brokerDeviceLedger");
+  f.files.set(join(options.batchDir, "broker/clients.json"), "{}");
+  const ledger = new BrokerDeviceLedger({
+    batchDir: options.batchDir,
+    timer: f.deps.timer,
+    fs: {
+      exists: f.deps.exists,
+      readFile: f.deps.readFile,
+      mkdir: () => {},
+      appendFile: (path, text) => f.files.set(path, (f.files.get(path) ?? "") + text),
+    },
+  });
+  ledger.info(
+    "phone",
+    { session: { outcome: "ready", requestId: "batch-phone-1", sessionUuid: "session" } },
+    {
+      sessionId: "session",
+      nativeDevice: { name: "ambroker-ledger", deviceId: "emulator-5556", platform: "android" },
+    },
+  );
+  return ledger;
+}
+
+test.each([undefined, "broker_session", "future_hold"])(
+  "broker ledger shows the client and refuses shutdown with heldBy %s",
+  async (heldBy) => {
+    const f = await deviceFixture();
+    await addBrokerLedger(f);
+    inventoryRows(f, [
+      { ...row("emulator-5556", "ambroker-ledger"), runtime: { ...row().runtime, heldBy } },
+    ]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0]).toMatchObject({
+      classification: "allowed",
+      client: "phone",
+      sessionUuid: "session",
+      provenance: "broker-owned",
+    });
+    expect(f.captures).toEqual([]);
+    for (const flags of [[], ["--device", "emulator-5556"]]) {
+      expect(await runPrivateDaemonCommand(command("shutdown-devices", ...flags), f.deps)).toBe(1);
+      expect(document(f).results[0].outcome).toBe("broker-held");
+    }
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+
+test.each(["protected", "name-only", "serial-reused", "plain-name", "released"])(
+  "broker view classifies %s conservatively",
+  async (kind) => {
+    const f = await deviceFixture(kind === "protected" ? ["ambroker-ledger"] : []);
+    const ledger = kind === "protected" ? undefined : await addBrokerLedger(f);
+    if (kind === "protected") {
+      const manifestPath = join(options.batchDir, "batch.json");
+      const stored = JSON.parse(f.files.get(manifestPath) ?? "{}");
+      expect(
+        stored.options?.protectedDevices,
+        `manifest ${manifestPath} in [${[...f.files.keys()].filter((key) => key.endsWith("batch.json")).join(", ")}]: ${JSON.stringify(stored.options)}`,
+      ).toEqual(["ambroker-ledger"]);
+      await expect(addBrokerLedger(f)).rejects.toBeInstanceOf(BrokerDeviceInfoRefusedError);
+    }
+    const name =
+      kind === "name-only"
+        ? "ambroker-unrecorded"
+        : kind === "serial-reused"
+          ? "ambroker-successor"
+          : kind === "plain-name"
+            ? "owner-device"
+            : "ambroker-ledger";
+    if (kind === "released") {
+      ledger!.record("released", ledger!.devices()[0]);
+    }
+    inventoryRows(f, [row("emulator-5556", name)]);
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices[0].classification).toBe(
+      kind === "protected" ? "protected" : "foreign",
+    );
+    expect(document(f).devices[0].client).toBeUndefined();
+    expect(
+      await runPrivateDaemonCommand(
+        command("shutdown-devices", "--device", "emulator-5556"),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+
+test("devices --ledger reads evidence with no socket, host probe or write", async () => {
+  const f = await deviceFixture();
+  const ledger = await addBrokerLedger(f);
+  const writes = f.writes.length;
+  expect(await runPrivateDaemonCommand(command("devices", "--ledger"), f.deps)).toBe(0);
+  expect(document(f).ledger).toEqual(ledger.entries);
+  expect(f.frames).toEqual([]);
+  expect(f.captures).toEqual([]);
+  expect(f.writes.length).toBe(writes);
+});
+
+test("protection wins over conflicting broker inventory identities", async () => {
+  const f = await deviceFixture(["protected-name"]);
+  await addBrokerLedger(f);
+  inventoryRows(f, [
+    row("emulator-5556", "ambroker-ledger"),
+    row("emulator-5556", "protected-name"),
+  ]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  expect(document(f).devices[0]).toMatchObject({ classification: "protected", protected: true });
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "emulator-5556"), f.deps),
+  ).toBe(1);
+  expect(document(f).results[0].outcome).toBe("protected");
+  expect(killFrames(f)).toEqual([]);
+});

@@ -74,6 +74,7 @@ import {
   type AndroidPriorPackageState,
   type TimedOutInstallVerdict,
 } from "./androidInstallTimeoutRecovery";
+import type { ActionCall } from "./ActionCall";
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
@@ -145,6 +146,12 @@ export interface InstallAppOptions {
   iosDowngradeRecoveryBackendResolver?: typeof resolveIosDowngradeRecoveryBackend;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   signingInspector?: PackageSigningInspector;
+}
+
+/** Call context for {@link InstallApp.execute}: the target user and install guard ride beside the signal. */
+export interface InstallAppCall extends ActionCall {
+  userId?: number;
+  guard?: InstallGuardOptions;
 }
 
 /** Opt-in Android guards; omitting them keeps the historical install behavior. */
@@ -229,12 +236,24 @@ export class InstallApp {
     });
   }
 
+  async execute(artifactPath: string, call?: InstallAppCall): Promise<InstallAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     artifactPath: string,
     userId?: number,
     signal?: AbortSignal,
     guard?: InstallGuardOptions,
+  ): Promise<InstallAppResult>;
+  async execute(
+    artifactPath: string,
+    userIdOrCall?: number | InstallAppCall,
+    signalArg?: AbortSignal,
+    guardArg?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
+    const { userId, signal, guard } =
+      typeof userIdOrCall === "object"
+        ? userIdOrCall
+        : { userId: userIdOrCall, signal: signalArg, guard: guardArg };
     const perf = this.createPerformanceTracker();
     const nested = hasAmbientPerfTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
@@ -629,13 +648,10 @@ export class InstallApp {
       );
     }
     try {
-      const output = await this.adb.executeCommand(
-        `shell pm list packages --user ${userId}`,
-        undefined,
-        undefined,
-        true,
+      const output = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+        noRetry: true,
         signal,
-      );
+      });
       return packageListingContains(output.toString(), packageName);
     } catch (error) {
       logger.warn(`[InstallApp] Package presence query failed: ${errorMessage(error)}`, error);
@@ -956,10 +972,7 @@ export class InstallApp {
     try {
       const result = await this.adb.executeCommand(
         `shell pm install-existing --user ${userId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        true,
-        signal,
+        { noRetry: true, signal },
       );
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       if (
@@ -1018,13 +1031,11 @@ export class InstallApp {
     signal?: AbortSignal,
   ): Promise<AndroidInstallAttempt> {
     try {
-      const result = await this.adb.executeCommand(
-        installArgs,
-        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-        undefined,
-        true,
+      const result = await this.adb.executeCommand(installArgs, {
+        timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       return { success: output.includes("Success"), output, diagnostics: output, threw: false };
     } catch (error) {
@@ -1077,10 +1088,7 @@ export class InstallApp {
     try {
       await this.adb.executeCommand(
         `shell am force-stop --user ${userId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        true,
-        signal,
+        { noRetry: true, signal },
       );
     } catch (error) {
       // Force-stop is best-effort; uninstall can still remove a package that is not running.
@@ -1089,13 +1097,10 @@ export class InstallApp {
         error,
       );
     }
-    await this.adb.executeCommand(
-      `uninstall ${packageName}`,
-      ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-      undefined,
-      undefined,
+    await this.adb.executeCommand(`uninstall ${packageName}`, {
+      timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
       signal,
-    );
+    });
   }
 
   private extractErrorText(error: unknown): string {
@@ -1544,13 +1549,10 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const result = await this.adb.executeCommand(
-      `shell pm list packages --user ${userId}`,
-      undefined,
-      undefined,
-      true,
+    const result = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+      noRetry: true,
       signal,
-    );
+    });
     const packages = new Set<string>();
     for (const line of result.stdout.split("\n")) {
       const trimmed = line.trim();

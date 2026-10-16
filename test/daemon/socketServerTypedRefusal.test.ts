@@ -4,7 +4,7 @@ import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
 import {
   SessionRecoveryIdentityLossError,
   SessionSuspectError,
@@ -144,13 +144,13 @@ test("device_outside_bound_session names the bound session and device on the fra
   expect(frameFields(error)).toEqual(mcpFields(error));
 });
 
-test("device_outside_managed_slots names the refused target on the frame", () => {
-  const error = new DeviceOutsideManagedSlotsError("tapOn", "device", "scope-1", {
+test("device_outside_broker_grant names the refused target on the frame", () => {
+  const error = new DeviceOutsideBrokerGrantError("tapOn", "device", "scope-1", {
     deviceId: "emulator-5556",
   });
 
   expect(mcpRequestFailureDetails(error, undefined)).toEqual({
-    code: "device_outside_managed_slots",
+    code: "device_outside_broker_grant",
     retryable: false,
     details: { action: "tapOn", reason: "device", scopeKey: "scope-1", deviceId: "emulator-5556" },
   });

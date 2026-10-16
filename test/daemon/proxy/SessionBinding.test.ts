@@ -95,7 +95,7 @@ function harness() {
     ownedDeviceSessions: new Set(),
     sessionPlatforms: new Map(),
     sessionDeviceIds: new Map(),
-    managedExecutionSessions: new Set(),
+    sessionBrokerSessions: new Map(),
     plainRestartSessionLosses: new Map(),
     pendingHeldSessionPlatformLosses: new Map(),
     initialSessionUuid: () => controls.initialSessionUuid,

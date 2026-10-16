@@ -617,9 +617,7 @@ describe("ExecuteGesture path fences", () => {
                     { x: 10, y: 20 },
                     { x: 30, y: 40 },
                   ],
-              300,
-              undefined,
-              { displayFence: fence },
+              { durationMs: 300, displayFence: fence },
             );
           },
           {
@@ -1051,8 +1049,8 @@ describe("display fence options preserve public call shapes", () => {
             shape === "extra"
               ? () => Reflect.apply(gesture.execute, gesture, [path, 300, undefined, []])
               : shape === "legacy"
-                ? () => gesture.execute(path, 300)
-                : () => gesture.execute(path, 300, undefined, options);
+                ? () => gesture.execute(path, { durationMs: 300 })
+                : () => gesture.execute(path, { durationMs: 300, ...options });
           break;
         case "coordinateFallback":
           invoke =

@@ -3,11 +3,15 @@ import "./harnessLogSink";
 import { DAEMON_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketServer/LineFramer";
 import * as daemonConstants from "../../src/daemon/constants";
 import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
-import { substituteFramePlaceholders, type ManagedFrameIdentity } from "./daemonFramePlaceholders";
-import { readFileSync } from "node:fs";
+import { substituteFramePlaceholders, type BrokerFrameIdentity } from "./daemonFramePlaceholders";
+import { existsSync, readFileSync } from "node:fs";
+import { z } from "zod";
+import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
+import { matchesProtection } from "./privateDaemonDeviceEvidence";
+import { brokerLedgerEntrySchema, brokerNativeDeviceSchema } from "./brokerDeviceLedger";
 import { Socket } from "node:net";
 import { homedir, userInfo } from "node:os";
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   type DaemonRequest,
@@ -19,16 +23,26 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
-  DAEMON_RELEASE_EXECUTION_METHOD,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
-import { acquireManagedSlotsThroughDaemon } from "../../src/daemon/managedSlotProxyAcquisition";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/managedExecutionLiveness";
+import {
+  acquireSessionThroughDaemon,
+  DAEMON_RELEASE_BROKER_SESSION_METHOD,
+} from "../../src/daemon/sessionBrokerProxyAcquisition";
+import { BROKER_CLEANUP_TIMEOUT_MS } from "./brokerDaemonClient";
+import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
+import {
+  isBrokerBatch,
+  readBrokerClients,
+  readBrokerProtectedDevices,
+  readBrokerIdentity,
+  resolveBrokerClient,
+} from "./brokerClientFiles";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import { parseManagedSlotConfigSource } from "../../src/models/managedSlotConfig";
+import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { readEnvPositiveInteger } from "../../src/utils/envNumbers";
@@ -62,7 +76,9 @@ export interface DaemonFrameCommand {
   keepOpenMs: number;
   then: { method: string; json?: string }[];
   cancelAfterMs?: number;
-  managedBinding?: string;
+  brokerBinding?: string;
+  tokenOf?: string;
+  expectRefused: boolean;
   holdMs: number;
   allowSelector: boolean;
   allowHostMutation: boolean;
@@ -122,6 +138,7 @@ function readFrameArguments(
   const values: Record<string, string> = {};
   const booleans = {
     "--allow-selector": "allowSelector",
+    "--expect-refused": "expectRefused",
     "--allow-host-mutation": "allowHostMutation",
   } as const;
   for (let i = 2; i < argv.length; i++) {
@@ -228,6 +245,15 @@ function frameModeCombinationRefusal(
   command: DaemonFrameCommand,
   values: Record<string, string>,
 ): string | undefined {
+  if (command.brokerBinding && command.allowSelector) {
+    return "--allow-selector is unavailable with --broker-binding.";
+  }
+  if (command.expectRefused && (!command.brokerBinding || command.mode !== "send")) {
+    return "--expect-refused requires --broker-binding and --mode send.";
+  }
+  if (command.tokenOf && !command.brokerBinding) {
+    return "--token-of requires --broker-binding.";
+  }
   if (command.then.length && command.mode !== "send") {
     return "--then requires --mode send.";
   }
@@ -264,6 +290,7 @@ export function parseDaemonFrameArgs(
     then: [],
     holdMs: 0,
     allowSelector: false,
+    expectRefused: false,
     allowHostMutation: false,
     ...(argv[0] === "heartbeat" ? { externalKeeper: true } : {}),
   };
@@ -277,7 +304,8 @@ export function parseDaemonFrameArgs(
   }
   command.type = type;
   command.socket = values["--socket"];
-  command.managedBinding = values["--managed-binding"];
+  command.brokerBinding = values["--broker-binding"];
+  command.tokenOf = values["--token-of"];
   const error = frameAssignmentsRefusal(values, command);
   return error ? { error } : command;
 }
@@ -289,6 +317,7 @@ export interface DaemonFrameDeps {
   timer: Timer;
   ids: IdGenerator;
   readFile(path: string): string;
+  exists(path: string): boolean;
   out(line: string): void;
   err(line: string): void;
 }
@@ -311,6 +340,7 @@ export class FrameRpc {
     private readonly deps: Pick<DaemonFrameDeps, "timer" | "ids" | "out">,
     // Same control answers as DaemonClient: 256 MiB, including file/video payloads.
     maxFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
+    private readonly redact = (text: string): string => text,
   ) {
     this.decoder = new LineDecoder(maxFrameBytes, "Control response");
     this.startedAt = deps.timer.now();
@@ -342,6 +372,7 @@ export class FrameRpc {
     connection.onClose((error) => this.fail(error ?? new Error("Control socket closed.")));
   }
   fail(error: Error): void {
+    error = new Error(this.redact(error.message));
     this.failure ??= error;
     for (const waiting of this.pending.values()) {
       this.deps.timer.clearTimeout(waiting.timeout);
@@ -416,7 +447,7 @@ export class FrameRpc {
   ): Promise<unknown> {
     const response = await this.request(method, params, options.timeoutMs);
     if (!response.success) {
-      throw Object.assign(new Error(response.error ?? "Daemon refused request."), {
+      throw Object.assign(new Error(this.redact(response.error ?? "Daemon refused request.")), {
         code: response.code,
       });
     }
@@ -510,6 +541,10 @@ const knownDaemonMethods = new Set<unknown>([
     .filter(([name]) => name.endsWith("_METHOD"))
     .map(([, value]) => value),
   "daemon/sessionInfo",
+  "daemon/prepareSession",
+  "daemon/sessionRequestStatus",
+  "daemon/releaseBrokerSession",
+  "daemon/abandonSessionRequest",
 ]);
 export function daemonMethodHint(method: string): string | undefined {
   if (!/^(daemon|ide)\/.*-/.test(method)) {
@@ -522,11 +557,94 @@ function frameGuard(
   method: string,
   params: unknown,
   command: DaemonFrameCommand,
+  ownSessionId?: string,
+  binding?: BrokerFrameBinding,
 ): string | undefined {
+  if (
+    command.brokerBinding &&
+    (["resources", "resources/list"].includes(method) ||
+      (["read", "resources/read"].includes(method) &&
+        String((params as { uri?: unknown } | null)?.uri ?? "").startsWith("automobile:devices/")))
+  ) {
+    return "Device inventory resources are refused with --broker-binding.";
+  }
   if (method === "tools/call") {
     const tool = params as { name?: string; arguments?: unknown } | null;
+    let refusalProbe = false;
+    if (
+      command.brokerBinding &&
+      ["startDevice", "provisionDevice", "getAndroid", "getApple", "killDevice"].includes(
+        tool?.name ?? "",
+      )
+    ) {
+      if (!command.expectRefused) {
+        return `${tool?.name} is refused with --broker-binding; use --expect-refused to assert the product gate.`;
+      }
+      const args = tool?.arguments;
+      if (
+        !args ||
+        typeof args !== "object" ||
+        Array.isArray(args) ||
+        Object.entries(args).some(([key, value]) => key !== "sessionUuid" || value !== ownSessionId)
+      ) {
+        return "Expected lifecycle refusal requires {} or only this client's own sessionUuid; device names and selectors are forbidden.";
+      }
+      refusalProbe = true;
+    }
+    if (command.brokerBinding && !refusalProbe) {
+      const native = binding?.device;
+      const protectedDevices = binding?.protectedDevices ?? [];
+      if (
+        native &&
+        (matchesProtection(native, protectedDevices) || !isSessionBrokerDeviceName(native.name))
+      ) {
+        return "Protected or non-product native grant refused.";
+      }
+      const matches = (value: unknown, key?: string): boolean => {
+        if (!native) {
+          return false;
+        }
+        if (typeof value === "string") {
+          return (
+            !protectedDevices.includes(value) &&
+            (key === "platform"
+              ? value === native.platform
+              : value === native.deviceId || value === native.name)
+          );
+        }
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return false;
+        }
+        const entries = Object.entries(value);
+        return (
+          entries.some(([field]) => ["name", "deviceId", "avdName", "udid"].includes(field)) &&
+          entries.every(
+            ([field, entry]) =>
+              ["name", "deviceId", "avdName", "udid", "platform"].includes(field) &&
+              matches(entry, field),
+          )
+        );
+      };
+      const inspect = (value: unknown): boolean => {
+        if (Array.isArray(value)) {
+          return value.every(inspect);
+        }
+        if (!value || typeof value !== "object") {
+          return true;
+        }
+        return Object.entries(value).every(([key, entry]) =>
+          ["deviceId", "device", "selector", "avdName", "udid", "deviceName"].includes(key)
+            ? matches(entry)
+            : inspect(entry),
+        );
+      };
+      if (!inspect(tool?.arguments)) {
+        return "Explicit device names and selectors must equal this client's recorded native grant; unknown or protected devices are refused.";
+      }
+    }
     const refusal = deviceStartGuardRefusal(tool?.name ?? "", tool?.arguments, {
-      allowSelector: command.allowSelector,
+      // The strict probe shape above contains no native target or selector.
+      allowSelector: command.allowSelector || refusalProbe,
     });
     if (refusal) {
       return refusal;
@@ -550,14 +668,55 @@ function frameNotice(method: string, deps: DaemonFrameDeps): void {
     );
   }
 }
-async function managedKeeper(
-  config: ReturnType<typeof parseManagedSlotConfigSource>,
+interface BrokerFrameBinding {
+  config: SessionConfig;
+  token: string;
+  existingSessionId?: string;
+  clients: Map<string, string>;
+  frameToken?: string;
+  device?: z.infer<typeof brokerNativeDeviceSchema>;
+  protectedDevices?: string[];
+}
+async function brokerKeeper(
+  binding: BrokerFrameBinding,
   rpc: FrameRpc,
   deps: DaemonFrameDeps,
-): Promise<{ release(sendRelease?: boolean): Promise<void>; identity: ManagedFrameIdentity }> {
-  const token = deps.ids.next();
-  const held = new Map<string, NodeJS.Timeout | undefined>();
-  const options = { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS };
+): Promise<{
+  release(sendRelease?: boolean): Promise<void>;
+  identity: BrokerFrameIdentity;
+  ready: boolean;
+}> {
+  const { config, token } = binding;
+  let heldSession: string | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+  const releaseSession = async (sessionId: string): Promise<unknown> => {
+    // Binding to a live client's grant must never release it, including a failed hold.
+    if (binding.existingSessionId) {
+      return undefined;
+    }
+    return rpc.call(
+      DAEMON_RELEASE_BROKER_SESSION_METHOD,
+      { sessionId, livenessOwnerToken: token },
+      { timeoutMs: BROKER_CLEANUP_TIMEOUT_MS },
+    );
+  };
+  const release = async (sendRelease = true): Promise<void> => {
+    if (heartbeat) {
+      deps.timer.clearInterval(heartbeat);
+    }
+    if (!sendRelease || !heldSession) {
+      return;
+    }
+    const sessionId = heldSession;
+    heldSession = undefined;
+    try {
+      await releaseSession(sessionId);
+    } catch (error) {
+      deps.err(
+        `Broker release failed; owner loss will release ${sessionId}: ${errorMessage(error)}`,
+      );
+    }
+  };
   const leaseMs = readEnvPositiveInteger(
     "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
     undefined,
@@ -565,63 +724,22 @@ async function managedKeeper(
     deps.env,
     { warn: deps.err },
   );
-  // Same per-heartbeat deadline as DaemonMcpProxy, independent of its lifecycle machinery.
   const heartbeatTimeoutMs = Math.max(
     1,
     Math.min(Math.floor(leaseMs / 2), PROXY_HEARTBEAT_INTERVAL_MS * 2),
   );
-  const release = async (sendRelease = true): Promise<void> => {
-    const sessions = [...held.keys()];
-    for (const handle of held.values()) {
-      if (handle) {
-        deps.timer.clearInterval(handle);
-      }
-    }
-    held.clear();
-    if (!sendRelease) {
-      return;
-    }
-    await Promise.all(
-      sessions.map(async (sessionId) => {
-        try {
-          await rpc.call(
-            DAEMON_RELEASE_EXECUTION_METHOD,
-            { sessionId, livenessOwnerToken: token },
-            options,
-          );
-        } catch (error) {
-          // A typed missing session has already completed release; other failures remain visible.
-          if (
-            error !== null &&
-            typeof error === "object" &&
-            "code" in error &&
-            error.code === DAEMON_SESSION_NOT_FOUND_CODE
-          ) {
-            return;
-          }
-          deps.err(
-            `Managed release failed; owner loss will release ${sessionId}: ${errorMessage(error)}`,
-          );
-        }
-      }),
-    );
-  };
-  const result = await acquireManagedSlotsThroughDaemon(config, {
+  const result = await acquireSessionThroughDaemon(config, {
     ensureConnected: async () => {
       rpc.assertOpen();
     },
-    callDaemonMethod: (method, params, requestOptions) => rpc.call(method, params, requestOptions),
-    trackAcquiredSessions: (sessionIds) => {
-      for (const sessionId of sessionIds) {
-        if (!held.has(sessionId)) {
-          held.set(sessionId, undefined);
-        }
-      }
-    },
+    callDaemonMethod: (method, params, options) => rpc.call(method, params, options),
     livenessOwnerToken: token,
     timer: deps.timer,
-    releaseHeldSessions: release,
-    holdSession: async (sessionId, signal) => {
+    releaseSession,
+    holdSession: async (_requestId, sessionId) => {
+      if (binding.existingSessionId && binding.existingSessionId !== sessionId) {
+        throw new Error("Broker grant differs from the client's recorded session.");
+      }
       const params = {
         sessionId,
         livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
@@ -629,16 +747,14 @@ async function managedKeeper(
         reportIdleRelease: true,
         reportDaemonInstance: true,
       };
-      // The proxy does NOT send livenessOwnerKind; it sends the heartbeat policy,
-      // which the daemon preserves as managed-execution for slot sessions.
       await rpc.call(
         DAEMON_HEARTBEAT_METHOD,
         { ...params, claimLivenessOwnership: true },
         { timeoutMs: heartbeatTimeoutMs },
       );
-      signal.throwIfAborted();
+      heldSession = sessionId;
       let inFlight = false;
-      const handle = deps.timer.setInterval(() => {
+      heartbeat = deps.timer.setInterval(() => {
         if (inFlight) {
           return;
         }
@@ -649,52 +765,168 @@ async function managedKeeper(
           },
           (error: unknown) => {
             inFlight = false;
-            deps.err(`Managed heartbeat failed: ${errorMessage(error)}`);
-            // A typed not-found answer ends this session's keeper; transient misses do not
-            // abort the shared connection or its user frames (as for proxy held sessions).
+            deps.err(`Broker heartbeat failed: ${errorMessage(error)}`);
             if (
               error !== null &&
               typeof error === "object" &&
               "code" in error &&
               error.code === DAEMON_SESSION_NOT_FOUND_CODE
             ) {
-              deps.timer.clearInterval(handle);
-              held.delete(sessionId);
+              if (heartbeat) {
+                deps.timer.clearInterval(heartbeat);
+              }
+              heldSession = undefined;
             }
           },
         );
       }, PROXY_HEARTBEAT_INTERVAL_MS);
-      held.set(sessionId, handle);
     },
   });
   deps.out(JSON.stringify(result));
-  const sessionIds = result.slots.flatMap((slot) => (slot.sessionUuid ? [slot.sessionUuid] : []));
-  const slots = new Map(
-    result.slots.flatMap((slot) =>
-      slot.sessionUuid ? [[slot.slotIndex, slot.sessionUuid] as const] : [],
-    ),
-  );
-  return { release, identity: { sessionIds, slots, token } };
+  return {
+    release,
+    ready: result.outcome === "ready",
+    identity: { sessionId: result.sessionUuid ?? undefined, token, clients: binding.clients },
+  };
 }
 interface UserFrame {
   method: string;
   params: unknown;
 }
-type ManagedFrameConfig = ReturnType<typeof parseManagedSlotConfigSource>;
-function userFramesRefusal(frames: UserFrame[], command: DaemonFrameCommand): string | undefined {
+
+function userFramesRefusal(
+  frames: UserFrame[],
+  command: DaemonFrameCommand,
+  ownSessionId?: string,
+  binding?: BrokerFrameBinding,
+): string | undefined {
   for (const frame of frames) {
-    const refusal = frameGuard(frame.method, frame.params, command);
+    const refusal = frameGuard(frame.method, frame.params, command, ownSessionId, binding);
     if (refusal) {
       return refusal;
     }
   }
   return undefined;
 }
+function readFrameBinding(
+  command: DaemonFrameCommand,
+  deps: DaemonFrameDeps,
+  secrets: Set<string>,
+): BrokerFrameBinding | undefined {
+  if (!command.brokerBinding) {
+    return undefined;
+  }
+  const source = command.brokerBinding;
+  const batch = deps.env.MT_BATCH;
+  const names = batch && isBrokerBatch(batch, deps) ? readBrokerClients(batch, deps) : [];
+  const clients = new Map<string, string>();
+  // Tokens from every initialized client are redacted even if a refusal echoes foreign input.
+  for (const name of names) {
+    const dir = resolve(batch!, "sessions", name);
+    const tokenPath = join(dir, "owner-token");
+    if (deps.exists(tokenPath)) {
+      secrets.add(deps.readFile(tokenPath));
+    }
+    const initPath = join(dir, "init.json");
+    if (deps.exists(initPath)) {
+      const init = JSON.parse(deps.readFile(initPath)) as {
+        session?: { outcome?: string; sessionUuid?: unknown };
+      };
+      if (
+        init.session?.outcome === "ready" &&
+        typeof init.session.sessionUuid === "string" &&
+        init.session.sessionUuid
+      ) {
+        clients.set(name, init.session.sessionUuid);
+      }
+    }
+  }
+  const name = names.find(
+    (client) =>
+      source === client || resolve(source) === resolve(batch!, "sessions", client, "request.json"),
+  );
+  let binding: BrokerFrameBinding;
+  if (name) {
+    const client = resolveBrokerClient(batch, name, deps);
+    const identity = readBrokerIdentity(client, deps);
+    const sessionId = clients.get(name);
+    if (!sessionId) {
+      throw new Error("Client binding requires a recorded ready grant in init.json.");
+    }
+    const infoPath = join(client.dir, "info.json");
+    let device: BrokerFrameBinding["device"];
+    if (deps.exists(infoPath)) {
+      const info = z
+        .object({ sessionId: z.literal(sessionId), nativeDevice: brokerNativeDeviceSchema })
+        .parse(JSON.parse(deps.readFile(infoPath)));
+      device = info.nativeDevice;
+    }
+    const ledgerPath = join(batch!, "evidence/ledger.jsonl");
+    if (deps.exists(ledgerPath)) {
+      const bytes = deps.readFile(ledgerPath);
+      if (bytes && !bytes.endsWith("\n")) {
+        throw new Error("Incomplete broker ledger record.");
+      }
+      for (const line of bytes.split("\n").filter(Boolean)) {
+        const row = brokerLedgerEntrySchema.parse(JSON.parse(line));
+        if (row.batchDir !== resolve(batch!)) {
+          throw new Error("Broker ledger belongs to another batch.");
+        }
+        if (
+          row.client === name &&
+          row.requestId === identity.config.requestId &&
+          row.sessionUuid === sessionId &&
+          row.kind === "info"
+        ) {
+          if (device && JSON.stringify(device) !== JSON.stringify(row.device)) {
+            throw new Error("Conflicting native device info.");
+          }
+          device = row.device;
+        }
+      }
+    }
+    binding = {
+      ...identity,
+      existingSessionId: sessionId,
+      clients,
+      device,
+      protectedDevices: readBrokerProtectedDevices(batch!, deps),
+    };
+  } else {
+    if (!source.endsWith("request.json")) {
+      throw new Error("--broker-binding requires a batch client name or path to request.json.");
+    }
+    if (batch && isBrokerBatch(batch, deps)) {
+      throw new Error(
+        "Untracked broker batch acquisition refused; use --broker-binding <client> for a recorded batch client.",
+      );
+    }
+    // Standalone acquisitions are permitted only outside broker batches.
+    const token = deps.ids.next();
+    secrets.add(token);
+    binding = { config: parseSessionConfig(JSON.parse(deps.readFile(source))), token, clients };
+    if (deps.exists(join(dirname(source), "owner-token"))) {
+      throw new Error("Stored client requests must resolve to a client of MT_BATCH.");
+    }
+  }
+  secrets.add(binding.token);
+  if (command.tokenOf) {
+    if (!name || command.tokenOf === name || !names.includes(command.tokenOf)) {
+      throw new Error("--token-of must name another client of this binding's batch.");
+    }
+    const other = resolveBrokerClient(batch, command.tokenOf, deps);
+    binding.frameToken = readBrokerIdentity(other, deps).token;
+    secrets.add(binding.frameToken);
+  }
+  return binding;
+}
 function prepareUserFrames(
   command: DaemonFrameCommand,
   deps: DaemonFrameDeps,
-): { frames: UserFrame[]; config?: ManagedFrameConfig } | { error: string } {
+  secrets: Set<string>,
+): { frames: UserFrame[]; binding?: BrokerFrameBinding } | { error: string } {
   try {
+    const binding = readFrameBinding(command, deps, secrets);
     const frames = [{ method: command.method, json: command.json }, ...command.then].map(
       (frame) => ({
         method: frame.method,
@@ -718,30 +950,41 @@ function prepareUserFrames(
         ),
       };
     }
-    const config =
-      command.managedBinding === undefined
-        ? undefined
-        : parseManagedSlotConfigSource(command.managedBinding, deps.readFile);
-    // Validate names and requested slot indices before connecting or acquiring anything.
-    const planned = config
+    const planned = binding
       ? {
-          sessionIds: ["planned-session"],
-          slots: new Map(config.requests.map((slot) => [slot.slotIndex, "planned-session"])),
-          token: "planned-token",
+          sessionId: binding.existingSessionId ?? "{{ownSessionId}}",
+          token: binding.token,
+          clients: binding.clients,
         }
       : undefined;
-    for (const frame of frames) {
-      substituteFramePlaceholders(frame.params, planned);
+    if (
+      command.tokenOf &&
+      frames.some(
+        (frame) =>
+          !["daemon/sessionRequestStatus", DAEMON_RELEASE_BROKER_SESSION_METHOD].includes(
+            frame.method,
+          ),
+      )
+    ) {
+      throw new Error(
+        "--token-of is only for sessionRequestStatus/releaseBrokerSession isolation frames.",
+      );
     }
-    const error = userFramesRefusal(frames, command);
-    return error ? { error } : { frames, config };
+    const guardedFrames = frames.map((frame) => ({
+      ...frame,
+      params: substituteFramePlaceholders(frame.params, planned),
+    }));
+    const error = userFramesRefusal(guardedFrames, command, planned?.sessionId, binding);
+    return error ? { error } : { frames, binding };
   } catch (error) {
-    return { error: `Invalid JSON/config/placeholders: ${errorMessage(error)}` };
+    deps.err(`Invalid JSON/config/placeholders: ${errorMessage(error)}`);
+    return { error: "Invalid frame input; see diagnostic above." };
   }
 }
 function resolveUserFrames(
   frames: UserFrame[],
-  identity: ManagedFrameIdentity,
+  identity: BrokerFrameIdentity,
+  deps: DaemonFrameDeps,
 ): UserFrame[] | { error: string } {
   try {
     return frames.map((frame) => ({
@@ -749,9 +992,45 @@ function resolveUserFrames(
       params: substituteFramePlaceholders(frame.params, identity),
     }));
   } catch (error) {
+    deps.err(`Cannot resolve broker frame: ${errorMessage(error)}`);
     // A failed acquisition may return no sessions; refuse all user frames before sending them.
     return { error: errorMessage(error) };
   }
+}
+function isProductRefusal(response: DaemonResponse): boolean {
+  const envelope = response.result as
+    | { isError?: boolean; content?: Array<{ type?: string; text?: string }> }
+    | undefined;
+  if (response.success !== false && envelope?.isError !== true) {
+    return false;
+  }
+  const payload = readToolEnvelopePayload(response.result)?.payload;
+  const code = response.code ?? payload?.code;
+  if (
+    typeof code === "string" &&
+    ["device_outside_managed_slots", "session_ownership_lost"].includes(code)
+  ) {
+    return true;
+  }
+  const messages = [
+    response.error,
+    payload?.error,
+    payload?.message,
+    ...(Array.isArray(envelope?.content) ? envelope.content : [])
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text),
+  ];
+  return messages.some(
+    (message) =>
+      typeof message === "string" &&
+      (message.includes("Session request belongs to another liveness owner") ||
+        /Session broker owns device lifecycle; \w+ cannot allocate or retire a device/.test(
+          message,
+        ) ||
+        /Tool \w+ requires a live session granted by the session broker; prepare a session before using device tools/.test(
+          message,
+        )),
+  );
 }
 async function sendUserFrames(
   command: DaemonFrameCommand,
@@ -771,6 +1050,9 @@ async function sendUserFrames(
     await rpc.pause(command.holdMs);
   }
   rpc.assertOpen();
+  if (command.expectRefused) {
+    return responses.every(isProductRefusal) ? 0 : 2;
+  }
   return responses.every((response) => response.success === true) ? 0 : 1;
 }
 async function writeDestructiveFrames(
@@ -831,12 +1113,73 @@ export async function runDaemonFrame(
   command: DaemonFrameCommand,
   deps: DaemonFrameDeps,
 ): Promise<number> {
+  const secrets = new Set<string>();
+  const rawDeps = deps;
+  const redact = (text: string): string => {
+    for (const token of [...secrets].filter(Boolean).sort((a, b) => b.length - a.length)) {
+      text = text
+        .replaceAll(JSON.stringify(token).slice(1, -1), "[REDACTED]")
+        .replaceAll(token, "[REDACTED]");
+    }
+    return text;
+  };
+  deps = {
+    ...deps,
+    out: (line) => rawDeps.out(redact(line)),
+    err: (line) => rawDeps.err(redact(line)),
+  };
   const target = privateFrameSocket(command, deps);
   if ("error" in target) {
     deps.err(target.error);
     return 2;
   }
-  const prepared = prepareUserFrames(command, deps);
+  // Control sockets can use a short auxiliary root, so also recover the batch from daemon state paths.
+  if (command.brokerBinding) {
+    try {
+      const candidates = [
+        deps.env.MT_BATCH,
+        dirname(dirname(target.socket)),
+        ...[
+          "AUTOMOBILE_DAEMON_PID_FILE_PATH",
+          "AUTOMOBILE_DATA_DIR",
+          "AUTOMOBILE_COORDINATION_DIR",
+        ].map((key) => (deps.env[key] ? dirname(dirname(deps.env[key]!)) : undefined)),
+      ];
+      let batch: string | undefined;
+      for (const candidate of candidates) {
+        if (!candidate) {
+          continue;
+        }
+        let path = resolve(candidate);
+        while (true) {
+          if (isBrokerBatch(path, deps)) {
+            batch = path;
+            break;
+          }
+          const parent = dirname(path);
+          if (parent === path) {
+            break;
+          }
+          path = parent;
+        }
+        if (batch) {
+          break;
+        }
+      }
+      if (batch) {
+        if (command.brokerBinding.endsWith("request.json") && !deps.env.MT_BATCH) {
+          throw new Error(
+            "Untracked broker batch acquisition refused; use --broker-binding <client> from the batch wrapper.",
+          );
+        }
+        deps = { ...deps, env: { ...deps.env, MT_BATCH: batch } };
+      }
+    } catch (error) {
+      deps.err(errorMessage(error));
+      return 2;
+    }
+  }
+  const prepared = prepareUserFrames(command, deps, secrets);
   if ("error" in prepared) {
     deps.err(prepared.error);
     return 2;
@@ -846,6 +1189,7 @@ export async function runDaemonFrame(
   let release: ((sendRelease?: boolean) => Promise<void>) | undefined;
   let abrupt = false;
   let cancellationSummary: string | undefined;
+  let ownSessionId: string | undefined;
   try {
     const connection = await connectWithDeadline(
       deps.connect,
@@ -853,18 +1197,32 @@ export async function runDaemonFrame(
       deps.timer,
       command.timeoutMs,
     );
-    rpc = new FrameRpc(connection, deps);
-    if (prepared.config) {
-      const keeper = await managedKeeper(prepared.config, rpc, deps);
+    rpc = new FrameRpc(connection, deps, DAEMON_CLIENT_MAX_FRAME_BYTES, redact);
+    if (prepared.binding) {
+      const keeper = await brokerKeeper(prepared.binding, rpc, deps);
       release = keeper.release;
-      const resolved = resolveUserFrames(frames, keeper.identity);
+      ownSessionId = keeper.identity.sessionId;
+      if (!keeper.ready) {
+        return 1;
+      }
+      const resolved = resolveUserFrames(frames, keeper.identity, deps);
       if ("error" in resolved) {
         deps.err(resolved.error);
         return 2;
       }
       frames = resolved;
+      if (prepared.binding.frameToken) {
+        deps.err(`Isolation frame: using token of batch client ${command.tokenOf}.`);
+        frames = frames.map((frame) => ({
+          ...frame,
+          params: {
+            ...(frame.params as Record<string, unknown>),
+            livenessOwnerToken: prepared.binding!.frameToken,
+          },
+        }));
+      }
     }
-    const refusal = userFramesRefusal(frames, command);
+    const refusal = userFramesRefusal(frames, command, ownSessionId, prepared.binding);
     if (refusal) {
       deps.err(refusal);
       return 2;
@@ -962,6 +1320,7 @@ export async function main(): Promise<number> {
     timer: defaultTimer,
     ids: defaultIdGenerator,
     readFile: (path) => readFileSync(path, "utf8"),
+    exists: existsSync,
     out: console.log,
     err: console.error,
   });

@@ -22,11 +22,8 @@ import {
 } from "../../src/server/videoRecordingManager";
 import {
   hasSegmentedVideoRecordingsForOwner,
-  registerVideoRecordingTools,
   resetSegmentedSessions,
-  setRecordingRequesterResolverForTesting,
   setSegmentedSessionTimer,
-  setVideoRecordingDeviceDetectorForTesting,
 } from "../../src/server/videoRecordingTools";
 import { getVideoArchiveItem } from "../../src/server/videoRecordingResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -45,6 +42,9 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+
+const videoRecording = createVideoRecordingToolsHarness();
 
 isolateToolRegistry();
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "SlotDevice" };
@@ -123,21 +123,25 @@ describe("ownerless recording acquisition adoption", () => {
     });
     registerRecordingSessionCleanup(manager);
     connectionOwner = undefined;
-    setRecordingRequesterResolverForTesting({
-      baseSessionUuid: (id) => id,
-      isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
-      connectionOwnsDeviceSession: (connection, id, owner) =>
-        connection === connectionOwner && manager.getSessionForDevice(id) === owner,
-      holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
-      resolveOwnedDeviceSessionForMcpSession: (connection, id) =>
-        connection === connectionOwner ? (manager.getSessionForDevice(id) ?? undefined) : undefined,
+    videoRecording.configure({
+      requesterResolver: {
+        baseSessionUuid: (id) => id,
+        isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
+        connectionOwnsDeviceSession: (connection, id, owner) =>
+          connection === connectionOwner && manager.getSessionForDevice(id) === owner,
+        holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
+        resolveOwnedDeviceSessionForMcpSession: (connection, id) =>
+          connection === connectionOwner
+            ? (manager.getSessionForDevice(id) ?? undefined)
+            : undefined,
+      },
     });
     const detector = new FakeDeviceSessionManager();
     detector.setConnectedDevices([device, free]);
-    setVideoRecordingDeviceDetectorForTesting(detector);
+    videoRecording.configure({ deviceDetector: detector });
     setSegmentedSessionTimer(timer);
     if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
+      videoRecording.register();
     }
   });
 
@@ -145,8 +149,7 @@ describe("ownerless recording acquisition adoption", () => {
     manager.stopCleanupTimer();
     resetSegmentedSessions();
     resetVideoRecordingManagerDependencies();
-    setRecordingRequesterResolverForTesting(undefined);
-    setVideoRecordingDeviceDetectorForTesting(undefined);
+    videoRecording.clear();
     for (const id of acquisitions) {
       takeRecordingIdsFinalizedByRelease(id);
     }
@@ -347,14 +350,16 @@ describe("ownerless recording acquisition adoption", () => {
       undefined,
       connection,
     );
-    setRecordingRequesterResolverForTesting({
-      baseSessionUuid: (id) => id,
-      isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
-      holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
-      connectionOwnsDeviceSession: (requester, id, holder) =>
-        pool.resolveOwnedDeviceSessionForMcpSession(requester, id) === holder,
-      resolveOwnedDeviceSessionForMcpSession: (requester, id) =>
-        pool.resolveOwnedDeviceSessionForMcpSession(requester, id),
+    videoRecording.configure({
+      requesterResolver: {
+        baseSessionUuid: (id) => id,
+        isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
+        holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
+        connectionOwnsDeviceSession: (requester, id, holder) =>
+          pool.resolveOwnedDeviceSessionForMcpSession(requester, id) === holder,
+        resolveOwnedDeviceSessionForMcpSession: (requester, id) =>
+          pool.resolveOwnedDeviceSessionForMcpSession(requester, id),
+      },
     });
     const response = await runWithToolSelectionContext({ callerMcpSessionId: connection }, () =>
       handler()(free, { action: "start", maxDuration: 300 }),
@@ -458,7 +463,7 @@ describe("ownerless recording acquisition adoption", () => {
     expect(events).toEqual(["unbound", "acquire", "unbound"]);
   });
 
-  test("a managed-slot execution session passed to the acquisition hook becomes the owner", async () => {
+  test("a broker-binding execution session passed to the acquisition hook becomes the owner", async () => {
     const recording = await startVideoRecording({ device });
     const execution = "managed-execution:slot-0";
     await pool.bindOrReuseDeviceSession(execution, device.deviceId, "android");

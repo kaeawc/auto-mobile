@@ -9,6 +9,10 @@ import type {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandRest,
+} from "../../fakes/executeCommandOptionsOf";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
   stdout,
@@ -51,13 +55,8 @@ class ReadinessAdbExecutor extends FakeAdbExecutor {
     return super.getBootedAndroidDevices();
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, ...rest: ExecuteCommandRest): Promise<ExecResult> {
+    const { signal } = executeCommandOptionsOf([command, ...rest]);
     const readinessCommands = new Set([
       "get-state",
       "shell pm list packages",
@@ -74,7 +73,7 @@ class ReadinessAdbExecutor extends FakeAdbExecutor {
         );
       });
     }
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, ...rest);
   }
 }
 

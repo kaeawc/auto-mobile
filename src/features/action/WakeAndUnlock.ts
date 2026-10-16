@@ -22,6 +22,7 @@ export type {
   WakeAndUnlockResult,
 } from "../../models/WakeAndUnlock";
 import { AndroidWakeAndUnlock } from "../../utils/android-cmdline-tools/AndroidWakeAndUnlock";
+import type { ActionCall } from "./ActionCall";
 /**
  * iOS wake + swipe-dismiss seam. iOS simulators cannot set a device passcode, so
  * there is no secure bouncer to enter a PIN into — "unlock" is waking the screen
@@ -120,11 +121,22 @@ export class WakeAndUnlock {
    *   thrown. Ignored on iOS.
    * @param transportDeadlineMs - Daemon absolute host-clock deadline; bounds simulator unlock.
    */
+  async execute(pin?: string, call?: ActionCall): Promise<WakeAndUnlockResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     pin?: string,
     transportDeadlineMs?: number,
     signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult>;
+  async execute(
+    pin?: string,
+    deadlineOrCall?: number | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<WakeAndUnlockResult> {
+    const { deadlineMs: transportDeadlineMs, signal } =
+      typeof deadlineOrCall === "object"
+        ? deadlineOrCall
+        : { deadlineMs: deadlineOrCall, signal: signalArg };
     throwIfAborted(signal);
     switch (this.device.platform) {
       case "android":

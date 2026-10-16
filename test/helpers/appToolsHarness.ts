@@ -25,10 +25,12 @@ export function createAppToolsHarness() {
     },
     /** Merge `overrides` into one family's dependencies and re-register the tools. */
     configure<K extends Family>(family: K, overrides: NonNullable<AppToolsDependencies[K]>): void {
-      dependencies = {
-        ...dependencies,
-        [family]: { ...(dependencies[family] as object | undefined), ...(overrides as object) },
-      };
+      // A factory is a function, not a bag of overrides: spreading it into `{}` would lose it.
+      const merged =
+        typeof overrides === "function"
+          ? overrides
+          : { ...(dependencies[family] as object | undefined), ...(overrides as object) };
+      dependencies = { ...dependencies, [family]: merged };
       register();
     },
     /** Forget overrides without re-registering (afterEach). */

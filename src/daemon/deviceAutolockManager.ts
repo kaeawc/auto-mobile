@@ -1,4 +1,4 @@
-import { bindDevice } from "./deviceBinding";
+import { bindDevice, holderOf } from "./deviceBinding";
 import { launchProcessLiveness } from "./transitionalAdbBindWait";
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
 import { heldDeviceBindRefusal, InputDeviceOwnedError } from "./inputDeviceOwnership";
@@ -196,7 +196,7 @@ export class DeviceAutolockManager {
       platform,
       verifiedAndroidAvdIdentity ?? sourceImage,
     );
-    const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const heldBefore = holderOf(this.pool.getDevice(deviceId)) ?? null;
     const receipt = receiptOrNew(policy.receipt);
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
@@ -471,7 +471,7 @@ export class DeviceAutolockManager {
     }
     if (
       this.pool.getDevice(device.id) === device &&
-      device.sessionId === session.sessionId &&
+      holderOf(device) === session.sessionId &&
       device.assignmentCount === snapshot.assignmentCount + 1 &&
       this.pool.getPooledSessionIdentity(device) === session
     ) {
@@ -538,13 +538,13 @@ export class DeviceAutolockManager {
       throw heldDeviceBindRefusal(
         this.pool,
         device.id,
-        device.sessionId ?? undefined,
+        holderOf(device) ?? undefined,
         undefined,
         "another",
       );
     }
-    const session = device.sessionId
-      ? this.pool.getSessionManager().getSession(device.sessionId)
+    const session = holderOf(device)
+      ? this.pool.getSessionManager().getSession(holderOf(device)!)
       : null;
     if (!session) {
       return undefined;
@@ -553,7 +553,7 @@ export class DeviceAutolockManager {
       throw heldDeviceBindRefusal(
         this.pool,
         device.id,
-        device.sessionId ?? undefined,
+        holderOf(device) ?? undefined,
         undefined,
         "another",
       );
@@ -584,10 +584,10 @@ export class DeviceAutolockManager {
     sourceImage: DeviceInfo | undefined,
     mcpSessionId: string | undefined,
   ): void {
-    if (!sourceImage || !device.sessionId) {
+    if (!sourceImage || !holderOf(device)) {
       return;
     }
-    const existingSession = this.pool.getSessionManager().getSession(device.sessionId);
+    const existingSession = this.pool.getSessionManager().getSession(holderOf(device)!);
     if (
       existingSession &&
       existingSession.assignedDevice === device.id &&
@@ -682,7 +682,7 @@ export class DeviceAutolockManager {
           return [];
         }
         const device = this.pool.getDevice(session.assignedDevice);
-        if (device && device.autolockSessionId === id && device.sessionId === id) {
+        if (device && device.autolockSessionId === id && holderOf(device) === id) {
           return [
             { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
           ];
@@ -825,7 +825,7 @@ export class DeviceAutolockManager {
       if (
         !session ||
         !device ||
-        device.sessionId !== sessionId ||
+        holderOf(device) !== sessionId ||
         device.autolockSessionId !== sessionId
       ) {
         return "not-attached";
@@ -905,7 +905,7 @@ export class DeviceAutolockManager {
     if (
       this.pool.getDevice(expectedDevice.id) !== expectedDevice ||
       expectedDevice.assignmentCount !== expectedAssignmentCount ||
-      expectedDevice.sessionId !== null ||
+      holderOf(expectedDevice) !== null ||
       expectedDevice.autolockSessionId !== sessionId
     ) {
       return;

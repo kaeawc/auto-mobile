@@ -1,4 +1,4 @@
-import { unbindDevice } from "./deviceBinding";
+import { unbindDevice, holderOf } from "./deviceBinding";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type {
   PooledDevice,
@@ -290,7 +290,7 @@ export class SessionPreservingRecoveryRunner {
     return (
       this.pool.getPooledDevice(device.id) === device &&
       device.assignmentCount === assignmentCount &&
-      (device.sessionId === sessionId || device.sessionId === null)
+      (holderOf(device) === sessionId || holderOf(device) === null)
     );
   }
 

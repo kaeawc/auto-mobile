@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
@@ -263,11 +264,11 @@ function assertDeviceOwner(input: {
 }): void {
   const { device, sessionUuid, sessions, pool } = input;
   if (
-    device.sessionId &&
-    device.sessionId !== sessionUuid &&
-    sessions.getSession(device.sessionId)
+    holderOf(device) &&
+    holderOf(device) !== sessionUuid &&
+    sessions.getSession(holderOf(device)!)
   ) {
-    throw heldDeviceBindRefusal(pool, device.id, device.sessionId, sessionUuid);
+    throw heldDeviceBindRefusal(pool, device.id, holderOf(device)!, sessionUuid);
   }
 }
 

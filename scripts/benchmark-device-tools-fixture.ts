@@ -21,12 +21,10 @@ import type { InstallAppResult } from "../src/models/InstallAppResult";
 import type { LaunchAppResult } from "../src/models/LaunchAppResult";
 import type { PressButtonResult } from "../src/models/PressButtonResult";
 import {
-  resetInstallAppToolDependencies,
+  registerAppTools,
   resetInstalledAppResourceRefresh,
-  resetLaunchAppToolDependencies,
-  setInstallAppToolDependencies,
   setInstalledAppResourceRefresh,
-  setLaunchAppToolDependencies,
+  type AppToolsDependencies,
 } from "../src/server/appTools";
 import {
   resetPressButtonFactory,
@@ -164,6 +162,22 @@ function fakeInstalledAppResourceRefresh(): void {
   setInstalledAppResourceRefresh({ invalidate() {}, notify: async () => {} });
 }
 
+// Fixtures share one registration of the app tools, so each keeps only its own family of fakes
+// and every change re-registers the tools with whatever is currently installed.
+const installedAppToolFakes: AppToolsDependencies = {};
+
+function setAppToolFake<K extends keyof AppToolsDependencies>(
+  family: K,
+  fake: AppToolsDependencies[K] | undefined,
+): void {
+  if (fake === undefined) {
+    delete installedAppToolFakes[family];
+  } else {
+    installedAppToolFakes[family] = fake;
+  }
+  registerAppTools(installedAppToolFakes);
+}
+
 function installLaunchAppFixture(): ToolFixture {
   const result: LaunchAppResult = {
     success: true,
@@ -171,11 +185,11 @@ function installLaunchAppFixture(): ToolFixture {
     observation: capturedObservation(),
   };
   fakeInstalledAppResourceRefresh();
-  setLaunchAppToolDependencies({ createLaunchApp: () => ({ execute: async () => result }) });
+  setAppToolFake("launchApp", { createLaunchApp: () => ({ execute: async () => result }) });
   return {
     args: { platform: "android", appId: APP_ID },
     dispose() {
-      resetLaunchAppToolDependencies();
+      setAppToolFake("launchApp", undefined);
       resetInstalledAppResourceRefresh();
     },
   };
@@ -188,11 +202,11 @@ function installInstallAppFixture(): ToolFixture {
     packageName: APP_ID,
   };
   fakeInstalledAppResourceRefresh();
-  setInstallAppToolDependencies({ createInstallApp: () => ({ execute: async () => result }) });
+  setAppToolFake("installApp", { createInstallApp: () => ({ execute: async () => result }) });
   return {
     args: { platform: "android", artifactPath: ARTIFACT_PATH },
     dispose() {
-      resetInstallAppToolDependencies();
+      setAppToolFake("installApp", undefined);
       resetInstalledAppResourceRefresh();
     },
   };

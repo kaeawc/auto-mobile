@@ -1,13 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, LaunchAppResult } from "../../src/models";
 import {
-  registerAppTools,
   resetInstalledAppResourceRefresh,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
   setInstalledAppResourceRefresh,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
@@ -19,6 +14,9 @@ import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttache
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 isolateToolRegistry();
 
@@ -37,30 +35,25 @@ let timer: FakeTimer;
 beforeEach(() => {
   ToolRegistry.clearTools();
   SessionReleaseBroadcaster.clearForTesting();
-  resetLaunchAppToolDependencies();
-  resetTerminateAppToolDependencies();
   setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
   attacher = new FakePrototypeViewerAttacher();
   connections = new PrototypeViewerConnections();
   timer = new FakeTimer();
-  setLaunchAppToolDependencies({
+  appTools.configure("launchApp", {
     createLaunchApp: () => ({ execute: async () => RESULT }),
     prototypeViewerAttacher: attacher,
     prototypeViewerConnections: connections,
     timer,
   });
-  setTerminateAppToolDependencies({
+  appTools.configure("terminateApp", {
     createTerminateApp: () => ({ execute: async () => ({ success: true, packageName: APP }) }),
   });
-  registerAppTools();
 });
 
 afterEach(() => {
   connections.releaseDevice(SIMULATOR.deviceId);
-  ToolRegistry.clearTools();
+  appTools.clear();
   SessionReleaseBroadcaster.clearForTesting();
-  resetLaunchAppToolDependencies();
-  resetTerminateAppToolDependencies();
   resetInstalledAppResourceRefresh();
 });
 
@@ -160,7 +153,7 @@ test.each([
 });
 
 test.each(["typed", "thrown"])("%s launch failure skips viewer attach", async (failure) => {
-  setLaunchAppToolDependencies({
+  appTools.configure("launchApp", {
     createLaunchApp: () => ({
       execute: async () => {
         if (failure === "thrown") {
@@ -190,7 +183,7 @@ test("successful termination of another bundle leaves the viewer connected", asy
 
 test("failed termination keeps the viewer connected", async () => {
   const client = recordViewer();
-  setTerminateAppToolDependencies({
+  appTools.configure("terminateApp", {
     createTerminateApp: () => ({ execute: async () => ({ success: false, error: "failed" }) }),
   });
   await expect(

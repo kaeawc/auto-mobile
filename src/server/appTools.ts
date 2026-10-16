@@ -111,29 +111,10 @@ export interface ListAppsToolDependencies {
   queryInstalledApps: typeof queryInstalledApps;
 }
 
-let listAppsToolDependencies: ListAppsToolDependencies | null = null;
-
-function getListAppsToolDependencies(): ListAppsToolDependencies {
-  if (!listAppsToolDependencies) {
-    listAppsToolDependencies = {
-      toolResponseFormatter: new DefaultToolResponseFormatter(),
-      queryInstalledApps,
-    };
-  }
-  return listAppsToolDependencies;
-}
-
-export function setListAppsToolDependencies(deps: Partial<ListAppsToolDependencies>): void {
-  const currentDeps = getListAppsToolDependencies();
-  listAppsToolDependencies = {
-    toolResponseFormatter: deps.toolResponseFormatter ?? currentDeps.toolResponseFormatter,
-    queryInstalledApps: deps.queryInstalledApps ?? currentDeps.queryInstalledApps,
-  };
-}
-
-export function resetListAppsToolDependencies(): void {
-  listAppsToolDependencies = null;
-}
+const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
+  toolResponseFormatter: new DefaultToolResponseFormatter(),
+  queryInstalledApps,
+});
 
 export interface LaunchAppExecutor {
   execute(
@@ -185,46 +166,22 @@ function createDefaultPrototypeAgentInjector(
   });
 }
 
-let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
-
-function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
-  if (!launchAppToolDependencies) {
-    let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
-    launchAppToolDependencies = {
-      createLaunchApp: (device) => new LaunchApp(device),
-      idGenerator: defaultIdGenerator,
-      prototypeAgentRegistry,
-      prototypeViewerConnections,
-      timer: defaultTimer,
-      prototypeViewerAttacher: {
-        attach: (device, bundleId) => {
-          viewerAttacher ??= createPrototypeViewerAttacher();
-          return viewerAttacher.attach(device, bundleId);
-        },
+function createDefaultLaunchAppToolDependencies(): LaunchAppToolDependencies {
+  let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
+  return {
+    createLaunchApp: (device) => new LaunchApp(device),
+    idGenerator: defaultIdGenerator,
+    prototypeAgentRegistry,
+    prototypeViewerConnections,
+    timer: defaultTimer,
+    prototypeViewerAttacher: {
+      attach: (device, bundleId) => {
+        viewerAttacher ??= createPrototypeViewerAttacher();
+        return viewerAttacher.attach(device, bundleId);
       },
-      createPrototypeAgentInjector: createDefaultPrototypeAgentInjector,
-    };
-  }
-  return launchAppToolDependencies;
-}
-
-export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependencies>): void {
-  const currentDeps = getLaunchAppToolDependencies();
-  launchAppToolDependencies = {
-    createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
-    idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
-    prototypeAgentRegistry: deps.prototypeAgentRegistry ?? currentDeps.prototypeAgentRegistry,
-    prototypeViewerAttacher: deps.prototypeViewerAttacher ?? currentDeps.prototypeViewerAttacher,
-    prototypeViewerConnections:
-      deps.prototypeViewerConnections ?? currentDeps.prototypeViewerConnections,
-    timer: deps.timer ?? currentDeps.timer,
-    createPrototypeAgentInjector:
-      deps.createPrototypeAgentInjector ?? currentDeps.createPrototypeAgentInjector,
+    },
+    createPrototypeAgentInjector: createDefaultPrototypeAgentInjector,
   };
-}
-
-export function resetLaunchAppToolDependencies(): void {
-  launchAppToolDependencies = null;
 }
 
 export interface TerminateAppExecutor {
@@ -241,27 +198,9 @@ export interface TerminateAppToolDependencies {
   createTerminateApp(device: BootedDevice): TerminateAppExecutor;
 }
 
-let terminateAppToolDependencies: TerminateAppToolDependencies | null = null;
-
-function getTerminateAppToolDependencies(): TerminateAppToolDependencies {
-  if (!terminateAppToolDependencies) {
-    terminateAppToolDependencies = {
-      createTerminateApp: (device) => new TerminateApp(device),
-    };
-  }
-  return terminateAppToolDependencies;
-}
-
-export function setTerminateAppToolDependencies(deps: Partial<TerminateAppToolDependencies>): void {
-  const currentDeps = getTerminateAppToolDependencies();
-  terminateAppToolDependencies = {
-    createTerminateApp: deps.createTerminateApp ?? currentDeps.createTerminateApp,
-  };
-}
-
-export function resetTerminateAppToolDependencies(): void {
-  terminateAppToolDependencies = null;
-}
+const defaultTerminateAppToolDependencies: TerminateAppToolDependencies = {
+  createTerminateApp: (device) => new TerminateApp(device),
+};
 
 export interface CrashAppExecutor {
   execute(appId: string, signal?: AbortSignal): Promise<CrashAppResult>;
@@ -318,24 +257,9 @@ export interface UninstallAppToolDependencies {
   createUninstallApp(device: BootedDevice): UninstallAppExecutor;
 }
 
-let uninstallAppToolDependencies: UninstallAppToolDependencies | null = null;
-
-function getUninstallAppToolDependencies(): UninstallAppToolDependencies {
-  return (uninstallAppToolDependencies ??= {
-    createUninstallApp: (device) => new UninstallApp(device),
-  });
-}
-
-export function setUninstallAppToolDependencies(deps: Partial<UninstallAppToolDependencies>): void {
-  uninstallAppToolDependencies = {
-    createUninstallApp:
-      deps.createUninstallApp ?? getUninstallAppToolDependencies().createUninstallApp,
-  };
-}
-
-export function resetUninstallAppToolDependencies(): void {
-  uninstallAppToolDependencies = null;
-}
+const defaultUninstallAppToolDependencies: UninstallAppToolDependencies = {
+  createUninstallApp: (device) => new UninstallApp(device),
+};
 
 export interface InspectPackageSigningExecutor {
   execute(
@@ -352,21 +276,9 @@ const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDep
   createInspectPackageSigning: (device) => new InspectPackageSigning(device),
 };
 
-let installAppToolDependencies: InstallAppToolDependencies | null = null;
-
-function getInstallAppToolDependencies(): InstallAppToolDependencies {
-  return (installAppToolDependencies ??= { createInstallApp: (device) => new InstallApp(device) });
-}
-
-export function setInstallAppToolDependencies(deps: Partial<InstallAppToolDependencies>): void {
-  installAppToolDependencies = {
-    createInstallApp: deps.createInstallApp ?? getInstallAppToolDependencies().createInstallApp,
-  };
-}
-
-export function resetInstallAppToolDependencies(): void {
-  installAppToolDependencies = null;
-}
+const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
+  createInstallApp: (device) => new InstallApp(device),
+};
 
 /** Report the first identity signal from the shared launch observation resolver. */
 function isVerifiedLaunchObservation(
@@ -919,6 +831,7 @@ export interface LaunchAppActionArgs {
 function prepareLaunchArguments(
   device: BootedDevice,
   args: LaunchAppActionArgs,
+  idGenerator: IdGenerator,
 ): { launchArguments?: string[]; mutationToken?: string } {
   if (args.launchArguments?.includes("--automobile-mutation-token")) {
     throw new ActionableError("launchArguments contains a reserved argument");
@@ -931,7 +844,7 @@ function prepareLaunchArguments(
   if (!args.launchArguments?.includes("--allow-storage-mutations")) {
     return { launchArguments: args.launchArguments };
   }
-  const mutationToken = getLaunchAppToolDependencies().idGenerator.next();
+  const mutationToken = idGenerator.next();
   iosMutationTokens.set(device.deviceId, args.appId, mutationToken);
   return {
     launchArguments: [...args.launchArguments, "--automobile-mutation-token", mutationToken],
@@ -1071,35 +984,31 @@ export function describeListAppsResult(
   );
 }
 
-const listAppsHandler = async (
-  device: BootedDevice,
-  args: ListAppsArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  const { toolResponseFormatter, queryInstalledApps: queryApps } = getListAppsToolDependencies();
-  try {
-    signal?.throwIfAborted();
-    const content = await queryApps(
-      {
-        deviceId: device.deviceId,
-        platform: device.platform,
-        type: args.type,
-        search: args.search,
-        profile: args.profile,
-      },
-      signal,
-    );
-    signal?.throwIfAborted();
+const createListAppsHandler =
+  ({ toolResponseFormatter, queryInstalledApps: queryApps }: ListAppsToolDependencies) =>
+  async (device: BootedDevice, args: ListAppsArgs, _progress?: unknown, signal?: AbortSignal) => {
+    try {
+      signal?.throwIfAborted();
+      const content = await queryApps(
+        {
+          deviceId: device.deviceId,
+          platform: device.platform,
+          type: args.type,
+          search: args.search,
+          profile: args.profile,
+        },
+        signal,
+      );
+      signal?.throwIfAborted();
 
-    return toolResponseFormatter.createJSONToolResponse({
-      message: describeListAppsResult(device.deviceId, content),
-      ...content,
-    });
-  } catch (error) {
-    throw toActionableError(error, `Failed to list apps for device ${device.deviceId}`);
-  }
-};
+      return toolResponseFormatter.createJSONToolResponse({
+        message: describeListAppsResult(device.deviceId, content),
+        ...content,
+      });
+    } catch (error) {
+      throw toActionableError(error, `Failed to list apps for device ${device.deviceId}`);
+    }
+  };
 
 function executeLaunch(
   launchApp: LaunchAppExecutor,
@@ -1143,57 +1052,58 @@ function launchFailure(
 }
 
 // Launch app handler
-const launchAppHandler = async (
-  device: BootedDevice,
-  args: LaunchAppActionArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  let mutationMayHaveHappened = false;
-  let mutationToken: string | undefined;
-  const dependencies = getLaunchAppToolDependencies();
-  let prototypeLaunch: PrototypeLaunch | undefined;
-  try {
-    signal?.throwIfAborted();
-    prototypeLaunch = args.prototype
-      ? await beginPrototypeLaunch(dependencies, device, args.appId)
-      : undefined;
-    signal?.throwIfAborted();
-    const prepared = prepareLaunchArguments(device, args);
-    mutationToken = prepared.mutationToken;
-    const launchApp = dependencies.createLaunchApp(device);
-    mutationMayHaveHappened = true;
-    const result = await executeLaunch(
-      launchApp,
-      args,
-      prepared.launchArguments,
-      prototypeLaunch,
-      signal,
-    );
-    signal?.throwIfAborted();
+const createLaunchAppHandler =
+  (dependencies: LaunchAppToolDependencies) =>
+  async (
+    device: BootedDevice,
+    args: LaunchAppActionArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
+    let mutationToken: string | undefined;
+    let prototypeLaunch: PrototypeLaunch | undefined;
+    try {
+      signal?.throwIfAborted();
+      prototypeLaunch = args.prototype
+        ? await beginPrototypeLaunch(dependencies, device, args.appId)
+        : undefined;
+      signal?.throwIfAborted();
+      const prepared = prepareLaunchArguments(device, args, dependencies.idGenerator);
+      mutationToken = prepared.mutationToken;
+      const launchApp = dependencies.createLaunchApp(device);
+      mutationMayHaveHappened = true;
+      const result = await executeLaunch(
+        launchApp,
+        args,
+        prepared.launchArguments,
+        prototypeLaunch,
+        signal,
+      );
+      signal?.throwIfAborted();
 
-    const safeResult = result.error
-      ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
-      : result;
-    const response = buildLaunchAppResponse(args.appId, safeResult);
-    await attachLaunchedViewer(
-      dependencies.prototypeViewerAttacher,
-      dependencies.timer,
-      device,
-      args,
-    );
-    return createStructuredToolResponse(
-      prototypeLaunch ? await prototypeLaunch.attach(response, result.pid) : response,
-    );
-  } catch (error) {
-    prototypeLaunch?.abort();
-    throw launchFailure(error, device, args.appId, mutationToken);
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
+      const safeResult = result.error
+        ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
+        : result;
+      const response = buildLaunchAppResponse(args.appId, safeResult);
+      await attachLaunchedViewer(
+        dependencies.prototypeViewerAttacher,
+        dependencies.timer,
+        device,
+        args,
+      );
+      return createStructuredToolResponse(
+        prototypeLaunch ? await prototypeLaunch.attach(response, result.pid) : response,
+      );
+    } catch (error) {
+      prototypeLaunch?.abort();
+      throw launchFailure(error, device, args.appId, mutationToken);
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-  }
-};
+  };
 
 async function attachLaunchedViewer(
   attacher: LaunchAppToolDependencies["prototypeViewerAttacher"],
@@ -1273,60 +1183,60 @@ async function beginPrototypeLaunch(
 }
 
 // Terminate app handler
-const terminateAppHandler = async (
-  device: BootedDevice,
-  args: AppActionArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  let mutationMayHaveHappened = false;
-  try {
-    signal?.throwIfAborted();
-    if (device.platform === "ios") {
-      iosMutationTokens.clear(device.deviceId, args.appId);
-    }
-    const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
-    mutationMayHaveHappened = true;
-    const result = await terminateApp.execute(
-      args.appId,
-      {
-        skipUiStability: true, // skip the 12+ second stability polling
-      },
-      signal,
-    );
-
-    // A typed failure (e.g. an iOS installed-app listing that failed, or a
-    // devicectl termination error) must surface as an error rather than a
-    // response claiming the app was terminated — issue #5621. Mirrors the
-    // uninstall handler below.
-    if (!result.success) {
-      throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
-    }
-    if (device.platform === "ios") {
-      // Only after a successful termination: a failed one leaves the agent running and reachable.
-      getLaunchAppToolDependencies().prototypeAgentRegistry.release(device.deviceId, args.appId);
-      getLaunchAppToolDependencies().prototypeViewerConnections.release(
-        device.deviceId,
+const createTerminateAppHandler =
+  (
+    dependencies: TerminateAppToolDependencies,
+    launchDependencies: Pick<
+      LaunchAppToolDependencies,
+      "prototypeAgentRegistry" | "prototypeViewerConnections"
+    >,
+  ) =>
+  async (device: BootedDevice, args: AppActionArgs, _progress?: unknown, signal?: AbortSignal) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      if (device.platform === "ios") {
+        iosMutationTokens.clear(device.deviceId, args.appId);
+      }
+      const terminateApp = dependencies.createTerminateApp(device);
+      mutationMayHaveHappened = true;
+      const result = await terminateApp.execute(
         args.appId,
+        {
+          skipUiStability: true, // skip the 12+ second stability polling
+        },
+        signal,
       );
-    }
 
-    return createStructuredToolResponse({
-      message: buildTerminateMessage(args.appId, result),
-      observation: result.observation,
-      ...result,
-    });
-  } catch (error) {
-    if (error instanceof ActionableError) {
-      throw error;
+      // A typed failure (e.g. an iOS installed-app listing that failed, or a
+      // devicectl termination error) must surface as an error rather than a
+      // response claiming the app was terminated — issue #5621. Mirrors the
+      // uninstall handler below.
+      if (!result.success) {
+        throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
+      }
+      if (device.platform === "ios") {
+        // Only after a successful termination: a failed one leaves the agent running and reachable.
+        launchDependencies.prototypeAgentRegistry.release(device.deviceId, args.appId);
+        launchDependencies.prototypeViewerConnections.release(device.deviceId, args.appId);
+      }
+
+      return createStructuredToolResponse({
+        message: buildTerminateMessage(args.appId, result),
+        observation: result.observation,
+        ...result,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, `Failed to terminate app`);
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-    throw toActionableError(error, `Failed to terminate app`);
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
-    }
-  }
-};
+  };
 
 const createCrashAppHandler =
   (dependencies: CrashAppToolDependencies) =>
@@ -1414,43 +1324,42 @@ function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undef
 }
 
 // Install app handler
-const installAppHandler = async (
-  device: BootedDevice,
-  args: InstallAppArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  let mutationMayHaveHappened = false;
-  try {
-    signal?.throwIfAborted();
-    const installApp = getInstallAppToolDependencies().createInstallApp(device);
-    mutationMayHaveHappened = true;
-    const guard = installGuardFromArgs(args);
-    const result = guard
-      ? await installApp.execute(args.artifactPath, undefined, signal, guard)
-      : await installApp.execute(args.artifactPath, undefined, signal);
-    if (!result.success) {
-      throw new ActionableError(result.error || `Failed to install app from ${args.artifactPath}`);
-    }
-    const message = result.warning
-      ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
-      : `Installed app from ${args.artifactPath}`;
+const createInstallAppHandler =
+  (dependencies: InstallAppToolDependencies) =>
+  async (device: BootedDevice, args: InstallAppArgs, _progress?: unknown, signal?: AbortSignal) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      const installApp = dependencies.createInstallApp(device);
+      mutationMayHaveHappened = true;
+      const guard = installGuardFromArgs(args);
+      const result = guard
+        ? await installApp.execute(args.artifactPath, undefined, signal, guard)
+        : await installApp.execute(args.artifactPath, undefined, signal);
+      if (!result.success) {
+        throw new ActionableError(
+          result.error || `Failed to install app from ${args.artifactPath}`,
+        );
+      }
+      const message = result.warning
+        ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
+        : `Installed app from ${args.artifactPath}`;
 
-    return createJSONToolResponse({
-      message,
-      ...result,
-    });
-  } catch (error) {
-    if (error instanceof ActionableError) {
-      throw error;
+      return createJSONToolResponse({
+        message,
+        ...result,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, `Failed to install app`);
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-    throw toActionableError(error, `Failed to install app`);
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
-    }
-  }
-};
+  };
 
 /** Passes the guard only when requested so an unguarded call keeps its historical shape. */
 function executeUninstall(
@@ -1468,51 +1377,58 @@ function executeUninstall(
 }
 
 // Uninstall app handler
-const uninstallAppHandler = async (
-  device: BootedDevice,
-  args: UninstallAppArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  let mutationMayHaveHappened = false;
-  try {
-    signal?.throwIfAborted();
-    const uninstallApp = getUninstallAppToolDependencies().createUninstallApp(device);
-    mutationMayHaveHappened = true;
-    const result = await executeUninstall(uninstallApp, args, signal);
+const createUninstallAppHandler =
+  (dependencies: UninstallAppToolDependencies) =>
+  async (
+    device: BootedDevice,
+    args: UninstallAppArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      const uninstallApp = dependencies.createUninstallApp(device);
+      mutationMayHaveHappened = true;
+      const result = await executeUninstall(uninstallApp, args, signal);
 
-    if (!result.success) {
-      throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);
-    }
+      if (!result.success) {
+        throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);
+      }
 
-    const message = result.wasInstalled
-      ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
-      : `App ${args.appId} was not installed`;
+      const message = result.wasInstalled
+        ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
+        : `App ${args.appId} was not installed`;
 
-    return createJSONToolResponse({
-      message,
-      ...result,
-    });
-  } catch (error) {
-    if (error instanceof ActionableError) {
-      throw error;
+      return createJSONToolResponse({
+        message,
+        ...result,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, `Failed to uninstall app`);
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-    throw toActionableError(error, `Failed to uninstall app`);
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
-    }
-  }
-};
+  };
 
 // Register tools
 let unsubscribePrototypeAgentLifecycle: (() => void) | undefined;
 
 /** A released session or a removed device ends every agent recorded on its device. */
-function subscribePrototypeAgentLifecycle(): () => void {
+function subscribePrototypeAgentLifecycle(
+  dependencies: Pick<
+    LaunchAppToolDependencies,
+    "prototypeAgentRegistry" | "prototypeViewerConnections"
+  >,
+): () => void {
   const releaseDevice = (deviceId: string) => {
-    getLaunchAppToolDependencies().prototypeAgentRegistry.releaseDevice(deviceId);
-    getLaunchAppToolDependencies().prototypeViewerConnections.releaseDevice(deviceId);
+    dependencies.prototypeAgentRegistry.releaseDevice(deviceId);
+    dependencies.prototypeViewerConnections.releaseDevice(deviceId);
   };
   const cleanups = [
     SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot, extras) => {
@@ -1528,13 +1444,40 @@ function subscribePrototypeAgentLifecycle(): () => void {
 
 /** Overrides for the collaborators `registerAppTools` wires into its handlers (tests, embedders). */
 export interface AppToolsDependencies {
+  listApps?: Partial<ListAppsToolDependencies>;
+  launchApp?: Partial<LaunchAppToolDependencies>;
+  terminateApp?: Partial<TerminateAppToolDependencies>;
+  uninstallApp?: Partial<UninstallAppToolDependencies>;
+  installApp?: Partial<InstallAppToolDependencies>;
   crashApp?: Partial<CrashAppToolDependencies>;
   appLifecycle?: Partial<AppLifecycleToolDependencies>;
   inspectPackageSigning?: Partial<InspectPackageSigningToolDependencies>;
   appPermissionsFactory?: AppPermissionsFactory;
 }
 
-export function registerAppTools(dependencies: AppToolsDependencies = {}) {
+/** Builds every injectable handler from real defaults overlaid with `dependencies`. */
+function createAppToolHandlers(dependencies: AppToolsDependencies) {
+  const listAppsHandler = createListAppsHandler({
+    ...createDefaultListAppsToolDependencies(),
+    ...dependencies.listApps,
+  });
+  const launchAppDependencies: LaunchAppToolDependencies = {
+    ...createDefaultLaunchAppToolDependencies(),
+    ...dependencies.launchApp,
+  };
+  const launchAppHandler = createLaunchAppHandler(launchAppDependencies);
+  const terminateAppHandler = createTerminateAppHandler(
+    { ...defaultTerminateAppToolDependencies, ...dependencies.terminateApp },
+    launchAppDependencies,
+  );
+  const uninstallAppHandler = createUninstallAppHandler({
+    ...defaultUninstallAppToolDependencies,
+    ...dependencies.uninstallApp,
+  });
+  const installAppHandler = createInstallAppHandler({
+    ...defaultInstallAppToolDependencies,
+    ...dependencies.installApp,
+  });
   const crashAppHandler = createCrashAppHandler({
     ...defaultCrashAppToolDependencies,
     ...dependencies.crashApp,
@@ -1550,8 +1493,35 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
   const setAppPermissionsHandler = createSetAppPermissionsHandler(
     dependencies.appPermissionsFactory,
   );
+  return {
+    listAppsHandler,
+    launchAppDependencies,
+    launchAppHandler,
+    terminateAppHandler,
+    uninstallAppHandler,
+    installAppHandler,
+    crashAppHandler,
+    appLifecycleHandler,
+    inspectPackageSigningToolDependencies,
+    setAppPermissionsHandler,
+  };
+}
+
+export function registerAppTools(dependencies: AppToolsDependencies = {}) {
+  const {
+    listAppsHandler,
+    launchAppDependencies,
+    launchAppHandler,
+    terminateAppHandler,
+    uninstallAppHandler,
+    installAppHandler,
+    crashAppHandler,
+    appLifecycleHandler,
+    inspectPackageSigningToolDependencies,
+    setAppPermissionsHandler,
+  } = createAppToolHandlers(dependencies);
   unsubscribePrototypeAgentLifecycle?.();
-  unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle();
+  unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle(launchAppDependencies);
   const inspectPackageSigningHandler = async (
     device: BootedDevice,
     args: InspectPackageSigningArgs,

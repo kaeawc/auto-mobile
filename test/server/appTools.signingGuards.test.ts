@@ -1,28 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  installAppSchema,
-  registerAppTools,
-  resetInstallAppToolDependencies,
-  resetUninstallAppToolDependencies,
-  setInstallAppToolDependencies,
-  setUninstallAppToolDependencies,
-  uninstallAppSchema,
-} from "../../src/server/appTools";
+import { installAppSchema, uninstallAppSchema } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SigningGuardError } from "../../src/models/SigningGuardError";
 import { SIGNER_A } from "../helpers/signedApkFixtures";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
 
 describe("install/uninstall signing guard arguments", () => {
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    registerAppTools();
+    appTools.reset();
   });
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
+    appTools.clear();
   });
 
   test("schemas accept well-formed digests and reject malformed or empty lists", () => {
@@ -46,7 +38,7 @@ describe("install/uninstall signing guard arguments", () => {
 
   test("uninstallApp forwards the guard; without one the call shape is unchanged", async () => {
     const calls: unknown[][] = [];
-    setUninstallAppToolDependencies({
+    appTools.configure("uninstallApp", {
       createUninstallApp: () => ({
         execute: async (...args) => {
           calls.push(args.slice(0, 5));
@@ -63,7 +55,7 @@ describe("install/uninstall signing guard arguments", () => {
 
   test("installApp forwards guards and surfaces a typed refusal", async () => {
     const calls: unknown[][] = [];
-    setInstallAppToolDependencies({
+    appTools.configure("installApp", {
       createInstallApp: () => ({
         execute: async (...args) => {
           calls.push(args);

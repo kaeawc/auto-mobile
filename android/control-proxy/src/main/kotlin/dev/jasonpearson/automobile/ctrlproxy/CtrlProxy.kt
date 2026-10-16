@@ -43,12 +43,10 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfil
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
-import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
@@ -103,8 +101,6 @@ import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
-import dev.jasonpearson.automobile.protocol.FrameMetricsData
-import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
@@ -203,7 +199,6 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
-import kotlinx.serialization.serializer
 
 /**
  * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
@@ -1648,133 +1643,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
   private val navigationEventReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_NAVIGATION_EVENT) {
-          return
-        }
-
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.navigationEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})",
-              )
-              if (
-                !sdkEventBatchProcessor.enqueueNavigationEvent(
-                  destination = event.destination,
-                  source = event.source.name,
-                  arguments = event.arguments ?: emptyMap(),
-                  metadata = event.metadata ?: emptyMap(),
-                  applicationId = event.applicationId,
-                  timestamp = event.timestamp,
-                )
-              ) {
-                Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val destination = intent.getStringExtra(AutoMobileSDK.EXTRA_DESTINATION) ?: return
-          val source = intent.getStringExtra(AutoMobileSDK.EXTRA_SOURCE) ?: return
-          val applicationId = intent.getStringExtra(AutoMobileSDK.EXTRA_APPLICATION_ID)
-
-          // Extract arguments (prefixed with "arg_")
-          val arguments = mutableMapOf<String, String>()
-          val metadata = mutableMapOf<String, String>()
-
-          intent.extras?.keySet()?.forEach { key ->
-            when {
-              key.startsWith("arg_") -> {
-                intent.getStringExtra(key)?.let { value ->
-                  arguments[key.removePrefix("arg_")] = value
-                }
-              }
-              key.startsWith("meta_") -> {
-                intent.getStringExtra(key)?.let { value ->
-                  metadata[key.removePrefix("meta_")] = value
-                }
-              }
-            }
-          }
-
-          Log.d(
-            TAG,
-            "Received navigation event (legacy): $destination from $source (app: $applicationId)",
-          )
-          if (
-            !sdkEventBatchProcessor.enqueueNavigationEvent(
-              destination = destination,
-              source = source,
-              arguments = arguments,
-              metadata = metadata,
-              applicationId = applicationId,
-              timestamp = System.currentTimeMillis(),
-            )
-          ) {
-            Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling navigation event broadcast", e)
-        }
-      }
-    }
+    NavigationEventReceiver(
+      sdkEventBatchProcessor = { sdkEventBatchProcessor },
+      timeProvider = timeProvider,
+    )
 
   private val recompositionReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT) {
-          return
-        }
-
-        val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT) ?: return
-        try {
-          val snapshot = jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
-          recompositionStore.updateSnapshot(snapshot)
-        } catch (e: Exception) {
-          Log.e(TAG, "Failed to parse recomposition snapshot", e)
-        }
-      }
-    }
+    RecompositionSnapshotReceiver(
+      jsonLenient = jsonLenient,
+      recompositionStore = recompositionStore,
+    )
 
   private val frameMetricsReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT) {
-          return
-        }
-
-        val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT) ?: return
-        try {
-          val snapshot = jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
-          frameMetricsStore.updateSnapshot(snapshot)
-          // Forward live so the host can feed real app-frame data into perfSnapshot.
-          if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-            val response =
-              FrameMetricsEventResponse(
-                timestamp = snapshot.timestamp,
-                frameMetrics =
-                  FrameMetricsData(
-                    applicationId = snapshot.applicationId,
-                    fps = snapshot.fps,
-                    frameTimeMs = snapshot.frameTimeMs,
-                    jankFrames = snapshot.jankFrames,
-                    totalFrames = snapshot.totalFrames,
-                  ),
-              )
-            serviceScope.launch { webSocketServer.broadcast(response) }
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Failed to parse frame metrics snapshot", e)
-        }
-      }
-    }
+    FrameMetricsSnapshotReceiver(
+      jsonLenient = jsonLenient,
+      frameMetricsStore = frameMetricsStore,
+      scope = serviceScope,
+      isRunning = { ::webSocketServer.isInitialized && webSocketServer.isRunning() },
+      broadcast = { response -> webSocketServer.broadcast(response) },
+    )
 
   private val packageReceiver =
     object : BroadcastReceiver() {

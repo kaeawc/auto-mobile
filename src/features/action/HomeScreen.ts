@@ -35,6 +35,7 @@ import {
 } from "../observe/observationReadScope";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 // Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
 const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
@@ -81,7 +82,14 @@ export class HomeScreen extends BaseVisualChange {
     this.device = device;
   }
 
-  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<HomeScreenResult> {
+  async execute(call?: ActionCall): Promise<HomeScreenResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<HomeScreenResult>;
+  async execute(
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
+  ): Promise<HomeScreenResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     return withObservationReadScope(() => this.executeWithReadScope(progress, signal));
   }
 

@@ -133,7 +133,7 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
   try {
     await expect(
       runWithAbortSignal(controller.signal, () =>
-        rotate.execute("landscape", undefined, undefined, controller.signal),
+        rotate.execute("landscape", { signal: controller.signal }),
       ),
     ).rejects.toThrow("Rotation cancelled");
     expect(controller.signal.aborted).toBe(true);

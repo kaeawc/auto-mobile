@@ -187,7 +187,7 @@ describe("session rotation restoration", () => {
       await h.rotate.execute("landscape");
       expect(h.adb.auto).toBe(0);
       await h.rotate.execute("portrait");
-      await h.rotate.execute("landscape", undefined, true);
+      await h.rotate.execute("landscape", { lockOrientation: true });
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
         userRotation: 2,
@@ -594,7 +594,7 @@ describe("session rotation restoration", () => {
       try {
         await h.manager.createSession("rotation-session", device.deviceId, "android");
         await h.rotate.execute("landscape");
-        const result = await h.rotate.execute("portrait", undefined, false);
+        const result = await h.rotate.execute("portrait", { lockOrientation: false });
         expect(result.orientationLockState).toBe("unlocked");
         expect(h.adb.auto).toBe(1);
         expect(h.adb.user).toBe(2);
@@ -616,7 +616,7 @@ describe("session rotation restoration", () => {
     const setter = spyOn(h.manager, "setRotation");
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await h.rotate.execute("landscape", undefined, false);
+      await h.rotate.execute("landscape", { lockOrientation: false });
       expect(setter).toHaveBeenCalledTimes(1);
       expect(setter.mock.calls[0][1]).toEqual({ accelerometerRotation: 1, userRotation: 2 });
       expect(h.adb.user).toBe(2);
@@ -644,7 +644,7 @@ describe("session rotation restoration", () => {
         h.adb.mismatch = false;
         return result;
       };
-      const result = await h.rotate.execute("portrait", undefined, false);
+      const result = await h.rotate.execute("portrait", { lockOrientation: false });
       expect(result.warning).toContain("user_rotation");
       expect(h.manager.getRotation("rotation-session")).toBeDefined();
       h.adb.executeCommand = execute;
@@ -749,7 +749,7 @@ describe("session rotation restoration", () => {
         }
         return execute(command);
       };
-      const restoring = h.rotate.execute("portrait", undefined, false);
+      const restoring = h.rotate.execute("portrait", { lockOrientation: false });
       await started.promise;
       h.timer.advanceTime(1000);
       const result = await restoring;
@@ -857,7 +857,7 @@ describe("session rotation restoration", () => {
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await h.rotate.execute("landscape");
-      await h.rotate.execute("portrait", undefined, false);
+      await h.rotate.execute("portrait", { lockOrientation: false });
       expect(h.adb.auto).toBe(1);
       expect(h.adb.user).toBe(2);
       const rememberedAfterUnlock = h.manager.getRotation("rotation-session");
@@ -917,11 +917,9 @@ describe("session rotation restoration", () => {
           return result;
         };
         // Explicit false also exercises catch-path automatic-rotation restoration.
-        const result = await h.rotate.execute(
-          "landscape",
-          undefined,
-          stage === "final mismatch" ? true : false,
-        );
+        const result = await h.rotate.execute("landscape", {
+          lockOrientation: stage === "final mismatch" ? true : false,
+        });
         expect(result.success).toBe(false);
         expect(writesAtRemoval).toBeGreaterThan(0);
         expect(h.adb.writes()).toHaveLength(writesAtRemoval);

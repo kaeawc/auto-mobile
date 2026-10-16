@@ -48,6 +48,7 @@ import type {
   SelectAllTextResult,
   TapOnElementResult,
 } from "../../src/models";
+import type { RotateCall } from "../../src/features/action/ActionCall";
 
 const test = warmedTests(() => {
   resetTapAnyElementFactory();
@@ -438,8 +439,8 @@ describe("rotateHandler (registered handler wiring)", () => {
   test("forwards lockOrientation to the rotate implementation", async () => {
     let receivedLockOrientation: boolean | undefined;
     setRotateFactory(() => ({
-      execute: async (_orientation, _progress, lockOrientation) => {
-        receivedLockOrientation = lockOrientation;
+      execute: async (_orientation, call) => {
+        receivedLockOrientation = (call as RotateCall | undefined)?.lockOrientation;
         return fakeResult({ success: true });
       },
     }));

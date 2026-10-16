@@ -18,6 +18,7 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
   return {
@@ -62,11 +63,19 @@ export class PressButton extends BaseVisualChange {
     return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
   }
 
+  async execute(button: string, call?: ActionCall): Promise<PressButtonResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     button: string,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<PressButtonResult>;
+  async execute(
+    button: string,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");

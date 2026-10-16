@@ -546,7 +546,7 @@ describe("HomeScreen", () => {
           });
           try {
             const request = () =>
-              homeScreen.execute(undefined, when === "ambient" ? undefined : controller.signal);
+              homeScreen.execute({ signal: when === "ambient" ? undefined : controller.signal });
             await expect(
               when === "ambient" ? runWithAbortSignal(controller.signal, request) : request(),
             ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
@@ -761,7 +761,7 @@ describe("HomeScreen", () => {
       const progressCallback = async () => {
         callbackCalled = true;
       };
-      const result = await homeScreen.execute(progressCallback);
+      const result = await homeScreen.execute({ progress: progressCallback });
 
       expect(result.success).toBe(true);
       expect(result.navigationMethod).toBe("hardware");

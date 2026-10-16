@@ -689,3 +689,55 @@ describe("Android catalog and default resolution", () => {
     ).toBe("catalog_metadata_invalid");
   });
 });
+
+describe("Android system image selection", () => {
+  const image = (flavor: string, version = "16") => ({
+    systemImagePackage: `system-images;android-36;${flavor};arm64-v8a`,
+    osVersion: version,
+    versionPrecision: "major" as const,
+    apiLevel: 36,
+    abi: "arm64-v8a",
+    flavor,
+    installed: true,
+    metadataState: "current" as const,
+  });
+  const resolveWith = (
+    releases: ReturnType<typeof image>[],
+    os: object = { kind: "major", major: 16 },
+  ) => {
+    const catalog = androidCatalog({ releases });
+    const defaults = androidDefaults();
+    const normalized = normalizeAndroid(
+      {
+        schemaVersion: 1,
+        platform: "android",
+        hardware: { kind: "archetype", archetype: "phone" },
+        os: os as never,
+      },
+      defaults,
+      catalog,
+    );
+    return resolveSessionDeviceProfile(normalized, defaults, catalog);
+  };
+
+  test("prefers google_apis over google_apis_playstore regardless of catalog order", () => {
+    for (const releases of [
+      [image("google_apis_playstore"), image("google_apis")],
+      [image("google_apis"), image("google_apis_playstore")],
+    ]) {
+      expect(unwrap(resolveWith(releases)).profile).toMatchObject({ flavor: "google_apis" });
+    }
+  });
+
+  test("falls back to package order when no google_apis image is installed", () => {
+    const resolved = unwrap(resolveWith([image("google_apis_playstore"), image("default")]));
+    expect(resolved.profile).toMatchObject({ flavor: "default" });
+  });
+
+  test("an API level used as os names the release version in the error", () => {
+    const error = unwrapError(resolveWith([image("google_apis")], { kind: "major", major: 36 }));
+    expect(error.code).toBe("missing_installed_runtime");
+    expect(error.message).toContain("release version");
+    expect(error.message).toContain("API level 36 is Android 16");
+  });
+});

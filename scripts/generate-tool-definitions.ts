@@ -11,69 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { findToolDefinitionsDrift } from "./lib/toolDefinitionsDrift";
 import { ToolRegistry } from "../src/server/toolRegistry";
-import { registerObserveTools } from "../src/server/observeTools";
-import { registerInteractionTools } from "../src/server/interactionTools";
-import { registerAppTools } from "../src/server/appTools";
-import { registerUtilityTools } from "../src/server/utilityTools";
-import { registerDeviceTools } from "../src/server/deviceTools";
-import { registerToolSelectionTools } from "../src/server/toolSelectionTools";
-import { registerDeepLinkTools } from "../src/server/deepLinkTools";
-import { registerNavigationTools } from "../src/server/navigationTools";
-import { registerNotificationTools } from "../src/server/notificationTools";
-import { registerPlanTools } from "../src/server/planTools";
-import { registerCriticalSectionTools } from "../src/server/criticalSectionTools";
-import { registerBarrierTools } from "../src/server/barrierTools";
-import { registerVideoRecordingTools } from "../src/server/videoRecordingTools";
-import { registerSnapshotTools } from "../src/server/snapshotTools";
-import { registerSnapshotOfTools } from "../src/server/snapshotOfTools";
-import { registerBiometricTools } from "../src/server/biometricTools";
-import { registerTelephonyTools } from "../src/server/telephonyTools";
-import { registerPrototypeTools } from "../src/server/prototypeTools";
-import { registerHighlightTools } from "../src/server/highlightTools";
-import { registerDatabaseTools } from "../src/server/databaseTools";
-import { registerStorageTools } from "../src/server/storageTools";
-import { registerPreferenceTools } from "../src/server/preferenceTools";
-import { registerAppFileTools } from "../src/server/appFileTools";
-import { registerSessionLogTools } from "../src/server/sessionLogTools";
-import { registerDownloadsFixtureTools } from "../src/server/downloadsFixtureTools";
-import { registerFormTools } from "../src/server/formTools";
-import { registerAccessibilityTools } from "../src/server/accessibilityTools";
-import { registerAccessibilityFocusTools } from "../src/server/accessibilityFocusTools";
-import { registerNetworkTools } from "../src/server/networkTools";
+import { registerAllTools } from "../src/server/registerAllTools";
 
 const OUTPUT_PATH = "schemas/tool-definitions.json";
-
-function registerAllTools(): void {
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerToolSelectionTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerNotificationTools();
-  registerPlanTools();
-  registerCriticalSectionTools();
-  registerBarrierTools();
-  registerVideoRecordingTools();
-  registerSnapshotTools();
-  registerSnapshotOfTools();
-  registerBiometricTools();
-  registerTelephonyTools();
-  registerHighlightTools();
-  registerPrototypeTools();
-  registerDatabaseTools();
-  registerStorageTools();
-  registerPreferenceTools();
-  registerAppFileTools();
-  registerSessionLogTools();
-  registerDownloadsFixtureTools();
-  registerFormTools();
-  registerAccessibilityTools();
-  registerAccessibilityFocusTools();
-  registerNetworkTools();
-}
 
 function getToolDefinitions(): unknown[] {
   const toolDefinitions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
@@ -135,7 +75,7 @@ if (args.some((argument) => argument !== "--check") || args.length > 1) {
   process.exit(2);
 }
 
-registerAllTools();
+registerAllTools({ daemonMode: true });
 const definitions = getToolDefinitions();
 if (args[0] === "--check") {
   checkToolDefinitions(OUTPUT_PATH, definitions);

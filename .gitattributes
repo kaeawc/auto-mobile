@@ -16,6 +16,7 @@ test/fixtures/ios-devicetype-order/*.json text eol=lf
 test/fixtures/ios-devicetype-order/*.md text eol=lf
 test/fixtures/ci/coverage-badge/*.json text eol=lf
 test/fixtures/release/*.md text eol=lf
+test/fixtures/tool-registration/*.json text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf

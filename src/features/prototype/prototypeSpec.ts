@@ -3,7 +3,7 @@ import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { record } from "./prototypeTemplate";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import {
   keySchema,

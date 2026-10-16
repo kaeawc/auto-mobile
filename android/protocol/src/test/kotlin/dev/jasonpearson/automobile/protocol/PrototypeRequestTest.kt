@@ -258,7 +258,7 @@ class PrototypeRequestTest {
     assertEquals("device", decoded.via)
     assertEquals(5000, decoded.timeoutMs)
     assertEquals(JsonPrimitive("1"), decoded.headers!!.getValue("A"))
-    assertEquals(obj("""{"state":"q"}"""), decoded.headers!!.getValue("B"))
+    assertEquals(obj("""{"state":"q"}"""), decoded.headers.getValue("B"))
     assertEquals(obj("""{"value":{"k":true}}"""), decoded.body)
     assertEquals(PrototypeDismissAction, decoded.onError!!.single())
   }
@@ -413,7 +413,7 @@ class PrototypeRequestTest {
       obj(
         """{"status":404,"headers":{"content-type":"application/json"},"durationMs":12,"error":{"code":"http_error","message":"HTTP 404"}}""",
       ),
-      result.data!!["feed__meta"],
+      result.data["feed__meta"],
     )
   }
 
@@ -444,7 +444,7 @@ class PrototypeRequestTest {
     assertFalse(result.result.succeeded)
     assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.result.meta.error?.code)
     assertNull(result.data!!["feed"])
-    val meta = result.data!!["feed__meta"]!!.jsonObject
+    val meta = result.data["feed__meta"]!!.jsonObject
     assertEquals(JsonPrimitive(200), meta["status"])
     assertEquals(
       JsonPrimitive("invalid_response"),
@@ -473,7 +473,7 @@ class PrototypeRequestTest {
     val response = received(JsonPrimitive("body"), headers = mapOf("x-big" to "z".repeat(1000)))
     val result = applied("""{"pad":"$filler"}""", "/data/feed", response)
     assertEquals(JsonPrimitive("body"), result.data!!["feed"])
-    assertEquals(obj("""{"status":200,"durationMs":12}"""), result.data!!["feed__meta"])
+    assertEquals(obj("""{"status":200,"durationMs":12}"""), result.data["feed__meta"])
   }
 
   @Test

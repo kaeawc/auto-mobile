@@ -77,11 +77,16 @@ class PrototypeRequestStorageTest {
   fun `a response that writes a stored key is persisted`() = runTest {
     val runtime = runtime()
     runtime.handle(
-      PrototypeInteraction.Tap(checkNotNull(runtime.renderModel().root.children[0].source?.onTap))
+      PrototypeInteraction.Tap(checkNotNull(runtime.renderModel().root.children[0].source?.onTap)),
     )
     runCurrent()
     http.answer.complete(
-      PrototypeRequestResponse.Received(200, emptyMap(), Json.parseToJsonElement("""["a","b"]"""), 3)
+      PrototypeRequestResponse.Received(
+        200,
+        emptyMap(),
+        Json.parseToJsonElement("""["a","b"]"""),
+        3,
+      ),
     )
     runCurrent()
     timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)

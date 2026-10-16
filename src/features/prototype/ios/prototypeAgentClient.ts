@@ -16,6 +16,11 @@ import type { IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import type { PrototypeRequestHost, PrototypeResponseSender } from "../prototypeRequestHandler";
+import {
+  PROTOTYPE_REQUEST_MESSAGE_TYPE,
+  PROTOTYPE_RESPONSE_MESSAGE_TYPE,
+} from "../prototypeRequestProtocol";
 
 /** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
 export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
@@ -96,6 +101,11 @@ export interface PrototypeAgentClient {
   onEvent(listener: (event: PrototypeAgentMessage) => void): () => void;
   /** Called once when the connection ends; returns an unsubscribe function. */
   onClosed(listener: (error: Error) => void): () => void;
+  /**
+   * Routes the agent's `prototype_request` frames (`via: "host"`, #12529) to the host proxy and
+   * cancels its running requests when the connection ends. Replaces any earlier host.
+   */
+  attachRequestHost?(host: PrototypeRequestHost | undefined): void;
   close(): void;
 }
 
@@ -227,6 +237,7 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
   private pendingHandshake: PendingHandshake | undefined;
   private agentHandshake: PrototypeAgentHandshake | undefined;
   private closedError: Error | undefined;
+  private requestHost: PrototypeRequestHost | undefined;
 
   constructor(
     private readonly socket: PrototypeAgentSocket,
@@ -308,6 +319,10 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
     return () => this.closedListeners.delete(listener);
   }
 
+  attachRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.requestHost = host;
+  }
+
   close(): void {
     this.fail(new ActionableError("Prototype agent connection was closed by the host."));
   }
@@ -384,8 +399,39 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
       this.eventListeners.forEach((listener) => listener(message));
       return;
     }
+    if (message.type === PROTOTYPE_REQUEST_MESSAGE_TYPE) {
+      void this.handlePrototypeRequest(message);
+      return;
+    }
     // A reply that arrives after its request timed out has nobody waiting; dropping it is safe.
     logger.debug(`[prototype-agent] ignoring unmatched frame: ${JSON.stringify(message)}`);
+  }
+
+  /** Answers one `prototype_request` frame with a `prototype_response` on the same socket. */
+  private async handlePrototypeRequest(frame: PrototypeAgentMessage): Promise<void> {
+    const send: PrototypeResponseSender = (response) => {
+      if (this.closedError !== undefined) {
+        throw new Error("Prototype agent connection is closed");
+      }
+      this.send(response);
+    };
+    if (this.requestHost === undefined) {
+      logger.warn("[prototype-agent] prototype_request received but no host proxy is attached");
+      send({
+        type: PROTOTYPE_RESPONSE_MESSAGE_TYPE,
+        requestId: typeof frame.requestId === "string" ? frame.requestId : "",
+        ok: false,
+        error: { code: "network", message: "The host request proxy is not available." },
+        durationMs: 0,
+      });
+      return;
+    }
+    try {
+      await this.requestHost.handleRequest(frame, send);
+    } catch (error) {
+      // The host replies by itself; an escape here means nobody can be told, so only trace it.
+      logger.warn(`[prototype-agent] prototype_request failed: ${errorMessage(error)}`, error);
+    }
   }
 
   private handleClose(error: Error | undefined): void {
@@ -428,6 +474,7 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
       waiter.reject(error);
     }
     this.waiters.clear();
+    this.requestHost?.handleDisconnect();
     this.socket.end();
     this.closedListeners.forEach((listener) => listener(error));
     this.closedListeners.clear();

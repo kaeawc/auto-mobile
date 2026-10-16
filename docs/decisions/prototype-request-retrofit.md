@@ -18,12 +18,12 @@ runs against a real server, for the dynamic URL, headers, bodies, the size cap a
 
 ## Alternatives checked
 
-| Alternative | Why not |
-| --- | --- |
-| `java.net.HttpURLConnection` / `java.net.http.HttpClient` | In the JDK/Android platform, but there is no coroutine cancellation, no redirect-policy or timeout composition, and `java.net.http` does not exist on Android. The repo would hand-roll what OkHttp already gives. |
-| OkHttp alone | Already a direct dependency and still does the transport here. The issue asks for a typed Retrofit client behind `PrototypeHttpClient`; Retrofit adds suspend functions with call cancellation and annotation-declared methods for ~130 KB, with no new transitive libraries beyond OkHttp. |
-| Ktor client | A dependency of the test source set only (`ktor.client.*`); the server-side Ktor in `control-proxy` is not a client. Adding the client engine to the app would be a second HTTP stack next to OkHttp. |
-| An existing repository helper | `src/` and `scripts/lib/` are TypeScript; there is no Kotlin HTTP helper in `android/`. |
+| Alternative                                               | Why not                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `java.net.HttpURLConnection` / `java.net.http.HttpClient` | In the JDK/Android platform, but there is no coroutine cancellation, no redirect-policy or timeout composition, and `java.net.http` does not exist on Android. The repo would hand-roll what OkHttp already gives.                                                                          |
+| OkHttp alone                                              | Already a direct dependency and still does the transport here. The issue asks for a typed Retrofit client behind `PrototypeHttpClient`; Retrofit adds suspend functions with call cancellation and annotation-declared methods for ~130 KB, with no new transitive libraries beyond OkHttp. |
+| Ktor client                                               | A dependency of the test source set only (`ktor.client.*`); the server-side Ktor in `control-proxy` is not a client. Adding the client engine to the app would be a second HTTP stack next to OkHttp.                                                                                       |
+| An existing repository helper                             | `src/` and `scripts/lib/` are TypeScript; there is no Kotlin HTTP helper in `android/`.                                                                                                                                                                                                     |
 
 ## Consequences
 

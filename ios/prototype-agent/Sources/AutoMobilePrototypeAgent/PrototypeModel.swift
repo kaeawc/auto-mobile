@@ -105,6 +105,8 @@ final class PrototypeModel {
     @ObservationIgnored var hitRects = PrototypeHitRects()
 
     @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
+    /// Runs the `request` actions the session starts and cancels (#12529).
+    @ObservationIgnored var requestDriver: PrototypeRequestDriver?
     @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
     /// Resigns keyboard focus inside the prototype window.
     @ObservationIgnored var onEndEditing: (() -> Void)?
@@ -206,7 +208,10 @@ final class PrototypeModel {
             prepared?.spec ?? spec, reset: reset, appearance: appearance, specBytes: specBytes,
             restoredState: prepared?.state
         )
+        // A show that replaces another prototype cancels that one's requests.
+        let requestCommands = next.takeRequestCommands()
         publish(next, replacingSpec: true)
+        requestDriver?.perform(requestCommands)
         expandedSelect = nil
         showRevision += 1
         syncSnackbarTimeouts()
@@ -356,6 +361,7 @@ final class PrototypeModel {
         // `transition` adds the `appearance_changed` a state or page change caused.
         var next = session
         let events = next.transition(transition)
+        let requestCommands = next.takeRequestCommands()
         publish(next)
         // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
         // redraw value-holding controls so they show those values instead of the refused input.
@@ -374,6 +380,13 @@ final class PrototypeModel {
             hitRects.removeAll()
             onVisibilityChange?(false)
         }
+        requestDriver?.perform(requestCommands)
+    }
+
+    /// A request's answer. Not user activity: it neither restarts the idle TTL nor needs the
+    /// prototype to still be the one that asked (the session drops answers it no longer awaits).
+    func completeRequest(_ requestId: String, _ response: PrototypeRequestResponse) {
+        apply(activity: false) { $0.completeRequest(requestId, response) }
     }
 
     func status() -> [String: Any] {

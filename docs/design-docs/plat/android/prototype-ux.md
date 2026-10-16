@@ -1143,11 +1143,18 @@ above in `PrototypeStorageRestorer` (`android/protocol`, the pure twin of `resto
 ### Request action (#12523)
 
 ```json
-{ "type": "request", "method": "GET", "url": "http://localhost:8080/feed",
-  "headers": {"Accept": "application/json"}, "query": {"q": {"state": "search"}},
-  "into": "/data/feed", "statusKey": "feedStatus", "via": "host",
-  "onSuccess": [{"type": "setState", "key": "loaded", "value": true}],
-  "onError": [] }
+{
+  "type": "request",
+  "method": "GET",
+  "url": "http://localhost:8080/feed",
+  "headers": { "Accept": "application/json" },
+  "query": { "q": { "state": "search" } },
+  "into": "/data/feed",
+  "statusKey": "feedStatus",
+  "via": "host",
+  "onSuccess": [{ "type": "setState", "key": "loaded", "value": true }],
+  "onError": []
+}
 ```
 
 A `request` calls an HTTP endpoint from a tap, writes the answer into `/data` and reports its
@@ -1158,29 +1165,29 @@ the via-device requests), so show, patch and `replaceNode` refuse a spec contain
 without them. A device advertising `prototype_network_v1` also writes `/data` for `into`, with the
 `applyPrototypeDataWrite` semantics, without `prototype_data_actions_v1`.
 
-| Field | Rule |
-| --- | --- |
-| `url` | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`. |
-| `method` | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`. |
-| `headers`, `query` | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in order. |
-| `body` | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one. |
-| `into` | `/data/<pointer>` with the data-action rules (whole `{index}` segment in a repeat). It must name an object member, not an array element, and its parent must exist. Optional: without it nothing is written to data. |
-| `statusKey` | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key. |
-| `via` | `"host"` (default) or `"device"`. |
-| `timeoutMs` | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`. |
-| `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests. |
+| Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`. |
+| `method`               | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`.                                                                                                                                                                                                                                                                                                                                                                          |
+| `headers`, `query`     | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in order.                                                                                                                                                                                                                                               |
+| `body`                 | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `into`                 | `/data/<pointer>` with the data-action rules (whole `{index}` segment in a repeat). It must name an object member, not an array element, and its parent must exist. Optional: without it nothing is written to data.                                                                                                                                                                                                                                                                                                                           |
+| `statusKey`            | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key.                                                                                                                                                                                                                                                                                                        |
+| `via`                  | `"host"` (default) or `"device"`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
 reads them from there (the contract is the single source for the host executor, the validator and
 the native runtimes):
 
-| Limit | Value |
-| --- | --- |
-| `DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS` | 10000 |
-| `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS` | 30000 (a larger `timeoutMs` is a validation error; the host clamps) |
-| `MAX_PROTOTYPE_RESPONSE_BYTES` | 262144, never above `MAX_PROTOTYPE_DATA_WRITE_BYTES`, so an accepted response is one `/data` write |
-| `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` | 4 per device |
-| `MAX_PROTOTYPE_ACTION_DEPTH` | 4: a top-level action is level 1 and each `onSuccess` / `onError` adds one. The contract walk counts it like selector and condition depth; Zod does not, and treats follow-up entries as actions of any depth. |
+| Limit                                  | Value                                                                                                                                                                                                          |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS` | 10000                                                                                                                                                                                                          |
+| `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`     | 30000 (a larger `timeoutMs` is a validation error; the host clamps)                                                                                                                                            |
+| `MAX_PROTOTYPE_RESPONSE_BYTES`         | 262144, never above `MAX_PROTOTYPE_DATA_WRITE_BYTES`, so an accepted response is one `/data` write                                                                                                             |
+| `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT`     | 4 per device                                                                                                                                                                                                   |
+| `MAX_PROTOTYPE_ACTION_DEPTH`           | 4: a top-level action is level 1 and each `onSuccess` / `onError` adds one. The contract walk counts it like selector and condition depth; Zod does not, and treats follow-up entries as actions of any depth. |
 
 **Response handling** is the pure function `applyPrototypeRequestOutcome`
 (`prototypeRequestOutcome.ts`), the reference the device runtimes copy:
@@ -1207,8 +1214,16 @@ authored `emit` with that name is a validation error) and a payload decoded by
 `ctrlProxyWireManifest.ts` is unchanged:
 
 ```json
-{ "requestId": "r-1", "method": "GET", "url": "http://localhost:8080/feed?q=cats", "via": "host",
-  "into": "/data/feed", "outcome": "success", "status": 200, "durationMs": 31 }
+{
+  "requestId": "r-1",
+  "method": "GET",
+  "url": "http://localhost:8080/feed?q=cats",
+  "via": "host",
+  "into": "/data/feed",
+  "outcome": "success",
+  "status": 200,
+  "durationMs": 31
+}
 ```
 
 `outcome` is `"success"` or `"error"`; `error: {code, message}` is present exactly for `"error"`;
@@ -1258,12 +1273,29 @@ Worked example: a feed that shows a spinner, the result and an error (state
 
 ```json
 [
-  { "type": "text", "text": "Loading", "visibleWhen": { "key": "feedStatus", "equals": "loading" } },
-  { "type": "text", "text": "{data:/feed__meta/error/message}",
-    "visibleWhen": { "key": "feedStatus", "equals": "error" } },
-  { "type": "button", "label": "Load",
-    "onTap": [{ "type": "request", "url": "http://localhost:8080/feed",
-      "query": { "q": { "state": "search" } }, "into": "/data/feed", "statusKey": "feedStatus" }] }
+  {
+    "type": "text",
+    "text": "Loading",
+    "visibleWhen": { "key": "feedStatus", "equals": "loading" }
+  },
+  {
+    "type": "text",
+    "text": "{data:/feed__meta/error/message}",
+    "visibleWhen": { "key": "feedStatus", "equals": "error" }
+  },
+  {
+    "type": "button",
+    "label": "Load",
+    "onTap": [
+      {
+        "type": "request",
+        "url": "http://localhost:8080/feed",
+        "query": { "q": { "state": "search" } },
+        "into": "/data/feed",
+        "statusKey": "feedStatus"
+      }
+    ]
+  }
 ]
 ```
 

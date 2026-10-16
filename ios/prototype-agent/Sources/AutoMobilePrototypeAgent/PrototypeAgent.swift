@@ -128,6 +128,7 @@ final class PrototypeAgent: NSObject {
         }
         server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
         agent.server = server
+        agent.installRequestDriver()
         server.start()
     }
 
@@ -231,6 +232,25 @@ final class PrototypeAgent: NSObject {
         observeStorageFlush()
         server.start()
         self.server = server
+        installRequestDriver()
+    }
+
+    /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames
+    /// to the connected host and come back as `prototype_response`; `via: "device"` calls run on a
+    /// dedicated URLSession client.
+    private func installRequestDriver() {
+        let driver = PrototypeRequestDriver(
+            clock: SystemPrototypeClock(),
+            device: PrototypeURLSessionClient()
+        ) { [weak self] frame in
+            guard let self, connectedClients > 0, let server else { return false }
+            server.broadcast(frame)
+            return true
+        }
+        driver.onComplete = { [weak model] requestId, response in
+            model?.completeRequest(requestId, response)
+        }
+        model.requestDriver = driver
     }
 
     /// Stored prototype values are debounced; the app going to the background or ending flushes them.
@@ -447,6 +467,11 @@ final class PrototypeAgent: NSObject {
             body.merge(extra) { _, new in new }
             reply(body)
         }
+        // The host's answer to a `prototype_request` frame is not a request: nothing replies to it.
+        if type == PrototypeRequestWire.responseType {
+            model.requestDriver?.receiveHostResponse(message)
+            return
+        }
         if let rejection = PrototypeTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
             return result(false, rejection)
         }
@@ -579,7 +604,11 @@ final class PrototypeAgent: NSObject {
     /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
-        if count < 1 { model.hostDisconnected() }
+        if count < 1 {
+            model.hostDisconnected()
+            // Calls still waiting on the host (a persistent prototype outlives it) cannot be answered.
+            model.requestDriver?.hostDisconnected()
+        }
         for pending in outbox.clientCountChanged(count) {
             server?.broadcast(pending)
         }

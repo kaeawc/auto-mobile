@@ -2684,6 +2684,7 @@ function prototypeTargets(
     if (transport === undefined) {
       transport = new IosPrototypeTransport(agent);
       transports.ios.set(agent, transport);
+      requestWiring.attachIosPrototypeRequests(agent, device.deviceId, transports.requests);
     }
     return { transport, ios: transport };
   };
@@ -2714,11 +2715,10 @@ interface PrototypeHost {
 function createPrototypeHost(dependencies: PrototypeToolDependencies): PrototypeHost {
   const store =
     dependencies.store ?? new InMemoryPrototypeStatusStore(prototypeClock(dependencies));
-  const requests = requestWiring.createPrototypeRequestCoordinator(
-    dependencies.timer ?? defaultTimer,
-  );
+  const timer = dependencies.timer ?? defaultTimer;
+  const requests = requestWiring.createPrototypeRequestCoordinator(timer);
   const events = new PrototypeEventCoordinator(
-    dependencies.timer ?? defaultTimer,
+    timer,
     store,
     TelemetryRecorder.getInstance(),
     requests,

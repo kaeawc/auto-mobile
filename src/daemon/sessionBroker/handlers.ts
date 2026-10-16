@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parseSessionConfig } from "../../devices/sessionConfig";
+import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { DaemonRequest } from "../types";
@@ -12,7 +13,12 @@ const statusParams = z
   .strict();
 const abandonParams = statusParams;
 const releaseParams = z
-  .object({ sessionId: z.string().uuid(), livenessOwnerToken: ownerToken })
+  .object({
+    sessionId: z.string().uuid(),
+    livenessOwnerToken: ownerToken,
+    // Set only by a proxy whose execution owner died (#12791); a client release omits it.
+    reason: z.literal(SESSION_OWNER_EXITED_CODE).optional(),
+  })
   .strict();
 
 export async function handlePrepareBrokerSession(
@@ -129,7 +135,10 @@ export async function handleReleaseBrokerSession(
       result: { sessionUuid: parsed.data.sessionId, outcome: "unknown_session" },
     };
   }
-  return { success: true, result: { ...(await service.broker.release(parsed.data.sessionId)) } };
+  return {
+    success: true,
+    result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
+  };
 }
 
 /** Reconnect proves request ownership and derives private binding from the receipt. */

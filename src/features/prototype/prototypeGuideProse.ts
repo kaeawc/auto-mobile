@@ -691,3 +691,17 @@ whole action list atomically, shows errors on every listed field, and sends
 \`{kind:"validation_failed", keys:[…]}\` naming only the failing keys. \`change\` events carry
 \`validity: {key:boolean}\` for checked keys. Both event kinds retain the usual event envelope.
 `;
+
+export const GUIDE_DEVICE_LOOPBACK = `## Requests to localhost from the device
+
+On Android, \`localhost\`, \`127.0.0.1\` and \`[::1]\` in a \`request\` action with \`via: "device"\` mean the
+device itself. When you \`show\` such a prototype, the host runs \`adb reverse tcp:<port> tcp:<port>\` for
+each literal port (a URL without a port reverses 80, or 443 for https), removes only the reverses it
+created when the prototype is dismissed or the device disconnects, and leaves a reverse that already
+existed alone. A failed reverse never fails the show; \`inspect\` reports it as \`reverseFailures\`.
+
+A port that is a binding (\`http://localhost:{state:port}/feed\`) cannot be reversed, because it is only
+known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
+those requests. A saved prototype launched with no host connected gets no reverse either.
+iOS simulators share the Mac's network, so nothing is reversed there.
+`;

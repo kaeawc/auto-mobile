@@ -42,6 +42,15 @@ import {
   AndroidPrototypeTransport,
   type AndroidPrototypeClient,
 } from "../features/prototype/androidPrototypeTransport";
+import { PrototypeAdbReverseManager } from "../features/prototype/PrototypeAdbReverseManager";
+import { subscribePrototypeCleanup, type PrototypeEventLifecycle } from "./prototypeLifecycle";
+import {
+  reverseForPatch,
+  reverseForSavedAction,
+  reverseLifecycle,
+  reverseOutputShape,
+  withReverseReport,
+} from "./prototypeReverse";
 import {
   prototypeAssetPutClient,
   prototypeEventSource,
@@ -892,6 +901,7 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show with element anchors: device timestamp of the hierarchy they were resolved against",
     ),
+  ...reverseOutputShape,
   deviceDroppedEvents: z
     .number()
     .int()
@@ -903,25 +913,7 @@ export const prototypeOutputSchema = z.object({
   ...eventCountsSchema.shape,
 });
 
-export interface PrototypeEventLifecycle {
-  /** `releasedDeviceId` is the device named by the release snapshot, when one exists. */
-  subscribeSessionRelease(
-    listener: (sessionUuid: string, releasedDeviceId?: string) => void,
-  ): () => void;
-  subscribeDeviceRemoval(listener: (deviceId: string) => void): () => void;
-  /**
-   * Returns `undefined` while unbinding cannot be observed yet (the daemon state is not
-   * initialised); the host retries on its next registration or call until it subscribes.
-   */
-  subscribeDeviceUnbound(listener: (deviceId: string) => void): (() => void) | undefined;
-  /**
-   * What an unbound subscription is bound to (the daemon's current session manager), or
-   * `undefined` while unbinding cannot be observed. When it changes (DaemonState reset and
-   * re-initialised), the host drops its subscription to the old source and subscribes again.
-   * Omitted: the source never changes.
-   */
-  deviceUnboundSource?(): object | undefined;
-}
+export type { PrototypeEventLifecycle } from "./prototypeLifecycle";
 type PrototypeClient = AndroidPrototypeClient;
 /**
  * The transport for one call; `android` carries the CtrlProxy-only display gate and inspect, `ios`
@@ -1647,6 +1639,7 @@ type PrototypeHandlerDependencies = {
   target: PrototypeTarget;
   assetReaders: AssetReaders;
   commits: PrototypeCommitGenerations;
+  reverses: PrototypeAdbReverseManager;
   cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
   timer?: Timer;
@@ -1704,8 +1697,12 @@ async function performPrototypeAction(
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
-        specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal))?.error ?? undefined,
+        specRefusal: async (spec) => {
+          const refusal = (await specCapabilityRefusal(target, spec, signal))?.error ?? undefined;
+          // A patched node may add or drop a via "device" request to localhost (#12530); the
+          // complete patched spec is the last thing seen before the patch is sent.
+          return refusal ?? (await reverseForPatch(dependencies, device, args.id!, spec));
+        },
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),
@@ -1778,6 +1775,8 @@ async function performMutation(
     if (stage.failure) {
       withdrawGeneration(ordering);
     }
+    const reversing = reverseLifecycle(dependencies, device, args, target);
+    const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
     const { result, warning } = await withdrawOnAbort(
       ordering,
       undefined,
@@ -1826,6 +1825,7 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
+    await reversing.settle(result.success, previouslyShown);
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,
@@ -1862,6 +1862,7 @@ async function performMutation(
       ...anchorsOutput(resolved),
       ...platformNotesOutput(sendArgs, device, prototypeTarget, result.success),
       ...visibility,
+      ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
     };
   } catch (error) {
@@ -2606,67 +2607,6 @@ function defaultPrototypeLifecycle(): PrototypeEventLifecycle {
   };
 }
 
-/**
- * The single lifecycle mechanism: a released session (and the device its snapshot names),
- * a removed device and an unbound device all clear host status and event buffers.
- *
- * The unbound hook may not be available when the host is created (the daemon host is built
- * before DaemonState initialises), so `ensureSubscribed` retries it until it takes, keeping
- * exactly one active unbound subscription. It also follows the hook's source: once DaemonState is
- * re-initialised with a new session manager, the subscription to the old one is dropped and
- * replaced (#10715).
- */
-function subscribePrototypeCleanup(
-  lifecycle: PrototypeEventLifecycle,
-  events: PrototypeEventCoordinator,
-): { ensureSubscribed: () => void; unsubscribe: () => void } {
-  const cleanups = [
-    lifecycle.subscribeSessionRelease((sessionUuid, releasedDeviceId) => {
-      events.releaseSession(sessionUuid);
-      if (releasedDeviceId) {
-        events.releaseDevice(releasedDeviceId);
-      }
-    }),
-    lifecycle.subscribeDeviceRemoval((deviceId) => events.releaseDevice(deviceId)),
-  ];
-  // A lifecycle without a source never re-initialises; one constant stands for it.
-  const fixedSource = {};
-  let unbound: { source: object; unsubscribe: () => void } | undefined;
-  let disposed = false;
-  const ensureSubscribed = () => {
-    if (disposed) {
-      return;
-    }
-    const source = lifecycle.deviceUnboundSource ? lifecycle.deviceUnboundSource() : fixedSource;
-    if (unbound !== undefined && unbound.source === source) {
-      return;
-    }
-    unbound?.unsubscribe();
-    unbound = undefined;
-    if (source === undefined) {
-      return;
-    }
-    const unsubscribe = lifecycle.subscribeDeviceUnbound((deviceId) =>
-      events.releaseDevice(deviceId),
-    );
-    if (unsubscribe) {
-      unbound = { source, unsubscribe };
-    }
-  };
-  ensureSubscribed();
-  return {
-    ensureSubscribed,
-    unsubscribe: () => {
-      disposed = true;
-      unbound?.unsubscribe();
-      unbound = undefined;
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
-    },
-  };
-}
-
 /** Transports cached per underlying client; shared with the host that owns the subscriptions. */
 interface PrototypeTransportCache {
   android: WeakMap<PrototypeClient, AndroidPrototypeTransport>;
@@ -2723,6 +2663,8 @@ interface PrototypeHost {
   commits: PrototypeCommitGenerations;
   patchQueue: PrototypePatchQueue;
   transports: PrototypeTransportCache;
+  /** `adb reverse` ownership for via "device" request ports (#12530). */
+  reverses: PrototypeAdbReverseManager;
   /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
   ensureLifecycle(): void;
   dispose(): void;
@@ -2736,9 +2678,11 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     store,
     TelemetryRecorder.getInstance(),
   );
+  const reverses = new PrototypeAdbReverseManager();
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,
+    reverses,
   );
   let disposed = false;
   return {
@@ -2747,12 +2691,14 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
     transports: { android: new WeakMap(), ios: new WeakMap() },
+    reverses,
     ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {
         disposed = true;
         cleanup.unsubscribe();
         events.dispose();
+        void reverses.dispose();
       }
     },
   };
@@ -2837,7 +2783,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
   }
   // Per-connection registrations run after DaemonState initialises: pick up the unbound hook.
   host.ensureLifecycle();
-  const { store, events, commits } = host;
+  const { store, events, commits, reverses } = host;
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
@@ -2908,9 +2854,14 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       return responseFor({ success: false, error: error.message });
     }
     if (args.action === "inspect") {
-      return responseFor(
-        await inspectDevice({ store, events }, target, scope, args.timeoutMs, signal),
+      const inspected = await inspectDevice(
+        { store, events },
+        target,
+        scope,
+        args.timeoutMs,
+        signal,
       );
+      return responseFor(withReverseReport(inspected, reverses.report(device.deviceId)));
     }
     if (args.action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);
@@ -2927,6 +2878,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       target,
       assetReaders,
       commits,
+      reverses,
       cacheInvalidator,
       now: () => clock.now(),
       timer: dependencies.timer,
@@ -2934,29 +2886,29 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       lastRenderedObservation: dependencies.lastRenderedObservation,
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
     };
-    return responseFor(
-      await dispatchPrototypeSavedAction(
-        { ...args, action: args.action, spec: args.spec as PrototypeSpec | undefined },
-        () => {
-          const savedSignal = combineWithAmbientAbort(signal);
-          return {
-            client: target.android!,
-            adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
-            signal: savedSignal,
-            stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
-          };
-        },
-        (action) =>
-          performPrototypeAction(
-            handlerDependencies,
-            device,
-            { ...args, action },
-            scope,
-            host.patchQueue,
-            combineWithAmbientAbort(signal),
-          ),
-      ),
+    const savedReverses = await reverseForSavedAction(handlerDependencies, device, args);
+    const dispatched = await dispatchPrototypeSavedAction(
+      { ...args, action: args.action, spec: args.spec as PrototypeSpec | undefined },
+      () => {
+        const savedSignal = combineWithAmbientAbort(signal);
+        return {
+          client: target.android!,
+          adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+          signal: savedSignal,
+          stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
+        };
+      },
+      (action) =>
+        performPrototypeAction(
+          handlerDependencies,
+          device,
+          { ...args, action },
+          scope,
+          host.patchQueue,
+          combineWithAmbientAbort(signal),
+        ),
     );
+    return responseFor(withReverseReport(dispatched, savedReverses));
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,

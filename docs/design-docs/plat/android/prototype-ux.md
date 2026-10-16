@@ -1214,6 +1214,29 @@ full-screen pager example below). The user chooses in chat; nothing waits on the
 device for a choice. `pager`, `setPage` and `{page}`/`{pageCount}` interpolation
 remain spec primitives for that.
 
+### Loopback requests from the device (#12530)
+
+On an Android emulator or device, `localhost` in a `request` action with `via: "device"` is the
+device itself, not the host. When the host shows a prototype it scans every such request, at any
+depth (including nested `onSuccess`/`onError` lists), for URLs on `localhost`, `127.0.0.1` or `[::1]`
+and runs `adb -s <serial> reverse tcp:<port> tcp:<port>` for each port. `via: "host"` requests are
+ignored.
+
+- Implicit ports are reversed: `http://localhost/` reverses 80 and `https://localhost/` reverses 443,
+  so the same URL reaches the same host server under both `via` values.
+- Ownership: a reverse is recorded as the host's own only when it created it. One already listed by
+  `adb reverse --list` is left alone and never removed. Ports are reference-counted across the
+  prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
+  the device is unbound or removed.
+- Best-effort: a failed reverse is logged and reported as `reverseFailures`; it never fails the show.
+- A port that is a binding (`http://localhost:{state:port}/feed`) or an unparseable URL cannot be
+  reversed, because it is unknown until the request runs. `inspect` reports these as
+  `unreversiblePorts`, and the authoring guide says to use `via: "host"` for them.
+- A saved prototype launched with no host connected has no host to run `adb reverse`, so its
+  `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
+  address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
+- iOS simulators share the Mac's network, so nothing is reversed there.
+
 ## Anchors
 
 #9316 specifies semantics but not exact field names. These are the chosen strict

@@ -38,7 +38,7 @@ const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
   "src/features/prototype/ios/prototypeViewerAttach.ts": 1,
   "src/server/appTools.ts": 2,
   "src/server/deviceToolsShutdown.ts": 1,
-  "src/server/prototypeTools.ts": 3,
+  "src/server/prototypeLifecycle.ts": 1,
 };
 
 function memberName(node: MemberExpression): string | undefined {

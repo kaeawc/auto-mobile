@@ -24078,6 +24078,48 @@
           "description": "show with element anchors: device timestamp of the hierarchy they were resolved against",
           "type": "number"
         },
+        "unreversiblePorts": {
+          "description": "Android show and inspect: loopback URLs of via \"device\" request actions whose port is not a literal (a binding, or an unparseable URL), so no adb reverse was made for them. Use via \"host\" for those requests. Absent when none",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "prototypeId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["prototypeId", "url", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "reverseFailures": {
+          "description": "Android show and inspect: loopback ports of via \"device\" request actions whose automatic adb reverse failed (best-effort; the show is not failed). Absent when none",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "prototypeId": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["prototypeId", "port", "error"],
+            "additionalProperties": false
+          }
+        },
         "deviceDroppedEvents": {
           "description": "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
           "type": "integer",

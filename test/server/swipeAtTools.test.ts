@@ -155,6 +155,124 @@ describe("swipeAtSchema", () => {
   });
 });
 
+describe("swipeAtSchema image endpoints validate like tapAt's image point", () => {
+  const swipe = (image: Record<string, unknown>) => ({ platform: "android", image });
+  const displaySource = (extra: Record<string, unknown> = {}) => ({
+    screenshot: {
+      screenSize: { width: 100, height: 200 },
+      screenshotOrientation: "display",
+      ...extra,
+    },
+  });
+  const nativeSource = {
+    screenshot: {
+      screenSize: { width: 100, height: 200 },
+      screenshotOrientation: "native",
+    },
+  };
+
+  test.each([
+    [
+      "pixels without imageSize",
+      { unit: "pixels", source: displaySource(), from: { x: 1, y: 1 }, to: { x: 5, y: 5 } },
+      ["source"],
+    ],
+    [
+      "a native screenshot without rotation",
+      {
+        unit: "normalized",
+        source: nativeSource,
+        from: { x: 0.1, y: 0.1 },
+        to: { x: 0.5, y: 0.5 },
+      },
+      ["source"],
+    ],
+    [
+      "a normalized from.x above 1",
+      {
+        unit: "normalized",
+        source: displaySource(),
+        from: { x: 1.5, y: 0.1 },
+        to: { x: 0.5, y: 0.5 },
+      },
+      ["from", "x"],
+    ],
+    [
+      "a negative normalized to.y",
+      {
+        unit: "normalized",
+        source: displaySource(),
+        from: { x: 0.1, y: 0.1 },
+        to: { x: 0.5, y: -0.2 },
+      },
+      ["to", "y"],
+    ],
+    [
+      "a pixel to.x at the image width",
+      {
+        unit: "pixels",
+        source: displaySource({ imageSize: { width: 100, height: 200 } }),
+        from: { x: 1, y: 1 },
+        to: { x: 100, y: 5 },
+      },
+      ["to", "x"],
+    ],
+  ])("rejects %s at the schema", (_label, image, path) => {
+    const result = swipeAtSchema.safeParse(swipe(image));
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain(["image", ...path].join("."));
+    }
+  });
+
+  test("reports a source problem once, not once per endpoint", () => {
+    const result = swipeAtSchema.safeParse(
+      swipe({
+        unit: "pixels",
+        source: displaySource(),
+        from: { x: 1, y: 1 },
+        to: { x: 5, y: 5 },
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.filter((issue) => issue.path.join(".") === "image.source"),
+      ).toHaveLength(1);
+    }
+  });
+
+  test.each([
+    [
+      "normalized endpoints on a display screenshot",
+      { unit: "normalized", source: displaySource(), from: { x: 0, y: 0 }, to: { x: 1, y: 1 } },
+    ],
+    [
+      "pixel endpoints inside the image",
+      {
+        unit: "pixels",
+        source: displaySource({ imageSize: { width: 100, height: 200 } }),
+        from: { x: 0, y: 0 },
+        to: { x: 99, y: 199 },
+      },
+    ],
+    [
+      "a native screenshot with its rotation",
+      {
+        unit: "normalized",
+        source: { screenshot: { ...nativeSource.screenshot, rotation: 1 } },
+        from: { x: 0.1, y: 0.1 },
+        to: { x: 0.5, y: 0.5 },
+      },
+    ],
+  ])("accepts %s", (_label, image) => {
+    expect(swipeAtSchema.safeParse(swipe(image)).success).toBe(true);
+  });
+});
+
 describe("swipeAtHandler", () => {
   const success: SwipeResult = { success: true, x1: 10, y1: 20, x2: 80, y2: 170, duration: 300 };
 

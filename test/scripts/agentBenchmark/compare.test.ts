@@ -92,6 +92,18 @@ describe("compareRun verdict", () => {
         screenIncludes: [],
       }).verdict,
     ).toBe("failed");
+    // Beside a successful call, an unfinished one still counts as a stumble.
+    const partlyUnfinished = new TranscriptBuilder()
+      .init()
+      .mcp("observe")
+      .mcp("tapOn", "ok", { noResult: true })
+      .result({ finalText: "COUNT: 3" });
+    const partial = compareRun(audit(partlyUnfinished), OK_OUTCOME, {
+      answerIncludes: ["COUNT: 3"],
+      screenIncludes: [],
+    });
+    expect(partial.verdict).toBe("passed");
+    expect(partial.stumbles).toBe(1);
     // Listing devices is inventory, not use of the device under test.
     const inventoryOnly = new TranscriptBuilder()
       .init()

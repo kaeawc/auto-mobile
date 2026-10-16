@@ -130,8 +130,17 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
 /**
  * How a bindable field is bound: `text` and `emitName` render to text, `operand` keeps a single
  * placeholder's type, and `key` renders to text that must then be a literal state key.
+ * `dataPath` is a data action's `/data/...` pointer: it renders to text, and only a whole
+ * `{index}` segment may be a placeholder.
  */
-export type FieldKind = "text" | "operand" | "emitName" | "key" | "emitBinding" | "emitContext";
+export type FieldKind =
+  | "text"
+  | "operand"
+  | "emitName"
+  | "key"
+  | "emitBinding"
+  | "emitContext"
+  | "dataPath";
 
 /** Receives each bindable field's value and path; its result replaces the value. */
 export type FieldVisitor = (
@@ -196,6 +205,14 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
   return condition;
 }
 
+/** A `{state}` binding names a (possibly repeat-bound) key; every other form is an emit binding. */
+function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
+  const binding = record(value);
+  return binding && Object.hasOwn(binding, "state")
+    ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
+    : visit(value, at, "emitBinding");
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -208,16 +225,10 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       if (record(action.context)) {
         action.context = Object.fromEntries(
           Object.entries(record(action.context)!).map(([name, value]) => {
-            const binding = record(value);
             const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
               ? `${path}.context.${name}`
               : `${path}.context[${JSON.stringify(name)}]`;
-            return [
-              name,
-              binding && Object.hasOwn(binding, "state")
-                ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
-                : visit(value, at, "emitBinding"),
-            ];
+            return [name, mapBinding(value, at, visit)];
           }),
         );
       }
@@ -227,6 +238,16 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "increment":
     case "decrement":
       mapField(action, "key", path, "key", visit);
+      break;
+    case "setData":
+    case "appendData":
+      mapField(action, "path", path, "dataPath", visit);
+      if (action.value !== undefined) {
+        action.value = mapBinding(action.value, `${path}.value`, visit);
+      }
+      break;
+    case "removeData":
+      mapField(action, "path", path, "dataPath", visit);
       break;
     default:
       break;

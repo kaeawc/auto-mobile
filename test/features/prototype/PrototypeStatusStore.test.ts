@@ -391,6 +391,20 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });
+  test("a device data write updates reported data and the tracked spec, or drops them", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    const write = (sequence: number, name: string, payload: unknown) =>
+      store.recordEvent(scope, { ...event(sequence, "panel", "change", name), payload });
+    write(1, "/data/count", { op: "set", value: 5, revision: 2 });
+    expect(store.status(scope).prototypes[0].data).toEqual({ count: 5 });
+    const tracked = store.shownSpecs.read(scope.deviceId, "panel");
+    expect(tracked.kind === "known" && tracked.spec.data).toEqual({ count: 5 });
+    // The value did not travel: neither copy can be kept exact.
+    write(2, "/data/count", { op: "set", revision: 3 });
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
+    expect(store.shownSpecs.read(scope.deviceId, "panel")).toEqual({ kind: "unknown" });
+  });
   test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",
     (hook) => {

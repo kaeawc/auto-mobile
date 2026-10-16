@@ -1,6 +1,10 @@
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
+  prototypeDataPathHasIndex,
+  prototypeDataPathPlaceholderMessage,
+} from "./prototypeDataActions";
+import {
   bindCheckedKeys,
   checkedKeyValues,
   bindText,
@@ -196,6 +200,20 @@ function fieldError(
   return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
 }
 
+/** A data action path binds only a whole `{index}` segment; `{alias.field}` is refused. */
+function dataPathPlaceholderError(
+  kind: FieldKind,
+  value: unknown,
+  path: string,
+  scope: Scope,
+): RepeatError | undefined {
+  const message =
+    kind === "dataPath" && typeof value === "string"
+      ? prototypeDataPathPlaceholderMessage(value, scope.binding)
+      : undefined;
+  return message === undefined ? undefined : fail(path, message);
+}
+
 function emitBindingError(value: unknown, path: string, scope?: Scope): RepeatError | undefined {
   const binding = record(value);
   if (!binding) {
@@ -224,10 +242,28 @@ function checkOwnFields(
     if (kind === "emitBinding") {
       first ??= emitBindingError(value, fieldPath, scope);
     }
+    first ??= dataPathPlaceholderError(kind, value, fieldPath, scope);
     first ??= fieldError(value, fieldPath, kind, scope, state, dataCondition);
     return value;
   });
   return first;
+}
+
+/** Outside a template a state key is literal and a data path has no `{index}`. */
+function literalPlaceholderError(
+  kind: FieldKind,
+  value: unknown,
+  path: string,
+): RepeatError | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (kind === "key" && !STATE_KEY.test(value)) {
+    return fail(path, "State key placeholder outside a repeat template");
+  }
+  return kind === "dataPath" && prototypeDataPathHasIndex(value)
+    ? fail(path, "{index} outside a repeat template")
+    : undefined;
 }
 
 /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
@@ -245,9 +281,7 @@ function checkLiteralKeys(node: Raw, path: string, state: RepeatState): RepeatEr
     ) {
       first = dataTextError(fieldPath, state);
     }
-    if (kind === "key" && typeof value === "string" && !STATE_KEY.test(value)) {
-      first ??= fail(fieldPath, "State key placeholder outside a repeat template");
-    }
+    first ??= literalPlaceholderError(kind, value, fieldPath);
     return value;
   });
   return first;

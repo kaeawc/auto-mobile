@@ -1138,6 +1138,8 @@ export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
 export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
 export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** setData/appendData/removeData on `/data`, each write reported as a `change` event. */
+export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 

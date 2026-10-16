@@ -12,7 +12,12 @@ import {
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeDataActionFields,
+  prototypeDataActionsUnsupportedMessage,
+} from "./prototypeDataActions";
 import { prototypeStackFields, prototypeStackUnsupportedMessage } from "./prototypeSpec";
 import {
   prototypeThemeModeFields,
@@ -124,6 +129,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CHECKS_CAPABILITY,
     fields: prototypeChecksFields,
     unsupportedMessage: prototypeChecksUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+    fields: prototypeDataActionFields,
+    unsupportedMessage: prototypeDataActionsUnsupportedMessage,
   },
 ];
 

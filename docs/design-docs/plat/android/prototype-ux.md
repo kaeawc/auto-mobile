@@ -927,6 +927,63 @@ preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
 
+### Data actions (#12519)
+
+`setData {path, value}`, `appendData {path, value}` and `removeData {path}` let a tap change `/data`
+on the device, so "add to cart" or "delete row" needs no agent round trip. They require
+`prototype_data_actions_v1` (which a device advertises only with `prototype_data_model_v1`); the
+host refuses a show, or a patch whose resulting spec contains one, on a device without it, through
+the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
+the complete result of `show`, `patch` and `replaceNode`).
+
+- `path` is `/data` plus a non-empty RFC 6901 pointer, validated by the same
+  `isPrototypeDataPointer` guard as `{data: pointer}` and patch ops (`MAX_PROTOTYPE_DATA_POINTER_LENGTH`);
+  `/data` alone is refused. Inside a `repeat`, a whole `{index}` segment (`/data/cart/{index}`) binds
+  to the current row; `{index}` elsewhere, outside a repeat, or `{alias.field}`, is a validation error.
+- `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
+  `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
+  value is data: no null.
+- Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
+  shared by the host mirror and meant for the device runtimes, `request` responses (#12523) and
+  storage restores (#12522). `set` creates or replaces an object member or replaces an existing array
+  element; `append` pushes onto an existing array; `remove` deletes an existing member or element and
+  shifts later elements down. Errors are typed (`invalid_path`, `invalid_value`, `not_found`,
+  `not_array`, `limit_exceeded`) and change nothing. The data after a write must satisfy the data
+  depth and array limits and `MAX_PROTOTYPE_DATA_WRITE_BYTES`.
+- The validator checks pointer syntax and `{index}` placement, rejects a literal value data cannot
+  hold, and, when the target has no `{index}` and resolves in the spec's own `data`, rejects an
+  `appendData` whose target is not an array. A target created only by an earlier write is the device's
+  to check.
+
+Each device write is reported on a `change` event, using existing wire fields so no event field is
+added: `name` is the written `/data/...` path (for an append, the array) and `payload` is
+`{op: "set"|"append"|"remove", value?, revision}`. `validity` may accompany it; a `change` whose name
+is a data path must carry a valid payload or the host drops it. `awaitEvent` returns it like any
+other event.
+
+**Revisions and host patches.** The device has one revision counter per prototype. A data write bumps
+it and reports the new value as `payload.revision`; a patch result's `revision` is the same counter.
+The agent's `/data` patch and a device write must not silently lose each other, so:
+
+1. The host applies every reported write to its tracked copy of the spec and to `status` data with
+   `applyPrototypeDataWrite`, keeping the copy exact. If it cannot (the value did not travel, the copy
+   disagrees, or a show is in flight so the order is unknown) it stops tracking the spec and removes
+   the reported data; the next patch requires a show first.
+2. It also logs `{path, revision}` of each write (the last 64 per prototype, remembering the newest
+   revision it forgot). A show of that id clears the log.
+3. Until the device has written a prototype's data, `/data` patches behave as before. After that, a
+   patch with a `/data` op requires `baseRevision`, and the host refuses it before sending, with the
+   existing `conflict` shape plus the touched paths (`conflict: {revision, state: {}, data: [paths]}`),
+   when a write newer than `baseRevision` touched a path that overlaps an op path (equal, ancestor or
+   descendant), or when `baseRevision` is older than the forgotten writes. A device receiving a
+   `/data` patch applies the same rule against its own history. `replaceNode` and `/state` ops are
+   unaffected.
+
+The smallest sound rule is therefore: a device write bumps the device revision and is reported in the
+change event; a stale `baseRevision` gets the existing conflict. Host-side bookkeeping lives in
+`PrototypeShownSpecs` (`recordDeviceDataWrite`, `dataPatchGuard`), called from
+`InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
@@ -1161,8 +1218,10 @@ must keep that id. Replacement nodes cannot contain `use` nodes or element
 anchors. Inline the component, use a bounds anchor, or use `show`.
 
 The agent writes data; the user writes state. Data-only patches and patches
-containing only data ops and `replaceNode` ignore `baseRevision`. Any state op,
-including `test`, requires `baseRevision`. A device supporting the capability
+containing only data ops and `replaceNode` ignore `baseRevision`, until the device has written the
+prototype's data with a data action (see [Data actions](#data-actions-12519)): from then on a
+`/data` op also needs `baseRevision` and conflicts with newer overlapping device writes. Any state
+op, including `test`, requires `baseRevision`. A device supporting the capability
 must refuse the whole patch with `conflict` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 

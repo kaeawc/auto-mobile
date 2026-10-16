@@ -1,3 +1,8 @@
+import { prototypeDataPointerTokens } from "./prototypeData";
+import { applyPrototypeDataWrite } from "./prototypeDataWrite";
+import type { PrototypeDataWriteEvent } from "./prototypeDataWriteEvent";
+import type { PrototypeData } from "./prototypeSpec";
+
 export type ShownSpecJson = Readonly<Record<string, unknown>>;
 export type ShownSpecRead =
   | { kind: "known"; spec: ShownSpecJson; version: number }
@@ -8,8 +13,38 @@ interface PendingShow {
   replaceOthers: boolean;
   superseded: boolean;
 }
+/** Device `/data` writes the host has seen for one prototype, oldest first, bounded. */
+interface DataWriteLog {
+  /** Writes at or below this revision were dropped from `writes`, so their paths are unknown. */
+  floor: number;
+  writes: { path: string; revision: number }[];
+}
+/** What a device data write did to the host's mirror of the prototype. */
+export type DeviceDataWriteOutcome =
+  | { kind: "mirrored"; data: PrototypeData }
+  | { kind: "dropped" }
+  | { kind: "untracked" };
+/** Whether a host `/data` patch may be built on `baseRevision` given the device writes seen. */
+export type DataPatchGuard =
+  | { kind: "ok" }
+  | { kind: "baseRevisionRequired" }
+  | { kind: "conflict"; revision: number; paths: string[] };
+const MAX_TRACKED_DATA_WRITES = 64;
+
+function dataPathTokens(path: string): string[] {
+  return path === "/data" ? [] : prototypeDataPointerTokens(path.slice("/data".length));
+}
+/** Two `/data` paths overlap when one addresses the other or something inside it. */
+function pathsOverlap(a: string, b: string): boolean {
+  const left = dataPathTokens(a);
+  const right = dataPathTokens(b);
+  const shared = Math.min(left.length, right.length);
+  return left.slice(0, shared).every((token, index) => token === right[index]);
+}
+
 interface DeviceSpecs {
   entries: Map<string, ShownSpecJson>;
+  dataWrites: Map<string, DataWriteLog>;
   epoch: number;
   issued: number;
   open: Map<number, PendingShow>;
@@ -23,6 +58,7 @@ export class PrototypeShownSpecs {
   beginShow(deviceId: string, id?: string, replaceOthers = true): number {
     const state = this.devices.get(deviceId) ?? {
       entries: new Map<string, ShownSpecJson>(),
+      dataWrites: new Map<string, DataWriteLog>(),
       epoch: 0,
       issued: 0,
       open: new Map<number, PendingShow>(),
@@ -61,16 +97,21 @@ export class PrototypeShownSpecs {
     if (refused) {
       if (pending.id !== undefined) {
         state.entries.delete(pending.id);
+        state.dataWrites.delete(pending.id);
       }
       return;
     }
     if (shown && ticket > state.poisonedThrough) {
       if (shown.replaceOthers !== false) {
         state.entries.clear();
+        state.dataWrites.clear();
       }
       state.entries.set(shown.id, structuredClone(shown.spec));
+      // A show makes its spec's data authoritative again, so earlier device writes are void.
+      state.dataWrites.delete(shown.id);
     } else {
       state.entries.clear();
+      state.dataWrites.clear();
     }
   }
 
@@ -98,6 +139,91 @@ export class PrototypeShownSpecs {
     return committed;
   }
 
+  /**
+   * The device wrote `/data` (setData, appendData, removeData). The write is applied to the host's
+   * copy of the spec with the same function the device uses, so the copy stays exact; when that is
+   * not possible (the value did not travel, the copy disagrees, or a show is in flight and the two
+   * cannot be ordered) the host stops tracking the spec and the next patch must follow a show.
+   * Applied writes are logged for {@link dataPatchGuard}.
+   */
+  recordDeviceDataWrite(
+    deviceId: string,
+    id: string,
+    write: PrototypeDataWriteEvent,
+  ): DeviceDataWriteOutcome {
+    const state = this.devices.get(deviceId);
+    if (!state) {
+      return { kind: "untracked" };
+    }
+    if (state.open.size > 0) {
+      this.abandon(deviceId);
+      return { kind: "dropped" };
+    }
+    const spec = state.entries.get(id);
+    if (!spec) {
+      return { kind: "untracked" };
+    }
+    const applied =
+      write.op === "remove"
+        ? applyPrototypeDataWrite(spec.data, { op: "remove", path: write.path })
+        : write.value === undefined
+          ? undefined
+          : applyPrototypeDataWrite(spec.data, {
+              op: write.op,
+              path: write.path,
+              value: write.value,
+            });
+    if (!applied?.success) {
+      this.forget(deviceId, id);
+      return { kind: "dropped" };
+    }
+    state.entries.set(id, { ...spec, data: applied.data });
+    state.epoch = ++this.sequence;
+    const log = state.dataWrites.get(id) ?? { floor: 0, writes: [] };
+    log.writes.push({ path: write.path, revision: write.revision });
+    while (log.writes.length > MAX_TRACKED_DATA_WRITES) {
+      log.floor = Math.max(log.floor, log.writes.shift()!.revision);
+    }
+    state.dataWrites.set(id, log);
+    return { kind: "mirrored", data: applied.data };
+  }
+
+  /**
+   * The rule that keeps a host `/data` patch and a device data write from silently losing each
+   * other. Once the device has written this prototype's data, a patch with `/data` ops needs the
+   * `baseRevision` its author last saw, and it conflicts when a write newer than that revision
+   * touched an overlapping path (or the host no longer remembers which paths were written).
+   * `paths` are the patch's `/data` op paths.
+   */
+  dataPatchGuard(
+    deviceId: string,
+    id: string,
+    paths: readonly string[],
+    baseRevision: number | undefined,
+  ): DataPatchGuard {
+    const log = this.devices.get(deviceId)?.dataWrites.get(id);
+    if (!log || paths.length === 0) {
+      return { kind: "ok" };
+    }
+    if (baseRevision === undefined) {
+      return { kind: "baseRevisionRequired" };
+    }
+    // Writes at or below the floor were forgotten, so a base that old cannot be shown safe.
+    const unknown = baseRevision < log.floor;
+    const touched = log.writes.filter(
+      (write) =>
+        write.revision > baseRevision && paths.some((path) => pathsOverlap(path, write.path)),
+    );
+    if (!unknown && touched.length === 0) {
+      return { kind: "ok" };
+    }
+    return {
+      kind: "conflict",
+      revision: Math.max(baseRevision, log.floor, ...log.writes.map((write) => write.revision)),
+      paths: unknown ? [...paths] : [...new Set(touched.map((write) => write.path))],
+    };
+  }
+
   /** A patch for this device has an unknown outcome: forget the entries and distrust every show dispatched so far. */
   abandon(deviceId: string): void {
     const state = this.devices.get(deviceId);
@@ -105,6 +231,7 @@ export class PrototypeShownSpecs {
       return;
     }
     state.entries.clear();
+    state.dataWrites.clear();
     state.poisonedThrough = state.issued;
     state.epoch = ++this.sequence;
   }
@@ -114,8 +241,10 @@ export class PrototypeShownSpecs {
     if (state && (id === undefined || state.entries.has(id))) {
       if (id === undefined) {
         state.entries.clear();
+        state.dataWrites.clear();
       } else {
         state.entries.delete(id);
+        state.dataWrites.delete(id);
       }
       state.epoch = ++this.sequence;
     }

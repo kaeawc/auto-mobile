@@ -21,7 +21,8 @@
     "MAX_PROTOTYPE_STACK_SCREENS": 32,
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
-    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096
+    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096,
+    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144
   },
   "definitions": {
     "offset": {
@@ -1476,6 +1477,193 @@
             "screen": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "setData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "appendData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["appendData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "removeData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["removeData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
               },
               "optional": false
             }

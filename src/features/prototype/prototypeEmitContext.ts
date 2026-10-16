@@ -6,7 +6,7 @@ import {
 } from "./prototypeSpec";
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import { expandPrototypeComponents } from "./prototypeComponents";
-import { mapBindableFields, record } from "./prototypeTemplate";
+import { mapBindableFields, record, type FieldKind } from "./prototypeTemplate";
 import { PROTOTYPE_EMIT_CONTEXT_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 
 /** Existing actionable refusal shared by show and patch capability checks. */
@@ -78,14 +78,22 @@ export function resolveEmitContext(
 
 /** Uses the shared action visitor, including actions on dialog/app-bar parts. */
 export function prototypeEmitContextFields(spec: unknown): string[] {
+  return prototypeFieldsOfKind(spec, "emitContext");
+}
+
+/**
+ * Authored paths of every bindable field of `kind`, located back to the authored spec when
+ * components expand, with component definitions that no expansion visited appended.
+ */
+export function prototypeFieldsOfKind(spec: unknown, kind: FieldKind): string[] {
   const expansion = expandPrototypeComponents(spec);
   if (!expansion.success) {
     return [];
   }
   const fields: string[] = [];
   const scan = (node: Record<string, unknown>, path: string): void => {
-    mapBindableFields(node, path, (entry, at, kind) => {
-      if (kind === "emitContext") {
+    mapBindableFields(node, path, (entry, at, fieldKind) => {
+      if (fieldKind === kind) {
         fields.push(at);
       }
       return entry;

@@ -379,7 +379,7 @@ describe("session screen reader restoration (#10146)", () => {
         h.timer.advanceTime(1);
         await pending;
 
-        h.manager.retireScreenReaderRestoration(android.deviceId);
+        h.manager.retireRestorations(android.deviceId, "removal");
         await h.manager.createSession("s2", android.deviceId, "android");
 
         expect(h.devices.restoreCalls).toHaveLength(3);
@@ -427,7 +427,7 @@ describe("session screen reader restoration (#10146)", () => {
       const pending = h.manager.getPendingDeviceCleanup(android.deviceId);
       const calls = h.devices.restoreCalls.length;
 
-      h.manager.retireScreenReaderRestoration(android.deviceId);
+      h.manager.retireRestorations(android.deviceId, "removal");
       h.timer.advanceTime(250);
       await pending;
       await flush();

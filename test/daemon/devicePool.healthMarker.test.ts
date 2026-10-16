@@ -32,7 +32,7 @@ const flush = async () => {
 const managers: SessionManager[] = [];
 afterEach(() => {
   for (const manager of managers.splice(0)) {
-    manager.retireClockRestoration(device.deviceId);
+    manager.retireRestorations(device.deviceId, "removal");
     manager.stopCleanupTimer();
   }
   defaultDeviceClockRestoreRegistry.retire(device.deviceId);
@@ -428,7 +428,7 @@ test("clock timeout surfaces reason while the original restore remains quarantin
     expect(h.calls).toBe(1);
   } finally {
     h.resume();
-    h.manager.retireClockRestoration(device.deviceId);
+    h.manager.retireRestorations(device.deviceId, "removal");
     await release;
   }
 });
@@ -738,7 +738,7 @@ test("#12112 clock recovery is unbounded and an orphan marker is permanent", asy
     recovering: true,
     retryAfterMs: undefined,
   });
-  h.manager.retireClockRestoration(device.deviceId);
+  h.manager.retireRestorations(device.deviceId, "removal");
   h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "clock");
   expect(await typedAllocationError(h)).toMatchObject({
     retryable: false,

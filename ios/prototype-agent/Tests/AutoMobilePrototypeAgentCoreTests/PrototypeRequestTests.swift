@@ -394,6 +394,14 @@ final class PrototypeRequestTests: XCTestCase {
         XCTAssertEqual(job.effectiveTimeoutMs, 5000)
     }
 
+    func testQueryEntriesAreAppliedInSortedKeyOrderLikeTheHost() throws {
+        let tap = #"[{"type":"request","url":"http://h/p","query":{"z":{"value":"1"},"a":{"value":"2"}}}]"#
+        var (session, actions) = try shown(onTap: tap)
+        _ = session.run(actions)
+        guard case let .start(job)? = session.takeRequestCommands().first else { return XCTFail("no start") }
+        XCTAssertEqual(job.url, "http://h/p?a=2&z=1")
+    }
+
     func testTheHostFrameCarriesOnlyWhatTheFrameSchemaAllows() throws {
         var (session, actions) = try shown(onTap: feed)
         _ = session.run(actions)

@@ -127,6 +127,25 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         XCTAssertFalse(seen.httpShouldHandleCookies)
     }
 
+    func testAStringBodyDefaultsToTextPlainUnlessTheAuthorSetAContentType() async throws {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        _ = try await client().perform(call(method: .post, body: Data("x".utf8)))
+        _ = try await client().perform(call(
+            method: .post, headers: ["content-type": "application/xml"], body: Data("x".utf8)
+        ))
+        let seen = StubProtocol.requests
+        XCTAssertEqual(seen[0].value(forHTTPHeaderField: "Content-Type"), "text/plain; charset=utf-8")
+        XCTAssertEqual(seen[1].value(forHTTPHeaderField: "Content-Type"), "application/xml")
+    }
+
+    func testAJsonBodyDefaultsToApplicationJson() {
+        let job = PrototypeRequestJob(
+            requestId: "r", prototypeId: "p", via: .device, method: .post, url: "http://localhost/",
+            headers: [:], body: .object(["a": .number(1)]), timeoutMs: 1000
+        )
+        XCTAssertEqual(PrototypeHttpRequest(job: job).headers["Content-Type"], "application/json")
+    }
+
     func testAGetSendsNoBody() async throws {
         StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
         _ = try await client().perform(call())

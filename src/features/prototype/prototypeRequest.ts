@@ -287,12 +287,21 @@ function entryText(
   return "message" in text ? failure("invalid_request", text.message) : text;
 }
 
+/** Swift cannot keep JSON key order, so query entries use one canonical order everywhere. */
+function entriesOf(action: Record<string, unknown>, field: "headers" | "query") {
+  const entries = Object.entries((action[field] ?? {}) as Record<string, unknown>);
+  return field === "query" ? entries.sort(compareUtf16) : entries;
+}
+
+const compareUtf16 = ([a]: [string, unknown], [b]: [string, unknown]): number =>
+  a < b ? -1 : a > b ? 1 : 0;
+
 /**
  * The executable reference for a device runtime: resolves a `request`'s bindings against the
  * committed `state` and `data` at the action. `url` is the action's `url` after the usual text
  * placeholders (`{key}`, `{data:/pointer}`, repeat) are bound; `item` and `index` bindings must
  * already be expanded to `{value}`. Each `query` entry is set (not appended) on the URL, in
- * authored order, so a query key already in `url` is replaced. A binding whose source is missing
+ * sorted key order (UTF-16 code units, the rule every runtime shares), so a query key already in `url` is replaced. A binding whose source is missing
  * or is not a scalar (header, query) fails the request as `invalid_request`.
  */
 export function resolvePrototypeRequest(
@@ -306,7 +315,7 @@ export function resolvePrototypeRequest(
   }
   const headers: Record<string, string> = {};
   for (const field of ["headers", "query"] as const) {
-    for (const [name, raw] of Object.entries((action[field] ?? {}) as Record<string, unknown>)) {
+    for (const [name, raw] of entriesOf(action, field)) {
       const entry = entryText(raw, `${field}.${name}`, inputs);
       if (!("text" in entry)) {
         return entry;

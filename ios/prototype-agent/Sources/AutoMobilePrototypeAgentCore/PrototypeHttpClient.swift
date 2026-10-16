@@ -16,9 +16,9 @@ struct PrototypeHttpRequest: Equatable, Sendable {
     /// body is never read, so the cap does not apply to it.
     let maxResponseBytes: Int
 
-    /// The call a job describes. A string body is sent as is; any other JSON value is sent as JSON
-    /// with `Content-Type: application/json` unless the author set a content type. GET and HEAD
-    /// send no body.
+    /// The call a job describes. A string body is sent as is with `Content-Type: text/plain;
+    /// charset=utf-8`; any other JSON value is sent as JSON with `Content-Type: application/json`.
+    /// An author-set content type (any letter case) wins in both cases. GET and HEAD send no body.
     init(job: PrototypeRequestJob, maxResponseBytes: Int = PrototypeLimits.maxResponseBytes) {
         method = job.method
         url = job.url
@@ -27,13 +27,13 @@ struct PrototypeHttpRequest: Equatable, Sendable {
         var headers = job.headers
         var body: Data?
         if let value = job.body, job.method.allowsBody {
+            let hasContentType = headers.keys.contains { $0.lowercased() == "content-type" }
             if case let .string(text) = value {
                 body = Data(text.utf8)
+                if !hasContentType { headers["Content-Type"] = "text/plain; charset=utf-8" }
             } else {
                 body = Data(PrototypeJSONText.string(value).utf8)
-                if !headers.keys.contains(where: { $0.lowercased() == "content-type" }) {
-                    headers["Content-Type"] = "application/json"
-                }
+                if !hasContentType { headers["Content-Type"] = "application/json" }
             }
         }
         self.headers = headers

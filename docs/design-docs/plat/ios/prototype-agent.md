@@ -575,9 +575,11 @@ method, bodies on GET and HEAD, `into` naming an object member, `statusKey` nami
 state key, header names, entry counts, `timeoutMs` 1 to 30000, follow-up lists of 1 to 32, the reserved
 `prototype_request` emit name and `MAX_PROTOTYPE_ACTION_DEPTH`), and `PrototypeRepeat` binds a request's
 `url`, `statusKey`, `into`, header and query strings, binding objects and nested follow-up lists per
-row. The Swift decoder keeps `query` as an unordered dictionary, so entries are set on the URL in
-UTF-16 name order, not authored order (the resolved URL, and so the event `url`, can differ from the
-host's ordering for a request with several query entries).
+row. Query entries are set on the URL in sorted key order (UTF-16 code units, the same as JS
+`sort()`) on every runtime; the Swift decoder holds `query` as an unordered dictionary, so the rule
+is canonical rather than authored order, and the resolved URL and event `url` match the host's. A
+string body without an author-set `Content-Type` is sent as `text/plain; charset=utf-8` and any
+other JSON body as `application/json`, as on the host and Android.
 
 `PrototypeRequestDriver` runs what the session starts, behind a clock and two seams so its tests are
 deterministic:

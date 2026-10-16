@@ -32,7 +32,8 @@ enum PrototypeRequestResolver {
         var headers: [String: String] = [:]
         var query: [(name: String, value: String)] = []
         for (field, entries) in [("headers", action.headers), ("query", action.query)] {
-            // Authored order: JSON objects are unordered in Swift, so sort for a stable query.
+            // JSON objects are unordered in Swift, so every runtime uses sorted key order (UTF-16 code
+            // units, like JS `sort()`) for a canonical query.
             for name in (entries ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
                 switch entryText(entries?[name], what: "\(field).\(name)", inputs: inputs) {
                 case let .success(text):

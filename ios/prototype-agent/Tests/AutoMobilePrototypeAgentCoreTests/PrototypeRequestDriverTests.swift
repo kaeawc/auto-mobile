@@ -465,7 +465,7 @@ final class PrototypeRequestDriverTests: XCTestCase {
             ))
         }
         XCTAssertEqual(job(.post, .string("raw")).body, Data("raw".utf8))
-        XCTAssertNil(job(.post, .string("raw")).headers["Content-Type"])
+        XCTAssertEqual(job(.post, .string("raw")).headers["Content-Type"], "text/plain; charset=utf-8")
         XCTAssertEqual(job(.put, .number(2)).body, Data("2".utf8))
         XCTAssertEqual(job(.put, .number(2)).headers["Content-Type"], "application/json")
         XCTAssertEqual(job(.patch, .object(["a/b": .string("é\"")])).body, Data(#"{"a/b":"é\""}"#.utf8))

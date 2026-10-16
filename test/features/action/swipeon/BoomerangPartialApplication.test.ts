@@ -15,7 +15,6 @@ import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const BOOMERANG: BoomerangConfig = { apexPauseMs: 50, returnSpeed: 1 };
 const perf = new NoOpPerformanceTracker();
@@ -64,7 +63,7 @@ function androidBoomerang(): Boomerang {
       gesture,
       proxy as unknown as ConstructorParameters<typeof TalkBackSwipeExecutor>[2],
       new FakeAccessibilityDetector(),
-      new FakeAdbClient() as unknown as AdbExecutor,
+      new FakeAdbClient(),
       timer,
     );
     return executor.executeBoomerangGesture(

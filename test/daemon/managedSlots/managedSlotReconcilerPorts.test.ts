@@ -18,7 +18,6 @@ import {
   createToolErrorResponse,
 } from "../../../src/server/deviceTools";
 import { MultiPlatformDeviceManager } from "../../../src/devices/deviceUtils";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -267,11 +266,7 @@ describe("PoolManagedSlotDeviceClaims", () => {
           return booted;
         },
       });
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        undefined,
-        fakeEmulator,
-      );
+      const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
       const inventory = await new DeviceManagerSlotInventory(manager).list("android", {});
       return inventory.devices[0];
     }

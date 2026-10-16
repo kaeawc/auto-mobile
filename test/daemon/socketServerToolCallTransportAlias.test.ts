@@ -93,6 +93,11 @@ async function startServer(options: { poolFolds: boolean } = { poolFolds: true }
     "http://localhost:0/mcp",
     fakeDaemonState(options),
     new FakeTimer(),
+    null,
+    {},
+    undefined,
+    // The cold owner-generation probe costs ~250 ms on the first start in a process; these tests do not cover the lock.
+    { bindLock: { acquire: () => true, release: () => {} } },
   );
   server.deviceReadToolCallClassifier = (name) => name === "observe";
   server.mcpClientFactory = async () => ({

@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test";
+import { beforeAll, describe, test } from "bun:test";
 import {
   assertOwnershipInvariants,
   ownershipSeedOverride,
@@ -167,6 +167,14 @@ function seedChunks(firstSeed: number): number[][] {
 }
 
 describe("device-session ownership under seeded concurrent interleavings", () => {
+  beforeAll(async () => {
+    if (ownershipSeedOverride()) {
+      return;
+    }
+    // Warm the harness's cold path here: CI's per-test timing excludes beforeAll.
+    await assertOwnershipInvariants([1], PROFILES.mixed, { tolerate: KNOWN_VIOLATIONS });
+  });
+
   for (const [name, profile] of Object.entries(PROFILES)) {
     for (const seeds of seedChunks(1)) {
       test(`${name}: seeds ${seeds[0]}-${seeds.at(-1)} keep every ownership invariant`, async () => {

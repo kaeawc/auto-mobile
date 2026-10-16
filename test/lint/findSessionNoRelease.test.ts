@@ -29,6 +29,13 @@ const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
   setDisplayPin: 1,
   invalidateAutomationReadiness: 1,
   setDeviceLabels: 1,
+  clearSessionCache: 1,
+};
+
+// The liveness lease and policy moved to SessionLivenessController (#11797). Its lookups reach
+// SessionManager.getSession through `this.port.getSession` (an expiring lookup, as they were in
+// class); the same per-method counts hold, and none may become findSession.
+const RETAINED_LIVENESS_EXPIRY_READERS: Readonly<Record<string, number>> = {
   recordHeartbeat: 1,
   claimLivenessOwnership: 2,
   releaseLivenessOwnership: 2,
@@ -37,7 +44,6 @@ const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
   adoptCliLivenessPolicy: 1,
   adoptManagedExecutionLivenessPolicy: 1,
   restoreHeartbeatLivenessPolicy: 1,
-  clearSessionCache: 1,
 };
 
 function callsIn(method: ts.MethodDeclaration, onlyThis = false): string[] {
@@ -100,6 +106,38 @@ test("in-class getSession calls stay within the retained expiry reader inventory
     }),
   );
   expect(actual).toEqual(RETAINED_EXPIRY_READERS);
+});
+
+test("the liveness controller's port getSession calls stay within the retained expiry reader inventory", () => {
+  const controllerSource = ts.createSourceFile(
+    "sessionLivenessLease.ts",
+    readFileSync(new URL("../../src/daemon/sessionLivenessLease.ts", import.meta.url), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const controller = controllerSource.statements.find(
+    (node): node is ts.ClassDeclaration =>
+      ts.isClassDeclaration(node) && node.name?.text === "SessionLivenessController",
+  );
+  expect(controller).toBeDefined();
+  const counts: Record<string, number> = {};
+  const visitMethod = (name: string, node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "getSession" &&
+      node.expression.expression.getText(controllerSource) === "this.port"
+    ) {
+      counts[name] = (counts[name] ?? 0) + 1;
+    }
+    ts.forEachChild(node, (child) => visitMethod(name, child));
+  };
+  for (const member of controller?.members ?? []) {
+    if (ts.isMethodDeclaration(member) && member.body) {
+      visitMethod(member.name.getText(controllerSource), member.body);
+    }
+  }
+  expect(counts).toEqual(RETAINED_LIVENESS_EXPIRY_READERS);
 });
 
 // Expiring `getSession(` calls left in src/server (#12581). Each is a mutation, release path,

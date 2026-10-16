@@ -8,10 +8,10 @@ import {
 } from "../../constants/release";
 import { ActionableError } from "../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
-import { errorMessage } from "../../utils/describeUnknownError";
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { VerifiedArtifactCache } from "../../utils/VerifiedArtifactCache";
 import { getTempDir } from "../../utils/tempDir";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import {
@@ -82,6 +82,7 @@ export class NetworkFilterAppProvider {
   private readonly commandRunner: NetworkFilterCommandRunner;
   private readonly cacheDir: string;
   private readonly timer: Timer;
+  private readonly cache: VerifiedArtifactCache;
   private readonly env: NodeJS.ProcessEnv;
   private readonly downloadTimeoutMs: number;
   private readonly expectedChecksumOverride?: string;
@@ -95,6 +96,12 @@ export class NetworkFilterAppProvider {
     this.commandRunner = deps.commandRunner ?? new DefaultNetworkFilterCommandRunner();
     this.cacheDir = deps.cacheDir ?? getTempDir(NETWORK_FILTER_CACHE_SUBDIR);
     this.timer = deps.timer ?? defaultTimer;
+    this.cache = new VerifiedArtifactCache({
+      downloader: this.downloader,
+      checksumCalculator: this.checksumCalculator,
+      fileSystem: this.fileSystem,
+      timer: this.timer,
+    });
     this.env = deps.env ?? process.env;
     this.downloadTimeoutMs = deps.downloadTimeoutMs ?? NETWORK_FILTER_DOWNLOAD_TIMEOUT_MS;
     this.expectedChecksumOverride = deps.expectedChecksum;
@@ -180,99 +187,78 @@ export class NetworkFilterAppProvider {
   }
 
   private async tryCache(expected: string): Promise<string | null> {
-    const raw = await this.fileSystem.readText(this.metadataPath);
-    if (raw === null) {
-      return null;
-    }
-    let metadata: unknown;
-    try {
-      metadata = JSON.parse(raw);
-    } catch (error) {
-      // Corrupt metadata is repaired by downloading again.
-      logger.debug(`[NETWORK_FILTER] Ignoring unreadable cache metadata: ${errorMessage(error)}`);
-      return null;
-    }
-    if (!isCacheMetadata(metadata) || metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
-      return null;
-    }
-    if (!(await this.fileSystem.isFile(controllerPath(this.cachedAppPath)))) {
-      return null;
-    }
-    return this.cachedAppPath;
+    const hit = await this.cache.isCached<Pick<NetworkFilterAppMetadata, "sha256">>({
+      label: "[NETWORK_FILTER]",
+      subject: "app",
+      expectedSha256: expected,
+      metadataPath: this.metadataPath,
+      parseMetadata: (value) => (isCacheMetadata(value) ? value : null),
+      verifyArtifact: () => this.fileSystem.isFile(controllerPath(this.cachedAppPath)),
+    });
+    return hit ? this.cachedAppPath : null;
   }
 
   private async download(expected: string, version: string): Promise<string> {
     await this.fileSystem.ensureDir(this.cacheDir);
     const archivePath = path.join(this.cacheDir, `${NETWORK_FILTER_ARCHIVE_FILENAME}.download`);
     const stagingDir = path.join(this.cacheDir, "app.download");
-    const controller = new AbortController();
-    const timeout = this.timer.setTimeout(() => controller.abort(), this.downloadTimeoutMs);
 
-    try {
-      await this.downloader.download(
-        this.releaseUrlOverride ?? resolveNetworkFilterUrl(this.env),
-        archivePath,
-        controller.signal,
-      );
-      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(archivePath);
-      if (actual.toLowerCase() !== expected.toLowerCase()) {
-        throw new ActionableError(
-          `Network Extension app checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
+    await this.cache.fetch({
+      label: "[NETWORK_FILTER]",
+      expectedSha256: expected,
+      url: this.releaseUrlOverride ?? resolveNetworkFilterUrl(this.env),
+      archivePath,
+      metadataPath: this.metadataPath,
+      downloadTimeoutMs: this.downloadTimeoutMs,
+      mismatchError: (want, actual) =>
+        new ActionableError(
+          `Network Extension app checksum verification failed. Expected: ${want}, Got: ${actual}. ` +
             "The downloaded release asset is corrupted or tampered; nothing was installed.",
-        );
-      }
-
-      await this.fileSystem.remove(stagingDir);
-      await this.fileSystem.ensureDir(stagingDir);
-      const extract = await this.commandRunner.run("ditto", ["-x", "-k", archivePath, stagingDir], {
-        timeoutMs: NETWORK_FILTER_EXTRACT_TIMEOUT_MS,
-      });
-      if (extract.exitCode !== 0) {
-        throw new ActionableError(
-          `Unable to unpack the Network Extension app archive with ditto (exit ${extract.exitCode}): ` +
-            `${extract.stderr.trim() || "no output"}`,
-        );
-      }
-      const stagedApp = path.join(stagingDir, NETWORK_FILTER_APP_NAME);
-      if (!(await this.fileSystem.isFile(controllerPath(stagedApp)))) {
-        throw new ActionableError(
-          `The Network Extension release asset does not contain ${NETWORK_FILTER_APP_NAME} ` +
-            "with its controller executable.",
-        );
-      }
-
-      await this.fileSystem.remove(this.appDir);
-      await this.fileSystem.rename(stagingDir, this.appDir);
-      await this.fileSystem.writeText(
-        this.metadataPath,
-        JSON.stringify(
-          {
-            version,
-            sha256: actual,
-            downloadedAt: this.timer.now(),
-          } satisfies NetworkFilterAppMetadata,
-          null,
-          2,
         ),
-      );
-      logger.info("[NETWORK_FILTER] Downloaded and verified release app", {
-        path: this.cachedAppPath,
-        sha256: actual,
-      });
-      return this.cachedAppPath;
-    } catch (error) {
-      await Promise.all([this.fileSystem.remove(archivePath), this.fileSystem.remove(stagingDir)]);
-      if (controller.signal.aborted) {
-        throw new ActionableError(
+      timeoutError: () =>
+        new ActionableError(
           `Timed out downloading the Network Extension app after ${this.downloadTimeoutMs}ms. ` +
             `Check GitHub Release asset availability or set ${NETWORK_FILTER_APP_PATH_ENV} for a local build.`,
+        ),
+      publish: async (downloaded, sha256) => {
+        await this.fileSystem.remove(stagingDir);
+        await this.fileSystem.ensureDir(stagingDir);
+        const extract = await this.commandRunner.run(
+          "ditto",
+          ["-x", "-k", downloaded, stagingDir],
+          {
+            timeoutMs: NETWORK_FILTER_EXTRACT_TIMEOUT_MS,
+          },
         );
-      }
-      throw error;
-    } finally {
-      this.timer.clearTimeout(timeout);
-      await this.fileSystem.remove(archivePath);
-    }
+        if (extract.exitCode !== 0) {
+          throw new ActionableError(
+            `Unable to unpack the Network Extension app archive with ditto (exit ${extract.exitCode}): ` +
+              `${extract.stderr.trim() || "no output"}`,
+          );
+        }
+        const stagedApp = path.join(stagingDir, NETWORK_FILTER_APP_NAME);
+        if (!(await this.fileSystem.isFile(controllerPath(stagedApp)))) {
+          throw new ActionableError(
+            `The Network Extension release asset does not contain ${NETWORK_FILTER_APP_NAME} ` +
+              "with its controller executable.",
+          );
+        }
+        await this.fileSystem.remove(this.appDir);
+        await this.fileSystem.rename(stagingDir, this.appDir);
+        logger.info("[NETWORK_FILTER] Downloaded and verified release app", {
+          path: this.cachedAppPath,
+          sha256,
+        });
+        return {
+          version,
+          sha256,
+          downloadedAt: this.timer.now(),
+        } satisfies NetworkFilterAppMetadata;
+      },
+      discard: () => this.fileSystem.remove(stagingDir),
+      settle: () => this.fileSystem.remove(archivePath),
+    });
+    return this.cachedAppPath;
   }
 }
 

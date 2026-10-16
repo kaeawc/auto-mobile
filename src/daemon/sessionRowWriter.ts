@@ -45,6 +45,10 @@ export interface SessionRowWriter {
   desire(uuid: string, desired: DesiredReleaseRow): void;
   pending(uuid: string): boolean;
   settled(uuid: string): Promise<void>;
+  /** Track background writes without wrapping their promises or changing settlement timing. */
+  trackDrainWrite(write: Promise<void>): void;
+  /** Live read-only set; callers take their drain snapshots synchronously. */
+  pendingDrainWrites(): ReadonlySet<Promise<void>>;
   drain(): Promise<void>;
   cancel(uuid: string, snapshot: SessionReleaseSnapshot): void;
   liftTerminal(uuid: string): void;
@@ -119,6 +123,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private readonly rows = new Map<string, Row>();
   private readonly listeners = new Set<ReleaseRowListener>();
   private readonly work = new Set<Promise<void>>();
+  private readonly drainWrites = new Set<Promise<void>>();
   private desireSeq = 0;
   private draining = false;
 
@@ -465,6 +470,15 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     void tracked.then(() => this.work.delete(tracked));
   }
 
+  trackDrainWrite(write: Promise<void>): void {
+    this.drainWrites.add(write);
+    void write.then(() => this.drainWrites.delete(write));
+  }
+
+  pendingDrainWrites(): ReadonlySet<Promise<void>> {
+    return this.drainWrites;
+  }
+
   async drain(): Promise<void> {
     this.draining = true;
     for (const [uuid, row] of this.rows) {
@@ -479,9 +493,10 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
         this.schedule(uuid, row, row.desired);
       }
     }
-    while (this.work.size || this.rows.size) {
+    while (this.work.size || this.rows.size || this.drainWrites.size) {
       await Promise.all([
         ...this.work,
+        ...this.drainWrites,
         ...Array.from(this.rows.keys(), (uuid) => this.settled(uuid)),
       ]);
     }

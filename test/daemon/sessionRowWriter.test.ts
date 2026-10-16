@@ -3,6 +3,7 @@ import {
   SerializedSessionRowWriter,
   type DesiredReleaseRow,
   type ReleaseRowLanded,
+  type SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { DeviceSessionRowNotReleasableError } from "../../src/db/deviceSessionRepository";
@@ -93,6 +94,56 @@ async function harness() {
     maxActive: () => maxActive,
   };
 }
+
+describe("SessionRowWriter background drain writes", () => {
+  const writers = [
+    ["serialized", async () => (await harness()).writer],
+    ["fake", () => Promise.resolve(new FakeSessionRowWriter())],
+  ] satisfies [string, () => Promise<SessionRowWriter>][];
+
+  test.each(writers)(
+    "%s retains promise identity and removes in exactly one hop",
+    async (_, create) => {
+      const writer = await create();
+      const write = Promise.withResolvers<void>();
+      writer.trackDrainWrite(write.promise);
+      writer.trackDrainWrite(write.promise);
+      const snapshot = Array.from(writer.pendingDrainWrites());
+      expect(snapshot).toHaveLength(1);
+      expect(snapshot[0]).toBe(write.promise);
+      write.resolve();
+      expect(Array.from(writer.pendingDrainWrites())).toEqual([write.promise]);
+      await Promise.resolve();
+      expect(writer.pendingDrainWrites().size).toBe(0);
+      expect(snapshot).toEqual([write.promise]);
+
+      const completed = Promise.resolve();
+      writer.trackDrainWrite(completed);
+      expect(Array.from(writer.pendingDrainWrites())).toEqual([completed]);
+      await Promise.resolve();
+      expect(writer.pendingDrainWrites().size).toBe(0);
+    },
+  );
+
+  test.each(writers)("%s drains background writes added while draining", async (_, create) => {
+    const writer = await create();
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    writer.trackDrainWrite(first.promise);
+    let drained = false;
+    const drain = writer.drain().then(() => {
+      drained = true;
+    });
+    writer.trackDrainWrite(second.promise);
+    first.resolve();
+    await flush();
+    expect(drained).toBe(false);
+    expect(Array.from(writer.pendingDrainWrites())).toEqual([second.promise]);
+    second.resolve();
+    await drain;
+    expect(writer.pendingDrainWrites().size).toBe(0);
+  });
+});
 
 describe("SessionRowWriter release statements", () => {
   test("lands the desired row and settles without real sleeps", async () => {

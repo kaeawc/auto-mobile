@@ -62,3 +62,64 @@ test("the default writer stays idle through manager create and release", async (
   expect(writer.pendingSnapshot("idle-writer")).toBeUndefined();
   expect(timer.getSleepHistory()).toEqual([]);
 });
+
+test("manager delegates drain tracking and awaits writes added during the drain", async () => {
+  const timer = new FakeTimer();
+  const writer = new FakeSessionRowWriter();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+    undefined,
+    undefined,
+    { rowWriter: writer },
+  );
+  manager.stopCleanupTimer();
+  const track = Reflect.get(manager, "trackReleaseDrainWrite") as (write: Promise<void>) => void;
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  track.call(manager, first.promise);
+  expect(Array.from(writer.pendingDrainWrites())).toEqual([first.promise]);
+  let drained = false;
+  const drain = manager.drainReleasePromises(1000).then((result) => {
+    drained = true;
+    return result;
+  });
+  track.call(manager, second.promise);
+  first.resolve();
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+  expect(drained).toBe(false);
+  expect(Array.from(writer.pendingDrainWrites())).toEqual([second.promise]);
+  second.resolve();
+  expect(await drain).toBe(true);
+  expect(writer.pendingDrainWrites().size).toBe(0);
+  expect(timer.getPendingTimeouts()).toEqual([]);
+  expect(timer.getSleepHistory()).toEqual([]);
+});
+
+test("manager drain excludes settled identities from its next writer snapshot", async () => {
+  const timer = new FakeTimer();
+  const writer = new FakeSessionRowWriter();
+  const completed = Promise.resolve();
+  let reads = 0;
+  writer.pendingDrainWrites = () => {
+    reads++;
+    // A third read ends a broken loop so the assertion fails without a timeout or real sleep.
+    return new Set(reads <= 2 ? [completed] : []);
+  };
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+    undefined,
+    undefined,
+    { rowWriter: writer },
+  );
+  manager.stopCleanupTimer();
+  expect(await manager.drainReleasePromises(1000)).toBe(true);
+  expect(reads).toBe(2);
+  expect(timer.getPendingTimeouts()).toEqual([]);
+  expect(timer.getSleepHistory()).toEqual([]);
+});

@@ -1662,8 +1662,6 @@ export class SessionManager {
   private readonly deviceOwnershipCallbacks = new Set<
     (deviceId: string, frameInvalidation: "generation-only" | "full") => void
   >();
-  /** Release writes that outlived their deadline but may still land (#10836). */
-  private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
   /**
    * Release rows a write failed to persist, awaiting a retry: terminal ones (#10959), and the
    * non-terminal ones of {@link pendingNonTerminalReleaseSnapshots} (#11557).
@@ -7180,7 +7178,7 @@ export class SessionManager {
     this.releaseDrainStarted = true;
     const releases = [
       ...Array.from(this.sessionSlots.activeReleases, (release) => release.promise),
-      ...this.lateReleaseWrites,
+      ...this.rowWriter.pendingDrainWrites(),
       // Shutdown does not wait out a retry's backoff: write every unconfirmed terminal row now,
       // before the database closes (#10959).
       ...this.retryPendingTerminalReleasesNow(),
@@ -7221,7 +7219,9 @@ export class SessionManager {
     while (pending.length > 0) {
       const settled = new Set(pending);
       await Promise.allSettled(pending);
-      pending = Array.from(this.lateReleaseWrites).filter((write) => !settled.has(write));
+      pending = Array.from(this.rowWriter.pendingDrainWrites()).filter(
+        (write) => !settled.has(write),
+      );
     }
     return true;
   }
@@ -9225,8 +9225,7 @@ export class SessionManager {
 
   /** Track a release write the shutdown drain must await before the database closes. */
   private trackReleaseDrainWrite(write: Promise<void>): void {
-    this.lateReleaseWrites.add(write);
-    void write.then(() => this.lateReleaseWrites.delete(write));
+    this.rowWriter.trackDrainWrite(write);
   }
 
   /**

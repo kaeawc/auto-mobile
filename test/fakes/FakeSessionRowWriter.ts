@@ -11,6 +11,7 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   private readonly outcomes = new Map<string, ReturnType<typeof Promise.withResolvers<boolean>>>();
   private readonly waiters = new Map<string, Set<() => void>>();
   private readonly listeners = new Set<(event: ReleaseRowLanded) => void | Promise<unknown>>();
+  private readonly drainWrites = new Set<Promise<void>>();
 
   desire(uuid: string, desired: DesiredReleaseRow): void {
     if (this.desires.get(uuid)?.terminal && !desired.terminal) {
@@ -74,8 +75,22 @@ export class FakeSessionRowWriter implements SessionRowWriter {
     }
   }
 
+  trackDrainWrite(write: Promise<void>): void {
+    this.drainWrites.add(write);
+    void write.then(() => this.drainWrites.delete(write));
+  }
+
+  pendingDrainWrites(): ReadonlySet<Promise<void>> {
+    return this.drainWrites;
+  }
+
   async drain(): Promise<void> {
-    await Promise.all(Array.from(this.desires.keys(), (uuid) => this.settled(uuid)));
+    while (this.drainWrites.size || this.desires.size) {
+      await Promise.all([
+        ...this.drainWrites,
+        ...Array.from(this.desires.keys(), (uuid) => this.settled(uuid)),
+      ]);
+    }
   }
 
   stop(): void {

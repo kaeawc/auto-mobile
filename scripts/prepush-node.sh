@@ -36,7 +36,7 @@ Run the Node pull-request gates in fail-fast order. --changed uses
 Bun's changed runner plus reference-only unit extras and affected
 safe integration tests; caps fall back to full unit/safe integration lanes; format, typecheck, and lint remain
 full because their repository-wide baselines and boundaries have no safe
-changed-file mode. Tool definitions drift and the static Fast Validation subset
+changed-file mode. Tests listed in test/always-run-tests.txt always run. Tool definitions drift and the static Fast Validation subset
 also run in both modes. --timing
 forces the unit timing budget gate on every OS.
 EOF
@@ -179,7 +179,7 @@ cleanup_affected_selection() {
 
 affected_test_selection() {
   local branch_changes worktree_changes untracked_changes="" selection_dir file
-  local -a units=() integrations=()
+  local -a units=() integrations=() bats_files=()
   # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
   branch_changes="$(vcs_changed_files_since_merge_base origin/main)" || return $?
   # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
@@ -201,12 +201,23 @@ affected_test_selection() {
   while IFS= read -r file; do
     [[ -z "$file" ]] || integrations+=("$file")
   done < "$selection_dir/integration-safe.txt"
+  while IFS= read -r file; do
+    [[ -z "$file" ]] || bats_files+=("$file")
+  done < "$selection_dir/bats.txt"
   if grep -Fx unit "$selection_dir/fallback.txt" > /dev/null; then
     env AUTOMOBILE_TEST_MODE=true bash scripts/test-ts.sh unit || return $?
   elif [[ "${#units[@]}" -gt 0 ]]; then
     env AUTOMOBILE_TEST_MODE=true bash scripts/test-ts.sh unit "${units[@]}" || return $?
   else
     echo "No reference-only unit extras selected."
+  fi
+  if [[ "${#bats_files[@]}" -gt 0 ]]; then
+    # Always-run bats (test/always-run-tests.txt) compare workflow/action content.
+    if command -v bats > /dev/null; then
+      bats "${bats_files[@]}" || return $?
+    else
+      echo "bats not installed; skipping always-run bats: ${bats_files[*]}"
+    fi
   fi
   if grep -Fx integration "$selection_dir/fallback.txt" > /dev/null; then
     bash scripts/prepush-integration-safe.sh || return $?

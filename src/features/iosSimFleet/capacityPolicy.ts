@@ -6,7 +6,7 @@ import {
 } from "../bootAdmission/capacityLimits";
 import type { FleetCostReport, HostResources, SimulatorCost } from "./types";
 
-export type { CapacityLimits, MaxBootedSource } from "../bootAdmission/capacityLimits";
+export type { CapacityLimits } from "../bootAdmission/capacityLimits";
 
 /** Env override: positive integer cap on concurrently booted simulators. */
 export const IOS_SIM_MAX_BOOTED_ENV = "AUTOMOBILE_IOS_SIM_MAX_BOOTED";

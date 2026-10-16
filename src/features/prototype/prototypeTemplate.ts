@@ -9,7 +9,6 @@
  */
 
 export type Raw = Record<string, unknown>;
-export type Scalar = string | number | boolean;
 
 /** A literal state key, and the shape of every repeat field name and component prop name. */
 export const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;

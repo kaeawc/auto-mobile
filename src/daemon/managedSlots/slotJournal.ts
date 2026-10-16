@@ -255,16 +255,6 @@ export type SlotJournalBlockReason =
   | "reconcile_in_progress"
   | "scope_not_valid";
 
-export type SlotJournalDriveResult =
-  | { kind: "settled"; entry: SlotJournalEntry }
-  | {
-      kind: "blocked";
-      entry: SlotJournalEntry;
-      reason: SlotJournalBlockReason;
-      message: string;
-      retryAfterMs?: number;
-    };
-
 /** Summary of one redrive, for acquisition evidence and logs. */
 export interface SlotJournalRedriveRecord {
   entryId: number;

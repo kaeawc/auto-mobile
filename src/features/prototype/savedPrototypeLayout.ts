@@ -21,7 +21,6 @@ import {
 const { dirname, join } = posix;
 
 export const SAVED_PROTOTYPE_FORMAT_VERSION = 1;
-export const MAX_SAVED_PROTOTYPE_MANIFEST_BYTES = 262144;
 const extensions: Record<PrototypeAssetMimeType, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",

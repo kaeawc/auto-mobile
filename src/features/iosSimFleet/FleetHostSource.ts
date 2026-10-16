@@ -63,8 +63,6 @@ export async function readHostProcessTable(
   return rows;
 }
 
-export { PS_SNAPSHOT_MAX_BUFFER_BYTES } from "./psSnapshot";
-
 const MEMORY_PRESSURE_SYSCTL = ["-n", "kern.memorystatus_vm_pressure_level"];
 
 /** kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical. */

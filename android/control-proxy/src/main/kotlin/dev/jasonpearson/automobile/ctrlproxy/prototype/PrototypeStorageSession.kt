@@ -245,7 +245,7 @@ internal constructor(
   private val values = LinkedHashMap(stored)
 
   /** What the disk holds, as far as this session knows: the last document it wrote or loaded. */
-  private var persistedValues = LinkedHashMap(persisted)
+  private var persistedValues: Map<String, JsonElement> = LinkedHashMap(persisted)
   private val sizes =
     stored.mapValuesTo(HashMap()) { (key, value) ->
       PrototypeStorageRestorer.entryBytes(key, value)

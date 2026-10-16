@@ -209,19 +209,11 @@ describe("CtrlProxyCertificates (Android)", function () {
     socket: CapturingWebSocket;
   }> => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      factory,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
       certificateFileSystem,
-    );
+    });
     await client.ensureConnected();
     const socket = await waitForSocket(getSocket);
     await waitForSocketOpen(socket);
@@ -234,19 +226,11 @@ describe("CtrlProxyCertificates (Android)", function () {
   const failingClient = (
     certificateFileSystem?: FakeCertificateFileSystem,
   ): AndroidCtrlProxyClient =>
-    AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
       certificateFileSystem,
-    );
+    });
 
   // ===========================================================================
   // requestInstallCaCertificate

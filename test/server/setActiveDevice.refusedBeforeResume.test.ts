@@ -66,12 +66,10 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     const adb = new FakeAdbExecutor();
     adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
     clientTimer = new FakeTimer();
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      createInstantFailureWebSocketFactory(clientTimer),
-      clientTimer,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(clientTimer),
+      timer: clientTimer,
+    });
     AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
     registerUtilityTools();
     // The holder takes the device through the same tool, before any budget state is set up.

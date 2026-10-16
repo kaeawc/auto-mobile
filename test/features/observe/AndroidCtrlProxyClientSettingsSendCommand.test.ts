@@ -46,23 +46,12 @@ async function harness() {
     isEmulator: true,
   };
   const adb = new FakeAdbExecutor();
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    () => socket as unknown as WebSocket,
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: () => socket as unknown as WebSocket,
     timer,
-    new FakeInstalledAppsRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    ids,
-  );
+    installedAppsRepository: new FakeInstalledAppsRepository(),
+    idGenerator: ids,
+  });
   await Promise.resolve();
   client["ws"] = socket as unknown as WebSocket;
   const requestIds = new CountingIdGenerator("wire");

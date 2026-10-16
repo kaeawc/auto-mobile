@@ -82,12 +82,10 @@ function androidClient(): AndroidCtrlProxyClient {
   adb.setScreenState(true);
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
-  return AndroidCtrlProxyClient.createForTesting(
-    androidDevice,
-    adb,
-    (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+  return AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
     timer,
-  );
+  });
 }
 
 function iosClient(): IOSCtrlProxyClient {

@@ -34,19 +34,12 @@ async function harness() {
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "storage-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
-    () => socket as unknown as WebSocket,
-    timer,
-    new FakeInstalledAppsRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    new CountingIdGenerator("delegate"),
+    {
+      webSocketFactory: () => socket as unknown as WebSocket,
+      timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      idGenerator: new CountingIdGenerator("delegate"),
+    },
   );
   await Promise.resolve();
   timer.advanceTime(123);

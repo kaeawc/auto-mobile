@@ -105,12 +105,10 @@ describe("detached promise rejection ownership", () => {
       error,
     );
     timer.advanceTime(500);
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-    );
+    });
     try {
       // Omit package/hierarchy to avoid performance monitoring and navigation work.
       client.handleHierarchyUpdate({ updatedAt: timer.now() });

@@ -36,15 +36,13 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
     navHarness = await installInMemoryNavManager();
     adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
 
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => {
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, timer);
         return socket;
       },
       timer,
-    );
+    });
     const manager = AndroidCtrlProxyManager.getInstance(device, { create: () => adb });
     spyOn(manager, "isAvailable").mockResolvedValue(true);
 

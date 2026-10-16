@@ -42,9 +42,11 @@ async function harness(commands: string[]) {
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "mock-rules-test", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
-    () => socket,
-    timer,
-    new FakeInstalledAppsRepository(),
+    {
+      webSocketFactory: () => socket,
+      timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+    },
   );
   clients.push(client);
   await Promise.resolve();

@@ -138,12 +138,10 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
     adb.setDeviceStates([{ deviceId: androidDevice.deviceId, state: "device" }]);
-    android = AndroidCtrlProxyClient.createForTesting(
-      androidDevice,
-      adb,
-      (url) => defaultWebSocketFactory(url),
+    android = AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
+      webSocketFactory: (url) => defaultWebSocketFactory(url),
       timer,
-    );
+    });
     await expect(call(android)).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
   });
 

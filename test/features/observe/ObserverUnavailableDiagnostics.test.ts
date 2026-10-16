@@ -45,12 +45,10 @@ test.each(["android", "ios"] as const)(
     Reflect.set(daemon, "deviceSessionRegistry", {});
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            new FakeAdbExecutor(),
-            createInstantFailureWebSocketFactory(timer),
+        ? AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+            webSocketFactory: createInstantFailureWebSocketFactory(timer),
             timer,
-          )
+          })
         : IOSCtrlProxyClient.createForTesting(
             device,
             8765,

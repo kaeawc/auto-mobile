@@ -48,19 +48,13 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         recorded.push({ event, applicationId });
       },
     };
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      () => {
+    client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("WebSocket connection is not needed for dispatch tests");
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      ingestor as AndroidSdkEventIngestor,
-    ) as unknown as DispatchTestClient;
+      sdkEventIngestor: ingestor as AndroidSdkEventIngestor,
+    }) as unknown as DispatchTestClient;
   });
 
   afterEach(() => {
@@ -369,8 +363,9 @@ test("connected greeting records gesture display capability without gating core 
   const proxy = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "gesture-greeting", platform: "android", name: "Fake" },
     new FakeAdbExecutor(),
-    undefined,
-    timer,
+    {
+      timer,
+    },
   );
   await proxy["handleWebSocketMessage"](
     JSON.stringify({ type: "connected", supportedCommands: ["gesture_display_id_v1"] }),

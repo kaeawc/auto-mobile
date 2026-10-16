@@ -218,10 +218,8 @@ describe("SendKeys IME failure after typing", () => {
       const device = { ...androidDevice, deviceId: `ime-done-failure-${afterTyping}` };
       const reason = "No focused editable node found for IME action";
       const requests: Record<string, unknown>[] = [];
-      const client = AndroidCtrlProxyClient.createForTesting(
-        device,
-        adb,
-        (url) => {
+      const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+        webSocketFactory: (url) => {
           const socket = new FakeWebSocket(url, "none", 0, timer);
           socket.send = (data: unknown) => {
             const request = JSON.parse(String(data)) as Record<string, unknown>;
@@ -242,7 +240,7 @@ describe("SendKeys IME failure after typing", () => {
           return socket;
         },
         timer,
-      );
+      });
       const { client: textClient, calls } = createTextClient();
       textClient.ime = (action) => client.requestImeAction(action);
       const observer = createObserver(focusedAndroidObservation("", {}, 1));
@@ -490,12 +488,10 @@ test.each([
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
   const device = { ...androidDevice, deviceId: `ime-clear-capability-${flags.join("-")}` };
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url) => new FakeWebSocket(url, "none", 0, timer),
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
-  );
+  });
   client["webSocketMessageHandlers"].connected({
     type: "connected",
     supportedCommands: ["request_commit_text", "request_cancel_ime_commit", ...flags],
@@ -2468,12 +2464,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const device = { ...androidDevice, deviceId: `old-apk-no-cancel-${operation}` };
-      const client = AndroidCtrlProxyClient.createForTesting(
-        device,
-        adb,
-        (url) => new FakeWebSocket(url, "none", 0, timer),
+      const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+        webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
         timer,
-      );
+      });
       const capabilities: string[] = [];
       const calls: string[] = [];
       client.supportsCommand = async (command) => {

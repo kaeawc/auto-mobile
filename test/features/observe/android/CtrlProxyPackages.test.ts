@@ -23,8 +23,8 @@ describe("CtrlProxyPackages (Android)", function () {
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
   const clients: AndroidCtrlProxyClient[] = [];
-  const createClient: typeof AndroidCtrlProxyClient.createForTesting = (...args) => {
-    const client = AndroidCtrlProxyClient.createForTesting(...args);
+  const createClient: typeof AndroidCtrlProxyClient.createForTesting = (device, adb, deps = {}) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, deps);
     clients.push(client);
     return client;
   };
@@ -172,7 +172,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("connection lifecycle", function () {
     test("cancels screenshot backoff when the underlying socket closes", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       const scheduler = new FakeScreenshotBackoffScheduler();
       try {
         await client.ensureConnected();
@@ -194,7 +197,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       const scheduler = new FakeScreenshotBackoffScheduler();
 
       (client as any).screenshotBackoffScheduler = scheduler;
@@ -205,7 +211,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes hierarchy cadence by sending interval config", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -221,7 +230,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("skips hierarchy cadence refresh when runner does not advertise support", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -255,7 +267,10 @@ describe("CtrlProxyPackages (Android)", function () {
         },
       });
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -273,7 +288,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestInstalledPackages", function () {
     test("sends request_installed_packages and resolves on result", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         // Trigger a connection (any method that calls ensureConnected works)
         await client.ensureConnected();
@@ -320,7 +338,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("returns error when WebSocket not connected", async function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         const result = await client.requestInstalledPackages(true);
         expect(result.success).toBe(false);
@@ -334,7 +355,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestPackageInfo", function () {
     test("sends request_package_info and resolves with package details", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -386,7 +410,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("returns error when package not found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -420,7 +447,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestLaunchIntent", function () {
     test("sends request_launch_intent and resolves with componentName", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);

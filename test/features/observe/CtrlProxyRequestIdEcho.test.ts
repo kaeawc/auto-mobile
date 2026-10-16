@@ -42,9 +42,11 @@ async function harness() {
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "request-id-echo", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
-    () => socket as unknown as WebSocket,
-    timer,
-    new FakeInstalledAppsRepository(),
+    {
+      webSocketFactory: () => socket as unknown as WebSocket,
+      timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+    },
   );
   await Promise.resolve(); // FakeWebSocket opens on a microtask, without real timers.
   client["ws"] = socket as unknown as WebSocket;

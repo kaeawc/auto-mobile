@@ -28,10 +28,8 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   const sockets: FakeWebSocket[] = [];
   const sent: string[][] = [];
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url) => {
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url) => {
       const socket = new FakeWebSocket(url, "none", 0, timer, "withhold");
       const messages: string[] = [];
       sent.push(messages);
@@ -59,17 +57,8 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
       return socket;
     },
     timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => manager,
-  );
+    serviceManagerFactory: () => manager,
+  });
   clients.push(client);
   return { client, timer, adb, sockets, sent };
 }

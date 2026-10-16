@@ -82,21 +82,11 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
     if (recorded) {
       lease.recordOwnedForward(PORT);
     }
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE,
-      adb,
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE, adb, {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      lease,
-    );
+      ctrlProxyForwardLease: lease,
+    });
     const internals = client as unknown as { portForwardingSetup: boolean; localPort: number };
     internals.portForwardingSetup = true;
     internals.localPort = PORT;

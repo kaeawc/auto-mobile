@@ -18,7 +18,10 @@ const device: BootedDevice = {
 function createClients(timer: FakeTimer) {
   const factory = createInstantFailureWebSocketFactory(timer);
   return [
-    AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), factory, timer),
+    AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: factory,
+      timer,
+    }),
     IOSCtrlProxyClient.createForTesting({ ...device, platform: "ios" }, 8765, factory, timer),
   ] as const;
 }

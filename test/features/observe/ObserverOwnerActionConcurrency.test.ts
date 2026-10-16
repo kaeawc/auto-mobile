@@ -139,10 +139,8 @@ test.each(ownerCommands)(
     const factory = new FakeAdbClientFactory(adb);
     let socket: FakeWebSocket | undefined;
     let hierarchyRequested = false;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, timer);
         spyOn(socket, "send").mockImplementation((wire: string) => {
           if (wire.includes('"request_hierarchy"')) {
@@ -152,7 +150,7 @@ test.each(ownerCommands)(
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
       AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);

@@ -20,24 +20,12 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     timer = new FakeTimer();
     socket = new FakeWebSocket("ws://fake", "none", 0, timer);
     await Promise.resolve();
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      () => socket as unknown as WebSocket,
+    client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: () => socket as unknown as WebSocket,
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new FakeIdGenerator(),
-      false,
-    );
+      idGenerator: new FakeIdGenerator(),
+      transientObserver: false,
+    });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
     client["ws"] = socket as unknown as WebSocket;
     client["autoReconnectEnabled"] = false;

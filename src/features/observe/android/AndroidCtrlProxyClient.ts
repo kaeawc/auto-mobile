@@ -643,22 +643,6 @@ export interface AndroidCtrlProxyClientDeps {
   transientObserver?: boolean;
 }
 
-type AndroidCtrlProxyClientLegacyTestArgs = [
-  timer?: Timer,
-  installedAppsRepository?: InstalledAppsStore,
-  retryExecutor?: RetryExecutor,
-  crashEventSink?: CrashEventSink,
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-  sdkEventIngestor?: AndroidSdkEventIngestor,
-  loggerInstance?: Logger,
-  certificateFileSystem?: CertificateFileSystem,
-  screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
-  ctrlProxyForwardLease?: CtrlProxyForwardLease,
-  serviceManagerFactory?: AndroidServiceManagerFactory,
-  idGenerator?: IdGenerator,
-  transientObserver?: boolean,
-];
-
 const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (device) =>
   AndroidCtrlProxyManager.getInstance(device);
 
@@ -1671,70 +1655,14 @@ export class AndroidCtrlProxyClient
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
 
-  /**
-   * Create instance for testing with custom WebSocket factory
-   */
+  /** Create an instance for testing with injectable dependencies. */
   public static createForTesting(
     device: BootedDevice,
     adb: AdbExecutor,
-    deps?: AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler },
-  ): AndroidCtrlProxyClient;
-  /** @deprecated Pass an AndroidCtrlProxyClientDeps object instead of positional dependencies. */
-  public static createForTesting(
-    device: BootedDevice,
-    adb: AdbExecutor,
-    webSocketFactory: WebSocketFactory,
-    ...args: AndroidCtrlProxyClientLegacyTestArgs
-  ): AndroidCtrlProxyClient;
-  public static createForTesting(
-    device: BootedDevice,
-    adb: AdbExecutor,
-    depsOrWebSocketFactory?:
-      | (AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler })
-      | WebSocketFactory,
-    ...args: AndroidCtrlProxyClientLegacyTestArgs
-  ): AndroidCtrlProxyClient {
-    const [
-      timer,
-      installedAppsRepository,
-      retryExecutor,
-      crashEventSink,
-      deviceConnectionLostNotifier,
-      sdkEventIngestor,
-      loggerInstance,
-      certificateFileSystem,
-      screenshotBackoffScheduler,
-      ctrlProxyForwardLease,
-      serviceManagerFactory,
-      idGenerator,
-      transientObserver = false,
-    ] = args;
-    // Positional form: a factory, or an explicit `undefined` factory followed by later positional
-    // arguments such as the timer. Anything else is the deps bag.
-    const isPositional =
-      typeof depsOrWebSocketFactory === "function" ||
-      (depsOrWebSocketFactory === undefined && args.length > 0);
-    const deps: AndroidCtrlProxyClientDeps & {
+    deps: AndroidCtrlProxyClientDeps & {
       screenshotBackoffScheduler?: ScreenshotBackoffScheduler;
-    } = isPositional
-      ? {
-          webSocketFactory:
-            typeof depsOrWebSocketFactory === "function" ? depsOrWebSocketFactory : undefined,
-          timer,
-          installedAppsRepository,
-          retryExecutor,
-          crashEventSink,
-          deviceConnectionLostNotifier,
-          sdkEventIngestor,
-          logger: loggerInstance,
-          certificateFileSystem,
-          screenshotBackoffScheduler,
-          ctrlProxyForwardLease,
-          serviceManagerFactory,
-          idGenerator,
-          transientObserver,
-        }
-      : (depsOrWebSocketFactory ?? {});
+    } = {},
+  ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(device, adb, {
       ...deps,
       ctrlProxyForwardLease: deps.ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),

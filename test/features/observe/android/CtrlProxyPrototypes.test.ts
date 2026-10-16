@@ -67,9 +67,11 @@ async function harness(
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "prototype-test", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
-    () => socket,
-    timer,
-    new FakeInstalledAppsRepository(),
+    {
+      webSocketFactory: () => socket,
+      timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+    },
   );
   clients.push(client);
   const extraContext = client["extraDelegateContextFields"].bind(client);

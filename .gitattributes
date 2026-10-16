@@ -186,3 +186,4 @@ test/fixtures/changed-test-selection/*.txt text eol=lf
 
 # Captured session broker protocol evidence stays stable across checkout platforms.
 test/fixtures/session-broker/** text eol=lf
+test/fixtures/android-system-image-37/** text eol=lf

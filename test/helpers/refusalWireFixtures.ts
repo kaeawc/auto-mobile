@@ -62,7 +62,7 @@ import {
   DeviceControlTransportError,
   LoopbackMcpConnectionError,
 } from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -1104,6 +1104,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   string
 >([
   [
+    UnknownToolError,
+    "daemon socket frame code (`daemon_unknown_tool`) only; clients still get the unchanged `Unknown tool:` text, not a typed refusal body.",
+  ],
+  [
     BindingConfigError,
     "Internal broker validation becomes a SessionBroker failure; slot launch and socket serializers were removed.",
   ],
@@ -1198,6 +1202,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
   registry_schema_unsupported:
     "Internal registry-open code translated by the broker acquisition path; covered by broker handler tests.",
+  daemon_unknown_tool:
+    "a daemon socket response field the proxy classifies by (details.toolName); clients still see the unchanged `Unknown tool:` text",
+  daemon_session_not_active:
+    "a daemon socket response field the proxy classifies by; clients still see the unchanged `is not an active daemon session` text",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

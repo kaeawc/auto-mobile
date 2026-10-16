@@ -2010,6 +2010,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
+      addPooledDevice: (device) => this.devices.set(device.id, device),
       withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
       identityEvidenceForBootedDevice: (device) =>

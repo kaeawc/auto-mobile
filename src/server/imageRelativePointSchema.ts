@@ -20,7 +20,7 @@ const bounds = z
 const rotation = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 const orientation = z.enum(["display", "native"]);
 
-export const imageRelativePointSchema = z
+const imagePointObject = z
   .object({
     unit: z
       .enum(["normalized", "pixels"])
@@ -77,26 +77,43 @@ export const imageRelativePointSchema = z
         .strict(),
     ]),
   })
-  .strict()
-  .superRefine((value, context) => {
-    const metadata = "crop" in value.source ? value.source.crop : value.source.screenshot;
-    const turn = "crop" in value.source ? value.source.rotation : value.source.screenshot.rotation;
-    if (metadata.screenshotOrientation === "native" && turn === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "native screenshotOrientation requires observe.rotation",
-        path: ["source"],
-      });
-    }
-    if (value.unit === "pixels" && !metadata.imageSize) {
-      context.addIssue({
-        code: "custom",
-        message: "pixels requires imageSize with the real file dimensions",
-        path: ["source"],
-      });
-    }
-    validateImageRange(value, context);
-  });
+  .strict();
+
+export const imageRelativePointSchema = imagePointObject.superRefine((value, context) =>
+  validateImagePoint(value, context),
+);
+
+/** Where {@link validateImagePoint} reports problems; a zod refinement context satisfies it. */
+export interface ImageIssueSink {
+  addIssue(issue: { code: "custom"; message: string; path: Array<string | number> }): void;
+}
+
+type ImagePointValue = z.infer<typeof imagePointObject>;
+
+/**
+ * The checks every image-relative point must pass: a native screenshot needs `observe.rotation`,
+ * pixels need the real `imageSize`, and the point must lie inside the image. Exported so a tool
+ * with several image points (swipeAt) applies the same rules instead of restating them.
+ */
+export function validateImagePoint(value: ImagePointValue, context: ImageIssueSink): void {
+  const metadata = "crop" in value.source ? value.source.crop : value.source.screenshot;
+  const turn = "crop" in value.source ? value.source.rotation : value.source.screenshot.rotation;
+  if (metadata.screenshotOrientation === "native" && turn === undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "native screenshotOrientation requires observe.rotation",
+      path: ["source"],
+    });
+  }
+  if (value.unit === "pixels" && !metadata.imageSize) {
+    context.addIssue({
+      code: "custom",
+      message: "pixels requires imageSize with the real file dimensions",
+      path: ["source"],
+    });
+  }
+  validateImageRange(value, context);
+}
 
 function validateImageRange(
   value: {
@@ -107,7 +124,7 @@ function validateImageRange(
       | { crop: { imageSize: { width: number; height: number } } }
       | { screenshot: { imageSize?: { width: number; height: number } } };
   },
-  context: z.RefinementCtx,
+  context: ImageIssueSink,
 ): void {
   const metadata = "crop" in value.source ? value.source.crop : value.source.screenshot;
   const maxima = value.unit === "normalized" ? { width: 1, height: 1 } : metadata.imageSize;

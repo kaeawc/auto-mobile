@@ -6,7 +6,7 @@ import type { BootedDevice } from "../models";
 import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
-import { imageRelativePointSchema } from "./imageRelativePointSchema";
+import { imageRelativePointSchema, validateImagePoint } from "./imageRelativePointSchema";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
@@ -45,30 +45,26 @@ const imageRelativeSwipeSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    // Each endpoint is a tapAt image point: reuse its checks (native orientation needs a rotation,
+    // Each endpoint is a tapAt image point: apply its checks (native orientation needs a rotation,
     // pixels need imageSize, the point must lie in the image) instead of restating them.
     const reported = new Set<string>();
     for (const endpoint of ["from", "to"] as const) {
       const { x, y } = value[endpoint];
-      const point = imageRelativePointSchema.safeParse({
-        unit: value.unit,
-        source: value.source,
-        x,
-        y,
-      });
-      if (point.success) {
-        continue;
-      }
-      for (const issue of point.error.issues) {
-        const axis = issue.path[0] === "x" || issue.path[0] === "y" ? issue.path[0] : undefined;
-        // An axis problem belongs to this endpoint; a source problem is shared, so report it once.
-        const path = axis ? [endpoint, axis] : ["source"];
-        const key = `${path.join(".")}:${issue.message}`;
-        if (!reported.has(key)) {
-          reported.add(key);
-          context.addIssue({ code: "custom", message: issue.message, path });
-        }
-      }
+      validateImagePoint(
+        { unit: value.unit, source: value.source, x, y },
+        {
+          addIssue: (issue) => {
+            const axis = issue.path[0];
+            // An axis problem belongs to this endpoint; a source problem is shared, so report it once.
+            const path = axis === "x" || axis === "y" ? [endpoint, axis] : ["source"];
+            const key = `${path.join(".")}:${issue.message}`;
+            if (!reported.has(key)) {
+              reported.add(key);
+              context.addIssue({ ...issue, path });
+            }
+          },
+        },
+      );
     }
   });
 

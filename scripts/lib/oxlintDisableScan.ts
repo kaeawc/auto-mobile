@@ -47,7 +47,7 @@ export function parseDirective(commentBody: string): Directive | null {
   const reason = sep === -1 ? "" : rest.slice(sep).replace(/^\s-+/, "").trim();
   const rules = rulesPart
     .split(",")
-    .map(r => normalizeRule(r.trim()))
+    .map((r) => normalizeRule(r.trim()))
     .filter(Boolean);
   return { rules: rules.length ? [...new Set(rules)] : ["*"], hasReason: reason.length > 0 };
 }
@@ -67,7 +67,7 @@ function collectTokens(node: ts.Node, sf: ts.SourceFile, visit: (token: ts.Node)
     visit(node);
     return;
   }
-  children.forEach(child => collectTokens(child, sf, visit));
+  children.forEach((child) => collectTokens(child, sf, visit));
 }
 
 /** Find every suppression directive in a source text. */
@@ -87,7 +87,7 @@ export function findDirectives(source: string, fileName = "input.tsx"): Directiv
       }
     }
   };
-  collectTokens(sf, sf, token => {
+  collectTokens(sf, sf, (token) => {
     take(ts.getLeadingCommentRanges(source, token.getFullStart()));
     take(ts.getTrailingCommentRanges(source, token.end));
   });
@@ -140,13 +140,13 @@ function walk(root: string, rel: string, out: string[], optional: boolean): void
 /** Scan required roots (must exist) and optional roots (may be absent). */
 export function scanRoots(root: string, required: string[], optional: string[] = []): string {
   const files: string[] = [];
-  required.forEach(d => walk(root, d, files, false));
-  optional.forEach(d => walk(root, d, files, true));
+  required.forEach((d) => walk(root, d, files, false));
+  optional.forEach((d) => walk(root, d, files, true));
   if (files.length === 0) {
     throw new Error("oxlint-disable scan: no source files found");
   }
   const counts = new Map<string, number>();
-  files.forEach(f => countRows(f, readFileSync(join(root, f), "utf8"), counts));
+  files.forEach((f) => countRows(f, readFileSync(join(root, f), "utf8"), counts));
   const lines = [...counts.entries()].map(([k, n]) => `${n}\t${k}`).sort();
   return lines.length ? `${lines.join("\n")}\n` : "";
 }

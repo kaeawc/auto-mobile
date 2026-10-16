@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { countRows, findDirectives, scanRoots } from "../../scripts/lib/oxlintDisableScan";
 
-const rulesOf = (src: string) => findDirectives(src).map(d => d.rules);
+const rulesOf = (src: string) => findDirectives(src).map((d) => d.rules);
 
 describe("oxlintDisableScan", () => {
   test("counts one directive per rule and normalises eslint/ prefix", () => {
@@ -15,9 +15,9 @@ describe("oxlintDisableScan", () => {
 
   test("flags reason-less directives and bare block directives", () => {
     const ds = findDirectives(
-      "x(); // oxlint-disable-line max-depth\n/* eslint-disable */\n/* eslint-disable foo -- r */"
+      "x(); // oxlint-disable-line max-depth\n/* eslint-disable */\n/* eslint-disable foo -- r */",
     );
-    expect(ds.map(d => [d.rules, d.hasReason])).toEqual([
+    expect(ds.map((d) => [d.rules, d.hasReason])).toEqual([
       [["max-depth"], false],
       [["*"], false],
       [["foo"], true],
@@ -26,7 +26,7 @@ describe("oxlintDisableScan", () => {
 
   test("ignores enable directives and directive text inside strings", () => {
     expect(
-      findDirectives('/* eslint-enable foo */\nconst s = "// oxlint-disable-next-line a";')
+      findDirectives('/* eslint-enable foo */\nconst s = "// oxlint-disable-next-line a";'),
     ).toEqual([]);
   });
 
@@ -72,7 +72,7 @@ describe("oxlintDisableScan", () => {
     countRows(
       "src/a.ts",
       "// oxlint-disable-next-line a\n// oxlint-disable-next-line a -- r",
-      counts
+      counts,
     );
     expect(counts.get("src/a.ts\toxlint-disable(a)")).toBe(2);
     expect(counts.get("src/a.ts\toxlint-disable-no-reason(a)")).toBe(1);
@@ -86,7 +86,7 @@ describe("oxlintDisableScan", () => {
       expect(() => scanRoots(root, ["src"], ["test"])).toThrow(/no source files/);
       writeFileSync(join(root, "src/a.ts"), "// oxlint-disable-next-line q -- r\n");
       expect(scanRoots(root, ["src"], ["test", "build.ts"])).toBe(
-        "1\tsrc/a.ts\toxlint-disable(q)\n"
+        "1\tsrc/a.ts\toxlint-disable(q)\n",
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

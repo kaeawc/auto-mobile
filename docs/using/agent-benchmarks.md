@@ -35,7 +35,7 @@ bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-re
 | Option                             | Meaning                                                                                |
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
 | `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                  |
-| `--all`                            | Run every suite in `benchmark/agent/suites/`.                                          |
+| `--all`                            | Run every suite in `benchmark/agent/suites/` (not combinable with `--suite`).          |
 | `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.       |
 | `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                       |
 | `--json`                           | Print the full result JSON instead of the text report.                                 |
@@ -219,12 +219,14 @@ patterns, or timeout change, the report flags that the baseline measured a diffe
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
 size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over the built `dist/` the run used: the
-bundle plus the schemas and vendor tools it loads at runtime, so a stale build after switching
-commits is flagged rather than silently measured), and
+bundle plus the schemas and vendor tools it loads at runtime, together with `bun.lock` for the
+image libraries the build leaves external, so a stale build after switching commits is flagged
+rather than silently measured), and
 `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
-flagged too. A fingerprint that could not be read (`unknown`) is never written into a baseline
-and never counts as a match.
+flagged too. A fingerprint that could not be read (`unknown`) never counts as a match. If the
+device or app build fingerprint is unknown, the run writes no `baseline.yml` at all, because a
+baseline missing them could never flag a later run on a different device or build.
 
 Suites have no free-form Claude flags. Any flag could undo run isolation (`--settings`,
 `--resume`, `--plugin-dir`), so each supported option is its own typed `claude` field.

@@ -84,6 +84,12 @@ describe("agent benchmark device selection", () => {
     );
     const garbled = new FakeCommandRunner().on("xcrun", () => ({ stdout: "not json" }));
     await expect(bootedIosSimulators(garbled, "darwin")).rejects.toThrow(/unparseable output/);
+    for (const stdout of ["{}", "null", '{"devices":[]}', '{"devices":{"ios":{}}}']) {
+      const malformed = new FakeCommandRunner().on("xcrun", () => ({ stdout }));
+      await expect(bootedIosSimulators(malformed, "darwin")).rejects.toThrow(/no devices map/);
+    }
+    const none = new FakeCommandRunner().on("xcrun", () => ({ stdout: '{"devices":{}}' }));
+    expect(await bootedIosSimulators(none, "darwin")).toEqual([]);
   });
 
   test("adb failures surface the command and its output", async () => {

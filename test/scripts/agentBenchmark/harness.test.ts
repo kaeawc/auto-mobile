@@ -86,6 +86,8 @@ function setup(transcript: string, launchMs = 42_000) {
     .onAdb("pm path", { stdout: "package:/x.apk" })
     .onAdb("pm clear", { stdout: "Success\n" })
     .onAdb("exec-out cat", { stdout: SCREEN })
+    .onAdb("dumpsys package", { stdout: "versionCode=7 minSdk=26\n    versionName=1.0\n" })
+    .onAdb("getprop", { stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n" })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
   const launches: ClaudeLaunchSpec[] = [];
   const claims: string[] = [];
@@ -551,6 +553,18 @@ describe("agent benchmark harness", () => {
     expect(runner.adbCalls()).toEqual(["devices"]);
     expect(claims).toEqual([]);
     expect(launches).toHaveLength(0);
+  });
+
+  test("a pass with an unknown device or app fingerprint writes no baseline snippet", async () => {
+    const { fs, logs, runner, deps, options } = setup(PASSING);
+    runner.onAdb("getprop", { exitCode: 1, stderr: "device offline" });
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(result.preflight.device).toBe("unknown");
+    expect(fs.exists(artifact("baseline.yml"))).toBe(false);
+    expect(logs).toContain(
+      "[demo] passed, but the device fingerprint is unknown; no baseline.yml written",
+    );
   });
 
   test("a pass without clearing app data writes no baseline snippet", async () => {

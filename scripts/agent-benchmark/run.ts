@@ -129,9 +129,10 @@ export function parseCliArgs(argv: string[]): CliOptions {
         throw new Error(`Unknown argument: ${flag}`);
     }
   }
-  const modes = [options.suites.length > 0 || options.all, options.fromResults.length > 0];
+  const modes = [options.suites.length > 0, options.all, options.fromResults.length > 0];
   if (!options.help && modes.filter(Boolean).length !== 1) {
-    throw new Error("Pass --suite/--all to run, or --from-result to re-render (not both).");
+    // --all with --suite would silently drop the named suite, so the modes are exclusive.
+    throw new Error("Pass one of --suite, --all, or --from-result.");
   }
   return options;
 }
@@ -408,11 +409,19 @@ export function bundleDigest(files: Array<{ path: string; read: () => Uint8Array
   return `sha256=${hash.digest("hex").slice(0, 16)}`;
 }
 
-function distDigest(distDir: string): string {
+/**
+ * The built `dist/` plus `bun.lock`: the build leaves sharp and jimp external, so they load
+ * from `node_modules` at runtime, and the lockfile pins exactly which versions those are.
+ */
+function serverDigest(): string {
+  const distDir = join(REPO_ROOT, "dist");
   const files = readdirSync(distDir, { recursive: true, encoding: "utf8" })
     .filter((path) => statSync(join(distDir, path)).isFile())
-    .map((path) => ({ path, read: () => readFileSync(join(distDir, path)) }));
-  return bundleDigest(files);
+    .map((path) => ({ path: `dist/${path}`, read: () => readFileSync(join(distDir, path)) }));
+  return bundleDigest([
+    ...files,
+    { path: "bun.lock", read: () => readFileSync(join(REPO_ROOT, "bun.lock")) },
+  ]);
 }
 
 async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<BenchmarkResult[]> {
@@ -420,7 +429,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
-  const serverBuild = distDigest(join(REPO_ROOT, "dist"));
+  const serverBuild = serverDigest();
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {

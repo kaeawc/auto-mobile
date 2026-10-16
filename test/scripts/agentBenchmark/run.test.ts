@@ -38,8 +38,10 @@ describe("agent benchmark CLI arguments", () => {
   });
 
   test("exactly one mode is required, and flags need values", () => {
-    expect(() => parseCliArgs([])).toThrow(/Pass --suite\/--all to run/);
-    expect(() => parseCliArgs(["--all", "--from-result", "x"])).toThrow(/not both/);
+    expect(() => parseCliArgs([])).toThrow(/Pass one of --suite, --all, or --from-result/);
+    expect(() => parseCliArgs(["--all", "--from-result", "x"])).toThrow(/Pass one of/);
+    // --all would silently drop an explicit suite, so the two are not combinable.
+    expect(() => parseCliArgs(["--all", "--suite", "custom.yml"])).toThrow(/Pass one of/);
     expect(() => parseCliArgs(["--suite"])).toThrow(/--suite needs a value/);
     expect(() => parseCliArgs(["--suite", "--json"])).toThrow(/--suite needs a value/);
     expect(() => parseCliArgs(["--all", "--bogus"])).toThrow(/Unknown argument: --bogus/);

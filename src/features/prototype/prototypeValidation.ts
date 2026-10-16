@@ -827,22 +827,34 @@ function chipErrors(
   return undefined;
 }
 /** Text field option relationships and the initial bound value; individual fields are contract-typed. */
+/** The rules tying `multiline` to the other text field options. */
+function multilineErrors(
+  value: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  const lineField = ["minLines", "maxLines"].find((field) => value[field] !== undefined);
+  if (value.multiline !== true) {
+    return lineField === undefined
+      ? undefined
+      : fail(`${path}.${lineField}`, "Requires multiline: true");
+  }
+  if (value.secure === true || value.keyboardType === "password") {
+    return fail(`${path}.multiline`, "Multiline text cannot be secure");
+  }
+  const imeField = ["imeAction", "onSubmit"].find((field) => value[field] !== undefined);
+  return imeField === undefined
+    ? undefined
+    : fail(`${path}.${imeField}`, "Multiline text has no IME action");
+}
 function textFieldErrors(
   value: Record<string, unknown>,
   path: string,
   stored: unknown,
 ): PrototypeValidationError | undefined {
   const { minLines, maxLines, maxLength } = value;
-  const lineField = ["minLines", "maxLines"].find((field) => value[field] !== undefined);
-  if (value.multiline !== true && lineField !== undefined) {
-    return fail(`${path}.${lineField}`, "Requires multiline: true");
-  }
-  if (value.multiline === true && (value.secure === true || value.keyboardType === "password")) {
-    return fail(`${path}.multiline`, "Multiline text cannot be secure");
-  }
-  const imeField = ["imeAction", "onSubmit"].find((field) => value[field] !== undefined);
-  if (value.multiline === true && imeField !== undefined) {
-    return fail(`${path}.${imeField}`, "Multiline text has no IME action");
+  const multiline = multilineErrors(value, path);
+  if (multiline) {
+    return multiline;
   }
   if (typeof minLines === "number" && typeof maxLines === "number" && minLines > maxLines) {
     return fail(`${path}.minLines`, "minLines cannot exceed maxLines");

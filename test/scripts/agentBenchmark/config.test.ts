@@ -174,6 +174,8 @@ describe("agent benchmark suite config", () => {
     for (const file of files) {
       const suite = loadSuite(join(SUITES_DIR, file), REPO_ROOT);
       expect(`${suite.definition.name}.yml`).toBe(file);
+      // Every shipped suite checks its start screen, so a broken preflight never reaches Claude.
+      expect(suite.definition.preflight.startScreenIncludes.length).toBeGreaterThan(0);
     }
   });
 

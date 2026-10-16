@@ -59,6 +59,20 @@ describe("compareRun verdict", () => {
     expect(result.stumbles).toBe(0);
   });
 
+  test("a run that never called an auto-mobile tool fails even with the right answer", () => {
+    const echoed = new TranscriptBuilder().init().result({ finalText: "COUNT: 3" });
+    const result = compareRun(audit(echoed), OK_OUTCOME, {
+      answerIncludes: ["COUNT: 3"],
+      screenIncludes: [],
+    });
+    expect(result.verdict).toBe("failed");
+    expect(result.checks.find((check) => check.name === "used the device")).toEqual({
+      name: "used the device",
+      passed: false,
+      detail: "no auto-mobile tool calls",
+    });
+  });
+
   test("a wrong final answer fails without making the run incomplete", () => {
     const result = compareRun(audit(cleanRun()), OK_OUTCOME, {
       answerIncludes: ["COUNT: 4"],
@@ -189,6 +203,11 @@ describe("verification text matching", () => {
       containsBounded("Step 3: Summary and completion.", "Step 3: Summary and completion"),
     ).toBe(true);
     expect(containsBounded("a (b) [c] 1.5", "(b) [c] 1.5")).toBe(true);
+    // Unicode letters bound a match too: a negated or longer word never satisfies it.
+    expect(containsBounded("未完了", "完了")).toBe(false);
+    expect(containsBounded("不成功", "成功")).toBe(false);
+    expect(containsBounded("Café", "Caf")).toBe(false);
+    expect(containsBounded("状態: 完了。", "完了")).toBe(true);
   });
 
   test("an over-tapped run fails both the answer and the screen check", () => {

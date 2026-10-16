@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import type { BootedDevice } from "../models";
 import type { TransitionalSimulatorState } from "../models/TransitionalSimulator";
 import type { PooledDevice } from "../daemon/devicePool";
@@ -66,7 +67,7 @@ export interface InventoryDeviceInput {
  * are derived here and nowhere else.
  */
 export function describeInventoryDevice(input: InventoryDeviceInput) {
-  const holderId = input.pooled?.sessionId;
+  const holderId = holderOf(input.pooled);
   const session: BootedInput["session"] = holderId
     ? (input.sessionsById?.get(holderId) ?? { sessionId: holderId })
     : undefined;

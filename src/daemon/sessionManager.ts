@@ -1,3 +1,6 @@
+import { createLegacyLifecycleView } from "./legacyLifecycleView";
+import { isLegacySessionIdKnown, type LegacyLifecycleView } from "./sessionSlots";
+import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
 import {
   RecorderTeardownRetries,
   RECORDER_TEARDOWN_RECHECK_MS,
@@ -1591,6 +1594,7 @@ function restartRecoveryDeadlineFromPersisted(
 /** The persisted handoff's fixed window; idle activity never moves this deadline. */
 function hasLapsedRestartRecoveryWindow(persisted: DeviceSession, nowMs: number): boolean {
   const deadline = restartRecoveryDeadlineFromPersisted(persisted, true);
+  // ORCHESTRATOR-CHOSEN: the window ends inclusively at released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS, matching persistedSessionExpiryReason and the admission probe.
   return deadline !== undefined && nowMs >= deadline;
 }
 
@@ -3650,6 +3654,7 @@ export class SessionManager {
     );
     settleRecovery(creation.promise);
     this.pendingSessionCreations.set(sessionId, creation);
+    this.slotShadowProbe.check(sessionId, "creation-start");
     try {
       const created = await this.withinCreateDeadline(
         sessionId,
@@ -3666,6 +3671,7 @@ export class SessionManager {
     } finally {
       if (this.pendingSessionCreations.get(sessionId) === creation) {
         this.pendingSessionCreations.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "creation-end");
       }
     }
   }
@@ -3850,6 +3856,7 @@ export class SessionManager {
       this.runningPlanLabelSessions.add(session.sessionId);
     }
     this.sessions.set(session.sessionId, session);
+    this.slotShadowProbe.check(session.sessionId, "published");
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
     this.cancelSessionlessUseOnAcquisition(session.assignedDevice, session.sessionId);
@@ -4218,15 +4225,12 @@ export class SessionManager {
    * as is a missing row. This is wider than startup rehydration, which only takes
    * the recoverable handoffs. The claim and the claimed-row upsert share it.
    */
-  private isReissuablePersistedSession(
-    persisted: DeviceSession | undefined,
-    callerInFlight = false,
-  ): boolean {
+  private isReissuablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
       (!persisted.release_reason || isReissuableByNameReleaseReason(persisted.release_reason)) &&
       isRecoverableDeviceSession(persisted, this.sessionNow()) &&
-      (callerInFlight ||
+      (this.claimedRecoverableRows.has(persisted) ||
         this.isRowOwnedByLivePeer(persisted) ||
         !hasLapsedRestartRecoveryWindow(persisted, this.sessionNow())),
     );
@@ -4943,9 +4947,11 @@ export class SessionManager {
       if (this.pendingSessionAssignments.get(sessionId) === assignment) {
         this.pendingSessionAssignments.delete(sessionId);
         this.sharedSessionAssignments.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "assignment-end");
       }
     });
     this.pendingSessionAssignments.set(sessionId, assignment);
+    this.slotShadowProbe.check(sessionId, "assignment-start");
     return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs);
   }
 
@@ -5100,16 +5106,38 @@ export class SessionManager {
     throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError, options.access);
   }
 
-  private isLapsedUnownedRestartRecovery(
-    devicePool: SessionDeviceAssigner | undefined,
-    persisted: DeviceSession | undefined,
-  ): boolean {
+  private isLapsedUnownedRestartRecovery(persisted: DeviceSession | undefined): boolean {
     return Boolean(
-      devicePool &&
       persisted &&
       persistedSessionExpiryReason(persisted, this.sessionNow()) === "restart-recovery-timeout" &&
       !this.isRowOwnedByLivePeer(persisted),
     );
+  }
+
+  /** Recheck admission after a conditional expiry write, which may lose to renewed activity. */
+  private async admitPersistedSession(
+    sessionId: string,
+    persisted: DeviceSession | undefined,
+  ): Promise<DeviceSession | undefined> {
+    persisted = await this.terminalizeExpiredPersistedSession(persisted);
+    const terminalRelease = this.unlessBeingReplaced(
+      persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
+    );
+    if (terminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+      throw new TerminalSessionError(sessionId, terminalRelease);
+    }
+    if (!this.isReissuablePersistedSession(persisted)) {
+      throw this.unadmittedSessionError(
+        sessionId,
+        persisted,
+        new UnissuedSessionError(
+          `Session ${sessionId} is not an active daemon session (not found). ` +
+            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+        ),
+      );
+    }
+    return persisted;
   }
 
   private async createUnseenSession(
@@ -5141,31 +5169,14 @@ export class SessionManager {
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     // Every recovery must enter while its fixed window is open, including plan-label callers
     // that may mint never-issued IDs. Idle-first rows retain that path's ordinary re-issue rules.
-    const restartWindowLapsed = this.isLapsedUnownedRestartRecovery(devicePool, persisted);
+    const restartWindowLapsed = devicePool && this.isLapsedUnownedRestartRecovery(persisted);
     if (
       (requireIssuedSession || restartWindowLapsed) &&
       !this.isReissuablePersistedSession(persisted)
     ) {
       // Answered from the row as the expiry write left it (#11498): a row whose deadline was
       // extended under this call is still live or recoverable, and is admitted like any other.
-      persisted = await this.terminalizeExpiredPersistedSession(persisted);
-      const terminalRelease = this.unlessBeingReplaced(
-        persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
-      );
-      if (terminalRelease) {
-        this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
-        throw new TerminalSessionError(sessionId, terminalRelease);
-      }
-      if (!this.isReissuablePersistedSession(persisted)) {
-        throw this.unadmittedSessionError(
-          sessionId,
-          persisted,
-          new UnissuedSessionError(
-            `Session ${sessionId} is not an active daemon session (not found). ` +
-              "Acquire a device with getAndroid or getApple before using its sessionUuid.",
-          ),
-        );
-      }
+      persisted = await this.admitPersistedSession(sessionId, persisted);
     }
     // Need to create new session - assign device from pool
     if (!devicePool) {
@@ -5197,8 +5208,11 @@ export class SessionManager {
     initialOwnership: "owned" | "awaiting-owner",
     shared: SharedSessionAssignment,
   ): Promise<Session> {
+    if (this.isLapsedUnownedRestartRecovery(listed)) {
+      listed = await this.admitPersistedSession(sessionId, listed);
+    }
     const claim =
-      listed && this.isReissuablePersistedSession(listed, true)
+      listed && this.isReissuablePersistedSession(listed)
         ? await this.claimRecoverableRow(sessionId, listed)
         : undefined;
     try {
@@ -5314,7 +5328,10 @@ export class SessionManager {
     if (claimed) {
       return claimed;
     }
-    const current = await this.readPersistedSession(sessionId);
+    let current = await this.readPersistedSession(sessionId);
+    if (this.isLapsedUnownedRestartRecovery(current)) {
+      current = await this.admitPersistedSession(sessionId, current);
+    }
     const terminalRelease = this.unlessBeingReplaced(
       current && this.terminalReleaseFromPersisted(sessionId, current),
     );
@@ -5322,7 +5339,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
-    if (current && this.isReissuablePersistedSession(current, true)) {
+    if (current && this.isReissuablePersistedSession(current)) {
       const reclaimed = await this.tryClaimRecoverableRow(
         sessionId,
         current,
@@ -5939,6 +5956,7 @@ export class SessionManager {
     );
     const rebind = { session: existing, promise };
     this.pendingSessionRebinds.set(sessionId, rebind);
+    this.slotShadowProbe.check(sessionId, "rebind-start");
     try {
       return await promise;
     } catch (error) {
@@ -5949,6 +5967,7 @@ export class SessionManager {
     } finally {
       if (this.pendingSessionRebinds.get(sessionId) === rebind) {
         this.pendingSessionRebinds.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "rebind-end");
       }
     }
   }
@@ -6557,6 +6576,45 @@ export class SessionManager {
     );
   }
 
+  /** Read-only shadow adapter; its maps reflect subsequent lifecycle mutations. */
+  getLegacyLifecycleView(): LegacyLifecycleView<Session> {
+    return createLegacyLifecycleView(
+      {
+        sessions: this.sessions,
+        pendingAssignments: this.pendingSessionAssignments,
+        pendingCreations: this.pendingSessionCreations,
+        pendingReleases: this.pendingSessionReleases,
+        pendingRebinds: this.pendingSessionRebinds,
+        releaseOps: this.releasePromises,
+        terminalSnapshots: this.terminalReleaseSnapshots,
+        recoveredTerminalIntents: this.recoveredTerminalReleaseIntents,
+        latestFinalizedIdentities: this.latestFinalizedSessionIdentities,
+      },
+      this.releasingSessions,
+    );
+  }
+
+  private readonly slotShadowProbe = new SessionSlotShadowProbe(
+    () => this.getLegacyLifecycleView(),
+    {
+      isCurrentSession: (session) => this.isCurrentSession(session),
+      isAdmittedForAutomation: (session) => this.isAdmittedForAutomation(session),
+      isLatestSessionIdentity: (session) => this.isLatestSessionIdentity(session),
+      isSessionBeingRecreated: (uuid) => this.isSessionBeingRecreated(uuid),
+      isKnownSessionId: (uuid) => isLegacySessionIdKnown(this.getLegacyLifecycleView(), uuid),
+    },
+    logger,
+  );
+
+  setSlotShadowProbeMode(mode: SlotShadowProbeMode): void {
+    this.slotShadowProbe.mode = mode;
+  }
+
+  /** Explicit checks also cover retained older incarnations in agreement tests. */
+  checkSlotShadowAgreement(uuid: string, event: string, identities: readonly Session[] = []): void {
+    this.slotShadowProbe.check(uuid, event, identities);
+  }
+
   isCurrentSession(session: Session): boolean {
     return (
       this.sessions.get(session.sessionId) === session &&
@@ -6690,6 +6748,7 @@ export class SessionManager {
 
     const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
+    this.slotShadowProbe.check(sessionId, "release-start");
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
@@ -6728,6 +6787,7 @@ export class SessionManager {
       this.activeReleasePromises.delete(release);
       if (this.releasePromises.get(sessionId) === release) {
         this.releasePromises.delete(sessionId);
+        this.slotShadowProbe.check(sessionId, "release-end");
       }
     }
   }
@@ -13407,6 +13467,7 @@ export class SessionManager {
       this.deviceSessionMap.delete(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
+    this.slotShadowProbe.check(sessionId, "unpublished");
     this.endedLabelBases.delete(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
@@ -13613,8 +13674,8 @@ export class SessionManager {
     requestedPlatform: Platform | undefined,
     callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
-    // Admission already accepted this recovery; its own target wait decides at the window end.
-    if (!persisted || !this.isReissuablePersistedSession(persisted, true)) {
+    // A recovery claimed inside the window keeps its target; its own wait decides when to end.
+    if (!persisted || !this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
     const stableDeviceId = persistedStableDeviceId(persisted);

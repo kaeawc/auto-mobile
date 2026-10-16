@@ -43,6 +43,12 @@ export type TextDelivery =
   | { kind: "insert" | "replace" | "commit"; text: string }
   | { kind: "keyevent" | "inputText"; text: string };
 
+/** Expected PID wrapper; keep argv assertions explicit about both Android implementations. */
+export function trackedInputTextCommand(command: string, apiLevel: number | null = null): string {
+  const input = command.slice("shell ".length);
+  return `shell echo $$; exec ${apiLevel !== null && apiLevel >= 31 ? "cmd " : ""}${input}`;
+}
+
 /**
  * Split a device-shell command line into words the way `/system/bin/sh` does for the subset
  * adb commands use: single quotes, backslash escapes outside quotes, and unquoted whitespace.
@@ -98,6 +104,11 @@ export function decodeAndroidInputTextArgument(argument: string): string {
 
 /** The text a `shell input text ...` adb command types on the device, or undefined. */
 export function decodeInputTextCommand(command: string): string | undefined {
+  const prefix = "shell echo $$; exec ";
+  if (command.startsWith(prefix)) {
+    const input = command.slice(prefix.length);
+    command = `shell ${input.startsWith("cmd ") ? input.slice("cmd ".length) : input}`;
+  }
   if (!command.startsWith("shell input text ")) {
     return undefined;
   }
@@ -120,6 +131,10 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
         return async (args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) => {
           const result = await execute(args, options);
           const command = args.join(" ");
+          const inputText = decodeInputTextCommand(command);
+          if (inputText !== undefined) {
+            deliveries.push({ kind: "inputText", text: inputText });
+          }
           if (command === "shell ime list -a -s" && !result.stdout.trim()) {
             return { ...result, stdout: `${priorImeId}\n${commitImeId}\n` };
           }

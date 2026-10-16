@@ -1,3 +1,4 @@
+import { bindDevice, unbindDevice, holderOf, isBusy, isIdle } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { logger } from "../utils/logger";
@@ -177,7 +178,7 @@ export class DeviceReplacement {
         // cannot leave an idle device mapped to the stopped serial.
         const originalWasDetached =
           !this.port.isPooledEntryCurrent(expectedDevice) ||
-          (preservedSession !== undefined && expectedDevice.sessionId === null);
+          (preservedSession !== undefined && holderOf(expectedDevice) === null);
         if (originalWasDetached) {
           await this.port.rollbackSystemUiAnrRecoveryReplacement(
             replacementDevice,
@@ -213,7 +214,7 @@ export class DeviceReplacement {
    * give it up.
    */
   settleSystemUiAnrOriginalClaim(originalDeviceId: string): void {
-    if (!this.port.devices.get(originalDeviceId)?.sessionId) {
+    if (!holderOf(this.port.devices.get(originalDeviceId))) {
       this.port.releaseDeviceClaim(originalDeviceId);
     }
   }
@@ -228,8 +229,8 @@ export class DeviceReplacement {
     await this.port.assignmentMutex.runExclusive(() => {
       if (
         !this.port.isPooledEntryCurrent(replacementDevice) ||
-        replacementDevice.sessionId !== preservedSession.sessionId ||
-        replacementDevice.status !== "busy" ||
+        holderOf(replacementDevice) !== preservedSession.sessionId ||
+        !isBusy(replacementDevice) ||
         this.port.sessionManager.getSession(preservedSession.sessionId) !== preservedSession ||
         preservedSession.assignedDevice !== replacementDevice.id
       ) {
@@ -283,7 +284,7 @@ export class DeviceReplacement {
   }
 
   systemUiAnrRecoverySession(expectedDevice: PooledDevice): Session | undefined {
-    const sessionId = expectedDevice.sessionId;
+    const sessionId = holderOf(expectedDevice);
     const session = sessionId ? this.port.sessionManager.getSession(sessionId) : null;
     if (
       session === null ||
@@ -322,7 +323,7 @@ export class DeviceReplacement {
         `System UI recovery replacement '${replacement.id}' does not match Android AVD '${sourceImage.name}'.`,
       );
     }
-    if (replacement.status !== "idle" || replacement.sessionId !== null) {
+    if (!isIdle(replacement) || holderOf(replacement) !== null) {
       throw new ActionableError(
         `System UI recovery replacement '${replacement.id}' is already assigned to a session.`,
       );
@@ -372,8 +373,7 @@ export class DeviceReplacement {
   }
 
   releaseCapturedDeviceForShutdown(device: PooledDevice): void {
-    device.sessionId = null;
-    device.status = "idle";
+    unbindDevice(device);
     device.errorCount = 0;
     this.port.lastReleasedDeviceId = device.id;
     this.port.notifyDeviceStateChanged(device);
@@ -486,8 +486,7 @@ export class DeviceReplacement {
         `Replacement device '${replacementDevice.id}' disconnected while its recovery session was being rebound.`,
       );
     }
-    replacementDevice.sessionId = session.sessionId;
-    replacementDevice.status = "busy";
+    bindDevice(replacementDevice, session.sessionId);
     this.port.pooledSessionIdentities.set(replacementDevice, session);
     // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
     // reads as "unlocked" and would let any session drive the recovered device

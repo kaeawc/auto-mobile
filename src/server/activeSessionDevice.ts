@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { DaemonState } from "../daemon/daemonState";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { BootedDevice } from "../models";
@@ -46,7 +47,7 @@ export function resolveActiveSessionDevice(sessionUuid: string): ActiveSessionDe
   }
 
   const pooledDevice = daemonState.getDevicePool().getDevice(session.assignedDevice);
-  if (!pooledDevice || pooledDevice.sessionId !== sessionUuid) {
+  if (!pooledDevice || holderOf(pooledDevice) !== sessionUuid) {
     return undefined;
   }
 

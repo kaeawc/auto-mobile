@@ -11,6 +11,7 @@ import {
   ios,
   observer,
   smallCorpus as corpus,
+  trackedInputTextCommand,
 } from "./SendKeysTestHarness";
 
 function expectWellFormedInserts(inserted: string[]): void {
@@ -329,8 +330,8 @@ describe("sendKeys Unicode delivery", () => {
     ).toMatchObject({ success: true });
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell getprop ro.build.version.sdk",
-      "shell input text 'ello,%s'",
-      "shell input text 'orld%s42'",
+      trackedInputTextCommand("shell input text 'ello,%s'"),
+      trackedInputTextCommand("shell input text 'orld%s42'"),
     ]);
     expect(h.inserted).toEqual(["H", "W", "!"]);
     expectWellFormedInserts(h.inserted);
@@ -407,7 +408,7 @@ describe("sendKeys Unicode delivery", () => {
     ]);
     expect(h.inserted).toEqual(["😀", "日本"]);
     expectWellFormedInserts(h.inserted);
-    expect(commands.some((command) => command.startsWith("shell input text "))).toBe(false);
+    expect(commands.some((command) => command.includes("input text "))).toBe(false);
   });
 
   test("Android eventLast can split an ASCII base from its combining mark", async () => {
@@ -487,7 +488,8 @@ describe("Android eventAll caret and preceding input", () => {
     expectWellFormedInserts(h.inserted);
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
-      "shell input text 'b%sc'",
+      "shell getprop ro.build.version.sdk",
+      trackedInputTextCommand("shell input text 'b%sc'"),
     ]);
   });
 

@@ -38,16 +38,18 @@ describe("session config launch resolution", () => {
 
   test("rejects incompatible launch bindings before reading a file", () => {
     let reads = 0;
-    expect(() =>
-      resolveSessionConfig({
-        flagValue: "/session.json",
-        readFile: () => {
-          reads++;
-          return JSON.stringify(config);
-        },
-        hasManagedSlotConfig: true,
-      }),
-    ).toThrow("session_config_invalid");
+    for (const incompatible of [{ hasInitialSessionUuid: true }, { noProxy: true }]) {
+      expect(() =>
+        resolveSessionConfig({
+          flagValue: "/missing",
+          readFile: () => {
+            reads++;
+            return "";
+          },
+          ...incompatible,
+        }),
+      ).toThrow("session_config_invalid");
+    }
     expect(reads).toBe(0);
   });
 
@@ -82,7 +84,7 @@ function ownerRig() {
 }
 
 describe("session execution owner start identity", () => {
-  test("accepts an identity with its PID and enforces the managed-slot length limits", () => {
+  test("accepts an identity with its PID and enforces the binding length limits", () => {
     expect(
       parseSessionConfig({ ...config, executionOwnerStartIdentity: "T1" })
         .executionOwnerStartIdentity,

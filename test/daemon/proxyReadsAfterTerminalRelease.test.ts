@@ -1,11 +1,9 @@
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
-import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
-  DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -16,9 +14,6 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { managedEndedPayload } from "../../src/server/proxyServer";
-import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
-import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 
 // #11483 items 2 and 3 (stdio proxy contract): reads after a terminal release. Owner contract: reads are never
 // refused and never require a session (#10971, docs/using/device-ownership.md "Read and control").
@@ -69,8 +64,6 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     client = new FakeDaemonClient({
       daemonMethodResults: new Map<string, unknown>([
         ["resources/list", { resources: [{ uri: BOOTED_URI, name: "Booted devices" }] }],
-        ["daemon/capabilities", { capabilities: ["managed-slots/v1"] }],
-        ["daemon/acquireManagedSlots", readyManagedSlotsResult(ANDROID.sessionUuid)],
       ]),
       resourceResult: BOOTED,
       onCallTool: async (name) => {
@@ -128,97 +121,13 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     // Warm one-off proxy/schema initialization outside the per-test 15ms budget.
     setupHarness();
     try {
-      await releaseManagedBinding();
+      await proxy.callTool("getAndroid", {});
     } finally {
       await closeHarness();
     }
   });
   beforeEach(setupHarness);
   afterEach(closeHarness);
-
-  async function acquireManagedBinding(): Promise<void> {
-    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
-    const result = await proxy.acquireManagedSlots({
-      contractVersion: 1,
-      managedHostScope: "host",
-      runnerNamespace: "runner",
-      runnerIncarnation: "boot",
-      localSlotCapacity: 1,
-      requests: [
-        {
-          slotIndex: 1,
-          role: "primary",
-          platform: "android",
-          requestedSpec: { runtime: "system-images;android-35;google_apis;arm64-v8a" },
-        },
-      ],
-    });
-    expect(result.outcome).toBe("ready");
-  }
-
-  async function releaseManagedBinding(
-    surfaceRelease = true,
-    reason = "cleanup-expired",
-  ): Promise<void> {
-    await acquireManagedBinding();
-    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, ANDROID.sessionUuid, reason);
-    if (surfaceRelease) {
-      await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
-        DaemonBoundSessionExpiredError,
-      );
-    }
-    expect(proxy.getTerminalSessionRelease()).toEqual({
-      sessionUuid: ANDROID.sessionUuid,
-      reason,
-    });
-    const copy = proxy.getTerminalSessionRelease()!;
-    copy.reason = "changed by caller";
-    expect(proxy.getTerminalSessionRelease()?.reason).toBe(reason);
-  }
-
-  test.each(["tapOn", "observe"])(
-    "the first managed deviceId read succeeds and leaves %s reporting the end",
-    async (nextTool) => {
-      await releaseManagedBinding(false, "heartbeat-timeout");
-      const forwardedBefore = client.callToolCalls.length;
-      await expect(
-        proxy.callTool("observe", { deviceId: ANDROID.deviceId }),
-      ).resolves.toMatchObject({
-        content: [{ type: "text", text: "ok" }],
-      });
-      expect(client.callToolCalls.at(-1)?.params).toEqual(
-        withProxyOwnerToken({ deviceId: ANDROID.deviceId }, "fake-1"),
-      );
-      const answer = await proxy.callTool(nextTool, {}).catch((error: unknown) => error);
-      expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
-      const ended = answer as DaemonBoundSessionExpiredError;
-      expect(
-        managedEndedPayload(
-          readyManagedSlotsResult(ANDROID.sessionUuid),
-          ended.sessionUuid,
-          ended.reason,
-        ),
-      ).toMatchObject({
-        error: {
-          code: "managed_execution_ended",
-          sessionUuid: ANDROID.sessionUuid,
-          reason: "heartbeat-timeout",
-        },
-      });
-      expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
-    },
-  );
-
-  test("a first managed deviceId read does not mark release as surfaced for resources", async () => {
-    await releaseManagedBinding(false, "heartbeat-timeout");
-    await proxy.callTool("observe", { deviceId: ANDROID.deviceId });
-    await expect(proxy.readResource(BOOTED_URI)).rejects.toMatchObject({
-      sessionUuid: ANDROID.sessionUuid,
-      reason: "heartbeat-timeout",
-    });
-    expect(client.readResourceCalls).toEqual([]);
-    await expect(proxy.readResource(BOOTED_URI)).resolves.toEqual(BOOTED);
-  });
 
   test("a non-managed first deviceId read reports release and its second succeeds", async () => {
     await proxy.callTool("getAndroid", {});
@@ -235,118 +144,6 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
     expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
     expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
-  });
-
-  test("a managed control naming a deviceId still reports release", async () => {
-    await releaseManagedBinding(false, "heartbeat-timeout");
-    const forwardedBefore = client.callToolCalls.length;
-    await expect(proxy.callTool("tapOn", { deviceId: ANDROID.deviceId })).rejects.toMatchObject({
-      sessionUuid: ANDROID.sessionUuid,
-      reason: "heartbeat-timeout",
-    });
-    expect(client.callToolCalls.length).toBe(forwardedBefore);
-  });
-
-  test("a managed liveness handover wins over a first deviceId read", async () => {
-    await acquireManagedBinding();
-    const handovers: string[] = [];
-    proxy.onLivenessHandover((handover) => handovers.push(handover.code));
-    const call = client.callDaemonMethod.bind(client);
-    spies.push(
-      spyOn(client, "callDaemonMethod").mockImplementation((method, ...args) =>
-        method === "daemon/heartbeat" ? new Promise<never>(() => {}) : call(method, ...args),
-      ),
-    );
-    for (let elapsed = 0; elapsed < 40_000 && handovers.length === 0; elapsed += 250) {
-      await timer.advanceTimeAsync(250, () => drainUntilQuiescent(timer));
-    }
-    expect(handovers).toEqual(["daemon_stalled"]);
-    client.emitNotification(
-      SESSION_RELEASED_NOTIFICATION_METHOD,
-      ANDROID.sessionUuid,
-      "heartbeat-timeout",
-    );
-    expect(proxy.getTerminalSessionRelease()).toMatchObject({ sessionUuid: ANDROID.sessionUuid });
-    const forwardedBefore = client.callToolCalls.length;
-    const answer = await proxy
-      .callTool("observe", { deviceId: ANDROID.deviceId })
-      .catch((error: unknown) => error);
-    expect(answer).toBeInstanceOf(DaemonSessionStalledError);
-    expect(answer).toMatchObject({
-      handover: {
-        code: "proxy_stalled",
-        releaseReasons: {
-          [ANDROID.sessionUuid]: "heartbeat-timeout",
-        },
-      },
-    });
-    expect(client.callToolCalls.length).toBe(forwardedBefore);
-  });
-
-  test("a managed read without a deviceId stays fenced every time after release was reported", async () => {
-    await releaseManagedBinding();
-    const forwardedBefore = client.callToolCalls.length;
-    for (const args of [
-      {},
-      {},
-      { deviceId: "" },
-      { deviceId: " \t" },
-      { deviceId: 123 },
-      { device: "A" },
-    ]) {
-      const answer = await proxy.callTool("observe", args).catch((error: unknown) => error);
-      expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
-      expect(answer).toMatchObject({
-        sessionUuid: ANDROID.sessionUuid,
-        reason: "cleanup-expired",
-      });
-    }
-    expect(client.callToolCalls.length).toBe(forwardedBefore);
-  });
-
-  test("a managed read naming a deviceId remains sessionless after release", async () => {
-    await releaseManagedBinding();
-    const forwardedBefore = client.callToolCalls.length;
-    await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
-    expect(client.callToolCalls.at(-1)?.params).toEqual(
-      withProxyOwnerToken({ deviceId: ANDROID.deviceId }, "fake-1"),
-    );
-    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
-  });
-
-  test("clipboard get is sessionless after release, while set retains the control fence", async () => {
-    await releaseManagedBinding();
-    const forwardedBefore = client.callToolCalls.length;
-    await expect(
-      proxy.callTool("clipboard", { action: "get", deviceId: ANDROID.deviceId }),
-    ).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
-    expect(client.callToolCalls.at(-1)).toEqual({
-      toolName: "clipboard",
-      params: withProxyOwnerToken({ action: "get", deviceId: ANDROID.deviceId }, "fake-1"),
-    });
-    for (const [name, args] of [
-      ["clipboard", { action: "set", deviceId: ANDROID.deviceId, text: "hello" }],
-      ["tapOn", { deviceId: ANDROID.deviceId, text: "OK" }],
-    ] as const) {
-      await expect(proxy.callTool(name, args)).rejects.toMatchObject({
-        sessionUuid: ANDROID.sessionUuid,
-        reason: "cleanup-expired",
-      });
-      await expect(proxy.callTool(name, args)).rejects.toBeInstanceOf(
-        DaemonBoundSessionExpiredError,
-      );
-    }
-    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
-  });
-
-  test("older clipboard definitions without argument shapes retain the release fence", async () => {
-    omitReadArgShapes = true;
-    await releaseManagedBinding();
-    const forwardedBefore = client.callToolCalls.length;
-    await expect(
-      proxy.callTool("clipboard", { action: "get", deviceId: ANDROID.deviceId }),
-    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
-    expect(client.callToolCalls.length).toBe(forwardedBefore);
   });
 
   test("a non-managed result-minted read without a device remains sessionless after release", async () => {

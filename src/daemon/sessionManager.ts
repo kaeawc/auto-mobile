@@ -1,5 +1,11 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
 import {
+  SerializedSessionRowWriter,
+  TerminalReleaseGenerationRefusedError,
+  type SessionRowWriter,
+  type ReleaseRowRetry,
+} from "./sessionRowWriter";
+import {
   SessionSlots,
   deriveSlotTag,
   isSlotTagBeingRecreated,
@@ -15,7 +21,7 @@ import {
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
-import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -95,7 +101,7 @@ import {
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
   resolveManagedExecutionIdleTimeoutMs,
-} from "./managedExecutionLiveness";
+} from "./sessionBroker/provisioning/executionLiveness";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
@@ -582,7 +588,7 @@ export interface PreCliLivenessSnapshot {
  *   invocation connects, runs one tool and exits, so between calls nobody is
  *   heartbeating; the session is instead reaped only after a wall-clock idle
  *   period measured in minutes, and never for a missing first heartbeat.
- * - `managed-execution` (#11176): a session a managed slot execution holds through its stdio
+ * - `managed-execution` (#11176): a session a broker binding execution holds through its stdio
  *   proxy. Judged exactly like `heartbeat` (owner lease plus suspect grace, idle measured from the
  *   end of the last tool call, reads never count), but its idle window is the launcher-trusted
  *   override bounded to 2–60 minutes (default 2), and a one-shot `--cli` declaration never moves
@@ -696,8 +702,8 @@ export interface SessionReleaseSnapshot {
   /** PID of the other daemon that claimed the device, when the terminal reason names one (#11098). */
   ownerPid?: number;
   /**
-   * Set to `managed-execution` when a managed slot execution's session is released on a live path
-   * (commit or forced stuck release), so release listeners can keep its slot assignment while
+   * Set to `managed-execution` when a broker binding execution's session is released on a live path
+   * (commit or forced stuck release), so release listeners can keep its binding assignment while
    * clearing the execution owner (#11177). Absent for every other policy.
    */
   livenessPolicy?: typeof MANAGED_EXECUTION_LIVENESS_POLICY;
@@ -968,18 +974,6 @@ interface ReleaseReasonState {
   terminalPersisted?: boolean;
 }
 
-/**
- * A release row whose write failed, waiting to be retried: a terminal one (#10959), or a
- * non-terminal one whose session is already gone (#11557).
- */
-interface TerminalReleaseRetry {
-  snapshot: SessionReleaseSnapshot;
-  attempt: number;
-  handle?: NodeJS.Timeout;
-  /** Already retried during shutdown's drain; a further failure is not retried again (#11058). */
-  shutdownAttempted?: boolean;
-}
-
 /** A live row's rewrite over its superseded release's terminal row that failed (#11557). */
 interface OwedSupersededRowReassert {
   /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
@@ -1092,7 +1086,7 @@ export interface SessionDeviceAssigner {
   /**
    * Hold each row's device for that row while restart recovery works through the rows (#11294).
    * The assigner must exempt a row's own recovery from its reservation, and may decline a device
-   * (one a managed slot holds). Optional: an assigner without it recovers rows unreserved.
+   * (one a broker binding holds). Optional: an assigner without it recovers rows unreserved.
    */
   reserveDevicesForRehydration?(rows: readonly RehydrationDeviceReservation[]): Promise<void>;
   /** Give up the reservation made for `sessionId`; a no-op when there is none. */
@@ -1483,7 +1477,6 @@ export const DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF: BackoffPolicy = exponentia
   initialDelayMs: 250,
   maxDelayMs: 5_000,
 });
-const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 /** Persisted rows recovered at once during startup rehydration (#11114). */
 export const SESSION_REHYDRATION_CONCURRENCY = 4;
@@ -1661,19 +1654,12 @@ export class SessionManager {
   private readonly deviceOwnershipCallbacks = new Set<
     (deviceId: string, frameInvalidation: "generation-only" | "full") => void
   >();
-  /** Release writes that outlived their deadline but may still land (#10836). */
-  private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
-  /**
-   * Release rows a write failed to persist, awaiting a retry: terminal ones (#10959), and the
-   * non-terminal ones of {@link pendingNonTerminalReleaseSnapshots} (#11557).
-   */
-  private readonly pendingTerminalReleaseRetries: Map<string, TerminalReleaseRetry> = new Map();
   /**
    * Set once shutdown starts draining releases (#11058): a terminal write that fails from then on
    * is retried at once and tracked by the drain, since a backoff timer would outlive the database.
    */
   private releaseDrainStarted = false;
-  private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
+  private rowWriter: SessionRowWriter;
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
   private readonly volatileTerminalReleaseIntents = new Map<string, string>();
@@ -1771,7 +1757,7 @@ export class SessionManager {
    * see {@link runNetworkConditionMutationExclusive}.
    */
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
-  private readonly sessionSlots = /* rowPending stubbed until W2 (#11799) */ new SessionSlots<
+  private readonly sessionSlots = new SessionSlots<
     Promise<Session>,
     SharedSessionAssignment,
     PendingSessionCreation,
@@ -1786,7 +1772,10 @@ export class SessionManager {
     ReleaseReasonState,
     TerminalReleaseReservation,
     TerminalReleaseIntent
-  >({ onFinalizedIdentityCollected: (uuid) => this.slotShadowProbe.transitionGuard.forget(uuid) });
+  >({
+    rowPending: { pending: (uuid) => this.rowWriter.pending(uuid) },
+    onFinalizedIdentityCollected: (uuid) => this.slotShadowProbe.transitionGuard.forget(uuid),
+  });
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
   /**
@@ -1828,8 +1817,6 @@ export class SessionManager {
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
-  private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
-    new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (
@@ -1881,7 +1868,7 @@ export class SessionManager {
 
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
-    this.terminalReleaseRetryBackoff = backoff;
+    this.rowWriter.setRetryBackoff(backoff);
   }
 
   /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
@@ -1976,7 +1963,7 @@ export class SessionManager {
       this.sessionSlots.deleteRecoveredTerminalIntent(intent.sessionId);
       this.slotShadowProbe.check(intent.sessionId, "recovered-terminal-intent-deleted");
       this.sessionSlots.deleteAdoptedTerminalOwner(intent.sessionId);
-      this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
+      this.liftTerminalFence(intent.sessionId, { releaseReason: intent.reason }, true);
     }
     if (applied.length > 0) {
       logger.warn(
@@ -2727,14 +2714,9 @@ export class SessionManager {
       undefined,
       timer,
     ),
-    // Resolve the shared barrier per write, not once at construction, so a
-    // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
-    // seen instead of a pinned drained instance (issue #2912). Because the barrier
-    // is resolved per-write here, a same-process daemon restart (tests only) that
-    // re-creates writer singletons needs no reconstruction of this SessionManager:
-    // closeDatabase() -> resetDbWriteBarrier() cold-starts the barrier and the next
-    // track() call picks it up. There is currently no in-process reopen path in
-    // production; revisit this note if one is added (issue #3154, follow-up to #2885).
+    // Resolve per write: closeDatabase() -> resetDbWriteBarrier() makes the next track()
+    // use a fresh barrier, not a pinned drained instance (#2912, #3154, #2885).
+    // Same-process reopen is tests-only; revisit if production adds that path.
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     // Seam for keep-awake restore (issue #2973): defaults to the real manager;
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
@@ -2755,11 +2737,8 @@ export class SessionManager {
       },
     }),
     // Device-wide network conditioning is session-scoped state (issue #6012).
-    // Keep this seam parallel to biometric/keep-awake so lifecycle tests never
-    // invoke adb. The factories object also injects clock restoration while
-    // preserving the existing positional network-restorer contract.
-    // The default restores normal connectivity via the emulator
-    // console; a released session must never leave a device impaired.
+    // Factories inject restoration without adb in tests, preserving the positional contract.
+    // The default restores normal connectivity via the emulator console.
     networkConditionRestorerFactory:
       | ((device: BootedDevice) => NetworkConditionRestorer)
       | DeviceStateRestorerFactories = (device) => ({
@@ -2781,6 +2760,14 @@ export class SessionManager {
     this.deviceSessionRepository = onSessionClock(deviceSessionRepository, {
       toWall: (sessionClockMs) => this.sessionClockToWall(sessionClockMs),
       toSessionClock: (wallMs) => this.wallToSessionClock(wallMs),
+    });
+    this.rowWriter = SerializedSessionRowWriter.create({
+      persistence: this.deviceSessionRepository,
+      timer,
+      backoff: DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF,
+      logger,
+      timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      timeoutError: SessionReleasePersistTimeoutError,
     });
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
@@ -2845,20 +2832,18 @@ export class SessionManager {
     this.startCleanupTimer();
   }
 
+  /** Inject before creating sessions or scheduling release writes. */
+  setRowWriter(writer: SessionRowWriter): void {
+    this.rowWriter = writer;
+  }
+
   private recoveryExpiryReleaseHandler?: RecoveryExpiryReleaseHandler;
 
   setRecoveryExpiryReleaseHandler(handler: RecoveryExpiryReleaseHandler): void {
     this.recoveryExpiryReleaseHandler = handler;
   }
 
-  /**
-   * The `Timer` this manager was constructed with (issue #7541). Lets
-   * call sites that already receive a `SessionManager` — e.g.
-   * `ToolExecutionContext`'s device-readiness setup — reuse the same
-   * injected `Timer` (a `FakeTimer` in tests) instead of hard-wiring
-   * `defaultTimer`, so retry/backoff delays on that path stay fake-clock
-   * testable rather than sleeping in real time.
-   */
+  /** Reuse the injected Timer for fake-clock readiness, retry and backoff waits (#7541). */
   getTimer(): Timer {
     return this.timer;
   }
@@ -3368,11 +3353,12 @@ export class SessionManager {
         ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
       },
     };
+    this.releaseRowSessions.set(snapshot, new WeakRef(session));
+    this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
     if (snapshot.terminal) {
       this.sessionSlots.setTerminalSnapshot(sessionId, snapshot);
     } else {
       // Applies only to the incarnation it released, like any non-terminal release (#11129).
-      this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
       this.sessionSlots.setForcedNonTerminal(session, snapshot);
     }
     return snapshot;
@@ -3812,7 +3798,7 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, terminalRelease);
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
-    this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
+    this.rowWriter.deletePendingNonTerminalRelease(session.sessionId);
     // A client that registered as an observer before acquiring a device keeps its name (#10671).
     const observerClientName = this.observerSessions
       ?.list?.()
@@ -3825,6 +3811,7 @@ export class SessionManager {
       this.runningPlanLabelSessions.add(session.sessionId);
     }
     this.sessions.set(session.sessionId, session);
+    this.rowWriter.noteLive(session.sessionId);
     this.slotShadowProbe.check(session.sessionId, "published");
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
@@ -4001,7 +3988,7 @@ export class SessionManager {
         reason: fence.releaseReason,
         at: this.sessionClockToWall(fence.releasedAtMs),
       });
-      this.terminalReleaseJournal.resolve(fence.sessionId, fence.releaseReason);
+      this.liftTerminalFence(fence.sessionId, fence, true);
       return;
     }
     const claimedReleaseReason = claimedRow?.releaseReason;
@@ -5702,7 +5689,7 @@ export class SessionManager {
 
   /**
    * Notified with a session that finished rehydrating after the startup deadline (late row or
-   * follow-up), so the daemon re-owns its managed slot like the startup batch (#11288).
+   * follow-up), so the daemon re-owns its broker binding like the startup batch (#11288).
    */
   setLateRehydrationListener(listener: (rehydrated: readonly string[]) => Promise<void>): void {
     this.lateRehydrationListener = listener;
@@ -6096,14 +6083,14 @@ export class SessionManager {
     }
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
-    // Recreate the replacement after awaited work: activity and label-routing
-    // updates remain live while persistence is in flight, and publishing the
-    // pre-persistence snapshot would overwrite them.
+    // Recreate after awaited work to preserve activity and label-routing updates made in flight.
     Object.assign(
       existing,
       this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
     );
-    this.sessionDeviceMap.set(existing.sessionId, assignedDevice);
+    const sessionId = existing.sessionId;
+    this.rowWriter.noteLive(sessionId);
+    this.sessionDeviceMap.set(sessionId, assignedDevice);
     if (this.deviceSessionMap.get(previousDevice) === existing.sessionId) {
       this.deviceSessionMap.delete(previousDevice);
     }
@@ -6542,7 +6529,7 @@ export class SessionManager {
   }
 
   /**
-   * Whether this daemon holds `sessionId` as a live managed slot execution (#11275): present, on
+   * Whether this daemon holds `sessionId` as a live broker binding execution (#11275): present, on
    * the `managed-execution` policy and not being released. The stored idle deadline does not
    * decide managed liveness; a lapsed owner lease stays live until the heartbeat path actually
    * releases the session. A rehydrated session waiting for its proxy counts until released too.
@@ -6922,7 +6909,7 @@ export class SessionManager {
       await this.persistSessionRelease(terminalSnapshot);
       return terminalSnapshot.deviceId;
     }
-    const pendingSnapshot = this.pendingNonTerminalReleaseSnapshots.get(sessionId);
+    const pendingSnapshot = this.rowWriter.pendingNonTerminalReleases().get(sessionId);
     if (pendingSnapshot) {
       return (await this.persistSessionRelease(pendingSnapshot, true))
         ? pendingSnapshot.deviceId
@@ -7163,9 +7150,10 @@ export class SessionManager {
     additionalReleases: ReadonlyArray<Promise<unknown>> = [],
   ): Promise<boolean> {
     this.releaseDrainStarted = true;
+    this.rowWriter.beginReleaseDrain();
     const releases = [
       ...Array.from(this.sessionSlots.activeReleases, (release) => release.promise),
-      ...this.lateReleaseWrites,
+      ...this.rowWriter.pendingDrainWrites(),
       // Shutdown does not wait out a retry's backoff: write every unconfirmed terminal row now,
       // before the database closes (#10959).
       ...this.retryPendingTerminalReleasesNow(),
@@ -7192,7 +7180,7 @@ export class SessionManager {
         throw error;
       }
     } finally {
-      this.pendingNonTerminalReleaseSnapshots.clear();
+      this.rowWriter.clearPendingNonTerminalReleases();
       this.supersededRowsUnderPendingRelease.clear();
     }
   }
@@ -7206,7 +7194,9 @@ export class SessionManager {
     while (pending.length > 0) {
       const settled = new Set(pending);
       await Promise.allSettled(pending);
-      pending = Array.from(this.lateReleaseWrites).filter((write) => !settled.has(write));
+      pending = Array.from(this.rowWriter.pendingDrainWrites()).filter(
+        (write) => !settled.has(write),
+      );
     }
     return true;
   }
@@ -7352,7 +7342,7 @@ export class SessionManager {
       }
       this.commitReplacedDeviceTeardown(sessionId, session, options, operation);
       if (!releaseSnapshot.terminal) {
-        this.sessionSlots.deleteTerminalSnapshot(sessionId);
+        this.liftTerminalFenceIfPresent(sessionId);
         this.sessionSlots.deleteTerminalReasonState(sessionId);
         // The removal dropped the rewrite owed over a superseded release's terminal row, and
         // this release's own write does not replace a terminal row.
@@ -7855,10 +7845,7 @@ export class SessionManager {
     liftTerminalFence: boolean = false,
   ): null {
     if (liftTerminalFence) {
-      this.sessionSlots.deleteTerminalSnapshot(sessionId);
-      // The session lives on; a restart must not terminalize it from this release's intent.
-      this.volatileTerminalReleaseIntents.delete(sessionId);
-      this.terminalReleaseJournal.resolve(sessionId);
+      this.liftTerminalFence(sessionId);
     }
     if (pendingCleanup.length > 0) {
       this.trackPendingTeardownCleanup(deviceId, pendingCleanup);
@@ -8819,8 +8806,8 @@ export class SessionManager {
     reason.finalizedSnapshot = upgradedSnapshot;
     this.recordFinalizedSessionRelease(session, reason);
     // The first reason's row, if its write failed, is no longer the one to retry (#11557).
-    if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
-      this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+    if (this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot) {
+      this.rowWriter.deletePendingNonTerminalRelease(snapshot.sessionId);
     }
     this.dropReleaseRetry(snapshot);
     if (upgradedSnapshot.terminal) {
@@ -8919,12 +8906,11 @@ export class SessionManager {
     retryPending: boolean = false,
     statementConditions?: MarkReleasedOptions,
   ): Promise<boolean> {
-    // A resumed UUID can be in flight before it publishes. Check immediately
-    // before issuing a retry so it cannot release the newly active row. The release stays
-    // pending: publishing ends it, and a resume that fails leaves the row to its retry (#11557).
+    // A retry yields to a reissue until publish ends it or failed creation leaves it owed (#11557).
     if (retryPending && this.isSessionBeingRecreated(snapshot.sessionId)) {
       return false;
     }
+    this.rowWriter.noteRelease(snapshot);
     try {
       if (snapshot.terminal) {
         // Record before issuing the row write; volatile intents cannot protect a crash at timeout.
@@ -8941,45 +8927,8 @@ export class SessionManager {
         }
       }
       const precondition = { ...this.releaseWritePrecondition(snapshot), ...statementConditions };
-      const issueWrite = (options: MarkReleasedOptions) =>
-        this.deviceSessionRepository.markReleased(
-          snapshot.sessionId,
-          releasedRowStatus(snapshot.releaseReason),
-          snapshot.releasedAtMs,
-          snapshot.releaseReason,
-          options,
-        );
-      const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
-      let refusedWrite: Promise<void> | undefined;
-      const fallback = (error: unknown) => {
-        if (!(error instanceof DeviceSessionRowNotReleasableError)) {
-          throw error;
-        }
-        if (snapshot.terminal) {
-          return (refusedWrite ??= this.resolveTerminalReleaseWrite(
-            snapshot,
-            precondition,
-            issueWrite,
-            error,
-          ));
-        }
-        if (guard.ownDaemonSessionId === undefined) {
-          throw error;
-        }
-        // A deadline and the first refusal can settle in the same turn; resume only once.
-        return (refusedWrite ??= this.retryRefusedRowWrite(
-          error,
-          snapshot.sessionId,
-          {
-            ...guard,
-            supersededReasons: guard.supersededReasons ?? [],
-            expectedRowGeneration: precondition.expectedRowGeneration,
-          },
-          (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
-          snapshot.releaseReason,
-          { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
-        ));
-      };
+      const issueWrite = (options: MarkReleasedOptions) => this.issueReleaseRow(snapshot, options);
+      const fallback = this.releaseRowFallback(snapshot, precondition, issueWrite);
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();
       const startedAtMs = deadlineNow();
       let deadlineExpired = false;
@@ -9026,6 +8975,64 @@ export class SessionManager {
     } catch (error) {
       return this.handleReleaseWriteFailure(error, snapshot, retryPending);
     }
+  }
+
+  private releaseRowFallback(
+    snapshot: SessionReleaseSnapshot,
+    precondition: MarkReleasedOptions,
+    issueWrite: (options: MarkReleasedOptions) => Promise<void>,
+  ): (error: unknown) => Promise<void> {
+    const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
+    let refusedWrite: Promise<void> | undefined;
+    return (error: unknown) => {
+      if (
+        !(error instanceof DeviceSessionRowNotReleasableError) ||
+        error instanceof TerminalReleaseGenerationRefusedError
+      ) {
+        throw error;
+      }
+      if (snapshot.terminal) {
+        return (refusedWrite ??= this.resolveTerminalReleaseWrite(
+          snapshot,
+          precondition,
+          issueWrite,
+          error,
+        ));
+      }
+      if (guard.ownDaemonSessionId === undefined) {
+        throw error;
+      }
+      // A deadline and the first refusal can settle in the same turn; resume only once.
+      return (refusedWrite ??= this.retryRefusedRowWrite(
+        error,
+        snapshot.sessionId,
+        {
+          ...guard,
+          supersededReasons: guard.supersededReasons ?? [],
+          expectedRowGeneration: precondition.expectedRowGeneration,
+        },
+        (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
+        snapshot.releaseReason,
+        { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
+      ));
+    };
+  }
+
+  private issueReleaseRow(snapshot: SessionReleaseSnapshot, options: MarkReleasedOptions) {
+    // A forced-out rebind can noteLive without lifting this snapshot's terminal fence.
+    if (
+      this.sessionSlots.getTerminalSnapshot(snapshot.sessionId) !== snapshot &&
+      !this.rowWriter.canIssueRelease(snapshot)
+    ) {
+      return Promise.reject(new TerminalReleaseGenerationRefusedError(snapshot.sessionId));
+    }
+    return this.deviceSessionRepository.markReleased(
+      snapshot.sessionId,
+      releasedRowStatus(snapshot.releaseReason),
+      snapshot.releasedAtMs,
+      snapshot.releaseReason,
+      options,
+    );
   }
 
   private handleReleaseWriteFailure(
@@ -9105,18 +9112,47 @@ export class SessionManager {
     this.trackReleaseDrainWrite(settled);
   }
 
+  private liftTerminalFenceIfPresent(uuid: string): void {
+    if (this.sessionSlots.hasTerminalSnapshot(uuid)) {
+      this.liftTerminalFence(uuid);
+    }
+  }
+
+  /** Lift/resolve in one synchronous turn. Confirm/refusal retains the terminal admission fence. */
+  private liftTerminalFence(
+    uuid: string,
+    resolved?: Pick<SessionReleaseSnapshot, "releaseReason">,
+    retainFence = false,
+    afterDelete?: () => void,
+  ): void {
+    if (!retainFence) {
+      const deleted = this.sessionSlots.deleteTerminalSnapshot(uuid);
+      if (afterDelete && !deleted) {
+        return;
+      }
+      afterDelete?.();
+    }
+    if (!resolved || this.volatileTerminalReleaseIntents.get(uuid) === resolved.releaseReason) {
+      this.volatileTerminalReleaseIntents.delete(uuid);
+    }
+    this.terminalReleaseJournal.resolve(uuid, resolved?.releaseReason);
+    // Match only the resolved desire; a late completion must leave a successor's intent alone.
+    if (resolved && "sessionId" in resolved) {
+      this.rowWriter.cancel(uuid, resolved as SessionReleaseSnapshot);
+    } else if (!retainFence) {
+      this.rowWriter.liftTerminal(uuid);
+    }
+  }
+
   /**
    * A release row landed. A terminal one's journal intent is no longer needed (#10959); a
    * non-terminal one is no longer pending, which also ends its retry (#11557).
    */
   private confirmReleaseWrite(snapshot: SessionReleaseSnapshot): void {
     if (snapshot.terminal) {
-      if (this.volatileTerminalReleaseIntents.get(snapshot.sessionId) === snapshot.releaseReason) {
-        this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
-      }
-      this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
-    } else if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
-      this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+      this.liftTerminalFence(snapshot.sessionId, snapshot, true);
+    } else if (this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot) {
+      this.rowWriter.deletePendingNonTerminalRelease(snapshot.sessionId);
     }
     this.forgetSupersededRowUnder(snapshot);
     this.restartReleasePersistence.get(snapshot)?.resolve();
@@ -9130,19 +9166,10 @@ export class SessionManager {
 
   /** The retry of `snapshot` no longer matters: forget it, and a terminal row's journal intent. */
   private dropReleaseRetry(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
-    if (pending?.snapshot === snapshot) {
-      if (pending.handle !== undefined) {
-        this.timer.clearTimeout(pending.handle);
-      }
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
-    }
+    this.rowWriter.cancelRetry(snapshot);
     this.forgetSupersededRowUnder(snapshot);
     if (snapshot.terminal) {
-      if (this.volatileTerminalReleaseIntents.get(snapshot.sessionId) === snapshot.releaseReason) {
-        this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
-      }
-      this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
+      this.liftTerminalFence(snapshot.sessionId, snapshot, true);
     }
   }
 
@@ -9152,66 +9179,15 @@ export class SessionManager {
    * replaces a non-terminal one's for the same UUID, never the reverse.
    */
   private scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
-    if (!snapshot.terminal && pending?.snapshot.terminal) {
-      return;
-    }
-    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
-      this.dropReleaseRetry(snapshot);
-      return;
-    }
-    const attempt = (pending?.snapshot === snapshot ? pending.attempt : 0) + 1;
-    if (pending?.handle !== undefined) {
-      this.timer.clearTimeout(pending.handle);
-    }
-    if (this.releaseDrainStarted) {
-      this.retryTerminalReleaseDuringDrain(snapshot, attempt, pending);
-      return;
-    }
-    const entry: TerminalReleaseRetry = { snapshot, attempt };
-    entry.handle = this.timer.setTimeout(() => {
-      entry.handle = undefined;
-      void this.retryTerminalReleaseWrite(entry);
-    }, this.terminalReleaseRetryBackoff.delayForAttempt(attempt));
-    (entry.handle as { unref?: () => void }).unref?.();
-    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
-    logger.warn(
-      `[SessionManager] The ${snapshot.releaseReason} release of session ${snapshot.sessionId} ` +
-        `is not persisted; retrying the write (attempt ${attempt})`,
-    );
+    this.rowWriter.scheduleRetry(snapshot, {
+      isStillOwed: () => this.isTerminalReleaseRetryCurrent(snapshot),
+      drop: () => this.dropReleaseRetry(snapshot),
+      run: (entry) => this.retryTerminalReleaseWrite(entry),
+    });
   }
 
-  /**
-   * Shutdown is draining (#11058): retry the write now and let the drain await it. One attempt per
-   * snapshot during the drain, so a database that keeps failing cannot spin the drain.
-   */
-  private retryTerminalReleaseDuringDrain(
-    snapshot: SessionReleaseSnapshot,
-    attempt: number,
-    pending: TerminalReleaseRetry | undefined,
-  ): void {
-    if (pending?.snapshot === snapshot && pending.shutdownAttempted) {
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
-      logger.warn(
-        `[SessionManager] The ${snapshot.releaseReason} release of session ` +
-          `${snapshot.sessionId} is still not persisted at shutdown` +
-          (snapshot.terminal ? "; the session stays fenced only until this process exits" : ""),
-      );
-      return;
-    }
-    const entry: TerminalReleaseRetry = { snapshot, attempt, shutdownAttempted: true };
-    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
-    logger.warn(
-      `[SessionManager] The ${snapshot.releaseReason} release of session ${snapshot.sessionId} ` +
-        `is not persisted; retrying the write before shutdown (attempt ${attempt})`,
-    );
-    this.trackReleaseDrainWrite(this.retryTerminalReleaseWrite(entry));
-  }
-
-  /** Track a release write the shutdown drain must await before the database closes. */
   private trackReleaseDrainWrite(write: Promise<void>): void {
-    this.lateReleaseWrites.add(write);
-    void write.then(() => this.lateReleaseWrites.delete(write));
+    this.rowWriter.trackDrainWrite(write);
   }
 
   /**
@@ -9223,7 +9199,7 @@ export class SessionManager {
    */
   private isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean {
     if (!snapshot.terminal) {
-      return this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot;
+      return this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot;
     }
     const fence = this.sessionSlots.getTerminalSnapshot(snapshot.sessionId);
     return (
@@ -9233,7 +9209,7 @@ export class SessionManager {
     );
   }
 
-  private async retryTerminalReleaseWrite(entry: TerminalReleaseRetry): Promise<void> {
+  private async retryTerminalReleaseWrite(entry: ReleaseRowRetry): Promise<void> {
     const { snapshot } = entry;
     if (!(await this.isReleaseRetryDue(entry))) {
       return;
@@ -9243,45 +9219,8 @@ export class SessionManager {
       if (!precondition) {
         return;
       }
-      const issueWrite = (options: MarkReleasedOptions) =>
-        this.deviceSessionRepository.markReleased(
-          snapshot.sessionId,
-          releasedRowStatus(snapshot.releaseReason),
-          snapshot.releasedAtMs,
-          snapshot.releaseReason,
-          options,
-        );
-      const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
-      let refusedWrite: Promise<void> | undefined;
-      const fallback = (error: unknown) => {
-        if (!(error instanceof DeviceSessionRowNotReleasableError)) {
-          throw error;
-        }
-        if (snapshot.terminal) {
-          return (refusedWrite ??= this.resolveTerminalReleaseWrite(
-            snapshot,
-            precondition,
-            issueWrite,
-            error,
-          ));
-        }
-        if (guard.ownDaemonSessionId === undefined) {
-          throw error;
-        }
-        // A deadline and the first refusal can settle in the same turn; resume only once.
-        return (refusedWrite ??= this.retryRefusedRowWrite(
-          error,
-          snapshot.sessionId,
-          {
-            ...guard,
-            supersededReasons: guard.supersededReasons ?? [],
-            expectedRowGeneration: precondition.expectedRowGeneration,
-          },
-          (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
-          snapshot.releaseReason,
-          { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
-        ));
-      };
+      const issueWrite = (options: MarkReleasedOptions) => this.issueReleaseRow(snapshot, options);
+      const fallback = this.releaseRowFallback(snapshot, precondition, issueWrite);
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();
       const startedAtMs = deadlineNow();
       let deadlineExpired = false;
@@ -9346,7 +9285,7 @@ export class SessionManager {
         `[SessionManager] Retrying the ${snapshot.releaseReason} release write of session ` +
           `${snapshot.sessionId} failed: ${errorMessage(error)}`,
       );
-      if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+      if (entry.isCurrent()) {
         this.scheduleTerminalReleaseRetry(snapshot);
       }
       return;
@@ -9356,8 +9295,8 @@ export class SessionManager {
       return;
     }
     this.confirmReleaseWrite(snapshot);
-    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+    if (entry.isCurrent()) {
+      this.rowWriter.cancelRetry(snapshot);
     }
   }
 
@@ -9367,9 +9306,9 @@ export class SessionManager {
    * flight, so the generation it named is gone and the row still reads as a restart would
    * rehydrate it. A read that fails leaves the write counted as landed, as before the read.
    */
-  private async wasRetriedReleaseWriteSkipped(entry: TerminalReleaseRetry): Promise<boolean> {
+  private async wasRetriedReleaseWriteSkipped(entry: ReleaseRowRetry): Promise<boolean> {
     const { snapshot } = entry;
-    if (snapshot.terminal || this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+    if (snapshot.terminal || !entry.isCurrent()) {
       return false;
     }
     try {
@@ -9377,7 +9316,7 @@ export class SessionManager {
       return (
         row !== undefined &&
         row.release_reason !== snapshot.releaseReason &&
-        this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry &&
+        entry.isCurrent() &&
         this.isRecoverablePersistedSession(row) &&
         !this.isRowOwnedByLivePeer(row) &&
         !this.isSessionBeingRecreated(snapshot.sessionId)
@@ -9393,9 +9332,9 @@ export class SessionManager {
   }
 
   /** The entry is still the UUID's retry and still matters; forgotten when it no longer does. */
-  private isReleaseRetryStillOwed(entry: TerminalReleaseRetry): boolean {
+  private isReleaseRetryStillOwed(entry: ReleaseRowRetry): boolean {
     const { snapshot } = entry;
-    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+    if (!entry.isCurrent()) {
       return false;
     }
     if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
@@ -9411,7 +9350,7 @@ export class SessionManager {
    * pending; if it fails, the row is still this release's to write, so the retry is armed again
    * (or, in shutdown's drain, which arms none, waits for the issue to end).
    */
-  private async isReleaseRetryDue(entry: TerminalReleaseRetry): Promise<boolean> {
+  private async isReleaseRetryDue(entry: ReleaseRowRetry): Promise<boolean> {
     const { snapshot } = entry;
     if (!this.isReleaseRetryStillOwed(entry)) {
       return false;
@@ -9434,7 +9373,7 @@ export class SessionManager {
    * rejects when a write or a read fails.
    */
   private async prepareRetriedReleaseWrite(
-    entry: TerminalReleaseRetry,
+    entry: ReleaseRowRetry,
   ): Promise<MarkReleasedOptions | undefined> {
     const { snapshot } = entry;
     const superseded = this.supersededRowsUnderPendingRelease.get(snapshot.sessionId);
@@ -9449,9 +9388,7 @@ export class SessionManager {
     }
     // Every release preserves peer/terminal rows and names its captured generation, when known.
     const precondition = await this.retriedReleaseWritePrecondition(snapshot);
-    return this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry
-      ? precondition
-      : undefined;
+    return entry.isCurrent() ? precondition : undefined;
   }
 
   /**
@@ -9484,14 +9421,7 @@ export class SessionManager {
 
   /** Issue every pending terminal retry now, skipping its backoff, and return the writes. */
   private retryPendingTerminalReleasesNow(): Promise<void>[] {
-    return Array.from(this.pendingTerminalReleaseRetries.values(), (entry) => {
-      if (entry.handle !== undefined) {
-        this.timer.clearTimeout(entry.handle);
-        entry.handle = undefined;
-      }
-      entry.shutdownAttempted = true;
-      return this.retryTerminalReleaseWrite(entry);
-    });
+    return this.rowWriter.retryPendingNow();
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {
@@ -9509,17 +9439,7 @@ export class SessionManager {
   }
 
   private recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingNonTerminalReleaseSnapshots;
-    if (
-      !pending.has(snapshot.sessionId) &&
-      pending.size >= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS
-    ) {
-      const oldestSessionId = pending.keys().next().value;
-      if (oldestSessionId !== undefined) {
-        pending.delete(oldestSessionId);
-      }
-    }
-    pending.set(snapshot.sessionId, snapshot);
+    this.rowWriter.recordPendingNonTerminalRelease(snapshot);
   }
 
   private async persistTerminalReleaseIfNeeded(snapshot: SessionReleaseSnapshot): Promise<void> {
@@ -11269,7 +11189,7 @@ export class SessionManager {
     if (this.currentNetworkConditionGeneration(session.sessionId) !== expectedGeneration) {
       logger.debug(
         `Network condition TTL expiry for session ${session.sessionId} settled after a newer ` +
-          `condition superseded it; leaving that condition's restore slot in place`,
+          `condition superseded it; leaving that condition's restore binding in place`,
       );
       return;
     }
@@ -11839,12 +11759,10 @@ export class SessionManager {
       return;
     }
     this.endedLabelBases.delete(sessionId);
-    if (this.sessionSlots.deleteTerminalSnapshot(sessionId)) {
+    this.liftTerminalFence(sessionId, undefined, false, () => {
       this.slotShadowProbe.check(sessionId, "plan-label-fence-lifted");
       this.sessionSlots.deleteTerminalReasonState(sessionId);
-      this.volatileTerminalReleaseIntents.delete(sessionId);
-      this.terminalReleaseJournal.resolve(sessionId);
-    }
+    });
   }
 
   /**
@@ -13082,11 +13000,11 @@ export class SessionManager {
   /**
    * Put a session on the `managed-execution` liveness policy (#11176) with its idle window: the
    * launcher-trusted `idleTimeoutMs` (bounded 2–60 minutes) or the 2-minute default. Called by the
-   * managed slot acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
+   * broker binding acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
    * the window. The owner lease is unchanged, and the idle deadline is re-derived from the last
    * tool activity, never from now, so adopting the policy is not device use (#10656).
    *
-   * Throws `ManagedSlotConfigError` for an out-of-bounds window and `ActionableError` for an
+   * Throws `BindingConfigError` for an out-of-bounds window and `ActionableError` for an
    * unknown session or a `cli-idle` one (a one-shot CLI session is not an execution's session).
    * A failed durable write rolls the in-memory change back and throws.
    */
@@ -13530,12 +13448,7 @@ export class SessionManager {
       this.timer.clearTimeout(this.rehydrationFollowUpTimer);
       this.rehydrationFollowUpTimer = null;
     }
-    for (const entry of this.pendingTerminalReleaseRetries.values()) {
-      if (entry.handle !== undefined) {
-        this.timer.clearTimeout(entry.handle);
-        entry.handle = undefined;
-      }
-    }
+    this.rowWriter.stopRetryTimers();
     for (const entry of this.owedSupersededRowReasserts.values()) {
       if (entry.handle !== undefined) {
         this.timer.clearTimeout(entry.handle);
@@ -13549,7 +13462,7 @@ export class SessionManager {
     }
     this.networkConditionExpiryTimers.clear();
     this.iosAppNetworkLeases.stopAll();
-    this.pendingNonTerminalReleaseSnapshots.clear();
+    this.rowWriter.clearPendingNonTerminalReleases();
     this.supersededRowsUnderPendingRelease.clear();
   }
 

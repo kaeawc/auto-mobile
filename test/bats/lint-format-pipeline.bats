@@ -14,7 +14,7 @@ setup() {
   cat >>"$TEST_DIR/bin/bash" <<'EOF'
 set -euo pipefail
 case "${1:-}" in
-  scripts/oxlint-baseline.sh | scripts/check-boundaries.sh | scripts/check-element-resolution-ratchet.sh)
+  scripts/oxlint-baseline.sh | scripts/check-boundaries.sh | scripts/file-size-baseline.sh | scripts/check-element-resolution-ratchet.sh)
     printf 'follow-on: %s\n' "$1"
     ;;
   *) exec "$REAL_BASH" "$@" ;;
@@ -33,6 +33,7 @@ run_lint() {
 assert_follow_on_checks() {
   [[ "$output" == *"follow-on: scripts/oxlint-baseline.sh"* ]]
   [[ "$output" == *"follow-on: scripts/check-boundaries.sh"* ]]
+  [[ "$output" == *"follow-on: scripts/file-size-baseline.sh"* ]]
   [[ "$output" == *"follow-on: scripts/check-element-resolution-ratchet.sh"* ]]
 }
 

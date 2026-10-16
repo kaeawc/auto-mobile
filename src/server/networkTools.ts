@@ -624,6 +624,7 @@ export function registerNetworkTools(): void {
       embeddedSdkOnly: true,
       // Reads only the host's captured events; open to any watcher (#10830).
       deviceReadOnly: true,
+      loudArtifactWrites: true,
     },
   );
 }

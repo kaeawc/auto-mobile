@@ -2,8 +2,8 @@ import type { Kysely, Selectable, Transaction } from "kysely";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import type { SlotRegistryDatabase } from "../managedSlots/sqliteSlotRegistry";
-import type { SlotExecOwnerLiveness, SlotProcessIdentity } from "../managedSlots/slotRegistry";
+import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";
+import type { BindingExecOwnerLiveness, BindingProcessIdentity } from "./registry/bindingRegistry";
 import { chooseIdleEvictions, selectAdmission, type BrokerLimits } from "./admission";
 import {
   abandonedRequestIdentity,
@@ -23,7 +23,7 @@ import {
   type DestructionTicket,
 } from "./store";
 
-type Executor = Kysely<SlotRegistryDatabase> | Transaction<SlotRegistryDatabase>;
+type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
 
 function requestRecord(row: Selectable<BrokerRequestsTable>): BrokerRequestRecord {
   return {
@@ -53,7 +53,7 @@ function resourceRecord(row: Selectable<BrokerResourcesTable>): BrokerResourceRe
   };
 }
 
-function sameOwner(left: SlotProcessIdentity, right: SlotProcessIdentity): boolean {
+function sameOwner(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
   return (
     left.daemonId === right.daemonId &&
     left.pid === right.pid &&
@@ -62,9 +62,9 @@ function sameOwner(left: SlotProcessIdentity, right: SlotProcessIdentity): boole
 }
 
 function ownsReadyBinding(
-  binding: Selectable<SlotRegistryDatabase["slot_assignments"]> | undefined,
+  binding: Selectable<BindingRegistryDatabase["slot_assignments"]> | undefined,
   sessionId: string,
-  owner: SlotProcessIdentity,
+  owner: BindingProcessIdentity,
 ): boolean {
   return Boolean(
     binding?.stable_device_id &&
@@ -99,15 +99,15 @@ function occupiedResources(resources: readonly BrokerResourceRecord[]) {
  * in its assignment rows and native work remains in its journal. Every mutation uses that same
  * BEGIN IMMEDIATE transaction boundary. No platform work or awaitable predicate runs inside it.
  *
- * A destroyed row is a tombstone, not a free allocation slot. Physical reuse only happens through
+ * A destroyed row is a tombstone, not a free allocation binding. Physical reuse only happens through
  * a clean idle row and always receives a new request/session binding. Recovery never promotes an
  * interrupted resource to idle.
  */
 export class SqliteSessionBrokerStore {
   constructor(
-    private readonly db: Kysely<SlotRegistryDatabase>,
+    private readonly db: Kysely<BindingRegistryDatabase>,
     private readonly scopeKey: string,
-    private readonly isOwnerLive: SlotExecOwnerLiveness,
+    private readonly isOwnerLive: BindingExecOwnerLiveness,
     private readonly ids: IdGenerator = defaultIdGenerator,
   ) {}
 
@@ -212,7 +212,7 @@ export class SqliteSessionBrokerStore {
    */
   async abandon(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
     livenessOwnerToken: string,
   ): Promise<BrokerAbandonment> {
     if (!requestId.trim() || !livenessOwnerToken) {
@@ -300,7 +300,7 @@ export class SqliteSessionBrokerStore {
 
   async activate(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
     sessionId: string,
   ): Promise<BrokerRequestRecord> {
     if (!sessionId.trim()) {
@@ -333,7 +333,7 @@ export class SqliteSessionBrokerStore {
 
   async beginRelease(
     sessionId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord | undefined> {
     return this.db.transaction().execute(async (trx) => {
       const row = await trx
@@ -369,7 +369,7 @@ export class SqliteSessionBrokerStore {
    */
   async completeCleanRelease(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
     limits: BrokerLimits,
   ): Promise<readonly DestructionTicket[]> {
     return this.db.transaction().execute(async (trx) => {
@@ -413,7 +413,7 @@ export class SqliteSessionBrokerStore {
   /** Failure is terminal for the request, but keeps a discoverable destruction obligation. */
   async fail(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
     error: string,
     errorCode = "session_preparation_failed",
     retryable = false,
@@ -445,7 +445,7 @@ export class SqliteSessionBrokerStore {
   /** Zero-pool release follows the same durable cleanup path, without pretending it was clean. */
   async releaseByDestruction(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
   ): Promise<DestructionTicket | undefined> {
     return this.db.transaction().execute(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
@@ -505,7 +505,7 @@ export class SqliteSessionBrokerStore {
    */
   async recoverRequest(
     requestId: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
   ): Promise<DestructionTicket | undefined> {
     return this.db.transaction().execute(async (trx) => {
       const request = requireValue(
@@ -539,7 +539,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async reserve(
-    trx: Transaction<SlotRegistryDatabase>,
+    trx: Transaction<BindingRegistryDatabase>,
     request: BrokerRequestRecord,
     input: BrokerAdmissionInput,
   ): Promise<BrokerAdmission> {
@@ -629,7 +629,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async trimIdle(
-    trx: Transaction<SlotRegistryDatabase>,
+    trx: Transaction<BindingRegistryDatabase>,
     limits: BrokerLimits,
   ): Promise<DestructionTicket[]> {
     const resources = await this.readResources(trx);
@@ -729,7 +729,7 @@ export class SqliteSessionBrokerStore {
   private async ownedRequest(
     db: Executor,
     id: string,
-    owner: SlotProcessIdentity,
+    owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await this.readRequest(db, id), "Unknown session request");
     if (!sameOwner(request.owner, owner)) {
@@ -756,7 +756,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async updateResource(
-    trx: Transaction<SlotRegistryDatabase>,
+    trx: Transaction<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
     changes: Partial<Pick<BrokerResourcesTable, "state" | "request_id" | "idle_order">>,
   ): Promise<BrokerResourceRecord> {
@@ -770,7 +770,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async updateRequest(
-    trx: Transaction<SlotRegistryDatabase>,
+    trx: Transaction<BindingRegistryDatabase>,
     id: string,
     changes: Partial<
       Pick<

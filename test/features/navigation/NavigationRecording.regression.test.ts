@@ -77,13 +77,16 @@ describe("navigation recording source state and routing", () => {
         args: Record<string, unknown>,
         device: undefined,
         session: undefined,
+        traits: { recordsNavigation: boolean },
       ) => ReturnType<NavigationGraphManager["recordToolCall"]>;
     } = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(
       capture.structuredContent,
     );
     try {
-      return recorder.record("tapOn", recordedArgs, undefined, undefined);
+      return recorder.record("tapOn", recordedArgs, undefined, undefined, {
+        recordsNavigation: true,
+      });
     } finally {
       cache.mockRestore();
     }

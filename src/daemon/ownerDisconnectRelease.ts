@@ -23,7 +23,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
-import { holdsOwnerHeartbeatLease } from "./managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,

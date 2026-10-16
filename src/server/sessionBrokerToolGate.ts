@@ -1,7 +1,7 @@
 import { DaemonState } from "../daemon/daemonState";
-import { MANAGED_CONNECTION_REFUSED_TOOLS } from "../daemon/managedSlots/managedConnectionScope";
-import { currentManagedSlotReconciler } from "../daemon/managedSlots/managedSlotExclusion";
-import { computeSlotScopeKey } from "../daemon/managedSlots/slotRegistry";
+import { BROKER_LIFECYCLE_TOOLS } from "../daemon/sessionBroker/lifecycleTools";
+import { currentBindingReconciler } from "../daemon/sessionBroker/provisioning/exclusion";
+import { computeBindingScopeKey } from "../daemon/sessionBroker/registry/bindingRegistry";
 import { SESSION_BROKER_SCOPE } from "../daemon/sessionBroker/hostConfig";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { ActionableError } from "../models/ActionableError";
@@ -30,10 +30,10 @@ export async function assertSessionBrokerToolCall(
   if (!state.isSessionBrokerMode()) {
     return;
   }
-  if (currentManagedSlotReconciler()?.scopeKey === computeSlotScopeKey(SESSION_BROKER_SCOPE)) {
+  if (currentBindingReconciler()?.scopeKey === computeBindingScopeKey(SESSION_BROKER_SCOPE)) {
     return;
   }
-  if (MANAGED_CONNECTION_REFUSED_TOOLS.has(toolName)) {
+  if (BROKER_LIFECYCLE_TOOLS.has(toolName)) {
     throw new ActionableError(
       `Session broker owns device lifecycle; ${toolName} cannot allocate or retire a device`,
     );

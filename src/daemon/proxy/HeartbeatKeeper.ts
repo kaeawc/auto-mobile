@@ -2,7 +2,6 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { LatestHeartbeatAsk } from "../daemonMcpProxy";
 import type { SessionReleaseSnapshot } from "../sessionManager";
 import {
   DAEMON_STALLED_CODE,
@@ -13,7 +12,7 @@ import {
 } from "../proxyLivenessRecovery";
 import { LifecycleConnectionInFlightError } from "./daemonErrors";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
-import type { ProxySessionState } from "./ProxySessionState";
+import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
 
 /**
  * Proxy operations shared with routing, reconnects, release handling and recovery:
@@ -68,7 +67,6 @@ export interface HeartbeatKeeperDependencies {
   state: ProxySessionState;
   tickLateness: TickLatenessClock;
   livenessRecovery: Pick<LivenessRecovery, "begin" | "isRecovering">;
-  managedExecutionSessions: Set<string>;
   heartbeatLeashMs: number;
   heartbeatIntervalMs: number;
   boundSessionReplayTtlMs: number;
@@ -109,10 +107,7 @@ export class HeartbeatKeeper {
       `[DaemonMcpProxy] Heartbeat tick fired more than ${this.deps.heartbeatLeashMs}ms late; re-heartbeating held sessions`,
     );
     for (const sessionUuid of this.deps.port.heldSessionUuids()) {
-      if (
-        this.deps.state.notFoundStopped.has(sessionUuid) &&
-        !this.deps.managedExecutionSessions.has(sessionUuid)
-      ) {
+      if (this.deps.state.notFoundStopped.has(sessionUuid)) {
         continue;
       }
       this.deps.livenessRecovery.begin(sessionUuid, PROXY_STALLED_CODE);

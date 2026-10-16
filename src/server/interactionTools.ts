@@ -2971,6 +2971,9 @@ export function resetWakeAndUnlockFactory(): void {
     });
 }
 
+/** UI interactions that may cause in-app navigation (the navigation recorder records them). */
+const NAV = { recordsNavigation: true } as const;
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -3457,7 +3460,7 @@ export function registerInteractionTools() {
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
       result.success,
-      async (closeSignal) => keyboardFactory(device).execute("close", closeSignal),
+      async (closeSignal) => keyboardFactory(device).execute("close", { signal: closeSignal }),
       signal,
     );
     const response = createStructuredToolResponse({
@@ -3647,7 +3650,7 @@ export function registerInteractionTools() {
       }
       throwIfAborted(signal);
       const keyboard = keyboardFactory(device);
-      const result = await keyboard.execute(args.action, signal);
+      const result = await keyboard.execute(args.action, { signal });
       throwIfAborted(signal);
 
       const response = createStructuredToolResponse(result);
@@ -3717,7 +3720,7 @@ export function registerInteractionTools() {
   ) => {
     try {
       const clipboard = clipboardFactory(device);
-      const result = await clipboard.execute(args.action, args.text, signal);
+      const result = await clipboard.execute(args.action, args.text, { signal });
 
       let message = formatClipboardMessage(result);
 
@@ -3749,7 +3752,7 @@ export function registerInteractionTools() {
     "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
     pressButtonSchema,
     pressButtonHandler,
-    { outputSchema: pressButtonResultSchema, defaultEnabled: true, supportsProgress: true },
+    { outputSchema: pressButtonResultSchema, defaultEnabled: true, supportsProgress: true, ...NAV },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3765,7 +3768,7 @@ export function registerInteractionTools() {
     "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     sendKeysSchema,
     sendKeysHandler,
-    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema },
+    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema, ...NAV },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3789,7 +3792,7 @@ export function registerInteractionTools() {
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
     tapOnHandler,
-    { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema },
+    { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema, ...NAV },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3823,7 +3826,7 @@ export function registerInteractionTools() {
     "Drag and drop element",
     dragAndDropSchema,
     dragAndDropHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...NAV },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3831,12 +3834,13 @@ export function registerInteractionTools() {
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     swipeOnHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, ...NAV },
   );
 
   ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, pinchOnHandler, {
     defaultEnabled: false,
     supportsProgress: true,
+    ...NAV,
   });
 
   ToolRegistry.registerDeviceAware(

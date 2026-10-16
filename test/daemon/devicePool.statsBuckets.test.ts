@@ -2,7 +2,7 @@ import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBi
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { poolHoldFor } from "../../src/server/deviceDescription";
 import type { BootedDevice } from "../../src/models";
@@ -10,9 +10,9 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { listDevicePayloads } from "../../src/server/deviceTools";
-import { assignManagedSlotDevice } from "./managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
@@ -113,8 +113,8 @@ describe("every pooled device is in exactly one stats bucket matching its listed
   beforeEach(async () => {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const registry = new FakeSlotRegistry(timer);
-    await assignManagedSlotDevice(registry, "ios", "SLOT");
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SLOT");
     const healthMarkers = new InMemoryDeviceHealthMarkers(timer);
     const manager = new FakeDeviceManager();
     devices = ids.map(ios);
@@ -126,11 +126,11 @@ describe("every pooled device is in exactly one stats bucket matching its listed
         deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
     await pool.initializeWithDevices(devices);
-    await pool.managedSlotStableIds("ios");
+    await pool.bindingStableIds("ios");
     await pool.reserveDevicesForRehydration(
       ["ERR-RES", "REHYDRATE"].map((id) => ({
         sessionId: `row-${id}`,

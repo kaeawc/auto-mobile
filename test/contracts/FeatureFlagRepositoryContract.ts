@@ -105,6 +105,34 @@ export function runFeatureFlagRepositoryContract(
         expect((await byKey(repository)).get("debug")?.config).toEqual({ b: 2 });
       }));
 
+    test("a seeded default config is copied, not aliased to the definition", () =>
+      withRepository(async (repository) => {
+        const defaultConfig = { level: 2 };
+        await repository.ensureFlags([definition("ui-perf-mode", true, defaultConfig)]);
+        defaultConfig.level = 99;
+        expect((await byKey(repository)).get("ui-perf-mode")?.config).toEqual({ level: 2 });
+      }));
+
+    test("an upserted config is copied, not aliased to the caller's object", () =>
+      withRepository(async (repository) => {
+        const config = { a: 1 };
+        await repository.upsertFlag("debug", true, config);
+        config.a = 2;
+        expect((await byKey(repository)).get("debug")?.config).toEqual({ a: 1 });
+      }));
+
+    test("listed records do not alias stored state", () =>
+      withRepository(async (repository) => {
+        await repository.upsertFlag("debug", true, { a: 1 });
+        const [record] = await repository.listFlags();
+        record.enabled = false;
+        (record.config as Record<string, unknown>).a = 2;
+        expect((await byKey(repository)).get("debug")).toMatchObject({
+          enabled: true,
+          config: { a: 1 },
+        });
+      }));
+
     test("one record per key after repeated upserts", () =>
       withRepository(async (repository) => {
         await repository.upsertFlag("debug", true);

@@ -61,11 +61,6 @@ export interface ArtifactIdentityRecord {
       match: boolean;
     }>;
   };
-  managedSlotContract: {
-    present: boolean;
-    contractVersions: number[] | null;
-    capabilities: string[] | null;
-  };
   checks: IdentityCheck[];
 }
 export interface ArtifactIdentityOptions {
@@ -386,7 +381,6 @@ export function identifyArtifact(
       expectedSha: options.expectSourceSha ?? null,
     },
     nativeResources: { from: "none", entries: {}, localAssets: [] },
-    managedSlotContract: { present: false, contractVersions: null, capabilities: null },
     checks: [],
   };
   const packagePath = join(root, "package.json");
@@ -481,29 +475,6 @@ export function identifyArtifact(
   );
   identifySource(record, info, options, ports);
   identifyNative(record, info, options, ports);
-  const contractPath = join(root, "schemas/managed-slot-contract.json");
-  if (ports.exists(contractPath)) {
-    const contract = JSON.parse(ports.readText(contractPath)) as {
-      contractVersions: number[];
-      daemonCapabilities: { base: string; additive: Array<{ capability: string }> };
-    };
-    record.managedSlotContract = {
-      present: true,
-      contractVersions: contract.contractVersions,
-      capabilities: [
-        contract.daemonCapabilities.base,
-        ...contract.daemonCapabilities.additive.map((entry) => entry.capability),
-      ],
-    };
-  }
-  check(
-    record,
-    "managed_slot_contract",
-    record.managedSlotContract.present ? "pass" : "warn",
-    record.managedSlotContract.present
-      ? "Published managed-slot contract present"
-      : "package predates the published managed-slot contract",
-  );
   record.verdict = record.checks.some((entry) => entry.status === "fail")
     ? "refused"
     : "identified";

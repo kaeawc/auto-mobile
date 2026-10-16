@@ -32466,6 +32466,23 @@
           "minimum": 1,
           "maximum": 3000
         },
+        "fromEdge": {
+          "description": "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. With Android gesture navigation a very-near-edge swipe may be taken as system back/home",
+          "type": "string",
+          "enum": ["left", "right", "top", "bottom"]
+        },
+        "edgeInset": {
+          "description": "With fromEdge: how far inside the edge the touch starts, px (iOS points); default 4 (iOS swipe-back needs the first ~20 pt)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "at": {
+          "description": "With fromEdge: normalized 0-1 position along the edge (default 0.5)",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "layer": {
           "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",

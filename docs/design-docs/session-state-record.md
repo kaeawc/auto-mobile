@@ -33,20 +33,20 @@ the assignment, creation, release-before-publish and rebind groups now live in `
 Line numbers below are historical for the remaining manager fields. `U` = keyed by UUID,
 `S` = keyed by `Session` object identity (a `WeakMap`/`WeakSet`).
 
-| Concern                | Field (line)                                                                                                            | Key         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------- |
-| Published              | `sessions` (1614)                                                                                                       | U           |
-| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                    | U / device  |
-| Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                            | U           |
-| Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                  | U / S       |
-| Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                  | U           |
-| Release before publish | `pendingSessionReleases` (now `SessionSlots`)                                                                           | U           |
-| Release in flight      | `releasePromises` (1651), `activeReleasePromises` (1653), `releasingSessions` (1740) (now SessionSlots)                 | U / set / S |
-| Terminal fence         | `terminalReleaseSnapshots` (1856), `terminalReleaseReasonStates` (1733), `terminalReleaseReservations` (1735)           | U           |
-| Finalized identity     | `finalizedSessionReleases` (1688), `latestFinalizedSessionIdentities` (1723), `finalizedSessionIdentityRegistry` (1724) | S / U       |
-| Forced release         | `forcedNonTerminalReleases` (1694) (now SessionSlots)                                                                   | S           |
-| Journal recovery       | `recoveredTerminalReleaseIntents` (1679), `adoptedDeadDaemonJournals` (1681), `adoptedTerminalReleaseOwners` (1686)     | U / daemon  |
-| Row facet (see 1.3)    | 17 fields, 1660-1665, 1703-1721, 1822-1843, 1857                                                                        | U / S       |
+| Concern                | Field (line)                                                                                                                                                         | Key         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Published              | `sessions` (1614)                                                                                                                                                    | U           |
+| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                                                                 | U / device  |
+| Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                                                                         | U           |
+| Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                                                               | U / S       |
+| Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                                                               | U           |
+| Release before publish | `pendingSessionReleases` (now `SessionSlots`)                                                                                                                        | U           |
+| Release in flight      | `releasePromises` (1651), `activeReleasePromises` (1653), `releasingSessions` (1740) (now SessionSlots)                                                              | U / set / S |
+| Terminal fence         | `terminalReleaseSnapshots` (1856), `terminalReleaseReasonStates` (1733), `terminalReleaseReservations` (1735) (now SessionSlots)                                     | U           |
+| Finalized identity     | `finalizedSessionReleases` (1688), `latestFinalizedSessionIdentities` (1723), `finalizedSessionIdentityRegistry` (1724) (identity map and registry now SessionSlots) | S / U       |
+| Forced release         | `forcedNonTerminalReleases` (1694) (now SessionSlots)                                                                                                                | S           |
+| Journal recovery       | `recoveredTerminalReleaseIntents` (1679), `adoptedDeadDaemonJournals` (1681), `adoptedTerminalReleaseOwners` (1686) (now SessionSlots)                               | U / daemon  |
+| Row facet (see 1.3)    | 17 fields, 1660-1665, 1703-1721, 1822-1843, 1857                                                                                                                     | U / S       |
 
 Flags on records carry more lifecycle: `forced`, `commitFenced`, `commitDeclined`, `stage`
 (`SessionReleaseOperation`, 990-1026) and `terminalPersisted`, `lateTerminalRelease`,
@@ -508,6 +508,8 @@ New code goes in proposed modules (SessionSlots and SessionRowWriter) so
 S3 landed with `SessionSlots` owning the assignment and creation group as per-facet maps.
 S4 landed with SessionSlots owning the rebind group (pendingSessionRebinds, deferredRebindCleanups).
 S5 landed with SessionSlots owning the release group (releasePromises, activeReleasePromises, releasingSessions, forcedNonTerminalReleases) as per-facet containers.
+
+S6 landed with SessionSlots owning the fence and identity group (terminalReleaseSnapshots, terminalReleaseReasonStates, terminalReleaseReservations, latestFinalizedSessionIdentities, recoveredTerminalReleaseIntents, adoptedTerminalReleaseOwners, adoptedDeadDaemonJournals); finalizedSessionReleases stays a side table.
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.

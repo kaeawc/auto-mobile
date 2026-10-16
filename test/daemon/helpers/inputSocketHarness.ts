@@ -41,7 +41,7 @@ export function createFakeDeviceManager(
       devices,
       succeededPlatforms,
     })),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+  } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
 }
 
 export function createFakeSession(

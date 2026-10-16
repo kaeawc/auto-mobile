@@ -1,19 +1,19 @@
 import { Socket } from "node:net";
-import { defaultTimer } from "../utils/SystemTimer";
-import type { Timer } from "../utils/SystemTimer";
-import { getSocketPath } from "./socketServer/index";
-import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
-import { ActionableError } from "../models/ActionableError";
+import { defaultTimer } from "../../src/utils/SystemTimer";
+import type { Timer } from "../../src/utils/SystemTimer";
+import { getSocketPath } from "../../src/daemon/socketServer/index";
+import { WEBRTC_STREAM_SOCKET_CONFIG } from "../../src/daemon/daemonFiles";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
   DaemonFrameTooLargeError,
   LineFramer,
-} from "./socketServer/LineFramer";
-import { webRtcStreamSocketResponseSchema } from "./webrtcStreamSocketTypes";
+} from "../../src/daemon/socketServer/LineFramer";
+import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
-} from "./webrtcStreamSocketTypes";
+} from "../../src/daemon/webrtcStreamSocketTypes";
 
 export const DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS = 45_000;
 

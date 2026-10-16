@@ -50,6 +50,18 @@ export const ENV = {
     default: "~/.auto-mobile/adb-servers",
     doc: "Absolute root of per-ADB-server claims shared by every daemon on one ADB server.",
   },
+  SESSION_BROKER_CONFIG: {
+    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    kind: "path",
+    default: "unset (broker disabled)",
+    doc: "Operator session-broker host configuration file; never a session requester input.",
+  },
+  SESSION_CONFIG: {
+    name: "AUTOMOBILE_SESSION_CONFIG",
+    kind: "path",
+    default: "unset",
+    doc: "Session configuration file read by the CLI, equivalent to --session-config.",
+  },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);

@@ -1,3 +1,4 @@
+import { ENV as ENV_SPECS } from "../config/env";
 import { z } from "zod";
 import {
   parseSessionDeviceRequirement,
@@ -12,7 +13,7 @@ import {
 } from "./managedSlotConfig";
 
 export const SESSION_CONFIG_FLAG = "--session-config";
-export const SESSION_CONFIG_ENV = "AUTOMOBILE_SESSION_CONFIG";
+export const SESSION_CONFIG_ENV = ENV_SPECS.SESSION_CONFIG.name;
 export const SESSION_BROKER_V1_CAPABILITY = "session-broker/v1";
 export const SESSION_EXPERIMENTAL_CAPABILITY = "automobile/session";
 

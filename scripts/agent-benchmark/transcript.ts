@@ -177,6 +177,10 @@ function handleUser(event: JsonRecord, state: AuditState): void {
       continue;
     }
     const text = toolResultText(block.content);
+    if (block.is_error !== undefined && typeof block.is_error !== "boolean") {
+      // A non-boolean flag ("true") cannot be trusted either way, so the transcript fails.
+      state.audit.parseErrors.push(`tool_result for ${id} has a non-boolean is_error`);
+    }
     record.isError = block.is_error === true;
     record.resultText = truncate(text);
     record.hasResult = true;

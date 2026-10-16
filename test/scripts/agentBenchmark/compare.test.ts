@@ -280,6 +280,8 @@ describe("verification text matching", () => {
     expect(containsBounded("EXPECTED_COUNT: 3\u20134", "EXPECTED_COUNT: 3")).toBe(false);
     expect(containsBounded("EXPECTED_COUNT: 3:4", "EXPECTED_COUNT: 3")).toBe(false);
     expect(containsBounded("EXPECTED_COUNT: 3 - done", "EXPECTED_COUNT: 3")).toBe(true);
+    expect(containsBounded("COUNT: 3\u22124", "COUNT: 3")).toBe(false);
+    expect(containsBounded("COUNT: 3\u20144", "COUNT: 3")).toBe(false);
     // Canonically equivalent forms match each other (NFC vs NFD).
     expect(containsBounded("Cafe\u0301", "Caf\u00e9")).toBe(true);
     expect(containsBounded("Caf\u00e9", "Cafe\u0301")).toBe(true);

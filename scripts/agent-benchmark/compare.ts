@@ -199,10 +199,11 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
  */
 /**
  * Characters that join digits into one value: decimal and grouping marks (ASCII and
- * Arabic U+066B/U+066C), fraction slashes (/ and U+2044), and range or ratio marks (-, the
- * U+2013 en dash, and :), so 3 is not inside 3-4 or 3:4.
+ * Arabic U+066B/U+066C), fraction slashes (/ and U+2044), and range, subtraction, or ratio
+ * marks (-, U+2013 en dash, U+2014 em dash, U+2212 minus, and :), so 3 is not inside 3-4,
+ * 3−4, or 3:4.
  */
-const NUMBER_JOINERS = "[.,/\u2044\u066B\u066C\\-\u2013:]";
+const NUMBER_JOINERS = "[.,/\u2044\u066B\u066C\\-\u2013\u2014\u2212:]";
 
 export function containsBounded(haystack: string, needle: string): boolean {
   // Unicode letters, digits, and combining marks bound a match, so 完了 does not match

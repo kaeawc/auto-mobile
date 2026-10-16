@@ -139,6 +139,19 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result?.finalText).toBe("first");
   });
 
+  test("a non-boolean is_error fails the transcript instead of reading as success", () => {
+    const base = new TranscriptBuilder().init().mcp("tapOn", "ok", { noResult: true }).build();
+    const id = auditTranscript(base, NO_PATTERNS).toolCalls[0].id;
+    const result = JSON.stringify({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: id, content: "x", is_error: "true" }],
+      },
+    });
+    const audit = auditTranscript(`${base}${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([`tool_result for ${id} has a non-boolean is_error`]);
+  });
+
   test("an empty transcript audits to zero calls with no init", () => {
     const audit = auditTranscript("", NO_PATTERNS);
     expect(audit.totalToolCalls).toBe(0);

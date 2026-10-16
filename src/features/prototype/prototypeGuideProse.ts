@@ -83,6 +83,14 @@ All these options require \`prototype_text_field_options_v1\`. A device without 
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with \`launchApp prototype: true\`, or drop the textField options.
 
+A \`textField\` may also declare \`trailingIcon: {icon, label, onTap?}\` (a built-in icon, its
+nonempty accessible \`label\` and optional 1-32 \`onTap\` actions, for example a clear button that
+\`setState\`s the field's key to an empty string; without \`onTap\` it is decoration),
+\`imeAction\` (\`done\`, \`next\`, \`search\`, \`send\` or \`go\`: the keyboard's action key) and
+\`onSubmit\` (1-32 actions run when that key is pressed; without \`imeAction\` the key is
+\`done\`). Multiline text has no IME action, so \`imeAction\` and \`onSubmit\` are refused with
+\`multiline: true\`. These need \`prototype_text_field_actions_v1\`, with the same refusal.
+
 Open question: a \`secure\` field's value still lives in state and in \`change\` events/\`inspect\`;
 this slice does not redact it.
 

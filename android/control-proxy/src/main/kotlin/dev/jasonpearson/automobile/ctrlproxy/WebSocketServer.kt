@@ -376,6 +376,7 @@ class WebSocketServer(
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
     add("prototype_gestures_v1")
+    add("prototype_text_field_actions_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")

@@ -840,6 +840,10 @@ function textFieldErrors(
   if (value.multiline === true && (value.secure === true || value.keyboardType === "password")) {
     return fail(`${path}.multiline`, "Multiline text cannot be secure");
   }
+  const imeField = ["imeAction", "onSubmit"].find((field) => value[field] !== undefined);
+  if (value.multiline === true && imeField !== undefined) {
+    return fail(`${path}.${imeField}`, "Multiline text has no IME action");
+  }
   if (typeof minLines === "number" && typeof maxLines === "number" && minLines > maxLines) {
     return fail(`${path}.minLines`, "minLines cannot exceed maxLines");
   }

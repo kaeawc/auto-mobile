@@ -9920,6 +9920,24 @@
         "hasDefault": true
       },
       {
+        "name": "trailingIcon",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAppBarAction",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "imeAction",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onSubmit",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,

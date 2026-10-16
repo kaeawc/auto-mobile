@@ -35,7 +35,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ForwardLeaseForeignDeviceOwnership,
@@ -410,16 +410,79 @@ export function bundleDigest(files: Array<{ path: string; read: () => Uint8Array
 }
 
 /**
+ * Every repository source file reachable from `entries` through runtime imports: the
+ * harness imports `src/` helpers directly (device ownership, locks, launch-failure
+ * detection), and those run unbundled, so their edits change behavior without a rebuild.
+ * Type-only imports are erased and never scanned; packages under node_modules are left to
+ * `bun.lock`.
+ */
+export function importClosure(
+  entries: string[],
+  scan: (path: string) => string[],
+  resolve: (specifier: string, fromDir: string) => string | undefined,
+  inRepo: (path: string) => boolean,
+): string[] {
+  const seen = new Set<string>();
+  const pending = [...entries];
+  while (pending.length > 0) {
+    const path = pending.pop() as string;
+    if (seen.has(path)) {
+      continue;
+    }
+    seen.add(path);
+    pending.push(
+      ...scan(path)
+        .map((specifier) => resolve(specifier, dirname(path)))
+        .filter((next): next is string => next !== undefined && inRepo(next)),
+    );
+  }
+  return [...seen].sort();
+}
+
+function scanModuleImports(transpiler: Bun.Transpiler, path: string): string[] {
+  // scanImports rejects a leading shebang, which entry-point scripts carry.
+  const code = readFileSync(path, "utf8").replace(/^#!.*/, "");
+  try {
+    return transpiler.scanImports(code).map((entry) => entry.path);
+  } catch {
+    // An unparseable file is still hashed; only its imports go unfollowed.
+    return [];
+  }
+}
+
+function harnessSources(): string[] {
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const harnessDir = join(REPO_ROOT, "scripts", "agent-benchmark");
+  return importClosure(
+    readdirSync(harnessDir)
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => join(harnessDir, name)),
+    // Imported JSON and other data files are hashed but have no imports to follow.
+    (path) => (/\.[cm]?[jt]sx?$/.test(path) ? scanModuleImports(transpiler, path) : []),
+    (specifier, fromDir) => {
+      try {
+        return Bun.resolveSync(specifier, fromDir);
+      } catch {
+        // Builtins (node:fs) and absent optional packages have no repository file to hash.
+        return undefined;
+      }
+    },
+    (path) => path.startsWith(REPO_ROOT) && !path.includes(`${sep}node_modules${sep}`),
+  );
+}
+
+/**
  * Everything that executes or scores a run: the built `dist/`; `bun.lock`, since the build
  * leaves sharp and jimp external and the lockfile pins which versions load at runtime;
- * `package.json`, which the server reads for its version; this harness's own sources, which
- * decide verdicts and metrics; and the Bun runtime version. The git commit is left out: it
+ * `package.json`, which the server reads for its version; this harness's sources and every
+ * repository module they import, which run unbundled and decide preflight, verdicts, and
+ * metrics; and the Bun runtime version. The git commit is left out: it
  * changes with every unrelated commit, which would flag every baseline as mismatched.
  */
 function serverDigest(): string {
-  const tree = (dir: string, filter: (path: string) => boolean = () => true) =>
+  const tree = (dir: string) =>
     readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
-      .filter((path) => filter(path) && statSync(join(REPO_ROOT, dir, path)).isFile())
+      .filter((path) => statSync(join(REPO_ROOT, dir, path)).isFile())
       .map((path) => ({
         path: `${dir}/${path}`,
         read: () => readFileSync(join(REPO_ROOT, dir, path)),
@@ -427,7 +490,7 @@ function serverDigest(): string {
   const file = (path: string) => ({ path, read: () => readFileSync(join(REPO_ROOT, path)) });
   return bundleDigest([
     ...tree("dist"),
-    ...tree("scripts/agent-benchmark", (path) => path.endsWith(".ts")),
+    ...harnessSources().map((path) => file(relative(REPO_ROOT, path))),
     file("bun.lock"),
     file("package.json"),
     { path: "bun-version", read: () => new TextEncoder().encode(process.versions.bun ?? "") },

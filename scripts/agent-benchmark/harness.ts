@@ -482,8 +482,9 @@ export async function runSuite(
     deps.fs.exists(transcriptPath) ? deps.fs.readFile(transcriptPath) : "",
     definition,
   );
-  // A wrapper whose --version probe failed still reports its version in the init event.
-  const claudeCodeVersion = version ?? audit.claudeCodeVersion;
+  // The init event names the CLI that actually ran; a wrapper's --version may describe
+  // itself instead, so the probe is only the fallback when the stream reports none.
+  const claudeCodeVersion = audit.claudeCodeVersion ?? version;
   const outcome = {
     claudeExitCode: exit.exitCode,
     timedOut: exit.timedOut,

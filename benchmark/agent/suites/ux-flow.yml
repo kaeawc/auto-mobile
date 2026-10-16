@@ -14,7 +14,7 @@ preflight:
       is_authenticated: true
       user_id: agent-benchmark
       display_name: Agent Benchmark
-  launchUri: automobile:playground/demos
+  launchUri: automobile://playground/demos
   # DemoIndexScreen's top bar; a redirect to onboarding or login stops the run before Claude.
   startScreenIncludes: ["Docs Demo Index"]
 claude:

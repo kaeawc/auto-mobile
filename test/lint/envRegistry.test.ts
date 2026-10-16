@@ -160,7 +160,7 @@ describe("environment variable registry", () => {
     const found = findEnvNames(
       "x.ts",
       `const a = process.env.DOT; const b = env["BRACKET"]; const { DESTRUCTURED, "QUOTED": q } = process.env;
-       const c = deps.env.NESTED; const g = ENV.REGISTRY; rangeEnv.trim(); const d = "AUTOMOBILE_LITERAL"; const e = "NOT_A_PRODUCT_LITERAL"; const f = other.PLAIN;`,
+       const c = deps.env.NESTED; const g = ENV.REGISTRY; const { ALSO_REGISTRY } = ENV; rangeEnv.trim(); const d = "AUTOMOBILE_LITERAL"; const e = "NOT_A_PRODUCT_LITERAL"; const f = other.PLAIN;`,
     );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_LITERAL",

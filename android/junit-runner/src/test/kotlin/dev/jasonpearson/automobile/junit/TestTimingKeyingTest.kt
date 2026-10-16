@@ -21,27 +21,29 @@ import org.junit.Test
  * is keyed by fully qualified class name (issue #10091).
  */
 class TestTimingKeyingTest {
-  private val store = TestTimingStore(ciMode = { false })
+  private lateinit var store: TestTimingStore
+  private lateinit var collaborators: PlanExecutorCollaborators
   private lateinit var daemon: TimingFakeDaemonClient
 
   @Before
   fun setup() {
     daemon = TimingFakeDaemonClient()
-    DaemonSocketClientManager.testClient = daemon
-    AutoMobileSharedUtils.testDeviceChecker = TimingFakeDeviceChecker()
-    DaemonHeartbeat.testController = TimingFakeHeartbeat()
-    AutoMobilePlanExecutor.testAgent =
+    val agent =
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { agent },
+        deviceChecker = TimingFakeDeviceChecker(),
+        daemon = daemon,
+        heartbeat = TimingFakeHeartbeat(),
+      )
+    store = TestTimingStore(ciMode = { false }, collaborators = collaborators)
     SystemPropertyCache.clear()
     store.clear()
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.junit.timing.ordering")
     SystemPropertyCache.clear()
     store.clear()
@@ -99,9 +101,12 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java, store).description.children.map {
-        it.methodName
-      }
+      AutoMobileRunner(RunnerTestTarget::class.java, store, collaborators)
+        .description
+        .children
+        .map {
+          it.methodName
+        }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }
@@ -116,9 +121,12 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java, store).description.children.map {
-        it.methodName
-      }
+      AutoMobileRunner(RunnerTestTarget::class.java, store, collaborators)
+        .description
+        .children
+        .map {
+          it.methodName
+        }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }
@@ -127,8 +135,8 @@ class TestTimingKeyingTest {
   fun `same-named test classes in different packages record different testClass values`() {
     daemon.executePlanResponse = successResponse()
 
-    PlanRecordingAlpha.SmokeCase().runsPlan()
-    PlanRecordingBeta.SmokeCase().runsPlan()
+    PlanRecordingAlpha.SmokeCase(collaborators).runsPlan()
+    PlanRecordingBeta.SmokeCase(collaborators).runsPlan()
 
     val recorded =
       daemon.executePlanArgs.map {
@@ -184,28 +192,30 @@ class TestTimingKeyingTest {
  * Two same-simple-name classes whose @Test methods run a plan; skipped when Gradle discovers them.
  */
 object PlanRecordingAlpha {
-  class SmokeCase {
+  @Ignore("Driven directly by TestTimingKeyingTest")
+  class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
-    @Ignore("Driven directly by TestTimingKeyingTest")
     fun runsPlan() {
       AutoMobilePlanExecutor.execute(
         "test-plans/launch-clock-app.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators,
       )
     }
   }
 }
 
 object PlanRecordingBeta {
-  class SmokeCase {
+  @Ignore("Driven directly by TestTimingKeyingTest")
+  class SmokeCase internal constructor(private val collaborators: PlanExecutorCollaborators) {
     @Test
-    @Ignore("Driven directly by TestTimingKeyingTest")
     fun runsPlan() {
       AutoMobilePlanExecutor.execute(
         "test-plans/launch-clock-app.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators,
       )
     }
   }

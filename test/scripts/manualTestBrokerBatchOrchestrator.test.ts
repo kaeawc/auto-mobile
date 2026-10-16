@@ -13,7 +13,7 @@ import {
   renderHostConfig,
 } from "../../scripts/manual-test/brokerBatch";
 import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";

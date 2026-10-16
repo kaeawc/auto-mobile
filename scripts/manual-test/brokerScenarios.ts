@@ -5,13 +5,13 @@ import {
 } from "./brokerDeviceScenarios";
 import { strict as assert } from "node:assert";
 import { join } from "node:path";
-import type { SessionConfig } from "../../src/models/sessionConfig";
+import type { SessionConfig } from "../../src/devices/sessionConfig";
 import {
   assertSessionOwnerIdentity,
   parseSessionConfig,
   SessionConfigError,
-} from "../../src/models/sessionConfig";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+} from "../../src/devices/sessionConfig";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";

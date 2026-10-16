@@ -4,7 +4,7 @@ import {
   waitForBrokerRelease,
 } from "../../scripts/manual-test/brokerDaemonClient";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

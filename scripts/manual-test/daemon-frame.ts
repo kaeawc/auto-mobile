@@ -42,7 +42,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import { parseSessionConfig, type SessionConfig } from "../../src/models/sessionConfig";
+import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { readEnvPositiveInteger } from "../../src/utils/envNumbers";

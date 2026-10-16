@@ -43,12 +43,12 @@ import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
+import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
 import {
-  DeviceAssignedToManagedSlotError,
-  DeviceOutsideManagedSlotsError,
-  ManagedSlotDiscoveryIncompleteError,
-  ManagedSlotOwnershipUnconfirmedError,
-} from "../daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+  BindingOwnershipUnconfirmedError,
+} from "../daemon/sessionBroker/provisioning/refusal";
 import {
   RetryableDeviceAcquisitionError,
   DeviceUnhealthyError,
@@ -168,8 +168,8 @@ function hasSelfDescribedRefusalPayload(
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
-  | DeviceAssignedToManagedSlotError
-  | DeviceOutsideManagedSlotsError
+  | DeviceAssignedToBindingError
+  | DeviceOutsideBrokerGrantError
   | DeviceOutsideBoundSessionError
   | SessionOutsideBoundSessionError
   | InputDeviceOwnedError
@@ -177,16 +177,16 @@ function hasSelfDescribedRefusalPayload(
   | OrphanRecorderActiveError
   | AppNotRunningError
   | SdkTooOldError
-  | ManagedSlotDiscoveryIncompleteError
-  | ManagedSlotOwnershipUnconfirmedError {
+  | BindingDiscoveryIncompleteError
+  | BindingOwnershipUnconfirmedError {
   return [
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,
     AmbiguousDeviceTargetError,
-    DeviceAssignedToManagedSlotError,
-    DeviceOutsideManagedSlotsError,
+    DeviceAssignedToBindingError,
+    DeviceOutsideBrokerGrantError,
     DeviceOutsideBoundSessionError,
     SessionOutsideBoundSessionError,
     InputDeviceOwnedError,
@@ -194,8 +194,8 @@ function hasSelfDescribedRefusalPayload(
     OrphanRecorderActiveError,
     AppNotRunningError,
     SdkTooOldError,
-    ManagedSlotDiscoveryIncompleteError,
-    ManagedSlotOwnershipUnconfirmedError,
+    BindingDiscoveryIncompleteError,
+    BindingOwnershipUnconfirmedError,
   ].some((Refusal) => error instanceof Refusal);
 }
 

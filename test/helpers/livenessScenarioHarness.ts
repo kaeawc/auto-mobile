@@ -60,11 +60,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type {
-  SlotExecOwner,
-  SlotProcessIdentity,
-  SlotRegistry,
-} from "../../src/daemon/managedSlots/slotRegistry";
-import { openSqliteSlotRegistry } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
+  BindingExecOwner,
+  BindingProcessIdentity,
+  BindingRegistry,
+} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { McpClientFactory } from "../../src/daemon/socketServer";
 import { toolErrorResult, type WireFixture } from "../daemon/helpers/desktopWireHarness";
 import {
@@ -190,11 +190,11 @@ export interface LivenessScenarioOptions {
    */
   ownerLeaseMs?: number;
   /**
-   * Give every daemon of the scenario the host's managed-slot registry: one in-memory registry
+   * Give every daemon of the scenario the host's broker binding registry: one in-memory registry
    * that outlives a daemon restart, as the registry file does (see
    * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
    */
-  managedSlots?: boolean;
+  bindings?: boolean;
 }
 
 /** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
@@ -276,8 +276,8 @@ function armHostTripwires(daemon: Daemon): void {
   }
 }
 
-/** Managed-slot exclusion that holds nothing: the host-wide slot registry is never opened. */
-const NO_MANAGED_SLOTS = {
+/** Broker binding exclusion that holds nothing: the host-wide binding registry is never opened. */
+const NO_BINDINGS = {
   refresh: async () => {},
   holderOf: () => undefined,
   stableIdsFor: () => new Set<string>(),
@@ -450,8 +450,8 @@ export class LivenessScenario {
   readonly exitRecords: DaemonExitRecord[] = [];
   /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
-  private readonly managedSlotsEnabled: boolean;
-  private managedSlots: SlotRegistry | undefined;
+  private readonly bindingsEnabled: boolean;
+  private bindings: BindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
   private readonly deviceNames: Record<string, string>;
@@ -490,7 +490,7 @@ export class LivenessScenario {
     this.freshConnectionIdPerDial = options.freshConnectionIdPerDial ?? false;
     this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
-    this.managedSlotsEnabled = options.managedSlots ?? false;
+    this.bindingsEnabled = options.bindings ?? false;
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -688,7 +688,7 @@ export class LivenessScenario {
         selfPid: SCENARIO_DAEMON_PID,
       }),
       () => ({ listDeviceImages: async () => [] }),
-      () => NO_MANAGED_SLOTS,
+      () => NO_BINDINGS,
       () => undefined,
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
@@ -696,11 +696,11 @@ export class LivenessScenario {
       daemon as unknown as { exitRecordFileSystem: FakeDaemonExitRecordFileSystem }
     ).exitRecordFileSystem = exitFiles;
     armHostTripwires(daemon);
-    if (this.managedSlotsEnabled) {
+    if (this.bindingsEnabled) {
       // The registry is a file on the host that outlives the daemon; each process finds it open.
-      this.managedSlots ??= await openSqliteSlotRegistry({ dbPath: ":memory:", timer: this.timer });
-      (daemon as unknown as { managedSlotRegistry: Promise<SlotRegistry> }).managedSlotRegistry =
-        Promise.resolve(this.managedSlots);
+      this.bindings ??= await openSqliteBindingRegistry({ dbPath: ":memory:", timer: this.timer });
+      (daemon as unknown as { bindingRegistry: Promise<BindingRegistry> }).bindingRegistry =
+        Promise.resolve(this.bindings);
     }
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
@@ -1555,23 +1555,23 @@ export class LivenessScenario {
 
   /** The running daemon's own id: what it records itself as wherever it owns something. */
   get daemonId(): string {
-    return this.daemonInternals().managedSlotJournalOwner().daemonId;
+    return this.daemonInternals().bindingJournalOwner().daemonId;
   }
 
-  private daemonInternals(): { managedSlotJournalOwner(): SlotProcessIdentity } {
-    return this.daemon.daemon as unknown as { managedSlotJournalOwner(): SlotProcessIdentity };
+  private daemonInternals(): { bindingJournalOwner(): BindingProcessIdentity } {
+    return this.daemon.daemon as unknown as { bindingJournalOwner(): BindingProcessIdentity };
   }
 
   /**
-   * `sessionId` becomes the execution of a managed slot, as `daemon/acquireManagedSlots` leaves
+   * `sessionId` becomes the execution of a broker binding, as broker acquisition leaves
    * it: the session is held on the managed-execution policy and the host registry records the
    * running daemon as the slot's execution owner. The reconciler's device work is the device
-   * boundary; the registry writes are the ones the acquisition makes. Needs `managedSlots`.
+   * boundary; the registry writes are the ones the acquisition makes. Needs `bindings`.
    */
   async holdAsManagedExecution(sessionId: string, idleTimeoutMs?: number): Promise<void> {
-    const registry = this.managedSlots;
+    const registry = this.bindings;
     if (!registry) {
-      throw new Error("LivenessScenario: start the scenario with `managedSlots`");
+      throw new Error("LivenessScenario: start the scenario with `bindings`");
     }
     await this.daemon.manager.adoptManagedExecutionLivenessPolicy(sessionId, { idleTimeoutMs });
     const scope = await registry.ensureScope({
@@ -1582,9 +1582,9 @@ export class LivenessScenario {
     if (scope.kind !== "ready") {
       throw new Error(`LivenessScenario: managed scope not ready: ${scope.kind}`);
     }
-    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
     const stableDeviceId = `Pixel_${sessionId}`;
-    await registry.initSlot(key, { role: "primary", platform: PLATFORM, requestedSpec: {} });
+    await registry.initBinding(key, { role: "primary", platform: PLATFORM, requestedSpec: {} });
     await registry.commitBinding(
       key,
       { generation: 0, stableDeviceId: null },
@@ -1600,16 +1600,23 @@ export class LivenessScenario {
     const claimed = await registry.claimExecution(
       key,
       { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
-      { ...this.daemonInternals().managedSlotJournalOwner(), sessionUuid: sessionId },
+      { ...this.daemonInternals().bindingJournalOwner(), sessionUuid: sessionId },
     );
     if (claimed.kind !== "claimed") {
-      throw new Error(`LivenessScenario: slot not claimed: ${claimed.kind}`);
+      throw new Error(`LivenessScenario: binding not claimed: ${claimed.kind}`);
     }
   }
 
   /** Who the host registry records as owning the slot `sessionId` executes in, if any. */
-  async managedSlotOwnerOf(sessionId: string): Promise<SlotExecOwner | undefined> {
-    const [assignment] = (await this.managedSlots?.findExecutionAssignments(sessionId)) ?? [];
+  async holdBrokerExecution(sessionId: string): Promise<void> {
+    const keeper = this.proxy as unknown as {
+      holdBrokerSession(requestId: string, sessionUuid: string): Promise<void>;
+    };
+    await keeper.holdBrokerSession(`request-${sessionId}`, sessionId);
+  }
+
+  async bindingOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {
+    const [assignment] = (await this.bindings?.findExecutionAssignments(sessionId)) ?? [];
     return assignment?.execOwner ?? undefined;
   }
 
@@ -1684,7 +1691,7 @@ export class LivenessScenario {
     // The daemon wires its clock onto the process singleton; a stopped scenario must not answer
     // for later files sharing that process (Windows CI).
     executionTracker.setSessionClockOffsetProvider(() => 0);
-    await this.managedSlots?.close();
+    await this.bindings?.close();
     this.tools.uninstall();
     if (this.realStartAdmission) {
       resetDeviceToolsDependencies();

@@ -2,7 +2,7 @@ import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/h
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
-import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
+import { StaleDisplayError, type StaleDisplayDetails } from "../../observe/StaleDisplayError";
 import {
   scopedSearchDescription,
   usesScopedSwipeContainer,

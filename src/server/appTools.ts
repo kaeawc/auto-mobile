@@ -13,15 +13,24 @@ import {
 } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/action/AppLifecycle";
+import type { ActionCall } from "../features/action/ActionCall";
 import { CrashApp } from "../features/action/CrashApp";
-import { LaunchApp } from "../features/action/LaunchApp";
+import { LaunchApp, type LaunchAppCall } from "../features/action/LaunchApp";
 import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
 } from "../features/action/launchObservationPackages";
-import { TerminateApp } from "../features/action/TerminateApp";
-import { InstallApp, type InstallGuardOptions } from "../features/action/InstallApp";
-import { UninstallApp, type UninstallGuardOptions } from "../features/action/UninstallApp";
+import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
+import {
+  InstallApp,
+  type InstallAppCall,
+  type InstallGuardOptions,
+} from "../features/action/InstallApp";
+import {
+  UninstallApp,
+  type UninstallAppCall,
+  type UninstallGuardOptions,
+} from "../features/action/UninstallApp";
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import type { PackageSigningInspection } from "../models/PackageSigningInspection";
@@ -117,17 +126,7 @@ const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
 });
 
 export interface LaunchAppExecutor {
-  execute(
-    appId: string,
-    clearAppData?: boolean,
-    coldBoot?: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
-    launchArguments?: string[],
-    launchEnvironment?: Record<string, string>,
-  ): Promise<LaunchAppResult>;
+  execute(appId: string, launch: LaunchAppCall): Promise<LaunchAppResult>;
 }
 
 /** Injects the iOS simulator prototype agent around a launch (#10567). */
@@ -185,13 +184,7 @@ function createDefaultLaunchAppToolDependencies(): LaunchAppToolDependencies {
 }
 
 export interface TerminateAppExecutor {
-  execute(
-    appId: string,
-    options?: {
-      skipUiStability?: boolean;
-    },
-    signal?: AbortSignal,
-  ): Promise<TerminateAppResult>;
+  execute(appId: string, call?: TerminateAppCall): Promise<TerminateAppResult>;
 }
 
 export interface TerminateAppToolDependencies {
@@ -203,7 +196,7 @@ const defaultTerminateAppToolDependencies: TerminateAppToolDependencies = {
 };
 
 export interface CrashAppExecutor {
-  execute(appId: string, signal?: AbortSignal): Promise<CrashAppResult>;
+  execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
 }
 
 export interface CrashAppToolDependencies {
@@ -231,12 +224,7 @@ const defaultAppLifecycleToolDependencies: AppLifecycleToolDependencies = {
 };
 
 export interface InstallAppExecutor {
-  execute(
-    artifactPath: string,
-    userId?: number,
-    signal?: AbortSignal,
-    guard?: InstallGuardOptions,
-  ): Promise<InstallAppResult>;
+  execute(artifactPath: string, call?: InstallAppCall): Promise<InstallAppResult>;
 }
 
 export interface InstallAppToolDependencies {
@@ -244,13 +232,7 @@ export interface InstallAppToolDependencies {
 }
 
 export interface UninstallAppExecutor {
-  execute(
-    appId: string,
-    keepData?: boolean,
-    userId?: number,
-    signal?: AbortSignal,
-    guard?: UninstallGuardOptions,
-  ): Promise<UninstallAppResult>;
+  execute(appId: string, call?: UninstallAppCall): Promise<UninstallAppResult>;
 }
 
 export interface UninstallAppToolDependencies {
@@ -1017,18 +999,14 @@ function executeLaunch(
   prototypeLaunch: PrototypeLaunch | undefined,
   signal: AbortSignal | undefined,
 ): Promise<LaunchAppResult> {
-  return launchApp.execute(
-    args.appId,
-    args.clearAppData ?? false,
+  return launchApp.execute(args.appId, {
+    clearAppData: args.clearAppData ?? false,
     // Injection takes effect only in a fresh process.
-    (args.coldBoot ?? false) || prototypeLaunch !== undefined,
-    undefined,
-    undefined,
-    undefined,
+    coldBoot: (args.coldBoot ?? false) || prototypeLaunch !== undefined,
     signal,
     launchArguments,
-    prototypeLaunch?.environment,
-  );
+    launchEnvironment: prototypeLaunch?.environment,
+  });
 }
 
 /** Clears the launch's mutation token and returns the error to throw, token redacted. */
@@ -1200,13 +1178,10 @@ const createTerminateAppHandler =
       }
       const terminateApp = dependencies.createTerminateApp(device);
       mutationMayHaveHappened = true;
-      const result = await terminateApp.execute(
-        args.appId,
-        {
-          skipUiStability: true, // skip the 12+ second stability polling
-        },
+      const result = await terminateApp.execute(args.appId, {
+        skipUiStability: true, // skip the 12+ second stability polling
         signal,
-      );
+      });
 
       // A typed failure (e.g. an iOS installed-app listing that failed, or a
       // devicectl termination error) must surface as an error rather than a
@@ -1250,7 +1225,7 @@ const createCrashAppHandler =
     try {
       signal?.throwIfAborted();
       mutationMayHaveHappened = true;
-      const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
+      const result = await dependencies.createCrashApp(device).execute(args.appId, { signal });
       signal?.throwIfAborted();
 
       const message = result.success
@@ -1333,9 +1308,7 @@ const createInstallAppHandler =
       const installApp = dependencies.createInstallApp(device);
       mutationMayHaveHappened = true;
       const guard = installGuardFromArgs(args);
-      const result = guard
-        ? await installApp.execute(args.artifactPath, undefined, signal, guard)
-        : await installApp.execute(args.artifactPath, undefined, signal);
+      const result = await installApp.execute(args.artifactPath, { signal, guard });
       if (!result.success) {
         throw new ActionableError(
           result.error || `Failed to install app from ${args.artifactPath}`,
@@ -1371,9 +1344,7 @@ function executeUninstall(
   const guard: UninstallGuardOptions | undefined = args.expectedSigningSha256
     ? { expectedSigningSha256: args.expectedSigningSha256 }
     : undefined;
-  return guard
-    ? uninstallApp.execute(args.appId, keepData, undefined, signal, guard)
-    : uninstallApp.execute(args.appId, keepData, undefined, signal);
+  return uninstallApp.execute(args.appId, { keepData, signal, guard });
 }
 
 // Uninstall app handler
@@ -1582,7 +1553,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true, outputSchema: terminateAppResultSchema },
+    { defaultEnabled: true, outputSchema: terminateAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1590,7 +1561,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Intentionally crash a running app through the platform crash path",
     crashAppSchema,
     crashAppHandler,
-    { defaultEnabled: true, outputSchema: crashAppResultSchema },
+    { defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1614,6 +1585,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       // CtrlProxy runner is still starting, even though simctl install itself
       // does not use CtrlProxy.
       deviceReadiness: "booted",
+      replacesProcess: true,
     },
   );
 
@@ -1622,7 +1594,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(

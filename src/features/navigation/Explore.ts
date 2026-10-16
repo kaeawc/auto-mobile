@@ -1403,12 +1403,7 @@ export class Explore extends BaseVisualChange {
       // Same injected transport and timer as the home press above.
       const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
         packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        signal,
+        { clearAppData: false, coldBoot: false, signal },
       );
       if (!result.success) {
         throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);

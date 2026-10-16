@@ -65,7 +65,7 @@ describe("isNonOwnerReaderOfHeldDevice (#11350)", () => {
     expect(await readAs("holder:B")).toBe(false);
   });
 
-  test("a managed slot's execution session, which holds its device, is an owner", async () => {
+  test("a broker binding's execution session, which holds its device, is an owner", async () => {
     const slotExecution = "slot-exec-0123abcd";
     await sessionManager.createSession(slotExecution, device.deviceId, "android");
     expect(await readAs(slotExecution)).toBe(false);

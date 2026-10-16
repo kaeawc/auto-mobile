@@ -65,16 +65,6 @@ function fixture() {
     join(root, "dist/src/index.js"),
     [release.apkSha256, release.ipaSha256, release.runnerSha256].join("\n"),
   );
-  put(
-    join(root, "schemas/managed-slot-contract.json"),
-    JSON.stringify({
-      contractVersions: [1],
-      daemonCapabilities: {
-        base: "managed-slots/v1",
-        additive: [{ capability: "managed-slots/v1.deviceFamily" }],
-      },
-    }),
-  );
   const gitCalls: Array<{ args: readonly string[]; cwd: string }> = [];
   const ports: ArtifactIdentityPorts = {
     exists: (path) => files.has(path),
@@ -153,9 +143,8 @@ describe("artifact identity", () => {
     expect(check(identify(f.ports), "not_source_checkout").detail).toContain("source checkout");
     expect(check(identify(f.ports), "not_source_checkout").status).toBe("fail");
   });
-  test("refuses the stale release SHA and warns about its absent contract", () => {
+  test("refuses the stale release SHA", () => {
     const f = fixture();
-    f.files.delete(join(root, "schemas/managed-slot-contract.json"));
     const record = identifyArtifact(
       { packageDir: root, repoDir: "/repo", expectSourceSha: currentSha },
       f.ports,
@@ -165,7 +154,6 @@ describe("artifact identity", () => {
     expect(check(record, "source_sha").status).toBe("fail");
     expect(check(record, "source_sha").detail).toContain(oldSha);
     expect(check(record, "source_sha").detail).toContain(`but qualification expects ${currentSha}`);
-    expect(check(record, "managed_slot_contract").status).toBe("warn");
     expect(check(record, "build_info").status).toBe("warn");
     expect(f.gitCalls[0]).toEqual({
       args: ["rev-parse", "--verify", "--quiet", "refs/tags/0.0.84^{commit}"],
@@ -182,11 +170,6 @@ describe("artifact identity", () => {
     expect(record.proofLevel).toBe("local-build");
     expect(check(record, "source_sha").detail).toContain("matching expected B51BFE5");
     expect(check(record, "source_sha").detail).not.toContain("but qualification expects");
-    expect(record.managedSlotContract).toEqual({
-      present: true,
-      contractVersions: [1],
-      capabilities: ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
-    });
   });
   test("warns on local build-info and tag disagreement", () => {
     const f = fixture();

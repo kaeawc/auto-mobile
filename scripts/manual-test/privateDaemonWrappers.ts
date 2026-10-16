@@ -15,6 +15,7 @@ export function renderPrivateDaemonWrappers(
     ...Object.fromEntries(
       ["proxy", "frame", "aux"].map((name) => [`${name}${index}`, `${prefix} ${name} "$@"\n`]),
     ),
+    [`broker${index}`]: `#!/usr/bin/env bash\nset -euo pipefail\nexec bash ${script} --batch-dir ${shellQuote(batchDir)} --daemon 1 -- bun ${shellQuote(join(repoRoot, "scripts/manual-test/broker-batch.ts"))} "$@"\n`,
   };
 }
 export function writePrivateDaemonWrappers(

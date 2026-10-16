@@ -1,7 +1,4 @@
-import type {
-  ResolvedSessionDeviceProfile,
-  SessionDeviceProfile,
-} from "../../devices/sessionRequirements";
+import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
@@ -40,6 +37,3 @@ export interface SessionBrokerDevicePort {
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
   reset?(resource: BrokerResourceRecord): Promise<"clean" | "pending">;
 }
-
-/** Persist the exact profile and resolution evidence used for native provisioning. */
-export type BrokerResolvedProfile = ResolvedSessionDeviceProfile;

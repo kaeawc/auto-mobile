@@ -58,11 +58,6 @@ function identity(): ArtifactIdentityRecord {
       expectedIntegrity: null,
     },
     nativeResources: { from: "none", entries: {}, localAssets: [] },
-    managedSlotContract: {
-      present: true,
-      contractVersions: [1],
-      capabilities: ["managed-slots/v1"],
-    },
     checks: [],
   };
 }
@@ -211,7 +206,7 @@ describe("qualification aggregation", () => {
     const report = aggregateResults({ files, identity: null });
     const md = report.markdown;
     expect(aggregateResults({ files: [...files].reverse(), identity: null }).markdown).toBe(md);
-    expect(md).toStartWith("# Managed-slot qualification summary\n");
+    expect(md).toStartWith("# Qualification summary\n");
     const native = md.split("## Native observations")[1].split("## Injected faults")[0];
     expect(native.indexOf("| host | a.case |")).toBeLessThan(native.indexOf("| host | z.case |"));
     expect(native).not.toContain("fault.case");

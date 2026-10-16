@@ -229,7 +229,7 @@ describe("UninstallApp (iOS simulator)", () => {
       deviceAppUninstaller: fakeUninstaller,
     });
     // iOS cannot keep app data during uninstall — the request must be ignored.
-    const result = await uninstall.execute("com.example.app", true);
+    const result = await uninstall.execute("com.example.app", { keepData: true });
 
     expect(result.success).toBe(true);
     expect(result.keepData).toBe(false);
@@ -495,7 +495,7 @@ describe("UninstallApp (Android)", () => {
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
-    const result = await uninstall.execute("com.example.app", true);
+    const result = await uninstall.execute("com.example.app", { keepData: true });
 
     expect(result.success).toBe(true);
     expect(result.keepData).toBe(true);
@@ -660,12 +660,10 @@ describe("UninstallApp (Android)", () => {
     controller.abort(new Error("caller cancelled"));
 
     await expect(
-      new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb)).execute(
-        "com.example.app",
-        false,
-        undefined,
-        controller.signal,
-      ),
+      new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb)).execute("com.example.app", {
+        keepData: false,
+        signal: controller.signal,
+      }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(fakeAdb.getCommandCalls()).toHaveLength(0);
   });
@@ -694,12 +692,10 @@ describe("UninstallApp (Android)", () => {
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
 
     await expect(
-      new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
-        "com.example.app",
-        false,
-        undefined,
-        controller.signal,
-      ),
+      new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute("com.example.app", {
+        keepData: false,
+        signal: controller.signal,
+      }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(
       adb.getCommandCalls().filter((call) => call.command === "shell pm list packages --user 0"),
@@ -888,7 +884,7 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
     };
 
     await expect(
-      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+      createUninstall().execute("com.example.app", { keepData: false, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
     expect(fakeUninstaller.calls).toHaveLength(0);
@@ -903,7 +899,7 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
     };
 
     await expect(
-      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+      createUninstall().execute("com.example.app", { keepData: false, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
@@ -918,7 +914,7 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
     };
 
     await expect(
-      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+      createUninstall().execute("com.example.app", { keepData: false, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 
@@ -931,7 +927,7 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
     };
 
     await expect(
-      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+      createUninstall().execute("com.example.app", { keepData: false, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 
@@ -995,7 +991,10 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
       };
 
       await expect(
-        uninstallWith(repository).execute("com.example.app", false, undefined, controller.signal),
+        uninstallWith(repository).execute("com.example.app", {
+          keepData: false,
+          signal: controller.signal,
+        }),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
       expect(repository.staleCalls).toBe(1);
@@ -1023,7 +1022,10 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
       };
 
       await expect(
-        uninstallWith(repository).execute("com.example.app", false, undefined, controller.signal),
+        uninstallWith(repository).execute("com.example.app", {
+          keepData: false,
+          signal: controller.signal,
+        }),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
       expect(repository.staleCalls).toBe(0);
@@ -1036,12 +1038,10 @@ describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const result = await createUninstall().execute(
-      "com.example.app",
-      false,
-      undefined,
-      controller.signal,
-    );
+    const result = await createUninstall().execute("com.example.app", {
+      keepData: false,
+      signal: controller.signal,
+    });
 
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(true);

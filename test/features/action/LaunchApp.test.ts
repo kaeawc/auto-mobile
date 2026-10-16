@@ -157,7 +157,7 @@ describe("LaunchApp", () => {
         activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
       };
     });
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
     expect(result.success).toBe(true);
     expect(invalidator.calls).toEqual([device]);
     // The app was not running, so this launch starts a new process.
@@ -182,7 +182,7 @@ describe("LaunchApp", () => {
       ...createObserveResult(),
       activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
     });
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
     expect(result.success).toBe(true);
     expect(invalidator.retiredProcesses).toEqual([]);
   });
@@ -207,7 +207,7 @@ describe("LaunchApp", () => {
       activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
     });
     const detectorSpy = spyOn(launchApp["targetUserDetector"], "detectTargetUserId");
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
     expect(result).toMatchObject({ success: true, userId: 0 });
     expect(
       fakeAdb.wasCommandExecuted(
@@ -239,15 +239,11 @@ describe("LaunchApp", () => {
       }
       return result;
     });
-    const result = await launchApp.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = await launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
 
     // #6868: "make this app foreground" is a goal, not a transition. An app that
     // is already there is the goal satisfied — a success carrying
@@ -269,26 +265,22 @@ describe("LaunchApp", () => {
 
   test("rejects Android launch arguments before invoking device commands", async () => {
     await expect(
-      launchApp.execute(packageName, false, false, undefined, undefined, undefined, undefined, [
-        "--flag",
-      ]),
+      launchApp.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        launchArguments: ["--flag"],
+      }),
     ).rejects.toThrow("launchArguments are supported on iOS only");
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 
   test("rejects an Android launch environment before invoking device commands", async () => {
     await expect(
-      launchApp.execute(
-        packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770" },
-      ),
+      launchApp.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        launchEnvironment: { SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770" },
+      }),
     ).rejects.toThrow("launch environment is supported on iOS simulators only");
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
@@ -300,7 +292,7 @@ describe("LaunchApp", () => {
       stderr: "",
     });
 
-    await launchApp.execute(packageName, false, false);
+    await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(fakeAdb.getCommandCalls()).toContainEqual(
       expect.objectContaining({
@@ -332,7 +324,9 @@ describe("LaunchApp", () => {
     (nestedLaunch as any).observeScreen = fakeObserveScreen;
     (nestedLaunch as any).window = fakeWindow;
 
-    await runWithPerfTracker(outer, () => nestedLaunch.execute(packageName, false, false));
+    await runWithPerfTracker(outer, () =>
+      nestedLaunch.execute(packageName, { clearAppData: false, coldBoot: false }),
+    );
 
     expect(outer.getTimings()).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "adb shell cmd user" })]),
@@ -362,7 +356,9 @@ describe("LaunchApp", () => {
       stderr: "",
     });
 
-    await expect(prioritizedLaunch.execute(packageName, false, false)).resolves.toMatchObject({
+    await expect(
+      prioritizedLaunch.execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).resolves.toMatchObject({
       success: true,
     });
 
@@ -408,15 +404,11 @@ describe("LaunchApp", () => {
     });
 
     try {
-      const result = await launchApp.execute(
-        packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const result = await launchApp.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        signal: controller.signal,
+      });
 
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
@@ -455,7 +447,9 @@ describe("LaunchApp", () => {
     });
 
     try {
-      await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("unknown command");
+      await expect(
+        launchApp.execute(packageName, { clearAppData: false, coldBoot: false }),
+      ).rejects.toThrow("unknown command");
       expect(calls).toHaveLength(1);
       expect(dispatches).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
@@ -473,7 +467,9 @@ describe("LaunchApp", () => {
     });
 
     try {
-      await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
+      await expect(
+        launchApp.execute(packageName, { clearAppData: false, coldBoot: false }),
+      ).rejects.toThrow("device offline");
       expect(calls).toHaveLength(2);
       expect(dispatches).toBe(2);
       expect(fakeTimer.now()).toBe(200);
@@ -493,15 +489,11 @@ describe("LaunchApp", () => {
     });
 
     try {
-      const resultPromise = launchApp.execute(
-        packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const resultPromise = launchApp.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        signal: controller.signal,
+      });
       for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i += 1) {
         await Promise.resolve();
       }
@@ -528,15 +520,11 @@ describe("LaunchApp", () => {
 
     try {
       await expect(
-        launchApp.execute(
-          packageName,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        ),
+        launchApp.execute(packageName, {
+          clearAppData: false,
+          coldBoot: false,
+          signal: controller.signal,
+        }),
       ).rejects.toBe(deviceLoss);
       expect(calls).toHaveLength(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
@@ -560,7 +548,7 @@ describe("LaunchApp", () => {
       createObserveResult(index === 0 ? "com.example.other" : packageName),
     );
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.alreadyForeground).toBe(true);
@@ -578,7 +566,7 @@ describe("LaunchApp", () => {
     });
     fakeObserveScreen.setObserveResult(() => createObserveResult(otherPackageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
@@ -615,7 +603,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(helperObservation);
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(result.foregroundActivityPackage).toBe(helperPackageName);
@@ -681,7 +672,11 @@ describe("LaunchApp", () => {
       }),
     );
 
-    const result = await launchApp.execute(packageName, false, false, undefined, 0);
+    const result = await launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      userId: 0,
+    });
 
     expect(result.success).toBe(false);
     expect(result.verifiedBy).toBeUndefined();
@@ -810,7 +805,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(companionObservation);
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(result.verifiedBy).toBe("task-provenance");
@@ -844,7 +842,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(companionObservation);
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(false);
     expect(result.verifiedBy).toBeUndefined();
@@ -885,7 +886,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => overlayObservation);
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(false);
     expect(result.verifiedBy).toBeUndefined();
@@ -926,7 +930,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => overlayObservation);
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
@@ -961,15 +968,11 @@ describe("LaunchApp", () => {
       () => observations.shift() ?? createObserveResult(packageName),
     );
 
-    const result = await launchApp.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = await launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
@@ -1009,7 +1012,7 @@ describe("LaunchApp", () => {
         : notificationShadeObservation;
     });
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
@@ -1034,7 +1037,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => notificationShadeObservation);
 
-    const result = await launchApp.execute(packageName, false, true);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
     const collapseCount = fakeAdb
       .getExecutedCommands()
       .filter((command) => command === "shell cmd statusbar collapse").length;
@@ -1063,7 +1066,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => notificationShadeObservation);
 
-    const result = await launchApp.execute(packageName, false, true);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("(notification shade) is covering the app");
@@ -1087,7 +1090,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => keyguardObservation);
 
-    const result = await launchApp.execute(packageName, false, true);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("device is locked");
@@ -1112,7 +1115,7 @@ describe("LaunchApp", () => {
       fakeAdb.setForegroundApp({ packageName, userId: 0 });
       fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
       fakeObserveScreen.setObserveResult(() => observation);
-      return launchApp.execute(packageName, false, true);
+      return launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
     };
 
     test("a lock sample of locked=false identifies the shade", async () => {
@@ -1208,7 +1211,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(otherPackageName));
 
-    const result = await launchApp.execute(packageName, false, true);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(otherPackageName);
@@ -1256,7 +1259,10 @@ describe("LaunchApp", () => {
         : createObserveResult(helperPackageName, backStack),
     );
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(result.verifiedBy).toBe("task-root");
@@ -1288,7 +1294,7 @@ describe("LaunchApp", () => {
     });
     fakeObserveScreen.setObserveResult(otherTaskObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(otherPackageName);
@@ -1309,15 +1315,11 @@ describe("LaunchApp", () => {
     });
     fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
 
-    const result = await launchApp.execute(
-      settingsPackageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
 
     expect(result.success).toBe(true);
     expect(result.alreadyForeground).toBe(true);
@@ -1367,15 +1369,11 @@ describe("LaunchApp", () => {
     (cancellableLaunch as any).observeScreen = fakeObserveScreen;
     (cancellableLaunch as any).window = fakeWindow;
 
-    const result = cancellableLaunch.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = cancellableLaunch.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
     for (let attempt = 0; attempt < 10 && receivedSignals.length < 2; attempt++) {
       await Promise.resolve();
     }
@@ -1420,15 +1418,11 @@ describe("LaunchApp", () => {
       },
     });
 
-    const result = cancellableLaunch.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = cancellableLaunch.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
     for (let attempt = 0; attempt < 20 && fakeTimer.getPendingTimeoutCount() === 0; attempt++) {
       await Promise.resolve();
     }
@@ -1473,15 +1467,11 @@ describe("LaunchApp", () => {
 
     try {
       await expect(
-        cancellableLaunch.execute(
-          packageName,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        ),
+        cancellableLaunch.execute(packageName, {
+          clearAppData: true,
+          coldBoot: false,
+          signal: controller.signal,
+        }),
       ).rejects.toBe(deviceLoss);
       expect(clearCalls).toBe(0);
       expect(hasStartedAppLaunch()).toBe(false);
@@ -1512,15 +1502,11 @@ describe("LaunchApp", () => {
 
     try {
       await expect(
-        launchApp.execute(
-          packageName,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        ),
+        launchApp.execute(packageName, {
+          clearAppData: false,
+          coldBoot: false,
+          signal: controller.signal,
+        }),
       ).rejects.toBe(deviceLoss);
       expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(false);
     } finally {
@@ -1548,15 +1534,11 @@ describe("LaunchApp", () => {
 
     try {
       await expect(
-        launchApp.execute(
-          packageName,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        ),
+        launchApp.execute(packageName, {
+          clearAppData: false,
+          coldBoot: false,
+          signal: controller.signal,
+        }),
       ).rejects.toBe(deviceLoss);
       expect(
         fakeAdb
@@ -1601,15 +1583,11 @@ describe("LaunchApp", () => {
     });
 
     try {
-      const result = await discoveryLaunch.execute(
-        packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const result = await discoveryLaunch.execute(packageName, {
+        clearAppData: false,
+        coldBoot: false,
+        signal: controller.signal,
+      });
       expect(result).toMatchObject({ success: true, activityName: ".Discovered" });
       expect(
         fakeAdb
@@ -1827,7 +1805,10 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
     fakeObserveScreen.setObserveResult(createObserveResult(settingsPackageName));
 
-    const result = await launchApp.execute(settingsPackageName, false, false);
+    const result = await launchApp.execute(settingsPackageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(settingsPackageName);
@@ -2133,7 +2114,7 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeObserveScreen.setObserveResult(createObserveResult(packageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(true);
@@ -2162,7 +2143,7 @@ describe("LaunchApp", () => {
     const warnSpy = spyOn(logger, "warn");
 
     try {
-      const result = await launchApp.execute(packageName, false, false);
+      const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
       expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
       expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(true);
@@ -2247,7 +2228,7 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
     fakeObserveScreen.setObserveResult(createObserveResult(packageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result).toMatchObject({ success: true, activityName: `${packageName}.ui.MainActivity` });
     expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainActivity'`)).toBe(
@@ -2320,7 +2301,7 @@ describe("LaunchApp", () => {
       fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
       fakeObserveScreen.setObserveResult(createObserveResult(packageName));
 
-      const result = await launchApp.execute(packageName, false, false);
+      const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
       expect(result.success).toBe(true);
       expect(
@@ -2341,15 +2322,11 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
     const controller = new AbortController();
     const cancellation = new Error("launch cancelled");
-    const resultPromise = launchApp.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const resultPromise = launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
 
     for (let i = 0; i < 100 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
       await Promise.resolve();
@@ -2404,7 +2381,10 @@ describe("LaunchApp", () => {
     (lifecycleLaunchApp as any).observeScreen = fakeObserveScreen;
     (lifecycleLaunchApp as any).window = fakeWindow;
 
-    const result = await lifecycleLaunchApp.execute(packageName, true, false);
+    const result = await lifecycleLaunchApp.execute(packageName, {
+      clearAppData: true,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
@@ -2435,7 +2415,7 @@ describe("LaunchApp", () => {
       frame("onboarding"),
     ]);
 
-    const result = await launchApp.execute(packageName, true, false);
+    const result = await launchApp.execute(packageName, { clearAppData: true, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation?.viewHierarchy).toEqual(frame("onboarding").viewHierarchy);
@@ -2456,7 +2436,7 @@ describe("LaunchApp", () => {
       } as unknown as ViewHierarchyResult,
     }));
 
-    const result = await launchApp.execute(packageName, true, false);
+    const result = await launchApp.execute(packageName, { clearAppData: true, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(fakeTimer.getCurrentTime()).toBe(2_500);
@@ -2469,7 +2449,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(createObserveResult(packageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
@@ -2493,7 +2473,10 @@ describe("LaunchApp", () => {
       }),
     });
 
-    const result = await launchWithFailedClear.execute(packageName, true, false);
+    const result = await launchWithFailedClear.execute(packageName, {
+      clearAppData: true,
+      coldBoot: false,
+    });
 
     expect(result).toMatchObject({
       success: false,
@@ -2518,7 +2501,10 @@ describe("LaunchApp", () => {
       }),
     });
 
-    const result = await launchWithFailedClear.execute(packageName, true, false);
+    const result = await launchWithFailedClear.execute(packageName, {
+      clearAppData: true,
+      coldBoot: false,
+    });
 
     expect(result).toMatchObject({
       success: false,
@@ -2552,7 +2538,10 @@ describe("LaunchApp", () => {
     (lifecycleLaunchApp as any).observeScreen = fakeObserveScreen;
     (lifecycleLaunchApp as any).window = fakeWindow;
 
-    const result = await lifecycleLaunchApp.execute(packageName, true, false);
+    const result = await lifecycleLaunchApp.execute(packageName, {
+      clearAppData: true,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
@@ -2600,7 +2589,10 @@ describe("LaunchApp", () => {
     (lifecycleLaunchApp as any).observeScreen = fakeObserveScreen;
     (lifecycleLaunchApp as any).window = fakeWindow;
 
-    const result = await lifecycleLaunchApp.execute(packageName, false, true);
+    const result = await lifecycleLaunchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: true,
+    });
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([]);
@@ -2631,7 +2623,7 @@ describe("LaunchApp", () => {
     (action as any).observeScreen = fakeObserveScreen;
     (action as any).window = fakeWindow;
 
-    const result = await action.execute(packageName, false, true);
+    const result = await action.execute(packageName, { clearAppData: false, coldBoot: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Cold boot could not stop");
@@ -2646,7 +2638,7 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
 
-    const resultPromise = launchApp.execute(packageName, false, false);
+    const resultPromise = launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     for (let i = 0; i < 500 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
       await Promise.resolve();
@@ -2679,15 +2671,11 @@ describe("LaunchApp", () => {
       () => observations.shift() ?? createObserveResult(packageName),
     );
 
-    const result = await launchApp.execute(
-      packageName,
-      false,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    );
+    const result = await launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      signal: controller.signal,
+    });
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
@@ -2720,7 +2708,7 @@ describe("LaunchApp", () => {
         () => observations.shift() ?? createObserveResult(packageName),
       );
 
-      const result = await launchApp.execute(packageName, false, false);
+      const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
       expect(result.observation?.activeWindow?.appId).toBe(packageName);
       expect(fakeObserveScreen.getExecuteOptions().every((options) => options.skipScreenshot)).toBe(
@@ -2755,7 +2743,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(unverifiedObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(false);
     expect(result.observation).toBeUndefined();
@@ -2779,7 +2767,7 @@ describe("LaunchApp", () => {
       fakeTimer.now() < 10_500 ? unverifiedObservation : createObserveResult(packageName),
     );
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation?.freshness?.verified).not.toBe(false);
@@ -2809,7 +2797,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(noWindowObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation).toBeDefined();
@@ -2855,7 +2843,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(statusBarOnlyObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     // Preserved as a no-window outcome, NOT flipped to a wrong-app rejection.
     expect(result.success).toBe(true);
@@ -2887,7 +2875,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(wrongAppObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
@@ -2922,7 +2910,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(laggedObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
@@ -2948,7 +2936,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(rightAppObservation);
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observationOmitted).toBeUndefined();
@@ -2976,7 +2964,7 @@ describe("LaunchApp", () => {
       notificationPermissionDetected: true,
     });
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.success).toBe(true);
     expect(result.observation?.notificationPermissionDetected).toBe(true);
@@ -3005,7 +2993,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
 
-    const result = await staleLaunchApp.execute(packageName, false, false);
+    const result = await staleLaunchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
@@ -3026,7 +3017,7 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
 
     expect(result.observation).toBeUndefined();
     expect(result.observationOmitted).toBeDefined();
@@ -3050,7 +3041,10 @@ describe("LaunchApp", () => {
       installedAppsProvider,
     });
 
-    const resultPromise = parallelLaunchApp.execute(packageName, false, false);
+    const resultPromise = parallelLaunchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     for (let i = 0; i < 50 && fakeTimer.getPendingSleepCount() < 2; i += 1) {
       await Promise.resolve();
@@ -3081,7 +3075,9 @@ describe("LaunchApp", () => {
       installedAppsProvider,
     });
 
-    await expect(action.execute(packageName, false, false)).rejects.toThrow(
+    await expect(
+      action.execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toThrow(
       "Could not determine whether com.example.app is installed: adb package listing failed",
     );
     expect(hasStartedAppLaunch()).toBe(false);
@@ -3095,7 +3091,9 @@ describe("LaunchApp", () => {
       },
     });
 
-    await expect(action.execute(packageName, false, false)).rejects.toThrow(
+    await expect(
+      action.execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toThrow(
       "Could not determine whether com.example.app is installed: installed-app listing did not complete successfully",
     );
     expect(hasStartedAppLaunch()).toBe(false);
@@ -3117,7 +3115,10 @@ describe("LaunchApp", () => {
       installedAppsProvider,
     });
 
-    const resultPromise = parallelLaunchApp.execute(packageName, false, false);
+    const resultPromise = parallelLaunchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     for (let i = 0; i < 50 && fakeTimer.getPendingSleepCount() < 2; i += 1) {
       await Promise.resolve();
@@ -3150,7 +3151,10 @@ describe("LaunchApp", () => {
       performanceTrackerFactory: () => perfTracker,
     });
 
-    const resultPromise = perfLaunchApp.execute(packageName, false, false);
+    const resultPromise = perfLaunchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+    });
 
     for (let i = 0; i < 50 && fakeTimer.getPendingSleepCount() < 2; i += 1) {
       await Promise.resolve();
@@ -3222,7 +3226,10 @@ describe("LaunchApp", () => {
     (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
     try {
-      const result = await iosLaunchApp.execute(systemBundleId, false, false);
+      const result = await iosLaunchApp.execute(systemBundleId, {
+        clearAppData: false,
+        coldBoot: false,
+      });
       expect(result.success).toBe(true);
       // Warm launch uses simctl directly — checkInstalled not called on success path
       expect(installedAppsProvider.getCallCount()).toBe(0);
@@ -3353,7 +3360,10 @@ describe("LaunchApp", () => {
           installedApps: [systemBundleId],
         });
         try {
-          const warmResult = await harness.iosLaunchApp.execute(userBundleId, false, false);
+          const warmResult = await harness.iosLaunchApp.execute(userBundleId, {
+            clearAppData: false,
+            coldBoot: false,
+          });
           expect(warmResult).toMatchObject({
             success: false,
             packageName: userBundleId,
@@ -3423,17 +3433,11 @@ describe("LaunchApp", () => {
         SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
       };
       try {
-        const result = await harness.iosLaunchApp.execute(
-          userBundleId,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          environment,
-        );
+        const result = await harness.iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+          launchEnvironment: environment,
+        });
         expect(result).toMatchObject({ success: true, pid: 123 });
         expect(harness.calls).toEqual([
           "listapps",
@@ -3488,7 +3492,10 @@ describe("LaunchApp", () => {
       fakeTimer.enableAutoAdvance();
       const harness = createIOSTestHarness({ bundleId: systemBundleId, installedApps: [] });
       try {
-        const result = await harness.iosLaunchApp.execute(systemBundleId, false, true);
+        const result = await harness.iosLaunchApp.execute(systemBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         expect(harness.calls).toEqual([
           `terminate:${simulatorId}:${systemBundleId}`,
@@ -3512,7 +3519,10 @@ describe("LaunchApp", () => {
           launchSuccess,
         });
         try {
-          const result = await harness.iosLaunchApp.execute(userBundleId, false, true);
+          const result = await harness.iosLaunchApp.execute(userBundleId, {
+            clearAppData: false,
+            coldBoot: true,
+          });
           expect(result.success).toBe(launchSuccess);
           if (!launchSuccess) {
             expect(result.error).toBe("simctl launch failed");
@@ -3583,7 +3593,7 @@ describe("LaunchApp", () => {
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
       try {
-        await iosLaunchApp.execute(userBundleId, false, false);
+        await iosLaunchApp.execute(userBundleId, { clearAppData: false, coldBoot: false });
         // setTargetBundleId must fire before launch so CtrlProxy receives the
         // bundle ID via SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID when it starts.
         expect(callOrder.indexOf(`setTargetBundleId:${userBundleId}`)).toBeLessThan(
@@ -3603,7 +3613,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
 
         expect(result.success).toBe(true);
         expect(fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
@@ -3621,7 +3634,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result).toMatchObject({
           success: false,
           packageName: userBundleId,
@@ -3642,7 +3658,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result).toMatchObject({
           success: false,
           packageName: userBundleId,
@@ -3675,15 +3694,11 @@ describe("LaunchApp", () => {
       };
 
       try {
-        const result = iosLaunchApp.execute(
-          userBundleId,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        );
+        const result = iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+          signal: controller.signal,
+        });
         for (let attempt = 0; attempt < 20 && !receivedSignal; attempt++) {
           await Promise.resolve();
         }
@@ -3715,7 +3730,10 @@ describe("LaunchApp", () => {
       } as unknown as IOSCtrlProxyClient);
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
 
         expect(result.success).toBe(true);
         expect(clearedBundleIds).toEqual([]);
@@ -3791,7 +3809,10 @@ describe("LaunchApp", () => {
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(result.observation?.viewHierarchy?.packageName).toBe(userBundleId);
         expect(iosObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
@@ -3809,7 +3830,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(targetBundleIdCalls).toEqual([userBundleId]);
       } finally {
@@ -3825,7 +3849,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result.success).toBe(false);
         // setTargetBundleId is called before requestLaunchApp (which triggers CtrlProxy setup),
         // so it fires regardless of whether the launch ultimately succeeds.
@@ -3843,7 +3870,10 @@ describe("LaunchApp", () => {
       });
 
       try {
-        const result = await iosLaunchApp.execute(systemBundleId, false, false);
+        const result = await iosLaunchApp.execute(systemBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(targetBundleIdCalls).toEqual([]);
       } finally {
@@ -4025,7 +4055,10 @@ describe("LaunchApp", () => {
         listingSuccessful: listing.successful,
       });
       try {
-        const result = await h.iosLaunchApp.execute(userBundleId, true, true);
+        const result = await h.iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: true,
+        });
         expect(h.installedApps.getCallCount()).toBe(1);
         expect(h.simctlCalls).toEqual([]);
         expect(h.terminateCalls).toEqual([]);
@@ -4057,7 +4090,10 @@ describe("LaunchApp", () => {
         installedApps: ["com.apple.Preferences"],
       });
       try {
-        const result = await h.iosLaunchApp.execute(userBundleId, false, true);
+        const result = await h.iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         expect(h.installedApps.getCallCount()).toBe(0);
         expect(h.deviceAppLauncher.launchCalls).toHaveLength(1);
@@ -4073,16 +4109,11 @@ describe("LaunchApp", () => {
         deviceId: simulatorUdid,
       });
       try {
-        await iosLaunchApp.execute(
-          userBundleId,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          ["--allow-storage-mutations"],
-        );
+        await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+          launchArguments: ["--allow-storage-mutations"],
+        });
         expect(simctlCalls).toEqual([`terminate:${userBundleId}`, `launch:${userBundleId}`]);
         expect(simctlLaunchArguments).toEqual([["--allow-storage-mutations"]]);
       } finally {
@@ -4096,16 +4127,11 @@ describe("LaunchApp", () => {
         deviceId: physicalUdid,
       });
       try {
-        await iosLaunchApp.execute(
-          userBundleId,
-          false,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          ["--allow-storage-mutations"],
-        );
+        await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+          launchArguments: ["--allow-storage-mutations"],
+        });
         expect(deviceAppLauncher.launchCalls[0]?.launchArguments).toEqual([
           "--allow-storage-mutations",
         ]);
@@ -4131,7 +4157,10 @@ describe("LaunchApp", () => {
           cacheInvalidator: invalidator,
         });
         try {
-          expect((await h.iosLaunchApp.execute(userBundleId, false, true)).success).toBe(true);
+          expect(
+            (await h.iosLaunchApp.execute(userBundleId, { clearAppData: false, coldBoot: true }))
+              .success,
+          ).toBe(true);
           expect(invalidator.calls).toHaveLength(2);
           expect(invalidator.calls[0]).toMatchObject({ deviceId: simulatorUdid, platform: "ios" });
         } finally {
@@ -4149,7 +4178,10 @@ describe("LaunchApp", () => {
         useDefaultClearAppData: true,
       });
       try {
-        const result = await h.iosLaunchApp.execute(userBundleId, true, true);
+        const result = await h.iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: true,
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain("data container");
         expect(h.simctlCalls).toEqual([
@@ -4178,7 +4210,10 @@ describe("LaunchApp", () => {
         });
         const h = createDeviceHarness({ deviceId: simulatorUdid, cacheInvalidator: invalidator });
         try {
-          expect((await h.iosLaunchApp.execute(userBundleId, false, true)).success).toBe(true);
+          expect(
+            (await h.iosLaunchApp.execute(userBundleId, { clearAppData: false, coldBoot: true }))
+              .success,
+          ).toBe(true);
           await store.put(simulatorUdid, stale, generation);
           expect(store.getRecentInMemoryForDevice(simulatorUdid)).toEqual(
             fence ? undefined : stale,
@@ -4197,11 +4232,10 @@ describe("LaunchApp", () => {
         launchResult: { success: true, pid: 4321 },
       });
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ false,
-          /* coldBoot */ true,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         expect(result.pid).toBe(4321);
         // Routed through devicectl with cold-boot relaunch semantics.
@@ -4225,7 +4259,7 @@ describe("LaunchApp", () => {
           deviceId: physicalUdid,
         });
       try {
-        await iosLaunchApp.execute(userBundleId, false, true);
+        await iosLaunchApp.execute(userBundleId, { clearAppData: false, coldBoot: true });
         // Exactly one devicectl round-trip: the launch (with --terminate-existing).
         // No separate pre-terminate call, and simctl is never touched on a device.
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
@@ -4245,7 +4279,10 @@ describe("LaunchApp", () => {
         deviceId: simulatorUdid,
       });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         expect(terminateCalls).toEqual([{ bundleId: userBundleId, deviceId: simulatorUdid }]);
       } finally {
@@ -4260,7 +4297,10 @@ describe("LaunchApp", () => {
         terminateError: new Error("not running"),
       });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         expect(simctlCalls).toEqual([`terminate:${userBundleId}`, `launch:${userBundleId}`]);
       } finally {
@@ -4274,11 +4314,10 @@ describe("LaunchApp", () => {
         deviceId: physicalUdid,
       });
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ false,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
         expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
@@ -4295,7 +4334,10 @@ describe("LaunchApp", () => {
         launchResult: { success: false, error: "Application not found on device" },
       });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain("Application not found on device");
       } finally {
@@ -4308,11 +4350,10 @@ describe("LaunchApp", () => {
       const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } =
         createDeviceHarness({ deviceId: physicalUdid });
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(clearCalls).toHaveLength(1);
         expect(clearCalls[0]).toMatchObject({
@@ -4341,11 +4382,10 @@ describe("LaunchApp", () => {
           clearResult: { success: false, packageName: userBundleId, error: "reinstall failed" },
         });
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: false,
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain("Failed to clear app data: reinstall failed");
         expect(clearCalls).toHaveLength(1);
@@ -4367,7 +4407,10 @@ describe("LaunchApp", () => {
         deviceId: simulatorUdid,
       });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: false,
+          coldBoot: true,
+        });
         expect(result.success).toBe(true);
         // Simulator path untouched: simctl used, devicectl launcher never called.
         expect(simctlCalls.some((c) => c === `launch:${userBundleId}`)).toBe(true);
@@ -4395,15 +4438,11 @@ describe("LaunchApp", () => {
 
       try {
         await expect(
-          iosLaunchApp.execute(
-            userBundleId,
-            /* clearAppData */ true,
-            /* coldBoot */ false,
-            undefined,
-            undefined,
-            undefined,
-            controller.signal,
-          ),
+          iosLaunchApp.execute(userBundleId, {
+            clearAppData: true,
+            coldBoot: false,
+            signal: controller.signal,
+          }),
         ).rejects.toBe(deviceLoss);
         expect(clearCalls).toHaveLength(0);
         expect(deviceAppLauncher.launchCalls).toHaveLength(0);
@@ -4527,11 +4566,10 @@ describe("LaunchApp", () => {
         },
       );
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         expect(installedApps.getCallCount()).toBe(1);
         expect(calls).toEqual([
@@ -4558,11 +4596,10 @@ describe("LaunchApp", () => {
       // No containerPath → get_app_container returns empty → clear fails.
       const { iosLaunchApp, calls, cleanup } = createClearDataHarness(userBundleId);
       try {
-        const result = await iosLaunchApp.execute(
-          userBundleId,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(userBundleId, {
+          clearAppData: true,
+          coldBoot: false,
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain("Failed to clear app data");
         // Must NOT launch with stale data
@@ -4576,11 +4613,10 @@ describe("LaunchApp", () => {
       fakeTimer.enableAutoAdvance();
       const { iosLaunchApp, calls, cleanup } = createClearDataHarness(systemBundleId);
       try {
-        const result = await iosLaunchApp.execute(
-          systemBundleId,
-          /* clearAppData */ true,
-          /* coldBoot */ false,
-        );
+        const result = await iosLaunchApp.execute(systemBundleId, {
+          clearAppData: true,
+          coldBoot: false,
+        });
         expect(result.success).toBe(true);
         // No get_app_container resolution for system bundles
         expect(calls.some((c) => c.startsWith("exec:get_app_container"))).toBe(false);

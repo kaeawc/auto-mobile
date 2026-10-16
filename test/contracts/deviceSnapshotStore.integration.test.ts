@@ -12,8 +12,8 @@ runDeviceSnapshotStoreContract("FakeDeviceSnapshotStore", async () => {
   return {
     store,
     // Existence comes from replaceSnapshotData; only the scripted size needs setting.
-    materialize: async (name, _options, bytes) => {
-      store.setSnapshotSize(name, bytes);
+    materialize: async (name, options, bytes) => {
+      store.setSnapshotSize(name, bytes, options);
     },
   };
 });

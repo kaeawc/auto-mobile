@@ -589,7 +589,7 @@ describe("Keyboard", () => {
           keyboardWindowHierarchy(),
         ]);
 
-        await newKeyboard().execute("open", controller.signal);
+        await newKeyboard().execute("open", { signal: controller.signal });
 
         expect(fakeClient.selectorSupportSignals).toEqual([controller.signal]);
         expect(fakeClient.nodeActionSignals).toEqual([controller.signal]);
@@ -600,7 +600,7 @@ describe("Keyboard", () => {
         fakeHierarchy.setResults([selectorField()]);
         fakeClient.onNodeAction = undefined;
         const keyboard = newKeyboard();
-        const open = keyboard.execute("open", controller.signal);
+        const open = keyboard.execute("open", { signal: controller.signal });
         controller.abort();
 
         await expect(open).rejects.toThrow("Operation cancelled");
@@ -614,7 +614,7 @@ describe("Keyboard", () => {
         fakeHierarchy.setDefaultResult(baseHierarchy());
         fakeClient.onNodeAction = () => controller.abort();
 
-        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+        await expect(newKeyboard().execute("open", { signal: controller.signal })).rejects.toThrow(
           "Operation cancelled",
         );
 
@@ -637,7 +637,7 @@ describe("Keyboard", () => {
         };
         fakeClient.onNodeAction = () => controller.abort();
 
-        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+        await expect(newKeyboard().execute("open", { signal: controller.signal })).rejects.toThrow(
           "Keyboard open outcome is indeterminate",
         );
 
@@ -659,7 +659,7 @@ describe("Keyboard", () => {
         };
         fakeClient.onNodeAction = () => controller.abort();
 
-        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+        await expect(newKeyboard().execute("open", { signal: controller.signal })).rejects.toThrow(
           "Operation cancelled",
         );
         expect(fakeAdb.getExecutedCommands()).toEqual([]);
@@ -670,7 +670,7 @@ describe("Keyboard", () => {
         fakeHierarchy.setResults([focusedInputHierarchy()]);
         fakeClient.onCaretRead = () => controller.abort();
 
-        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+        await expect(newKeyboard().execute("open", { signal: controller.signal })).rejects.toThrow(
           "Operation cancelled",
         );
         expect(fakeClient.caretReadCount).toBe(1);
@@ -691,9 +691,9 @@ describe("Keyboard", () => {
         });
 
         try {
-          await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
-            "Keyboard open outcome is indeterminate: the tap was dispatched",
-          );
+          await expect(
+            newKeyboard().execute("open", { signal: controller.signal }),
+          ).rejects.toThrow("Keyboard open outcome is indeterminate: the tap was dispatched");
         } finally {
           execute.mockRestore();
         }
@@ -714,7 +714,9 @@ describe("Keyboard", () => {
         fakeHierarchy.setResults([focusedInputHierarchy()]);
         fakeAdb.setCommandError("shell input tap", new Error("adb offline"));
 
-        await expect(newKeyboard().execute("open", live().signal)).rejects.toThrow("adb offline");
+        await expect(newKeyboard().execute("open", { signal: live().signal })).rejects.toThrow(
+          "adb offline",
+        );
       });
     });
 
@@ -876,7 +878,7 @@ describe("Keyboard", () => {
     controller.abort();
     const keyboard = newKeyboard();
 
-    await expect(keyboard.execute("open", controller.signal)).rejects.toThrow(
+    await expect(keyboard.execute("open", { signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
@@ -965,7 +967,7 @@ describe("Keyboard", () => {
     controller.abort();
     const keyboard = newKeyboard();
 
-    await expect(keyboard.execute("close", controller.signal)).rejects.toThrow(
+    await expect(keyboard.execute("close", { signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
@@ -1161,10 +1163,9 @@ describe("Keyboard", () => {
     };
     try {
       await expect(
-        new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
-          "detect",
-          controller.signal,
-        ),
+        new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute("detect", {
+          signal: controller.signal,
+        }),
       ).rejects.toThrow("Operation cancelled");
       expect(warning).not.toHaveBeenCalled();
       expect(fakeTimer.now()).toBe(0);

@@ -29,6 +29,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { isPathInside } from "../utils/filesystem/pathContainment";
 import { packageListingContains } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../utils/shellQuote";
@@ -1849,6 +1850,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       const overridePath = this.getApkPathOverride();
+      // Set when the shared cache downloaded and fully verified the APK itself; holds the
+      // checksum it was verified against ("" when none was configured).
+      let cacheVerifiedAgainst: string | null = null;
       perf.startOperation("httpDownload");
       if (overridePath) {
         logger.info("Using local accessibility service APK", { path: overridePath });
@@ -1863,46 +1867,25 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         if (usedPrefetch) {
           logger.info("Using prefetched accessibility service APK", { path: apkPath });
         } else {
-          const apkUrl = resolveApkUrl();
-          logger.info("Downloading APK", { url: apkUrl, destination: apkPath });
-          await this.fileDownloader.download(apkUrl, apkPath);
+          cacheVerifiedAgainst = await this.downloadAndVerifyApk(apkPath);
         }
       }
       perf.endOperation("httpDownload");
 
-      // Verify the file exists and has reasonable size (should be > 10KB)
       const stats = await fs.stat(apkPath);
-      if (stats.size < 10000) {
-        throw new Error(`Downloaded APK is too small (${stats.size} bytes), likely invalid`);
-      }
-
-      this.verifyApkIntegrity(apkPath);
-
-      const expectedChecksum = await this.getExpectedChecksum();
-      // Perform checksum verification (only if checksum is provided)
-      if (expectedChecksum.length > 0) {
-        perf.startOperation("checksumVerify");
-        const { checksum: actualChecksum, source } =
-          await this.checksumCalculator.computeFileSha256(apkPath);
-        const normalizedActual = actualChecksum.toLowerCase();
-        const normalizedExpected = expectedChecksum.toLowerCase();
-
-        if (normalizedActual !== normalizedExpected) {
-          logger.warn("APK checksum verification failed", {
-            expected: normalizedExpected,
-            actual: normalizedActual,
-          });
-          throw new Error(
-            `APK checksum verification failed. Expected: ${normalizedExpected}, Got: ${normalizedActual}`,
-          );
+      if (cacheVerifiedAgainst === null) {
+        await this.assertApkSizeAndStructure(apkPath);
+        const expectedChecksum = await this.getExpectedChecksum();
+        // Perform checksum verification (only if checksum is provided)
+        if (expectedChecksum.length > 0) {
+          perf.startOperation("checksumVerify");
+          await this.verifyApkChecksum(apkPath, expectedChecksum);
+          perf.endOperation("checksumVerify");
+        } else {
+          this.warnApkChecksumSkipped();
         }
-
-        logger.info("APK checksum verified successfully", { checksum: normalizedActual, source });
-        perf.endOperation("checksumVerify");
-      } else {
-        logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
-          apkUrl: resolveApkUrl(),
-        });
+      } else if (cacheVerifiedAgainst.length === 0) {
+        this.warnApkChecksumSkipped();
       }
 
       logger.info("APK downloaded successfully", { path: apkPath, size: stats.size });
@@ -1921,6 +1904,80 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       throw new Error(`Failed to download APK: ${errorMessage(error)}`);
     }
+  }
+
+  /** Download the release APK via the shared cache; returns the checksum it was verified against. */
+  private async downloadAndVerifyApk(apkPath: string): Promise<string> {
+    const apkUrl = resolveApkUrl();
+    logger.info("Downloading APK", { url: apkUrl, destination: apkPath });
+    const expected = await this.getExpectedChecksum();
+    await new VerifiedArtifactCache({
+      downloader: this.fileDownloader,
+      checksumCalculator: this.checksumCalculator,
+    }).fetch({
+      label: "[CTRL_PROXY]",
+      expectedSha256: expected.length > 0 ? expected.toLowerCase() : null,
+      url: apkUrl,
+      archivePath: `${apkPath}.download`,
+      finalPath: apkPath,
+      // Size and structure are checked before the hash, as for override/prefetched APKs.
+      afterDownload: async (downloaded) => {
+        await this.assertApkSizeAndStructure(downloaded);
+      },
+      mismatchError: (want, actual) => {
+        logger.warn("APK checksum verification failed", {
+          expected: want,
+          actual: actual.toLowerCase(),
+        });
+        return new Error(
+          `APK checksum verification failed. Expected: ${want}, Got: ${actual.toLowerCase()}`,
+        );
+      },
+      publish: async (_downloaded, checksum, source) => {
+        if (checksum !== null) {
+          logger.info("APK checksum verified successfully", {
+            checksum: checksum.toLowerCase(),
+            source,
+          });
+        }
+      },
+    });
+    return expected;
+  }
+
+  private async verifyApkChecksum(apkPath: string, expectedChecksum: string): Promise<void> {
+    const { checksum: actualChecksum, source } =
+      await this.checksumCalculator.computeFileSha256(apkPath);
+    const normalizedActual = actualChecksum.toLowerCase();
+    const normalizedExpected = expectedChecksum.toLowerCase();
+
+    if (normalizedActual !== normalizedExpected) {
+      logger.warn("APK checksum verification failed", {
+        expected: normalizedExpected,
+        actual: normalizedActual,
+      });
+      throw new Error(
+        `APK checksum verification failed. Expected: ${normalizedExpected}, Got: ${normalizedActual}`,
+      );
+    }
+
+    logger.info("APK checksum verified successfully", { checksum: normalizedActual, source });
+  }
+
+  /** Reject an implausibly small or structurally invalid APK before it is hashed or installed. */
+  private async assertApkSizeAndStructure(apkPath: string): Promise<void> {
+    // Verify the file exists and has reasonable size (should be > 10KB)
+    const stats = await fs.stat(apkPath);
+    if (stats.size < 10000) {
+      throw new Error(`Downloaded APK is too small (${stats.size} bytes), likely invalid`);
+    }
+    this.verifyApkIntegrity(apkPath);
+  }
+
+  private warnApkChecksumSkipped(): void {
+    logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
+      apkUrl: resolveApkUrl(),
+    });
   }
 
   private verifyApkIntegrity(apkPath: string): void {

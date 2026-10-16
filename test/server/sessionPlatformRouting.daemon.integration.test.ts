@@ -400,14 +400,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       // A managed connection gets its own typed refusal for a non-slot device, not the
       // bound-session one above (#11268, #11274).
       DaemonState.getInstance()
-        .getManagedConnectionScopes()
+        .getBrokerConnectionScopes()
         .bind(socketSessionId, { scopeKey: "scope-11268", sessionUuids: [apple] });
       const refusedSlot = await pinned.callTool("setActiveDevice", {
         deviceId: devices[0].deviceId,
         platform: "android",
       });
       expect(refusedSlot.isError).toBe(true);
-      expect(JSON.stringify(refusedSlot.content)).toContain("device_outside_managed_slots");
+      expect(JSON.stringify(refusedSlot.content)).toContain("device_outside_broker_grant");
       // Reads stay open everywhere (owner decision Q6, #11271): a read naming a device other than
       // the bound session's watches it sessionless instead of failing on the binding, and control
       // there gets the typed refusal rather than the routing error.
@@ -423,9 +423,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         keepScreenAwake: false,
       });
       expect(refusedControl.isError).toBe(true);
-      expect(JSON.stringify(refusedControl.content)).toContain("device_outside_managed_slots");
+      expect(JSON.stringify(refusedControl.content)).toContain("device_outside_broker_grant");
       expect(received.length).toBe(receivedBeforeControl);
-      DaemonState.getInstance().getManagedConnectionScopes().unbind(socketSessionId);
+      DaemonState.getInstance().getBrokerConnectionScopes().unbind(socketSessionId);
       // A generic pinned connection reads the other device too.
       await pinned.callTool("readRoutingProbe", { deviceId: devices[0].deviceId });
       expect(received.pop()).toBe(`read:${devices[0].deviceId}`);

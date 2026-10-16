@@ -10,7 +10,7 @@ type MessageExtraInfo = Parameters<NonNullable<Transport["onmessage"]>>[1];
  * Starts an MCP transport before any server is connected to it, holding inbound messages until
  * one is (#11173).
  *
- * A managed slot proxy acquires its slots before it may answer `initialize` (the result is part of
+ * A broker binding proxy acquires its bindings before it may answer `initialize` (the result is part of
  * the initialize capabilities), yet must still notice the client going away during that
  * acquisition: stdin EOF is only observed while stdin is being read. Starting the stdio transport
  * early keeps stdin read, so EOF reaches the process shutdown path (which aborts the acquisition),

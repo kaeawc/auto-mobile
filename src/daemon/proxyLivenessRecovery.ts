@@ -62,7 +62,6 @@ export const RECOVERY_SAFETY_MARGIN_MS = 1_000;
 /** Recovery action named to the harness for each state. */
 export const RESTART_DAEMON_THEN_RESUME_ACTION = "restart_daemon_then_resume_by_session_uuid";
 export const REACQUIRE_LOST_SESSIONS_ACTION = "reacquire_lost_sessions";
-export const WAIT_FOR_MANAGED_RECLAIM_ACTION = "wait_for_managed_reclaim";
 
 /** How long a session survives without an acknowledged heartbeat: the lease plus its suspect grace. */
 export function livenessBudgetMs(leaseMs: number): number {
@@ -266,25 +265,6 @@ export function livenessHandoverPayload(handover: LivenessHandover) {
       lastAcknowledgedHeartbeatAt: handover.lastAcknowledgedHeartbeatAt,
       retryable: true,
       recovery: { action: handover.action },
-    },
-  };
-}
-
-/** Managed slot sessions resume without a UUID supplied by the harness. */
-export function managedDaemonStalledPayload(handover: LivenessHandover) {
-  const payload = livenessHandoverPayload(handover);
-  return {
-    error: {
-      ...payload.error,
-      message:
-        `The AutoMobile daemon stopped acknowledging heartbeats for ${describeSessions(handover.sessions)}. ` +
-        `This managed proxy made ${handover.attempts} automatic recovery attempts. It keeps probing ` +
-        `every heartbeat interval and reclaims the session itself once a daemon answers again. ` +
-        `Do not pass a sessionUuid or try to acquire a device; retry the call later. ` +
-        `The proxy never restarts the daemon because it is shared. If no daemon comes back, ` +
-        `restarting it or relaunching the execution is the runner's decision. ` +
-        `If the session turns out to be released, calls answer managed_execution_ended.`,
-      recovery: { action: WAIT_FOR_MANAGED_RECLAIM_ACTION },
     },
   };
 }

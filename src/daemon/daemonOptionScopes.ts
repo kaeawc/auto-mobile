@@ -1,4 +1,3 @@
-import { MANAGED_SLOT_CONFIG_ENV } from "../models/managedSlotConfig";
 import type { DaemonOptions } from "./types";
 
 /**
@@ -50,7 +49,5 @@ export function daemonProcessEnvironment(environment: NodeJS.ProcessEnv): NodeJS
   for (const key of CONNECTION_PRESENTATION_ENV_KEYS) {
     delete processEnvironment[key];
   }
-  // Per-proxy launch state; the daemon must never re-parse it from its own cwd (#11286).
-  delete processEnvironment[MANAGED_SLOT_CONFIG_ENV];
   return processEnvironment;
 }

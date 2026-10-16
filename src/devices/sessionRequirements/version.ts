@@ -1,11 +1,6 @@
 import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { failure, success } from "./result";
-import type {
-  AndroidVersionPrecision,
-  EffectiveOsSelector,
-  RequirementResult,
-  SessionRequirementError,
-} from "./types";
+import type { AndroidVersionPrecision, EffectiveOsSelector, RequirementResult } from "./types";
 
 export interface NumericVersion {
   value: string;
@@ -104,19 +99,4 @@ export function androidOsEvidenceMatches(
     }
   }
   return osSelectorMatchesVersion(selector, knownVersion);
-}
-
-export function asConfigError(
-  result: RequirementResult<unknown>,
-  field: string,
-): SessionRequirementError | undefined {
-  if (result.ok) {
-    return undefined;
-  }
-  return {
-    ...result.error,
-    code: "invalid_config",
-    field,
-    message: result.error.message.replace(/^os\./, `${field}.`),
-  };
 }

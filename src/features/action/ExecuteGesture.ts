@@ -3,7 +3,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { Element } from "../../models";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
 import { inputDurationArgument } from "./touchscreenInput";
-import { StaleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
@@ -24,6 +24,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { ActionCall } from "./ActionCall";
 
 export interface FencedGestureOptions extends GestureOptions {
   /** Internal opt-in for the iOS lock-screen synthesized swipe. */
@@ -52,6 +53,12 @@ function swipeOutcomeUnknown(
 ): boolean {
   const unacknowledged = (result.dispatched ?? dispatchedByHost) && result.acknowledged !== true;
   return unacknowledged || isRunnerGestureOutcomeUnknown(result);
+}
+
+/** Call context for {@link ExecuteGesture.execute}: duration and display fence ride beside the signal. */
+export interface GestureCall extends ActionCall {
+  durationMs?: number;
+  displayFence?: DisplayFenceOption["displayFence"];
 }
 
 /**
@@ -447,13 +454,27 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param duration - Duration in milliseconds
    * @returns Result of the executed gesture
    */
+  async execute(path: Point[] | FingerPath[], call?: GestureCall): Promise<any>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     path: Point[] | FingerPath[],
-    duration: number = 300,
+    duration?: number,
     signal?: AbortSignal,
+    fenceOptions?: DisplayFenceOption,
+  ): Promise<any>;
+  async execute(
+    path: Point[] | FingerPath[],
+    durationOrCall?: number | GestureCall,
+    signalArg?: AbortSignal,
     fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
-    const fence = fenceOptions.displayFence;
+    const {
+      durationMs: duration = 300,
+      signal,
+      displayFence: fence,
+    } = typeof durationOrCall === "object"
+      ? durationOrCall
+      : { durationMs: durationOrCall, signal: signalArg, displayFence: fenceOptions.displayFence };
     throwIfAborted(signal);
     // Platform-specific gesture execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {

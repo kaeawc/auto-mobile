@@ -7,7 +7,7 @@ import {
 } from "../../src/server/planExecutionOrchestrator";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
 import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -92,10 +92,10 @@ test("planRefusalFields reads nextAction and ignores a code without a retryable 
 test("planRefusalFields carries a self-described refusal's payload evidence", () => {
   expect(
     planRefusalFields(
-      new DeviceOutsideManagedSlotsError("executePlan", "tool", "scope-1", { deviceLabel: "B" }),
+      new DeviceOutsideBrokerGrantError("executePlan", "tool", "scope-1", { deviceLabel: "B" }),
     ),
   ).toEqual({
-    code: "device_outside_managed_slots",
+    code: "device_outside_broker_grant",
     retryable: false,
     action: "executePlan",
     reason: "tool",

@@ -67,6 +67,7 @@ import {
   resolveComponentActivity,
 } from "./launcherActivityParsing";
 import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
+import type { ActionCall } from "./ActionCall";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -187,6 +188,31 @@ interface AndroidLaunchOptions {
   skipUiStability?: boolean;
   signal?: AbortSignal;
 }
+
+/** Launch request for {@link LaunchApp.execute}: what to launch and how, beside the call context. */
+export interface LaunchAppCall extends ActionCall {
+  clearAppData: boolean;
+  coldBoot: boolean;
+  /** Activity name to launch (Android only). */
+  activityName?: string;
+  /** Android user ID (auto-detected if not provided). */
+  userId?: number;
+  skipUiStability?: boolean;
+  launchArguments?: string[];
+  /** `SIMCTL_CHILD_*` variables for a fresh iOS simulator process. */
+  launchEnvironment?: Record<string, string>;
+}
+
+/** The deprecated positional parameters of {@link LaunchApp.execute} after `clearAppData`. */
+type LaunchAppPositionalTail = [
+  coldBoot?: boolean,
+  activityName?: string,
+  userId?: number,
+  skipUiStability?: boolean,
+  signal?: AbortSignal,
+  launchArguments?: string[],
+  launchEnvironment?: Record<string, string>,
+];
 
 export class LaunchApp extends BaseVisualChange {
   private simctl: SimCtlClient;
@@ -409,6 +435,8 @@ export class LaunchApp extends BaseVisualChange {
    * @param skipUiStability - Whether to skip UI stability checks
    * @param launchEnvironment - `SIMCTL_CHILD_*` variables for a fresh iOS simulator process
    */
+  async execute(packageName: string, launch: LaunchAppCall): Promise<LaunchAppResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     packageName: string,
     clearAppData: boolean,
@@ -419,6 +447,49 @@ export class LaunchApp extends BaseVisualChange {
     signal?: AbortSignal,
     launchArguments?: string[],
     launchEnvironment?: Record<string, string>,
+  ): Promise<LaunchAppResult>;
+  async execute(
+    packageName: string,
+    clearAppDataOrCall: boolean | LaunchAppCall,
+    ...positional: LaunchAppPositionalTail
+  ): Promise<LaunchAppResult> {
+    const [
+      coldBoot,
+      activityName,
+      userId,
+      skipUiStability,
+      signal,
+      launchArguments,
+      launchEnvironment,
+    ] = positional;
+    const launch: LaunchAppCall =
+      typeof clearAppDataOrCall === "object"
+        ? clearAppDataOrCall
+        : {
+            clearAppData: clearAppDataOrCall,
+            coldBoot: coldBoot ?? false,
+            activityName,
+            userId,
+            skipUiStability,
+            signal,
+            launchArguments,
+            launchEnvironment,
+          };
+    return this.executeLaunch(packageName, launch);
+  }
+
+  private async executeLaunch(
+    packageName: string,
+    {
+      clearAppData,
+      coldBoot,
+      activityName,
+      userId,
+      skipUiStability,
+      signal,
+      launchArguments,
+      launchEnvironment,
+    }: LaunchAppCall,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
     signal?.throwIfAborted();

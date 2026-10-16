@@ -71,9 +71,15 @@ describe("navigation recorder handler outcomes", () => {
     // Pay the one-time cold-start cost of the first recorded tool call and navigation write
     // (~5 ms, far more on a loaded runner) outside the per-test budget. beforeEach clears the
     // graph, so nothing from this throwaway call is visible to a test.
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
-      throw new Error("warmup");
-    });
+    registry.registerDeviceAware(
+      "tapOn",
+      "fake",
+      z.object({}),
+      async () => {
+        throw new Error("warmup");
+      },
+      { recordsNavigation: true },
+    );
     await registry
       .getTool("tapOn")!
       .handler({ text: "warmup" })
@@ -115,9 +121,15 @@ describe("navigation recorder handler outcomes", () => {
   }
 
   test("failed tap throwing element not found cannot label Splash -> Home", async () => {
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
-      throw new Error("element not found");
-    });
+    registry.registerDeviceAware(
+      "tapOn",
+      "fake",
+      z.object({}),
+      async () => {
+        throw new Error("element not found");
+      },
+      { recordsNavigation: true },
+    );
     await expect(registry.getTool("tapOn")!.handler({ text: "Does not exist" })).rejects.toThrow(
       "element not found",
     );
@@ -130,7 +142,9 @@ describe("navigation recorder handler outcomes", () => {
     { structuredContent: { success: false } },
     createJSONToolResponse({ success: false }),
   ])("failed result %j cannot label an unrelated transition", async (response) => {
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => response);
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => response, {
+      recordsNavigation: true,
+    });
     await registry.getTool("tapOn")!.handler({ text: "Does not exist" });
     await expectUnattributedAdvance();
   });
@@ -143,7 +157,9 @@ describe("navigation recorder handler outcomes", () => {
         },
       },
     });
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }));
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }), {
+      recordsNavigation: true,
+    });
     try {
       await expect(registry.getTool("tapOn")!.handler({ text: "Next" })).rejects.toThrow(
         "audit failed",
@@ -158,10 +174,16 @@ describe("navigation recorder handler outcomes", () => {
     const controller = new AbortController();
     const completion = Promise.withResolvers<{ success: boolean }>();
     const started = Promise.withResolvers<void>();
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
-      started.resolve();
-      return completion.promise;
-    });
+    registry.registerDeviceAware(
+      "tapOn",
+      "fake",
+      z.object({}),
+      async () => {
+        started.resolve();
+        return completion.promise;
+      },
+      { recordsNavigation: true },
+    );
     const pending = registry
       .getTool("tapOn")!
       .handler({ text: "Next" }, undefined, controller.signal);
@@ -177,7 +199,9 @@ describe("navigation recorder handler outcomes", () => {
 
   test("success stays eligible after settlement and ignores later aborts", async () => {
     const controller = new AbortController();
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }));
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }), {
+      recordsNavigation: true,
+    });
     await registry.getTool("tapOn")!.handler({ text: "Next" }, undefined, controller.signal);
     controller.abort();
     expect((await harness.manager.getStats()).toolCallHistorySize).toBe(1);
@@ -202,7 +226,9 @@ describe("navigation recorder handler outcomes", () => {
     }
 
     test("a tool that reports its dispatch is attributed from it, not from its start", async () => {
-      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(true));
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(true), {
+        recordsNavigation: true,
+      });
 
       await registry.getTool("tapOn")!.handler({ text: "Continue" });
 
@@ -212,7 +238,9 @@ describe("navigation recorder handler outcomes", () => {
     });
 
     test("a tool that reports nothing is still measured from its start", async () => {
-      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(false));
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(false), {
+        recordsNavigation: true,
+      });
 
       await registry.getTool("tapOn")!.handler({ text: "Continue" });
 
@@ -220,10 +248,16 @@ describe("navigation recorder handler outcomes", () => {
     });
 
     test("a failed tool that reported its dispatch is still withdrawn", async () => {
-      registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
-        reportToolDispatched();
-        return { success: false };
-      });
+      registry.registerDeviceAware(
+        "tapOn",
+        "fake",
+        z.object({}),
+        async () => {
+          reportToolDispatched();
+          return { success: false };
+        },
+        { recordsNavigation: true },
+      );
 
       await registry.getTool("tapOn")!.handler({ text: "Continue" });
 
@@ -233,15 +267,23 @@ describe("navigation recorder handler outcomes", () => {
 
   describe("app lifecycle tools forget the app's screen (#10193)", () => {
     test.each([
-      ["terminateApp", { appId: "com.x" }],
-      ["crashApp", { appId: "com.x" }],
-      ["uninstallApp", { appId: "com.x" }],
-      ["launchApp", { appId: "com.x", coldBoot: true }],
-      ["launchApp", { appId: "com.x", clearAppData: true }],
+      ["terminateApp", { appId: "com.x" }, { stopsApp: true }],
+      ["crashApp", { appId: "com.x" }, { stopsApp: true }],
+      ["uninstallApp", { appId: "com.x" }, { stopsApp: true }],
+      ["launchApp", { appId: "com.x", coldBoot: true }, {}],
+      ["launchApp", { appId: "com.x", clearAppData: true }, {}],
       // installApp names an artifact, not the app: installing over a running app restarts it.
-      ["installApp", { artifactPath: "/tmp/app.apk" }],
-    ])("%s %j leaves the next transition without an edge", async (tool, args) => {
-      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      ["installApp", { artifactPath: "/tmp/app.apk" }, { replacesProcess: true }],
+      // The behaviour follows the declared trait, not the tool's name.
+      ["someFutureKillTool", { appId: "com.x" }, { stopsApp: true }],
+    ])("%s %j leaves the next transition without an edge", async (tool, args, traits) => {
+      registry.registerDeviceAware(
+        tool,
+        "fake",
+        z.object({}),
+        async () => ({ success: true }),
+        traits,
+      );
       await registry.getTool(tool)!.handler(args);
 
       timer.setCurrentTime(1_011_000);
@@ -296,9 +338,13 @@ describe("navigation recorder handler outcomes", () => {
         timestamp: timer.now(),
         sequenceNumber: 0,
       });
-      registry.registerDeviceAware("installApp", "fake", z.object({}), async () => ({
-        success: true,
-      }));
+      registry.registerDeviceAware(
+        "installApp",
+        "fake",
+        z.object({}),
+        async () => ({ success: true }),
+        { replacesProcess: true },
+      );
 
       await registry
         .getTool("installApp")!
@@ -323,10 +369,16 @@ describe("navigation recorder handler outcomes", () => {
   test("navigation while a handler is running keeps its tap attribution", async () => {
     const completion = Promise.withResolvers<{ success: boolean }>();
     const started = Promise.withResolvers<void>();
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
-      started.resolve();
-      return completion.promise;
-    });
+    registry.registerDeviceAware(
+      "tapOn",
+      "fake",
+      z.object({}),
+      async () => {
+        started.resolve();
+        return completion.promise;
+      },
+      { recordsNavigation: true },
+    );
     const pending = registry.getTool("tapOn")!.handler({ text: "Next" });
     await started.promise;
     try {
@@ -364,7 +416,9 @@ describe("navigation recorder caller arguments", () => {
       },
       planLifecycleManager: { afterExecution: async () => {} },
     });
-    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }));
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }), {
+      recordsNavigation: true,
+    });
   });
 
   // Each test counts its own calls; under --randomize either test may run second.

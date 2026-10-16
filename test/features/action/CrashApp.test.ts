@@ -659,7 +659,9 @@ describe("CrashApp (iOS)", () => {
       }),
     );
 
-    await expect(action.execute("com.example.app", controller.signal)).rejects.toThrow();
+    await expect(
+      action.execute("com.example.app", { signal: controller.signal }),
+    ).rejects.toThrow();
     expect(invalidations).toBe(1);
   });
 

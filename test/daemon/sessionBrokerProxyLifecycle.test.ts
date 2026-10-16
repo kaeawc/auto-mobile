@@ -164,7 +164,7 @@ describe("session broker proxy lifecycle", () => {
       sessionBroker: { requestId: "request-1", livenessOwnerToken: TOKEN },
     });
     expect(registration?.params).not.toHaveProperty("scopeKey");
-    expect(registration?.params).not.toHaveProperty("slotIndex");
+    expect(registration?.params).not.toHaveProperty("bindingIndex");
   });
 
   test("a terminal release prevents stale reconnect but still requests durable cleanup", async () => {

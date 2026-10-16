@@ -1,5 +1,4 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
-import { restartResumeSessionForDevice, admitRestartReservedStart } from "./deviceToolsStartDevice";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -11,9 +10,9 @@ import {
 } from "../daemon/deviceAcquisitionRefusals";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
-  DeviceAssignedToManagedSlotError,
-  ManagedSlotDiscoveryIncompleteError,
-} from "../daemon/managedSlots/managedSlotRefusal";
+  DeviceAssignedToBindingError,
+  BindingDiscoveryIncompleteError,
+} from "../daemon/sessionBroker/provisioning/refusal";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
@@ -71,7 +70,7 @@ import {
 } from "../utils/deviceTimeouts";
 import {
   type ExactDeviceProvisioner,
-  managedSlotProvisionError,
+  bindingProvisionError,
   ProvisionDeviceCreateRejectedError,
   type ProvisionDeviceFailureCode,
   ProvisionDeviceError,
@@ -81,10 +80,25 @@ import { type VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecy
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import { classifyDisplayCutout } from "../utils/displayCutout";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
+import { restartResumeSessionForDevice } from "./deviceToolsStartDevice";
 import {
-  type ActiveProvisionDeviceRequest,
+  ActiveProvisionDeviceRequest,
+  DeviceToolsDependencies,
+  PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+  ProvisionDeviceArgs,
+  ProvisionDeviceCleanup,
+  ProvisionDeviceRollbackError,
+  RecordProvisionDeviceLifecycle,
+  StableDeviceTarget,
+  StartDeviceArgs,
+  TeardownDeviceArgs,
+  TeardownToolResponse,
   activeProvisionDeviceRequests,
+  admitRestartReservedStart,
   attachProvisionDeviceLifecycle,
+  bindUndoneIfUndelivered,
   cancelProvisionDeviceRequest,
   cancelUnownedColdBootUnlessRetryable,
   clearColdBootShutdownMarker,
@@ -100,29 +114,18 @@ import {
   lifecycleForProvisionResponseError,
   lifecycleStateForCleanup,
   parseProvisionDeviceArgs,
-  PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
-  ProvisionDeviceCleanup,
   provisionDeviceDeadlineMs,
   provisionDeviceSchema,
-  ProvisionDeviceRollbackError,
   publishWarmDeviceReady,
-  RecordProvisionDeviceLifecycle,
   reserveStableDeviceLifecycle,
   rethrowDeviceLifecycleReservationFailure,
-  bindUndoneIfUndelivered,
   rollBackUndeliveredBoot,
   runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
-  StableDeviceTarget,
-  TeardownDeviceArgs,
-  TeardownToolResponse,
   validatePooledDeviceMapping,
-  waitForProvisionDeviceSettlement,
   waitForProvisionDeviceRequest,
-} from "./deviceTools";
-import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
-import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
-import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
+  waitForProvisionDeviceSettlement,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 import type { CreatedDeviceRollback } from "./deviceToolsStartDevice";
 
 type ProvisioningHooks = {
@@ -550,13 +553,13 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     if (knownError) {
       return knownError;
     }
-    if (error instanceof DeviceAssignedToManagedSlotError) {
-      return managedSlotProvisionError(
+    if (error instanceof DeviceAssignedToBindingError) {
+      return bindingProvisionError(
         error,
         `Failed to provision ${args.device.platform} device '${args.device.name}'`,
       );
     }
-    if (error instanceof ManagedSlotDiscoveryIncompleteError) {
+    if (error instanceof BindingDiscoveryIncompleteError) {
       return new ProvisionDeviceError(
         "discovery_incomplete",
         `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
@@ -2423,7 +2426,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       ...(diagnostics.runtimeCompatibility
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
         : {}),
-      ...(diagnostics.managedSlot ? { managedSlot: diagnostics.managedSlot } : {}),
+      ...(diagnostics.binding ? { binding: diagnostics.binding } : {}),
       ...(diagnostics.capacity ? diagnostics.capacity : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };

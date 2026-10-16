@@ -308,7 +308,7 @@ export class PrototypeAgentProvider {
         });
         return {
           version: resolvePinnedVersion(this.env),
-          sha256,
+          sha256: sha256 ?? expected,
           size,
           downloadedAt: this.timer.now(),
         } satisfies PrototypeAgentMetadata;

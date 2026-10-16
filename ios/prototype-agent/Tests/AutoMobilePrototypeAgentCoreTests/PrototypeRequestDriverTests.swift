@@ -521,6 +521,18 @@ final class PrototypeRequestDriverTests: XCTestCase {
         )
     }
 
+    func testRequestBodyKeysAreSerializedInSortedOrderRecursively() {
+        let body: JSONValue = .object([
+            "b": .number(1), "a": .object(["z": .bool(true), "y": .null]), "10": .string("x"), "9": .array([
+                .object(["q": .number(1), "p": .number(2)]),
+            ]),
+        ])
+        XCTAssertEqual(
+            PrototypeJSONText.string(body),
+            #"{"10":"x","9":[{"p":2,"q":1}],"a":{"y":null,"z":true},"b":1}"#
+        )
+    }
+
     func testBodyDecoding() {
         XCTAssertEqual(PrototypeHttpBody.decode(Data()), .null)
         XCTAssertEqual(

@@ -162,6 +162,23 @@ describe("FetchPrototypeHttpExecutor", () => {
     });
   });
 
+  test("a JSON body is sent with object keys sorted recursively, whatever the authored order", async () => {
+    let sent: string | undefined;
+    const { executor } = executorFor(async (_url, init) => {
+      sent = init.body as string;
+      return body("{}");
+    });
+    await executor.execute(
+      {
+        ...request,
+        method: "POST",
+        body: { b: 1, a: { z: true, y: null }, "10": "x", "9": [{ q: 1, p: 2 }] },
+      },
+      signal(),
+    );
+    expect(sent).toBe('{"10":"x","9":[{"p":2,"q":1}],"a":{"y":null,"z":true},"b":1}');
+  });
+
   test("a header value with CR, LF or NUL is invalid_request without calling fetch", async () => {
     let called = false;
     const { executor } = executorFor(async () => {

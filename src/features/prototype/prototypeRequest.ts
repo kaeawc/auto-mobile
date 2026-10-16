@@ -131,6 +131,19 @@ function intoError(into: string): string | undefined {
 const memberPath = (path: string, name: string): string =>
   /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
 
+/** An invalid header name, or one repeated in another letter case (names are case-insensitive). */
+function headerNameProblem(name: string, seen: Set<string>): string | undefined {
+  if (!HEADER_NAME.test(name)) {
+    return "Invalid header name";
+  }
+  const lower = name.toLowerCase();
+  if (seen.has(lower)) {
+    return "Duplicate header name (names are case-insensitive)";
+  }
+  seen.add(lower);
+  return undefined;
+}
+
 function literalEntryError(
   entries: unknown,
   at: string,
@@ -139,10 +152,12 @@ function literalEntryError(
   if (typeof entries !== "object" || entries === null) {
     return undefined;
   }
+  const seenHeaders = new Set<string>();
   for (const [name, value] of Object.entries(entries)) {
     const entryPath = memberPath(`${at}.${field}`, name);
-    if (field === "headers" && !HEADER_NAME.test(name)) {
-      return { path: entryPath, message: "Invalid header name" };
+    const nameProblem = field === "headers" ? headerNameProblem(name, seenHeaders) : undefined;
+    if (nameProblem !== undefined) {
+      return { path: entryPath, message: nameProblem };
     }
     const literal = (value as { value?: unknown } | null)?.value;
     if (
@@ -328,6 +343,29 @@ function withQuery(target: URL, entries: readonly [string, string][]): string {
   return `${base}?${pieces.join("&")}${fragment}`;
 }
 
+/** Adds one resolved header or query entry to the request being built. */
+function addEntry(
+  into: { headers: Record<string, string>; query: [string, string][] },
+  field: "headers" | "query",
+  name: string,
+  text: string,
+) {
+  if (field === "headers") {
+    return addHeader(into.headers, name, text);
+  }
+  into.query.push([name, text]);
+  return undefined;
+}
+
+/** Adds a resolved header; a name repeated in another letter case is an `invalid_request`. */
+function addHeader(headers: Record<string, string>, name: string, text: string) {
+  if (Object.keys(headers).some((seen) => seen.toLowerCase() === name.toLowerCase())) {
+    return failure("invalid_request", `headers.${name}: duplicate header name`);
+  }
+  headers[name] = text;
+  return undefined;
+}
+
 /** Swift cannot keep JSON key order, so query entries use one canonical order everywhere. */
 function entriesOf(action: Record<string, unknown>, field: "headers" | "query") {
   const entries = Object.entries((action[field] ?? {}) as Record<string, unknown>);
@@ -363,10 +401,9 @@ export function resolvePrototypeRequest(
       if (!("text" in entry)) {
         return entry;
       }
-      if (field === "headers") {
-        headers[name] = entry.text;
-      } else {
-        query.push([name, entry.text]);
+      const rejected = addEntry({ headers, query }, field, name, entry.text);
+      if (rejected) {
+        return rejected;
       }
     }
   }

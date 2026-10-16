@@ -82,7 +82,8 @@ enum PrototypeHttpBody {
 }
 
 /// `JSON.stringify` for a `JSONValue`: numbers print as a script would (`1`, not `1.0`) and
-/// slashes are not escaped.
+/// slashes are not escaped. Object keys are written in sorted UTF-16 code unit order, recursively,
+/// the canonical body serialization on every runtime (the host sorts the same way).
 enum PrototypeJSONText {
     static func string(_ value: JSONValue) -> String {
         switch value {
@@ -114,7 +115,11 @@ enum PrototypeHttpHeaderCheck {
 
     /// The first problem with `headers` (names visited in sorted order), or `nil` when all are valid.
     static func problem(in headers: [String: String]) -> PrototypeRequestError? {
+        var seen = Set<String>()
         for name in headers.keys.sorted() {
+            if !seen.insert(name.lowercased()).inserted {
+                return .init(.invalidRequest, "Header \(name) is given twice (names are case-insensitive)")
+            }
             if name.isEmpty || !name.allSatisfy({ tokenCharacters.contains($0) }) {
                 return .init(.invalidRequest, "Header name is not an HTTP token: \(name.debugDescription)")
             }

@@ -37,7 +37,14 @@ enum PrototypeRequestResolver {
             for name in (entries ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
                 switch entryText(entries?[name], what: "\(field).\(name)", inputs: inputs) {
                 case let .success(text):
-                    if field == "headers" { headers[name] = text } else { query.append((name, text)) }
+                    if field == "headers" {
+                        if headers.keys.contains(where: { $0.lowercased() == name.lowercased() }) {
+                            return .failure(.init(.invalidRequest, "headers.\(name): duplicate header name"))
+                        }
+                        headers[name] = text
+                    } else {
+                        query.append((name, text))
+                    }
                 case let .failure(error):
                     return .failure(error)
                 }

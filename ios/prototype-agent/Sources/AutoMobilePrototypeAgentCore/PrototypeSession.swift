@@ -324,6 +324,11 @@ struct PrototypeSession {
                 events += dismiss(reason: .user)
             default:
                 if let write = writes[index] {
+                    // The plan was validated against the data before this list ran; an earlier data
+                    // action may have added a control (a repeat row) that refuses this value now.
+                    var next = state
+                    next[write.key] = write.value
+                    guard accepts(next) else { continue }
                     state[write.key] = write.value
                     if !touched.contains(write.key) { touched.append(write.key) }
                 }

@@ -537,6 +537,10 @@ final class PrototypeRequestTests: XCTestCase {
                 "root.onTap[0].headers[\"bad name\"]: Invalid header name"
             ),
             (
+                #"[{"type":"request","url":"http://h","headers":{"X-Test":"1","x-test":"2"}}]"#,
+                "root.onTap[0].headers[\"x-test\"]: Duplicate header name (names are case-insensitive)"
+            ),
+            (
                 #"[{"type":"request","url":"http://h","headers":{"X":{"value":[1]}}}]"#,
                 "root.onTap[0].headers.X.value: A header or query literal must be a string, number or boolean"
             ),

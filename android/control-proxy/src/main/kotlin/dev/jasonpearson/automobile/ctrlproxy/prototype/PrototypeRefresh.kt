@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox

@@ -1228,7 +1228,11 @@ object PrototypeSpecValidator {
   }
 
   /** Pull-to-refresh needs a vertical scroll, and its declared key must hold a boolean. */
-  private fun refreshErrors(value: JsonObject, path: String, state: JsonObject): PrototypeSpecError? {
+  private fun refreshErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
     if (value.text("type") != "scroll") return null
     val refresh = value["refresh"] as? JsonObject ?: return null
     if (value.text("axis") == "horizontal")

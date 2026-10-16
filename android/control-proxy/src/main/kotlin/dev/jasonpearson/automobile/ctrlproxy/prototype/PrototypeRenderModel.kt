@@ -254,8 +254,8 @@ internal class PrototypeNodeMapping(
               ?: prototypeListItemToggleKey(node)
               ?: (node as? PrototypeScrollNode)?.refresh?.stateKey)
             ?.let {
-            state[it] == PrototypeScalar.BooleanValue(true)
-          } ?: false,
+              state[it] == PrototypeScalar.BooleanValue(true)
+            } ?: false,
         selectedValue =
           prototypeSelectionKey(node)?.let { (state[it] as? PrototypeScalar.Text)?.value },
         sliderValue =

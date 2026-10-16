@@ -6450,6 +6450,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh": [
+      {
+        "name": "stateKey",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "onRefresh",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeSelector": [
       {
         "name": "elementId",
@@ -8885,6 +8899,12 @@
         "name": "axis",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "refresh",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh",
+        "nullable": true,
         "hasDefault": true
       },
       {

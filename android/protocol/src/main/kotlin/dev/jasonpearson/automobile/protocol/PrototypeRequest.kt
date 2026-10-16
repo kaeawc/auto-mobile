@@ -443,9 +443,36 @@ object PrototypeRequestOutcome {
     }
     if (into != null) {
       val path = PrototypeRequests.metaPath(into)
+      var metaWritten = false
       val attempts = if (meta.headers == null) listOf(true) else listOf(true, false)
       for (withHeaders in attempts) {
-        if (commit(PrototypeDataWrite.Set(path, meta.toJson(withHeaders))) == null) break
+        if (commit(PrototypeDataWrite.Set(path, meta.toJson(withHeaders))) == null) {
+          metaWritten = true
+          break
+        }
+      }
+      if (wroteInto && !metaWritten) {
+        // The body fit the data limits but no form of its metadata was accepted (a renderer limit
+        // the pure check cannot see): undo the body so the pair is atomic, and report the failure.
+        PrototypeDataWriter.pathPointer(into)?.let { pointer ->
+          val before = PrototypeDataPointer.resolve(data, pointer)
+          commit(
+            if (before != null) PrototypeDataWrite.Set(into, before)
+            else PrototypeDataWrite.Remove(into),
+          )
+        }
+        wroteInto = false
+        meta =
+          meta.copy(
+            error =
+              PrototypeRequestError(
+                PrototypeRequestErrorCode.INVALID_RESPONSE,
+                METADATA_DOES_NOT_FIT,
+              ),
+          )
+        for (withHeaders in attempts) {
+          if (commit(PrototypeDataWrite.Set(path, meta.toJson(withHeaders))) == null) break
+        }
       }
     }
     return PrototypeRequestResult(meta.error == null, meta, wroteInto)

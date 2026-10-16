@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -568,6 +569,54 @@ class PrototypeRequestTest {
     val result = applied("""{"pad":"$filler"}""", "/data/feed", response)
     assertEquals(JsonPrimitive("body"), result.data!!["feed"])
     assertEquals(obj("""{"status":200,"durationMs":12}"""), result.data["feed__meta"])
+  }
+
+  @Test
+  fun `a renderer refusal of the metadata rolls the body back and reports invalid_response`() {
+    var data: JsonObject? = obj("""{"feed":"old"}""")
+    // Stands in for the runtime's rebuilt-render limits: a success-shaped metadata is refused.
+    val result =
+      PrototypeRequestOutcome.complete(
+        "/data/feed",
+        received(JsonPrimitive("new")),
+        data,
+      ) { write ->
+        val refusedByRenderer =
+          write.path == "/data/feed__meta" &&
+            (write as PrototypeDataWrite.Set).value.let {
+              it is JsonObject && "error" !in it
+            }
+        if (refusedByRenderer) {
+          PrototypeDataWriteError(
+            PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+            "rendered text too long",
+          )
+        } else {
+          when (val written = PrototypeDataWriter.apply(data, write)) {
+            is PrototypeDataWriteResult.Success -> {
+              data = written.data
+              null
+            }
+            is PrototypeDataWriteResult.Failure -> written.error
+          }
+        }
+      }
+
+    assertFalse(result.succeeded)
+    assertFalse(result.wroteInto)
+    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.meta.error!!.code)
+    assertEquals("response and metadata exceed the data limit", result.meta.error.message)
+    assertEquals(JsonPrimitive("old"), data!!["feed"])
+    assertEquals(
+      "invalid_response",
+      data["feed__meta"]!!
+        .jsonObject
+        .getValue("error")
+        .jsonObject
+        .getValue("code")
+        .jsonPrimitive
+        .content,
+    )
   }
 
   @Test

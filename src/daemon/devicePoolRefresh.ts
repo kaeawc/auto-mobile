@@ -252,6 +252,7 @@ export class DevicePoolRefresh {
             platform: device.platform,
             sessionId: null,
             status: "idle",
+            health: "ok",
             lastUsedAt: now,
             assignmentCount: 0,
             errorCount: 0,

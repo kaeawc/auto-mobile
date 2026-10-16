@@ -9,7 +9,7 @@ import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingR
 import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
 import { getTempDir, TEMP_SUBDIRS } from "../utils/tempDir";
-import * as path from "path";
+import { assertPathInside } from "../utils/filesystem/pathContainment";
 import type { VideoRecordingMetadata } from "../models";
 
 /**
@@ -19,15 +19,11 @@ import type { VideoRecordingMetadata } from "../models";
  * arbitrary files. Returns the resolved, confined absolute path.
  */
 export function assertWithinArchiveRoot(filePath: string, archiveRoot: string): string {
-  const resolvedRoot = path.resolve(archiveRoot);
-  const resolved = path.resolve(resolvedRoot, filePath);
-  const relative = path.relative(resolvedRoot, resolved);
-  const escapes =
-    relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-  if (escapes) {
-    throw new Error(`Refusing to read recording file outside the archive root: ${filePath}`);
-  }
-  return resolved;
+  return assertPathInside(
+    archiveRoot,
+    filePath,
+    () => new Error(`Refusing to read recording file outside the archive root: ${filePath}`),
+  );
 }
 
 /**

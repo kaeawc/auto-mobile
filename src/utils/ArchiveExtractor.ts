@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { ActionableError } from "../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "./HostCommandExecutor";
 import { logger } from "./logger";
+import { isPathInside } from "./filesystem/pathContainment";
 import { sortedReaddir, sortedReaddirEntries } from "./io";
 
 /** Default extraction timeout — a local `tar` unpack should complete well within this. */
@@ -59,13 +60,7 @@ export function assertArchiveEntriesSafe(entries: string[], destinationDir: stri
         `Refusing to extract archive entry '${rawEntry}' with an absolute path; the archive may be malicious.`,
       );
     }
-    const resolvedEntry = path.resolve(resolvedRoot, entry);
-    const relativeToRoot = path.relative(resolvedRoot, resolvedEntry);
-    if (
-      relativeToRoot === ".." ||
-      relativeToRoot.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(relativeToRoot)
-    ) {
+    if (!isPathInside(resolvedRoot, entry)) {
       throw new ActionableError(
         `Refusing to extract archive entry '${rawEntry}' that escapes the destination directory; the archive may be malicious (path traversal).`,
       );

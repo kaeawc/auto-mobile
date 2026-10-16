@@ -28,6 +28,11 @@ enum PrototypeLimits {
     static let maxDataArrayItems = 500
     static let maxDataPointerLength = 256
     static let maxDataBytes = 262_144
+    /// `MAX_PROTOTYPE_STORAGE_BYTES` (#12522): stored bytes per prototype id, summed over entries as
+    /// the UTF-8 length of the storage key plus the compact JSON of the value.
+    static let maxStorageBytes = 262_144
+    /// `MAX_PROTOTYPE_STORAGE_KEYS`: entries in the spec's `storage.keys`.
+    static let maxStorageKeys = 64
     /// `MAX_PROTOTYPE_DATA_WRITE_BYTES`: the host validator's byte cost of `data` after a device
     /// `setData`, `appendData` or `removeData` write.
     static let maxDataWriteBytes = 262_144

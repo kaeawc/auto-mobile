@@ -15,7 +15,7 @@ struct PrototypeViewerApp: App {
         let layoutDirectory = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
             .appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName)
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
-        let model = PrototypeModel(mode: .standalone)
+        let model = PrototypeModel(mode: .standalone, storage: PrototypeStorageCoordinator.fileBacked())
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
         let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
         let launch: PrototypeViewerLaunch
@@ -144,6 +144,7 @@ private final class ViewerTerminationObserver: NSObject {
 
     @objc
     private func terminate(_: Notification) {
+        PrototypeAgent.flushStorage()
         PrototypeAgent.retractViewerEndpoint()
     }
 }

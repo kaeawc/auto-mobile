@@ -51,6 +51,8 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_checks_v1",
             "prototype_identifier_test_tag_only_v1",
             "prototype_bottom_sheet_drag_v1",
+            "clear_prototype_storage",
+            "prototype_storage_v1",
         ])
     }
 

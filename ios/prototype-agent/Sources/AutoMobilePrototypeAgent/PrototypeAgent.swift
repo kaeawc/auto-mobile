@@ -131,6 +131,11 @@ final class PrototypeAgent: NSObject {
         server.start()
     }
 
+    /// Writes any pending stored prototype values; the viewer calls it as the app terminates.
+    static func flushStorage() {
+        instance?.model.flushStorage()
+    }
+
     static func retractViewerEndpoint() {
         instance?.viewerEndpoint?.retract()
     }
@@ -139,7 +144,7 @@ final class PrototypeAgent: NSObject {
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
     init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode)
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -223,8 +228,26 @@ final class PrototypeAgent: NSObject {
         model.onSessionChange?(model.session)
         observeKeyboard()
         observeAssistiveEscape()
+        observeStorageFlush()
         server.start()
         self.server = server
+    }
+
+    /// Stored prototype values are debounced; the app going to the background or ending flushes them.
+    private func observeStorageFlush() {
+        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(flushStorageNotification(_:)),
+                name: name,
+                object: nil
+            )
+        }
+    }
+
+    @objc
+    private func flushStorageNotification(_: Notification) {
+        model.flushStorage()
     }
 
     /// Selector delivery matches keyboard notifications and stays on the UIKit main actor.
@@ -490,6 +513,17 @@ final class PrototypeAgent: NSObject {
                 }
                 model.dismiss(reason: .agent)
                 result(true)
+            case PrototypeAgentProtocol.clearStorageRequest:
+                // Wipes the stored values of an id (#12526); the shown prototype is left as it is.
+                guard let id = message["id"] as? String, !id.isEmpty else {
+                    return result(false, "clear_prototype_storage needs an id")
+                }
+                do {
+                    let cleared = try model.clearStorage(id: id)
+                    result(true, extra: ["cleared": cleared])
+                } catch {
+                    result(false, "Could not clear stored values for \(id): \(error)")
+                }
             case "put_prototype_asset":
                 guard let id = message["id"] as? String,
                       let base64 = message["dataBase64"] as? String,

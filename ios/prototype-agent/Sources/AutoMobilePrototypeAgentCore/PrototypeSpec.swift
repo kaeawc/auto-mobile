@@ -86,6 +86,8 @@ struct PrototypeSpec: Decodable {
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// unless the system reduces motion (#10442). See `PrototypeMotion`.
     let motion: String?
+    /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
+    let storage: PrototypeStorageBlock?
     /// The node tree with every `repeat` list template already expanded (see `PrototypeRepeat`).
     let root: PrototypeNode
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
@@ -93,7 +95,7 @@ struct PrototypeSpec: Decodable {
     private let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root
+        case id, window, state, data, theme, motion, root, storage
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -117,6 +119,8 @@ struct PrototypeSpec: Decodable {
         if let data { try PrototypeLimits.guardData(data) }
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
+        // The host validator owns the strict shape; a malformed block means "no storage" here.
+        storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage)) ?? nil
         let raw = try container.decode(JSONValue.self, forKey: .root)
         authoredRoot = raw
         // Menus validate against state, but state is decoded (and checked) after root to keep the
@@ -179,6 +183,7 @@ struct PrototypeSpec: Decodable {
         self.data = data
         theme = spec.theme
         motion = spec.motion
+        storage = spec.storage
         self.root = root
         authoredRoot = spec.authoredRoot
     }

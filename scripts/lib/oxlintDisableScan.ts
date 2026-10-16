@@ -9,7 +9,9 @@
 // literals, or on a later line of a block comment, is never a directive.
 //
 // Output is sorted "<count>\t<file>\t<key>" rows (the ratchet's row format), with
-// two key shapes: "oxlint-disable(<rule>)" for every directive and
+// three key shapes: "oxlint-disable(<rule>)" for each -next-line/-line directive,
+// "oxlint-disable-file(<rule>)" for the unbounded form (a separate key, so widening
+// a one-line suppression to the rest of the file is a new row, not a swap), and
 // "oxlint-disable-no-reason(<rule>)" for those without a `-- reason` suffix.
 // The `eslint-` spelling of each directive is counted identically (oxlint honours
 // it) and a leading `eslint/` is stripped from the rule. A directive naming
@@ -27,12 +29,15 @@ import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
-const DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])(.*)$/s;
+// Like oxlint, the directive keyword must be followed by whitespace or end the comment.
+const DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(-next-line|-line)?(?=\s|$)(.*)$/s;
 const SCAN_EXTENSIONS = /\.(?:[cm]?ts|tsx)$/;
 
 export interface Directive {
   rules: string[];
   hasReason: boolean;
+  /** "line" for the -next-line/-line forms; "file" for the unbounded form, which covers the rest of the file. */
+  scope: "line" | "file";
 }
 
 export function normalizeRule(rule: string): string {
@@ -44,17 +49,23 @@ export function parseDirective(commentBody: string): Directive | null {
   if (!m) {
     return null;
   }
-  const rest = m[1];
+  const scope = m[1] ? "line" : "file";
+  const rest = m[2];
   // ESLint's description separator: whitespace, then two or more dashes. A
   // no-space "--reason" still starts the reason rather than polluting a rule key.
   const sep = rest.search(/\s-{2,}/);
   const rulesPart = sep === -1 ? rest : rest.slice(0, sep);
   const reason = sep === -1 ? "" : rest.slice(sep).replace(/^\s-+/, "").trim();
+  // oxlint splits the rule list on commas or whitespace.
   const rules = rulesPart
-    .split(",")
+    .split(/[\s,]+/)
     .map((r) => normalizeRule(r.trim()))
     .filter(Boolean);
-  return { rules: rules.length ? [...new Set(rules)] : ["*"], hasReason: reason.length > 0 };
+  return {
+    rules: rules.length ? [...new Set(rules)] : ["*"],
+    hasReason: reason.length > 0,
+    scope,
+  };
 }
 
 function commentBody(source: string, range: ts.CommentRange): string {
@@ -107,7 +118,7 @@ export function countRows(file: string, source: string, counts: Map<string, numb
   const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const d of findDirectives(source, file)) {
     for (const rule of d.rules) {
-      bump(`${file}\toxlint-disable(${rule})`);
+      bump(`${file}\t${d.scope === "file" ? "oxlint-disable-file" : "oxlint-disable"}(${rule})`);
       if (!d.hasReason) {
         bump(`${file}\toxlint-disable-no-reason(${rule})`);
       }

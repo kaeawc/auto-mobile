@@ -182,6 +182,15 @@ write_src() { # <name> <lines...>
   [ "$status" -eq 0 ]
 }
 
+@test "widening a baselined one-line disable to the unbounded form fails as a new row" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* oxlint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
+}
+
 @test "removing an oxlint-disable passes and --update shrinks the baseline" {
   write_src a.ts '// oxlint-disable-next-line max-params -- reason'
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update

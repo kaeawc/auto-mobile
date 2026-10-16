@@ -103,7 +103,7 @@
 1	src/server/prototypeTools.ts	oxlint-disable(auto-mobile/no-unknown-cast)
 1	src/server/snapshotOfTools.ts	oxlint-disable(complexity)
 1	src/server/toolRegistry.ts	eslint(max-lines-per-function)
-1	src/server/toolRegistry.ts	oxlint-disable(@typescript-eslint/no-unused-vars)
+1	src/server/toolRegistry.ts	oxlint-disable-file(@typescript-eslint/no-unused-vars)
 1	src/server/toolRegistry.ts	oxlint-disable-no-reason(@typescript-eslint/no-unused-vars)
 1	src/utils/android-cmdline-tools/AdbClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/AdbClient.ts	oxlint-disable(auto-mobile/no-unknown-cast)

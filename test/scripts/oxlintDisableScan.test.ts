@@ -67,6 +67,28 @@ describe("oxlintDisableScan", () => {
     expect(c.hasReason).toBe(false);
   });
 
+  test("splits rule lists on commas or whitespace, as oxlint does", () => {
+    expect(rulesOf("// oxlint-disable-next-line no-alert no-debugger -- r")).toEqual([
+      ["no-alert", "no-debugger"],
+    ]);
+    expect(rulesOf("// oxlint-disable-next-line a,  b c -- r")).toEqual([["a", "b", "c"]]);
+  });
+
+  test("requires whitespace or end of comment after the directive keyword", () => {
+    expect(rulesOf("// oxlint-disable: use sparingly\nfoo();")).toEqual([]);
+    expect(rulesOf("// eslint-disable-next-line.\nfoo();")).toEqual([]);
+    expect(rulesOf("/* oxlint-disable */\nfoo();")).toEqual([["*"]]);
+  });
+
+  test("the unbounded form gets its own key, so widening a one-line suppression is a new row", () => {
+    const line = new Map<string, number>();
+    countRows("src/a.ts", "// oxlint-disable-next-line a -- r\nfoo();", line);
+    const file = new Map<string, number>();
+    countRows("src/a.ts", "/* oxlint-disable a -- r */\nfoo();", file);
+    expect([...line.keys()]).toEqual(["src/a.ts\toxlint-disable(a)"]);
+    expect([...file.keys()]).toEqual(["src/a.ts\toxlint-disable-file(a)"]);
+  });
+
   test("countRows emits a no-reason row only for reason-less directives", () => {
     const counts = new Map<string, number>();
     countRows(

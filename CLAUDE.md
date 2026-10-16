@@ -206,7 +206,7 @@ because they carry pre-existing violations: `complexity`, `max-depth`, `max-para
 TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
 file oxlint lints (repo-wide via `git ls-files`, TypeScript extensions only,
 minus the `.oxlintrc.json` `ignorePatterns`) adds
-`oxlint-disable(<rule>)` rows (and `oxlint-disable-no-reason(<rule>)` for
+`oxlint-disable(<rule>)` rows (`oxlint-disable-file(<rule>)` for the unbounded form, so widening a one-line suppression is a new row; and `oxlint-disable-no-reason(<rule>)` for
 directives lacking a `-- reason`) to the same baseline, so a new
 `oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs
 `--allow-grow` even when it carries a `-- reason`; a new directive without a

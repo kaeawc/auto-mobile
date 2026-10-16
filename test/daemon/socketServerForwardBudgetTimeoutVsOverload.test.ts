@@ -1,10 +1,14 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
-import { MCP_FORWARD_START_HEADROOM_MS, UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  MCP_FORWARD_START_HEADROOM_MS,
+  type UnixSocketServer,
+} from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { overloadRefusalError } from "../helpers/refusalWireFixtures";
@@ -27,7 +31,7 @@ function createFakeDaemonState() {
 }
 
 function createServer(timer: FakeTimer): UnixSocketServer {
-  return new UnixSocketServer(
+  return createTestUnixSocketServer(
     join(tmpdir(), `forward-budget-${randomUUID()}.sock`),
     "http://localhost:0/mcp",
     createFakeDaemonState(),

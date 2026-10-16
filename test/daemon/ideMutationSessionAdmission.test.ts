@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -8,7 +9,6 @@ import {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -175,7 +175,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
         }) as unknown as AndroidCtrlProxyManager,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

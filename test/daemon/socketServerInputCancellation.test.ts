@@ -1,7 +1,7 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -108,7 +108,7 @@ beforeEach(() => {
           }),
       }) as unknown as AndroidCtrlProxyClient,
   );
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     { isInitialized: () => false } as DaemonStateAccess,
@@ -343,7 +343,7 @@ test("a parked sessionless input/tap is not sent once another session acquires t
   sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
     executionTracker.cancelSessionlessDeviceUse(deviceId);
   });
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     {

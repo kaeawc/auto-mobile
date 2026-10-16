@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { expect, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
@@ -197,7 +198,7 @@ export interface SocketHarness extends Harness {
 }
 export function socketHarness(state?: DaemonStateAccess) {
   const { timer, stamps, handler: admission } = harness();
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     state ?? ({ isInitialized: () => false } as DaemonStateAccess),

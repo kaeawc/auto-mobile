@@ -1,7 +1,7 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { expect, spyOn, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { PressButton } from "../../src/features/action/PressButton";
@@ -31,7 +31,7 @@ class FakeSocket extends EventEmitter {
 
 test("a later pipe data event answers another device while the first call is held", async () => {
   const timer = new FakeTimer();
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     {} as DaemonStateAccess,
@@ -97,7 +97,7 @@ test.each(["returned failure", "thrown cancellation"])(
   async (contract) => {
     const timer = new FakeTimer();
     const device: BootedDevice = { platform: "android", deviceId: "fake-press", name: "Fake" };
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {} as DaemonStateAccess,

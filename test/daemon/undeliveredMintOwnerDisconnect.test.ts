@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -7,7 +8,6 @@ import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -443,7 +443,7 @@ test("#11999 a direct pool mint without a socket answer claim keeps ordinary gra
 for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] as const) {
   test(`#11999 socket claim brackets forwarding and ${outcome} termination`, async () => {
     const h = await harness();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/mint.sock",
       "http://localhost:0/mcp",
       {
@@ -510,7 +510,7 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
 
 test("#11999 a failed optional socket claim still forwards and writes the answer", async () => {
   const h = await harness();
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/fake/mint.sock",
     "http://localhost:0/mcp",
     {
@@ -561,7 +561,7 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
 test("#11999 socket close around the mint's answer uses its delivery status", async () => {
   for (const closeTiming of ["before-answer", "after-answer", "delivered"] as const) {
     const h = await harness();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/mint.sock",
       "http://localhost:0/mcp",
       {

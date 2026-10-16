@@ -1,4 +1,5 @@
 import type { SessionReleaseReason } from "./releaseReasons";
+import { releasePoolDevice, type SessionReleasePool } from "./releaseSessionAndDevice";
 import type { SessionReleaseOptions } from "./sessionManager";
 import type { DeviceInfo } from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
@@ -48,7 +49,7 @@ interface UnconfirmedRecoveringAndroidImage {
   deviceIds: readonly string[];
 }
 
-export interface DeviceRecoveryPoolPort {
+export interface DeviceRecoveryPoolPort extends SessionReleasePool {
   getRefreshGeneration(): number;
   /**
    * Which of these serials `adb devices` still lists as `offline` rather than
@@ -103,7 +104,6 @@ export interface DeviceRecoveryPoolPort {
     releaseReason: SessionReleaseReason,
     attempt: () => Promise<void>,
   ): Promise<void>;
-  releaseDevice(deviceId: string, sessionId: string): Promise<unknown>;
 }
 
 /** Coordinates recovery records, in-flight work, and image handoffs while the pool retains assignment state. */
@@ -824,7 +824,7 @@ export class DeviceRecoveryCoordinator {
           // Idle expiry has no daemon caller. This recovery flight owns its
           // capture even when a prior terminal diagnostic overrides the expiry reason.
           if (options.expiryOrigin && this.pool.hasReleasedDeviceCapture(record.sessionId)) {
-            await this.pool.releaseDevice(record.deviceId, record.sessionId);
+            await releasePoolDevice(this.pool, record.deviceId, record.sessionId);
           }
         },
       );

@@ -88,6 +88,12 @@ describe("agent benchmark device selection", () => {
       const malformed = new FakeCommandRunner().on("xcrun", () => ({ stdout }));
       await expect(bootedIosSimulators(malformed, "darwin")).rejects.toThrow(/no devices map/);
     }
+    for (const stdout of ['{"devices":{"iOS":[{"name":"Phone"}]}}', '{"devices":{"iOS":[null]}}']) {
+      const partial = new FakeCommandRunner().on("xcrun", () => ({ stdout }));
+      await expect(bootedIosSimulators(partial, "darwin")).rejects.toThrow(
+        /a simulator record has no state/,
+      );
+    }
     const none = new FakeCommandRunner().on("xcrun", () => ({ stdout: '{"devices":{}}' }));
     expect(await bootedIosSimulators(none, "darwin")).toEqual([]);
   });

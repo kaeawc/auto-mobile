@@ -92,6 +92,17 @@ describe("compareRun verdict", () => {
         screenIncludes: [],
       }).verdict,
     ).toBe("failed");
+    // Listing devices is inventory, not use of the device under test.
+    const inventoryOnly = new TranscriptBuilder()
+      .init()
+      .mcp("listDevices")
+      .result({ finalText: "COUNT: 3" });
+    expect(
+      compareRun(audit(inventoryOnly), OK_OUTCOME, {
+        answerIncludes: ["COUNT: 3"],
+        screenIncludes: [],
+      }).verdict,
+    ).toBe("failed");
   });
 
   test("a wrong final answer fails without making the run incomplete", () => {

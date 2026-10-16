@@ -7,6 +7,7 @@
  * dump). Baselines are comparison data, never gates: metric and tool-sequence
  * deltas are reported but never change the verdict.
  */
+import { isDeviceInventoryTool } from "../../src/daemon/daemonMcpProxy";
 import type { SuiteBaseline } from "./config";
 import type { TranscriptAudit } from "./transcript";
 
@@ -224,9 +225,11 @@ function missingFrom(haystack: string, needles: string[]): string[] {
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {
   // A UI benchmark that never touched the device proved nothing, whatever it answered; a
-  // call that errored (bad arguments, refused) did not touch it either.
+  // call that errored (bad arguments, refused) did not touch it either, and neither does a
+  // sessionless inventory call such as listDevices.
   const succeeded = audit.toolCalls.filter(
-    (call) => call.isMcp && call.hasResult && !call.isError,
+    (call) =>
+      call.isMcp && call.hasResult && !call.isError && !isDeviceInventoryTool(call.shortName),
   ).length;
   const checks: CheckResult[] = [
     {

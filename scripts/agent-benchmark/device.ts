@@ -122,6 +122,19 @@ export async function bootedIosSimulators(
   ) {
     throw failure("output has no devices map");
   }
+  // A record without a string state cannot be judged booted or not, so the scan is incomplete.
+  const records: unknown[] = Object.values(devices).flat();
+  if (
+    !records.every(
+      (record) =>
+        typeof record === "object" &&
+        record !== null &&
+        "state" in record &&
+        typeof record.state === "string",
+    )
+  ) {
+    throw failure("a simulator record has no state");
+  }
   return Object.values(devices)
     .flat()
     .filter((device) => device.state === "Booted")

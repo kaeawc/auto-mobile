@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": ["src/cli/index.ts"],
+  "project": ["src/**/*.ts"],
+  "typescript": {
+    "config": "tsconfig.dead-code.json"
+  }
+}

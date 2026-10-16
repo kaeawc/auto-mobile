@@ -7,7 +7,6 @@
 
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import WebSocket from "ws";
 import fs from "fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +23,7 @@ import type {
 } from "./types";
 import { quoteForAdbArg } from "./types";
 import { createTimestampedId } from "../../../utils/IdGenerator";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { sendCommand } from "../DeviceServiceUtils";
 
 /** Directory on device for pushing certificate files */
 const DEVICE_CERT_DIR = "/sdcard/Download/automobile/ca_certs";
@@ -64,6 +63,12 @@ export class CtrlProxyCertificates {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yCaCertResult> {
     const startTime = this.context.timer.now();
+    const failure = (error: string): A11yCaCertResult => ({
+      success: false,
+      action: "install",
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
     const trimmed = certificate.trim();
 
     if (!trimmed) {
@@ -76,47 +81,17 @@ export class CtrlProxyCertificates {
     }
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install");
-        return {
-          success: false,
-          action: "install",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const requestId = this.context.requestManager.generateId("caCertInstall");
-
-      // Register request with automatic timeout handling
-      const caCertPromise = this.context.requestManager.register<A11yCaCertResult>(
-        requestId,
-        "caCertInstall",
+      const result = await this.sendCertificateCommand<A11yCaCertResult>({
+        idPrefix: "caCertInstall",
+        messageType: "install_ca_cert",
+        params: { certificate: trimmed },
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action: "install",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `CA cert install timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.installCaCert({ requestId, certificate: trimmed }),
-        );
-        ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId})`);
+        perf,
+        notConnectedLog:
+          "[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install",
+        timeoutLabel: "CA cert install",
+        failure,
       });
-
-      const result = await perf.track("waitForCaCertInstall", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
@@ -145,6 +120,42 @@ export class CtrlProxyCertificates {
   }
 
   /**
+   * Shared sendCommand wrapper for the certificate and permission requests. Auto-connects like
+   * the hand-rolled paths did, attaches no ambient abort (so removal and cleanup requests stay
+   * uncancellable), and bypasses the generic command gate.
+   */
+  private sendCertificateCommand<T>(request: {
+    idPrefix: string;
+    messageType: string;
+    params: Record<string, unknown>;
+    timeoutMs: number;
+    perf: PerformanceTracker;
+    notConnectedLog: string;
+    timeoutLabel: string;
+    failure: (error: string) => T;
+  }): Promise<T> {
+    const { failure } = request;
+    return sendCommand<T>(
+      { ...this.context, isCommandSupported: undefined, wireDeadlineParams: undefined },
+      {
+        idPrefix: request.idPrefix,
+        responseType: request.idPrefix,
+        messageType: request.messageType,
+        params: request.params,
+        timeoutMs: request.timeoutMs,
+        perf: request.perf,
+        cancelScreenshotBackoff: false,
+        notConnectedError: () => {
+          logger.warn(request.notConnectedLog);
+          return failure("Failed to connect to accessibility service");
+        },
+        timeoutError: (timeout) => failure(`${request.timeoutLabel} timeout after ${timeout}ms`),
+        unsupportedCommandError: (_messageType, error) => failure(error),
+      },
+    );
+  }
+
+  /**
    * Request installation of a CA certificate from a host file path.
    * Pushes the file to the device before requesting installation.
    */
@@ -154,6 +165,12 @@ export class CtrlProxyCertificates {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yCaCertResult> {
     const startTime = this.context.timer.now();
+    const failure = (error: string): A11yCaCertResult => ({
+      success: false,
+      action: "install",
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
     const resolvedPath = this.resolveCertificatePath(certificatePath);
 
     if (!resolvedPath) {
@@ -191,49 +208,17 @@ export class CtrlProxyCertificates {
       });
       devicePath = pushedDevicePath;
 
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install");
-        return {
-          success: false,
-          action: "install",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const requestId = this.context.requestManager.generateId("caCertInstallFromPath");
-
-      // Register request with automatic timeout handling
-      const caCertPromise = this.context.requestManager.register<A11yCaCertResult>(
-        requestId,
-        "caCertInstallFromPath",
+      const result = await this.sendCertificateCommand<A11yCaCertResult>({
+        idPrefix: "caCertInstallFromPath",
+        messageType: "install_ca_cert_from_path",
+        params: { devicePath: pushedDevicePath },
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action: "install",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `CA cert install timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.installCaCertFromPath({ requestId, devicePath: pushedDevicePath }),
-        );
-        ws.send(message);
-        logger.debug(
-          `[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId}, devicePath: ${devicePath})`,
-        );
+        perf,
+        notConnectedLog:
+          "[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install",
+        timeoutLabel: "CA cert install",
+        failure,
       });
-
-      const result = await perf.track("waitForCaCertInstall", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
@@ -278,8 +263,13 @@ export class CtrlProxyCertificates {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yCaCertResult> {
     const startTime = this.context.timer.now();
+    const failure = (error: string): A11yCaCertResult => ({
+      success: false,
+      action: "remove",
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
     const trimmedAlias = alias.trim();
-    let requestId: string | null = null;
 
     if (!trimmedAlias) {
       return {
@@ -291,54 +281,17 @@ export class CtrlProxyCertificates {
     }
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert removal");
-        return {
-          success: false,
-          action: "remove",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const caCertRequestId = this.context.requestManager.generateId("caCertRemove");
-      requestId = caCertRequestId;
-      const caCertPromise = this.context.requestManager.register<A11yCaCertResult>(
-        caCertRequestId,
-        "caCertRemove",
+      const result = await this.sendCertificateCommand<A11yCaCertResult>({
+        idPrefix: "caCertRemove",
+        messageType: "remove_ca_cert",
+        params: { alias: trimmedAlias },
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action: "remove",
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `CA cert removal timeout after ${timeout}ms`,
-        }),
-        (error, totalTimeMs) => ({
-          success: false,
-          action: "remove",
-          totalTimeMs,
-          error,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.removeCaCert({ requestId: caCertRequestId, alias: trimmedAlias }),
-        );
-        ws.send(message);
-        logger.debug(
-          `[CTRL_PROXY] Sent CA cert removal request (requestId: ${caCertRequestId}, alias: ${trimmedAlias})`,
-        );
+        perf,
+        notConnectedLog:
+          "[CTRL_PROXY] Failed to establish WebSocket connection for CA cert removal",
+        timeoutLabel: "CA cert removal",
+        failure,
       });
-
-      const result = await perf.track("waitForCaCertRemoval", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
@@ -355,9 +308,6 @@ export class CtrlProxyCertificates {
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] CA cert removal request failed after ${duration}ms: ${error}`);
-      if (requestId) {
-        this.context.requestManager.resolveError(requestId, errorMessage(error), duration);
-      }
       // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
       rethrowRealCtrlProxyWebSocketInTestError(error);
       return {
@@ -377,53 +327,26 @@ export class CtrlProxyCertificates {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yDeviceOwnerStatusResult> {
     const startTime = this.context.timer.now();
+    const failure = (error: string): A11yDeviceOwnerStatusResult => ({
+      success: false,
+      isDeviceOwner: false,
+      isAdminActive: false,
+      totalTimeMs: this.context.timer.now() - startTime,
+      error,
+    });
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn(
-          "[CTRL_PROXY] Failed to establish WebSocket connection for device owner status",
-        );
-        return {
-          success: false,
-          isDeviceOwner: false,
-          isAdminActive: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const requestId = this.context.requestManager.generateId("deviceOwnerStatus");
-
-      // Register request with automatic timeout handling
-      const statusPromise = this.context.requestManager.register<A11yDeviceOwnerStatusResult>(
-        requestId,
-        "deviceOwnerStatus",
+      const result = await this.sendCertificateCommand<A11yDeviceOwnerStatusResult>({
+        idPrefix: "deviceOwnerStatus",
+        messageType: "get_device_owner_status",
+        params: {},
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          isDeviceOwner: false,
-          isAdminActive: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Device owner status timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.getDeviceOwnerStatus({ requestId }),
-        );
-        ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent device owner status request (requestId: ${requestId})`);
+        perf,
+        notConnectedLog:
+          "[CTRL_PROXY] Failed to establish WebSocket connection for device owner status",
+        timeoutLabel: "Device owner status",
+        failure,
       });
-
-      const result = await perf.track("waitForDeviceOwnerStatus", () => statusPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
@@ -463,6 +386,16 @@ export class CtrlProxyCertificates {
   ): Promise<A11yPermissionResult> {
     const startTime = this.context.timer.now();
     const trimmedPermission = permission.trim();
+    const failure = (error: string): A11yPermissionResult => ({
+      success: false,
+      permission: trimmedPermission,
+      granted: false,
+      totalTimeMs: this.context.timer.now() - startTime,
+      requestLaunched: false,
+      canRequest: false,
+      requiresSettings: false,
+      error,
+    });
 
     if (!trimmedPermission) {
       return {
@@ -478,61 +411,17 @@ export class CtrlProxyCertificates {
     }
 
     try {
-      const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for permission request");
-        return {
-          success: false,
-          permission: trimmedPermission,
-          granted: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          requestLaunched: false,
-          canRequest: false,
-          requiresSettings: false,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      const requestId = this.context.requestManager.generateId("permission");
-
-      // Register request with automatic timeout handling
-      const permissionPromise = this.context.requestManager.register<A11yPermissionResult>(
-        requestId,
-        "permission",
+      const result = await this.sendCertificateCommand<A11yPermissionResult>({
+        idPrefix: "permission",
+        messageType: "get_permission",
+        params: { permission: trimmedPermission, requestPermission },
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          permission: trimmedPermission,
-          granted: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          requestLaunched: false,
-          canRequest: false,
-          requiresSettings: false,
-          error: `Permission request timeout after ${timeout}ms`,
-        }),
-      );
-
-      await perf.track("sendRequest", async () => {
-        const ws = this.context.getWebSocket();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.getPermission({
-            requestId,
-            permission: trimmedPermission,
-            requestPermission,
-          }),
-        );
-        ws.send(message);
-        logger.debug(
-          `[CTRL_PROXY] Sent permission request (requestId: ${requestId}, permission: ${trimmedPermission})`,
-        );
+        perf,
+        notConnectedLog:
+          "[CTRL_PROXY] Failed to establish WebSocket connection for permission request",
+        timeoutLabel: "Permission request",
+        failure,
       });
-
-      const result = await perf.track("waitForPermission", () => permissionPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {

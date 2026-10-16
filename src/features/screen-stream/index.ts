@@ -1,60 +1,27 @@
 export {
-  FRAME_HEADER_SIZE,
-  FRAME_MAGIC,
-  FrameDecoder,
-  MAX_RAW_FRAME_BYTES,
-  ENCODED_VIDEO_HEIGHT_BASE,
-  ENCODED_VIDEO_HEIGHT_MASK,
-  crc32,
   encodeFrameHeader,
-  encodeEncodedVideoHeader,
   type DecodedFrame,
   type DecodedAudio,
   type DecodedEncodedVideo,
-  type EncodedVideoHeaderFields,
-  type FrameHeader,
   type MalformedFrameError,
-  type FrameDecoderMetrics,
 } from "./frameProtocol";
-export { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
+export { type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
   IosScreenCaptureHelper,
   parseCaptureIdleMarker,
-  SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
-  IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
   NATIVE_FRAME_METRICS_PREFIX,
   CAPTURE_CAPABILITY_PREFIX,
   CAPTURE_PERMISSION_PREFIX,
   CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
   IOS_HELPER_STOP_GRACE_MS,
-  SIMULATOR_FPS_DEFAULT,
-  SIMULATOR_FPS_MAX,
-  SIMULATOR_FPS_MIN,
   type CaptureTarget,
-  type CapturePermission,
   type EncodeSettings,
   type EncodeBitratePolicy,
-  type HelperSpawner,
-  type HelperProcessGroupKiller,
   type IosScreenCaptureHelperOptions,
-  type IosScreenCaptureHelperEvents,
   type FrameDeliveryScheduler,
   type NativeFrameMetrics,
   type IosScreenCaptureReadiness,
   type IosScreenCaptureReadinessPhase,
 } from "./IosScreenCaptureHelper";
-export {
-  IosSimulatorCaptureHelperPool,
-  IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
-  iosSimulatorCaptureHelperPool,
-  type IosSimulatorCaptureHelperLease,
-  type SimulatorCaptureHelperPoolOptions,
-} from "./IosSimulatorCaptureHelperPool";
-export {
-  ScreenCaptureHelperProvider,
-  SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
-  SCREEN_CAPTURE_HELPER_CACHE_FILENAME,
-  SCREEN_CAPTURE_HELPER_METADATA_FILENAME,
-  type ScreenCaptureHelperMetadata,
-} from "./ScreenCaptureHelperProvider";
+export { iosSimulatorCaptureHelperPool } from "./IosSimulatorCaptureHelperPool";

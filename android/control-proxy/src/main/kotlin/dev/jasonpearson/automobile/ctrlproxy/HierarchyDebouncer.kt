@@ -508,12 +508,6 @@ internal constructor(
   fun getLastHierarchy(): ViewHierarchy? = lastHierarchy
 
   /**
-   * Get the timestamp of the last accessibility event. Used by the TypeScript MCP server to check
-   * if events have occurred since a request was made.
-   */
-  fun getLastEventTimestamp(): Long = lastEventTimestamp
-
-  /**
    * Check if any accessibility events have occurred since the given timestamp. If no events have
    * occurred (stale), trigger an immediate extraction. This is used when the MCP server is waiting
    * for pushed data but no events are firing.

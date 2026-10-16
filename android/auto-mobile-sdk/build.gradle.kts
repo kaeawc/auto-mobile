@@ -11,6 +11,7 @@ plugins {
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.mavenPublish)
+  id("automobile.published-library")
   alias(libs.plugins.dokka)
 }
 
@@ -185,38 +186,4 @@ mavenPublishing {
   // not ship HTML API docs. The remaining defaults keep the real sources jar, and
   // Dokka stays applied for local/hosted doc generation.
   configure(AndroidMultiVariantLibrary(javadocJar = JavadocJar.Empty()))
-
-  // Coordinates: group and version from root, artifact from local gradle.properties
-  coordinates(
-    property("GROUP").toString(),
-    property("POM_ARTIFACT_ID").toString(),
-    version.toString(),
-  )
-
-  pom {
-    name.set(property("POM_NAME").toString())
-    description.set(property("POM_DESCRIPTION").toString())
-    inceptionYear.set("2025")
-    url.set(property("POM_URL").toString())
-    licenses {
-      license {
-        name.set(property("POM_LICENCE_NAME").toString())
-        url.set(property("POM_LICENCE_URL").toString())
-        distribution.set("repo")
-      }
-    }
-    developers {
-      developer {
-        id.set(property("POM_DEVELOPER_ID").toString())
-        name.set(property("POM_DEVELOPER_NAME").toString())
-        url.set("https://github.com/${property("POM_DEVELOPER_ID")}/")
-        email.set(property("POM_DEVELOPER_EMAIL").toString())
-      }
-    }
-    scm {
-      url.set(property("POM_SCM_URL").toString())
-      connection.set(property("POM_SCM_CONNECTION").toString())
-      developerConnection.set(property("POM_SCM_DEV_CONNECTION").toString())
-    }
-  }
 }

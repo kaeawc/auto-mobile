@@ -17,7 +17,7 @@ interface SelectorBounds {
  * path — {@link FocusElementMatcher} and {@link FocusNavigationExecutor} — so it
  * lives with its consumers.
  */
-export interface ElementSelector {
+export interface TalkBackElementSelector {
   /** Match by resource ID */
   resourceId?: string;
 

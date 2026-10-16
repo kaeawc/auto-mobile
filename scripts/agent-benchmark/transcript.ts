@@ -122,10 +122,14 @@ interface AuditState {
   fullResultText: Map<string, string>;
 }
 
+/** A fingerprint string; blank identifies nothing, so it stays unknown and cannot be baselined. */
+function identity(value: unknown): string | undefined {
+  return asString(value)?.trim() || undefined;
+}
+
 function handleInit(event: JsonRecord, state: AuditState): void {
-  // An empty string identifies nothing, so it stays unknown and cannot be baselined.
-  state.audit.observedModel ??= asString(event.model)?.trim() || undefined;
-  state.audit.claudeCodeVersion ??= asString(event.claude_code_version)?.trim() || undefined;
+  state.audit.observedModel ??= identity(event.model);
+  state.audit.claudeCodeVersion ??= identity(event.claude_code_version);
   const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers.filter(isRecord) : [];
   const ours = servers.find((server) => server.name === MCP_SERVER_NAME);
   state.audit.mcpServerStatus = asString(ours?.status) ?? "missing";
@@ -134,7 +138,7 @@ function handleInit(event: JsonRecord, state: AuditState): void {
 function handleAssistant(event: JsonRecord, line: number, state: AuditState): void {
   const message = event.message;
   if (isRecord(message)) {
-    state.audit.observedModel ??= asString(message.model);
+    state.audit.observedModel ??= identity(message.model);
   }
   const isSubagent = event.parent_tool_use_id !== null && event.parent_tool_use_id !== undefined;
   for (const block of contentBlocks(event)) {

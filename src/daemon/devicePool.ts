@@ -113,6 +113,7 @@ import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
 } from "../models/SessionRecoveryAssignmentError";
+import { assertPoolCapacity } from "./poolCapacityError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -3219,9 +3220,14 @@ export class DevicePool {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      const stats = shortfall.stats;
-
-      this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
+      assertPoolCapacity(
+        this.criteriaMatcher,
+        shortfall.stats,
+        requiredCount,
+        platform,
+        this.recoveringAndroidImages.size,
+        refreshFailureContext(refreshFailure),
+      );
 
       this.multiDeviceAllocations.enqueue(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
@@ -3748,36 +3754,6 @@ export class DevicePool {
       return this.refreshDevicesWithOutcome();
     }
     return undefined;
-  }
-
-  private assertMultiDeviceCapacity(
-    stats: ReturnType<DevicePool["getStatsForPlatform"]>,
-    requiredCount: number,
-    platform: Platform | undefined,
-    refreshFailure: string | undefined,
-  ): void {
-    if (
-      !this.criteriaMatcher.hasSufficientCapacityIncludingAndroidRecovery(
-        stats.total,
-        requiredCount,
-        this.recoveringAndroidImages.size,
-        platform,
-      )
-    ) {
-      throw new ActionableError(
-        `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
-          refreshFailureContext(refreshFailure) +
-          `Device pool status:\n` +
-          `  Total devices: ${stats.total}\n` +
-          `  Idle: ${stats.idle}\n` +
-          `  Assigned: ${stats.assigned}\n` +
-          `  Error: ${stats.error}\n\n` +
-          `Suggestions:\n` +
-          `  - Start ${requiredCount - stats.total} more emulator(s) or simulators\n` +
-          `  - Reduce the number of devices required in the test plan\n` +
-          `  - Verify ADB is working: adb devices`,
-      );
-    }
   }
 
   /**

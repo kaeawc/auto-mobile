@@ -29,14 +29,14 @@ import {
   type ScreenReaderRestoreState,
 } from "../features/accessibility/ScreenReaderRestore";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
-import { ExecNetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
+import { ExecNetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import {
   IOS_APP_NETWORK_RULE_LEASE_MS,
   IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
   IosAppNetworkRuleClient,
   type IosAppNetworkRule,
   type IosAppNetworkRuleCommandContext,
-} from "../features/network-filter/IosAppNetworkRuleClient";
+} from "../features/networkFilter/IosAppNetworkRuleClient";
 import { IosAppNetworkLeases, type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import {
   AndroidDeviceClockAdapter,

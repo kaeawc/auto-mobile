@@ -264,14 +264,12 @@ const defaultChooserAppMetadata: ChooserAppMetadata = {
     return resolveChooserActivityLabel(adb, packageName, url, signal);
   },
   async getFreshHierarchy(device, adbFactory, minTimestamp, timeoutMs, signal) {
-    return new ViewHierarchy(device, adbFactory).getViewHierarchy(
-      undefined,
-      undefined,
-      true,
+    return new ViewHierarchy(device, adbFactory).getViewHierarchy(undefined, {
+      skipWaitForFresh: true,
       minTimestamp,
       signal,
-      timeoutMs,
-    );
+      timeoutMs: timeoutMs,
+    });
   },
 };
 

@@ -8,7 +8,7 @@ import {
 } from "../../../src/features/utility/LocationRoutePlayer";
 import type { SessionManager } from "../../../src/daemon/sessionManager";
 import { logger } from "../../../src/utils/logger";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const ios: BootedDevice = {
@@ -27,7 +27,7 @@ const warn = spyOn(logger, "warn").mockImplementation(() => {});
 afterEach(() => warn.mockClear());
 afterAll(() => warn.mockRestore());
 
-function harness(simctl = new FakeSimCtlClient()) {
+function harness(simctl = new FakeSimctl()) {
   const timer = new FakeTimer();
   const registry = new LocationRouteRegistry(timer);
   const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
@@ -70,7 +70,7 @@ function harness(simctl = new FakeSimCtlClient()) {
 describe("session mock location clear", () => {
   test("static set clears once on release, strictly after an in-flight route settles", async () => {
     const calls: string[] = [];
-    class RecordedSimctl extends FakeSimCtlClient {
+    class RecordedSimctl extends FakeSimctl {
       override async executeCommandArgs(args: string[], timeoutMs?: number) {
         calls.push(args[2]);
         return super.executeCommandArgs(args, timeoutMs);
@@ -176,8 +176,7 @@ describe("session mock location clear", () => {
 
   test("removal aborts an in-flight attempt, even when the client ignores cancellation", async () => {
     let signal: AbortSignal | undefined;
-    const never =
-      Promise.withResolvers<Awaited<ReturnType<FakeSimCtlClient["executeCommandArgs"]>>>();
+    const never = Promise.withResolvers<Awaited<ReturnType<FakeSimctl["executeCommandArgs"]>>>();
     const timer = new FakeTimer();
     const clears = new MockLocationClearRegistry({
       timer,
@@ -199,7 +198,7 @@ describe("session mock location clear", () => {
 
   test("a hung attempt is bounded at 5s and retried with an aborted signal", async () => {
     const timer = new FakeTimer();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     let attempts = 0;
     let signal: AbortSignal | undefined;
     const clears = new MockLocationClearRegistry({

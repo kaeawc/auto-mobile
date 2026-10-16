@@ -1,6 +1,9 @@
 import { TypingSession } from "./sendkeys/TypingSession";
 import { KeyEventSupport } from "./sendkeys/KeyEventSupport";
-import { readBackWithSettle } from "./sendkeys/readBackWithSettle";
+import {
+  FocusedTextClearVerifier,
+  checkAbort as checkAbortCheckpoint,
+} from "./sendkeys/FocusedTextClearVerifier";
 import { EventLastTyper } from "./sendkeys/EventLastTyper";
 import { EventAllTyper } from "./sendkeys/EventAllTyper";
 import { ImeCommitTyper } from "./sendkeys/ImeCommitTyper";
@@ -10,15 +13,15 @@ import {
   ANDROID_FOCUSED_INPUT_ERROR,
   ANDROID_TYPE_FOCUSED_INPUT_ERROR,
   IME_COMMIT_READ_BACK_SETTLE_MS,
-  segmentGraphemes,
   isPrintableAscii,
 } from "./sendkeys/AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./sendkeys/ImeSpan";
 import type { AndroidModeTyper } from "./sendkeys/AndroidModeTyper";
 import { A11yTyper } from "./sendkeys/A11yTyper";
 import { EventOnlyTyper } from "./sendkeys/EventOnlyTyper";
+import { PasswordRouting } from "./sendkeys/PasswordRouting";
+import { IosTyper } from "./sendkeys/IosTyper";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import {
   resolveTextCtrlProxyTimeoutMs,
@@ -66,11 +69,10 @@ import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { imeCommitUnitFields } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { getFocusedTextField, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
+import { getFocusedTextField, getFocusedTextLength } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import {
   focusedFieldIsPassword,
-  focusedImeFieldClass,
   imeFailureFields,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
   LEGACY_IME_PASSWORD_REFUSAL,
@@ -90,7 +92,6 @@ import { Keyboard } from "./Keyboard";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { toSearchable } from "../utility/SearchableNode";
 import {
   AUTO_MOBILE_IME_ID,
   type ImeSubtypeSnapshot,
@@ -105,10 +106,6 @@ export {
   CARET_UNKNOWN_WARNING,
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
-
-/** The field still shows its pre-clear text after the full settle poll (#9943). */
-const CLEAR_UNCHANGED_WARNING =
-  "The field still shows its pre-clear text after the clear was acknowledged; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.";
 
 class SendKeysBudgetError extends Error {
   constructor() {
@@ -504,8 +501,6 @@ export interface SendKeysTextClient {
   ): Promise<TextActionResult>;
 }
 
-type AndroidClearState = { kind: "applied" } | { kind: "pending" } | { kind: "unreadable" };
-
 export interface SendKeysInputKey {
   press(
     key: InputKeyName,
@@ -549,6 +544,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
+  private readonly clearVerifier: FocusedTextClearVerifier;
+  private readonly passwordRouting: PasswordRouting;
+  private readonly iosTyper: IosTyper;
   // These values intentionally survive commands and concurrent calls on this executor.
   private readonly session = new TypingSession();
   private readonly keyEventSupport: KeyEventSupport;
@@ -608,6 +606,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };
     this.timer = dependencies.timer ?? defaultTimer;
+    this.clearVerifier = this.createClearVerifier();
+    this.passwordRouting = this.createPasswordRouting();
+    this.iosTyper = this.createIosTyper();
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
     this.keyEventSupport = this.createKeyEventSupport();
@@ -735,6 +736,39 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         activateCommitIme: (wasEnabled) => this.activateCommitIme(wasEnabled),
       },
     );
+  }
+
+  private createClearVerifier(): FocusedTextClearVerifier {
+    return new FocusedTextClearVerifier({
+      observer: { execute: (options) => this.observer.execute(options) },
+      timer: this.timer,
+      clearText: () => this.textClient.clear(),
+    });
+  }
+
+  private createPasswordRouting(): PasswordRouting {
+    return new PasswordRouting({
+      platform: () => this.device.platform,
+      observer: { execute: (options) => this.observer.execute(options) },
+      targetLayer: () => this.targetLayer,
+      resolveMode: (requestedMode) => this.resolveMode(requestedMode),
+      supportsImePasswordCommit: () => this.textClient.supportsImePasswordCommit(),
+      getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
+      hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
+    });
+  }
+
+  private createIosTyper(): IosTyper {
+    return new IosTyper({
+      session: this.session,
+      observer: this.observer,
+      timer: this.timer,
+      targetLayer: () => this.targetLayer,
+      clear: (signal, display) => this.clear(signal, display),
+      insert: (text, options) => this.textClient.insert(text, options),
+      withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
+      markPartialAfterMutation: (result) => markPartialAfterMutation(result),
+    });
   }
 
   private createKeyEventSupport(): KeyEventSupport {
@@ -1026,149 +1060,23 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.eventOnlyTyper.clearEventOnlyForReplace(textLength, signal, display);
   }
 
-  /**
-   * set_text("") is acknowledged before the app applies it; a following a11y insert plans from a
-   * fresh node snapshot and would otherwise write old + new text (#9884). The text read before the
-   * clear is what an unapplied clear still shows. Shared by the `clear` command and the clear that
-   * precedes an eventAll/eventLast replace (#9940).
-   */
-  private async clearAndVerifyAndroid(
+  private clearAndVerifyAndroid(
     signal?: AbortSignal,
     display?: string,
-    clear: () => Promise<TextActionResult> = () => this.textClient.clear(),
+    clear?: () => Promise<TextActionResult>,
     passwordField = false,
   ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
-    const preClearText = await this.readTextBeforeClear(signal, display, passwordField);
-    this.checkAbort(signal);
-    const result = await clear();
-    if (!result.success) {
-      return { result };
-    }
-    const unchangedWarning = await this.verifyAndroidClearApplied(preClearText, signal, display);
-    return { result, ...(unchangedWarning === undefined ? {} : { unchangedWarning }) };
+    return this.clearVerifier.clearAndVerifyAndroid(signal, display, clear, passwordField);
   }
 
-  /**
-   * Focused text before a clear, or undefined when there is nothing to verify (empty field, or an
-   * unreadable one, which is logged). Hint-aware: placeholder text counts as empty.
-   */
-  private async readTextBeforeClear(
-    signal?: AbortSignal,
-    display?: string,
-    passwordField = false,
-  ): Promise<string | undefined> {
-    try {
-      const snapshot = this.readFocusedTextSnapshot(
-        await this.readFreshObservation(signal, display),
-      );
-      if (snapshot === undefined && passwordField) {
-        // A password field is masked by design; an unverifiable clear is expected, not a fault.
-        logger.debug("[SendKeys] Password field is masked; the clear will not be verified");
-      } else if (snapshot === undefined) {
-        logger.warn(
-          "[SendKeys] Focused text is unreadable before the clear; it will not be verified",
-        );
-      }
-      return snapshot && snapshot.length > 0 ? snapshot.text : undefined;
-    } catch (error) {
-      this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] Pre-clear read unavailable: ${errorMessage(error)}`, error);
-      return undefined;
-    }
+  private readFreshObservation(signal?: AbortSignal, display?: string): Promise<ObserveResult> {
+    return this.clearVerifier.readFreshObservation(signal, display);
   }
 
-  /**
-   * Poll until the acknowledged clear is visible, i.e. the field no longer shows the pre-clear
-   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. Text that
-   * is still unchanged after the full poll is a settled state (a mask or permanent prefix already
-   * at its cleared content, or a refused clear), so the clear stays successful with a warning
-   * rather than failing the call (#9943). An unreadable field is retried, then passes.
-   */
-  private verifyAndroidClearApplied(
-    preClearText: string | undefined,
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<string | undefined> {
-    if (preClearText === undefined) {
-      return Promise.resolve(undefined);
-    }
-    return readBackWithSettle(
-      () => this.readClearState(preClearText, signal, display),
-      (state) => state.kind === "applied",
-      {
-        timer: this.timer,
-        finish: (state) => {
-          if (state?.kind === "applied") {
-            return undefined;
-          }
-          if (state?.kind === "pending") {
-            logger.warn(`[SendKeys] ${CLEAR_UNCHANGED_WARNING}`);
-            return CLEAR_UNCHANGED_WARNING;
-          }
-          logger.warn(
-            "[SendKeys] The clear could not be verified: the focused field stayed unreadable",
-          );
-          return undefined;
-        },
-      },
-    );
-  }
-
-  private async readClearState(
-    preClearText: string,
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<AndroidClearState> {
-    try {
-      const snapshot = this.readFocusedTextSnapshot(
-        await this.readFreshObservation(signal, display),
-      );
-      if (snapshot === undefined) {
-        return { kind: "unreadable" };
-      }
-      return snapshot.length === 0 || snapshot.text !== preClearText
-        ? { kind: "applied" }
-        : { kind: "pending" };
-    } catch (error) {
-      this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
-      return { kind: "unreadable" };
-    }
-  }
-
-  private async readFreshObservation(
-    signal?: AbortSignal,
-    display?: string,
-  ): Promise<ObserveResult> {
-    this.checkAbort(signal);
-    const observation = await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      skipScreenshot: true,
-      ...(display === undefined ? {} : { display }),
-    });
-    this.checkAbort(signal);
-    return observation;
-  }
-
-  /** Hint-aware length plus the text; undefined when the field cannot be read. */
   private readFocusedTextSnapshot(
     observation: ObserveResult,
   ): { text: string; length: number } | undefined {
-    const hierarchy = observation.viewHierarchy;
-    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
-      return undefined;
-    }
-    // Hint-aware, like ClearText.verifyKeyEventClear: placeholder text counts as empty.
-    const length = getFocusedTextLength(hierarchy);
-    if (length === undefined) {
-      return undefined;
-    }
-    const text = this.readFocusedText(observation);
-    if (length === 0) {
-      return { text: text ?? "", length };
-    }
-    return text === undefined ? undefined : { text, length };
+    return this.clearVerifier.readFocusedTextSnapshot(observation);
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -1203,173 +1111,30 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.device.platform === "ios" ? "xcuiTypeText" : mode;
   }
 
-  private async resolveAutoPasswordMode(
+  private resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<{
-    mode: AndroidSendKeysTypingMode;
-    focusedInputVerified: boolean;
-    verifyPasswordDeliverable: boolean;
-    focusedFieldClass?: string | null;
-    passwordField?: boolean;
-  }> {
-    if (this.device.platform !== "android" || requestedMode !== "auto") {
-      return {
-        mode: this.resolveMode(requestedMode),
-        focusedInputVerified: false,
-        verifyPasswordDeliverable: false,
-      };
-    }
-    let focusedFieldClass: string | null = null;
-    const password = await this.isFocusedAndroidPasswordField(
-      operation,
-      signal,
-      display,
-      (observation) => {
-        focusedFieldClass = focusedImeFieldClass(observation);
-      },
-    );
-    const focusedInputVerified = password !== undefined;
-    if (password && (await this.textClient.supportsImePasswordCommit())) {
-      // The CtrlProxy IME commits and clears password fields like any other field.
-      return {
-        mode: "ime",
-        focusedInputVerified,
-        verifyPasswordDeliverable: false,
-        focusedFieldClass,
-        passwordField: true,
-      };
-    }
-    return {
-      mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
-      focusedInputVerified,
-      verifyPasswordDeliverable: password === true && operation === "insert",
-      focusedFieldClass,
-      ...(password ? { passwordField: true } : {}),
-    };
+  ) {
+    return this.passwordRouting.resolveAutoPasswordMode(requestedMode, operation, signal, display);
   }
 
-  private async verifyPasswordRouting(
+  private verifyPasswordRouting(
     routing: { verifyPasswordDeliverable: boolean },
     text: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (routing.verifyPasswordDeliverable) {
-      await this.requirePasswordTextDeliverable(text, signal);
-    }
+    return this.passwordRouting.verifyPasswordRouting(routing, text, signal);
   }
 
-  /**
-   * Auto insert into a password field is delivered as key events, because CtrlProxy refuses
-   * `request_insert_text` on password fields. A character with no key event (non-ASCII, or an
-   * uppercase letter / shifted symbol below API 31) would be refused mid-run after the earlier
-   * characters were already typed (#9941). Decide up front so nothing is typed in that case.
-   */
-  private async requirePasswordTextDeliverable(text: string, signal?: AbortSignal): Promise<void> {
-    const undeliverable: string[] = [];
-    for (const grapheme of segmentGraphemes(text)) {
-      signal?.throwIfAborted();
-      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
-        undeliverable.push(grapheme);
-      }
-    }
-    if (undeliverable.length === 0) {
-      return;
-    }
-    // Never name the characters: they are part of a password.
-    const nonAscii = undeliverable.filter((grapheme) => !isPrintableAscii(grapheme)).length;
-    const reasons = [
-      ...(nonAscii > 0 ? [`${nonAscii} non-ASCII (no key event exists)`] : []),
-      ...(undeliverable.length > nonAscii
-        ? [
-            `${undeliverable.length - nonAscii} uppercase or shifted (key events need Android 12, API 31, or newer)`,
-          ]
-        : []),
-    ];
-    throw new ActionableError(
-      `Nothing was typed: the text for the focused password field contains ${undeliverable.length} character(s) that cannot be sent as key events on this device (${reasons.join("; ")}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Use operation: "replace" to set the whole value at once.`,
-    );
-  }
-
-  private async isFocusedAndroidPasswordField(
-    operation: SendKeysOperation,
-    signal?: AbortSignal,
-    display?: string,
-    onObservation?: (observation: ObserveResult) => void,
-  ): Promise<boolean | undefined> {
-    const observation = await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      skipScreenshot: true,
-      ...(display === undefined ? {} : { display }),
-    });
-    onObservation?.(observation);
-    const hierarchy = observation.viewHierarchy;
-    if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      // Auto insert already reads focus for password routing. Reject before dispatch
-      // rather than trusting an IME acknowledgement with no readable editable target.
-      if (operation === "insert" && this.targetLayer !== "prototype") {
-        throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
-      }
-      // Replace still dispatches; distinguish absent focus from a focused non-password field.
-      return undefined;
-    }
-    return hasFocusedPasswordField(hierarchy);
-  }
-
-  private async executeIosType(
+  private executeIosType(
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
-    signal?.throwIfAborted();
-    const resolvedMode = "xcuiTypeText" as const;
-    let clearWarning: string | undefined;
-    if (operation === "replace") {
-      const clearResult = await this.clear(signal, display);
-      if (!clearResult.success) {
-        return { ...clearResult, resolvedMode };
-      }
-      clearWarning = clearResult.warning;
-      signal?.throwIfAborted();
-    }
-
-    const before = await readIosTypedTextField(this.observer, this.timer, signal, display);
-    this.session.typingPasswordField = before?.secure === true;
-    signal?.throwIfAborted();
-
-    // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
-    // requested cross-platform mode in metadata, but report the actual mechanism.
-    const deadlineMs = getTextRequestDeadlineMs();
-    const result = await this.textClient.insert(text, {
-      ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(
-        text,
-        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
-      ),
-      abortSignal: signal,
-    });
-    if (!result.success) {
-      return {
-        ...this.withTextWarnings(
-          operation === "replace" ? markPartialAfterMutation(result) : result,
-          [clearWarning],
-        ),
-        resolvedMode,
-      };
-    }
-    return {
-      ...this.withTextWarnings(
-        this.targetLayer === "prototype"
-          ? result
-          : await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
-        [clearWarning],
-      ),
-      resolvedMode,
-    };
+    return this.iosTyper.executeIosType(text, operation, signal, display);
   }
 
   private async executeAndroidType(
@@ -1458,56 +1223,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private readFocusedText(observation: ObserveResult): string | undefined {
-    const detector = new FieldTypeDetector();
-    const focused = observation.focusedElement;
-    if (focused && String(focused.focused) === "true" && detector.detect(focused) === "text") {
-      if (detector.isPasswordField(focused)) {
-        return undefined;
-      }
-      return this.searchableText(focused);
-    }
-    if (!observation.viewHierarchy || !hasFocusedTextInput(observation.viewHierarchy)) {
-      return undefined;
-    }
-    // ClearText already selects focused editable controls, including custom editors
-    // with set_text actions, and preserves password metadata for unreadable values.
-    const editable = getFocusedTextField(observation.viewHierarchy);
-    if (editable !== undefined) {
-      return editable.secure ? undefined : editable.value;
-    }
-    const parser = new DefaultElementParser();
-    for (const root of parser.extractRootNodes(observation.viewHierarchy)) {
-      let found: string | undefined;
-      parser.traverseNode(root, (node) => {
-        const element = parser.extractNodeProperties(node);
-        if (element.focused === true || element.focused === "true") {
-          if (detector.isPasswordField(element)) {
-            return;
-          }
-          found = this.searchableText(element);
-        }
-      });
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  }
-
-  private searchableText(element: Parameters<typeof toSearchable>[0]): string | undefined {
-    const searchable = toSearchable(element);
-    return (
-      searchable.textSources.value ??
-      searchable.textSources.text ??
-      (searchable.capturedTextLength === 0 ? "" : undefined)
-    );
+    return this.clearVerifier.readFocusedText(observation);
   }
 
   private checkAbort(signal?: AbortSignal, error?: unknown): void {
-    signal?.throwIfAborted();
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
-    }
+    checkAbortCheckpoint(signal, error);
   }
 
   private pinImeUser(signal?: AbortSignal): ReturnType<ImeRestore["pinImeUser"]> {

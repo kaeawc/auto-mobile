@@ -1245,7 +1245,7 @@ class FakeSimCtl implements SimCtl {
 /**
  * Fake SimCtlClientFactory for testing.
  */
-class FakeSimCtlClientFactory implements SimCtlClientFactory {
+class FakeSimctlFactory implements SimCtlClientFactory {
   private fakeSimCtl: FakeSimCtl;
 
   constructor(fakeSimCtl: FakeSimCtl) {
@@ -1301,7 +1301,7 @@ describe("PerformanceMonitor iOS", () => {
   let fakeAdbFactory: FakeAdbClientFactory;
   let fakeAdbClient: FakeAdbClient;
   let fakeSimCtl: FakeSimCtl;
-  let fakeSimCtlFactory: FakeSimCtlClientFactory;
+  let fakeSimCtlFactory: FakeSimctlFactory;
   let fakePusher: FakePerformancePusher;
   let serverGetter: ServerGetter;
   let monitor: PerformanceMonitor;
@@ -1311,7 +1311,7 @@ describe("PerformanceMonitor iOS", () => {
     fakeAdbClient = new FakeAdbClient();
     fakeAdbFactory = new FakeAdbClientFactory(fakeAdbClient);
     fakeSimCtl = new FakeSimCtl();
-    fakeSimCtlFactory = new FakeSimCtlClientFactory(fakeSimCtl);
+    fakeSimCtlFactory = new FakeSimctlFactory(fakeSimCtl);
     fakePusher = new FakePerformancePusher();
     serverGetter = () => fakePusher;
   });

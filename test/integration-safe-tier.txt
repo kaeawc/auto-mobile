@@ -17,6 +17,7 @@
 # it (test/scripts/integrationSafeTier.test.ts enforces this). Classify by READING
 # the file, never by running it; when in doubt, unsafe.
 # Last derived from origin/main on 2026-10-10.
+test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
 test/ctrlProxy/ios/IOSHostPortAvailabilityChecker.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server L22
@@ -38,6 +39,7 @@ test/daemon/managedSlots/managedSlotRegistryAbsence.integration.test.ts | safe |
 test/daemon/managedSlots/slotJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/managedSlots/slotRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
 test/daemon/managedSlots/sqliteSlotRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
+test/daemon/sessionBroker/sqliteStore.integration.test.ts | unsafe | Bun.spawn of competing admission children with owned process cancellation
 test/daemon/socketRequestCancel.integration.test.ts | safe | tmpdir sockets L55, UnixSocketServer with fake timer
 test/daemon/socketServer/BaseSocketServerBindGuard.integration.test.ts | safe | mkdtemp socket dirs L52 and L96
 test/daemon/socketServer/BaseSocketServerOwnership.integration.test.ts | safe | tmpdir uuid sockets L61

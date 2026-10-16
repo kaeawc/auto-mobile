@@ -1,6 +1,6 @@
 # AutoMobile test as-any ratchet baseline -- see scripts/test-as-any-baseline.sh
 32	test/ctrlProxy/CtrlProxyManager.test.ts
-13	test/ctrlProxy/IOSCtrlProxyManager.test.ts
+12	test/ctrlProxy/IOSCtrlProxyManager.test.ts
 3	test/daemon/appearanceSocketServer.test.ts
 1	test/daemon/canonicalPixels.test.ts
 5	test/daemon/clientRequestIdGenerator.test.ts
@@ -8,7 +8,7 @@
 19	test/daemon/deviceDataStreamSocketServer.test.ts
 6	test/daemon/failuresPushSocketServer.test.ts
 42	test/daemon/identityRecovery.test.ts
-14	test/daemon/manager.test.ts
+2	test/daemon/manager.test.ts
 6	test/daemon/observationInitialFrame.test.ts
 8	test/daemon/performancePushSocketServer.test.ts
 1	test/daemon/sessionManager.test.ts
@@ -207,11 +207,11 @@
 1	test/server/toolRegistry.embeddedObservationSettle.test.ts
 21	test/server/toolRegistry.internalNoDiff.test.ts
 8	test/server/toolRegistry.lastHierarchyCache.test.ts
-20	test/server/toolRegistry.pipeline.test.ts
+14	test/server/toolRegistry.pipeline.test.ts
 1	test/server/toolRegistry.scrollPositionUpdate.test.ts
 5	test/server/tools/schema.integration.test.ts
 2	test/server/unissuedSessionBoundConnection.integration.test.ts
-7	test/utils/DeviceSessionManager.test.ts
+2	test/utils/DeviceSessionManager.test.ts
 1	test/utils/android-cmdline-tools/AdbClient-getDeviceLock.test.ts
 17	test/utils/android-cmdline-tools/AndroidEmulatorClient-corruptImage.test.ts
 6	test/utils/android-cmdline-tools/AndroidEmulatorClient-headless.test.ts

@@ -102,10 +102,15 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "The pre-launch snapshot of attached emulator serials that console-port reservation reads (moved verbatim out of AndroidEmulatorClient); a local port-allocation decision, never joined to pooled identity.",
     },
-    "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-      calls: 8,
+    "src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner.ts": {
+      calls: 1,
       reason:
-        "Android emulator discovery producer; runs below the pool. The 8th call (adoptsExistingAvdLaunch) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
+        "The booted-device inventory scan (moved verbatim out of AndroidEmulatorClient); an Android discovery producer that runs below the pool.",
+    },
+    "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
+      calls: 7,
+      reason:
+        "Android emulator discovery producer; runs below the pool. The 7th call (adoptsExistingAvdLaunch) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
       calls: 1,

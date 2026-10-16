@@ -9,7 +9,7 @@ import type {
   DocumentPickerVisibilityVerifier,
 } from "../../src/server/appFileService";
 import { ActionableError, type BootedDevice } from "../../src/models";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { logger } from "../../src/utils/logger";
 
 const device: BootedDevice = {
@@ -146,7 +146,7 @@ function request(overrides: Partial<PutAppFileProviderRequest> = {}): PutAppFile
 }
 function harness() {
   const fs = new MemoryFileSystem();
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const args = ["get_app_container", device.deviceId, appFiles.IOS_FILES_FIXTURE_BUNDLE_ID, "data"];
   // Only single-path stdout is trimmed; there is no simctl-output parser fixture.
   simctl.setCommandArgsResult(args, ` ${root}\n`);

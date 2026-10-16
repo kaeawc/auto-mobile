@@ -1,7 +1,6 @@
 import type { BootedDevice, ViewHierarchyResult, ViewHierarchyNode } from "../../models";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { ActionableError } from "../../models/ActionableError";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
@@ -506,14 +505,12 @@ export function createInstalledImeKeySession(device: BootedDevice): InstalledIme
     hierarchy: {
       read: (signal) => {
         cache.invalidateCache();
-        return viewHierarchy.getViewHierarchy(
-          undefined,
-          new NoOpPerformanceTracker(),
-          false,
-          0,
+        return viewHierarchy.getViewHierarchy(undefined, {
+          skipWaitForFresh: false,
+          minTimestamp: 0,
           signal,
-          READY_TIMEOUT_MS,
-        );
+          timeoutMs: READY_TIMEOUT_MS,
+        });
       },
     },
     tap: { execute: (point) => tapFrameBoundImeKey(cache, point) },

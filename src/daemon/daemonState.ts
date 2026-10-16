@@ -5,6 +5,7 @@ import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
 import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
+import type { SessionBrokerService } from "./sessionBroker/service";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -39,6 +40,8 @@ export class DaemonState implements DaemonStateLike {
   private readonly managedConnectionScopes = new ManagedConnectionScopes();
   private managedSlotAcquisition: ManagedSlotAcquisition | null = null;
   private managedExecutionReowner: ManagedExecutionReowner | null = null;
+  private sessionBrokerService: SessionBrokerService | undefined;
+  private sessionBrokerMode = false;
 
   private constructor() {}
 
@@ -137,6 +140,22 @@ export class DaemonState implements DaemonStateLike {
     return this.managedSlotAcquisition ?? undefined;
   }
 
+  setSessionBrokerMode(enabled: boolean): void {
+    this.sessionBrokerMode = enabled;
+  }
+
+  isSessionBrokerMode(): boolean {
+    return this.sessionBrokerMode;
+  }
+
+  setSessionBrokerService(service: SessionBrokerService | undefined): void {
+    this.sessionBrokerService = service;
+  }
+
+  getSessionBrokerService(): SessionBrokerService | undefined {
+    return this.sessionBrokerService;
+  }
+
   /** Publish the re-owner a re-bound managed connection re-stamps its slots through (#11275). */
   setManagedExecutionReowner(reowner: ManagedExecutionReowner | null): void {
     this.managedExecutionReowner = reowner;
@@ -202,6 +221,8 @@ export class DaemonState implements DaemonStateLike {
     this.managedConnectionScopes.clear();
     this.managedSlotAcquisition = null;
     this.managedExecutionReowner = null;
+    this.sessionBrokerService = undefined;
+    this.sessionBrokerMode = false;
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

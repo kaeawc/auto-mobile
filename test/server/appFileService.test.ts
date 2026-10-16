@@ -27,7 +27,7 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import {
   createSharedStorageServiceForTesting,
   type StageSharedStorageRequest,
@@ -868,7 +868,7 @@ describe("AppFileService", () => {
 
     function iosHarness() {
       const fileSystem = new TestAppFileFileSystem();
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(
         `get_app_container '${iosSimulatorDevice.deviceId}' '${appId}' data`,
         dataRoot,
@@ -1926,7 +1926,7 @@ describe("AppFileService", () => {
   test("writes iOS files through the provider resolved app data container", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const dataRoot = "/simulators/SIM-1/data";
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       dataRoot,
@@ -1973,7 +1973,7 @@ describe("AppFileService", () => {
       }
     }
     const fileSystem = new TrackingFileSystem();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       "/simulators/SIM-1/data",
@@ -2013,7 +2013,7 @@ describe("AppFileService", () => {
       if (destinationExists) {
         await fileSystem.writeFileBuffer(target, Buffer.from("original"));
       }
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(
         `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
         "/simulators/SIM-1/data",
@@ -2058,7 +2058,7 @@ describe("AppFileService", () => {
     }
     const fileSystem = new FailingRenameFileSystem();
     await fileSystem.writeFileBuffer(target, Buffer.from("original"));
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       "/simulators/SIM-1/data",
@@ -2101,7 +2101,7 @@ describe("AppFileService", () => {
       }
     }
     const fileSystem = new TrackingFileSystem();
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       "/simulators/SIM-1/data",
@@ -2162,7 +2162,7 @@ describe("AppFileService", () => {
 
     function createBatchHarness() {
       const fileSystem = new BatchFileSystem();
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(command, dataRoot);
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl,
@@ -2350,7 +2350,7 @@ describe("AppFileService", () => {
 
       function createFailureHarness() {
         const fileSystem = new SelectiveFailureFileSystem();
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setCommandResult(command, dataRoot);
         const service = createAppFileServiceForTesting({
           simctlFactory: () => simctl,
@@ -2441,7 +2441,7 @@ describe("AppFileService", () => {
 
       test("reports backups it could not remove after a successful batch", async () => {
         const fileSystem = new SelectiveFailureFileSystem();
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setCommandResult(command, dataRoot);
         const service = createAppFileServiceForTesting({
           simctlFactory: () => simctl,
@@ -2563,7 +2563,7 @@ describe("AppFileService", () => {
   test("maps iOS logical containers to simulator data container folders", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const dataRoot = "/simulators/SIM-1/data";
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       dataRoot,
@@ -2609,7 +2609,7 @@ describe("AppFileService", () => {
   test("preserves iOS binary app files exactly when writing and reading", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const dataRoot = "/simulators/SIM-1/data";
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       dataRoot,
@@ -2658,7 +2658,7 @@ describe("AppFileService", () => {
     try {
       const fileSystem = new TestAppFileFileSystem();
       const dataRoot = "/simulators/SIM-1/data";
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandResult(
         `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
         dataRoot,
@@ -2701,7 +2701,7 @@ describe("AppFileService", () => {
       Buffer.from([0, 1, 2]),
     );
     fileSystem.setSymlink(join(dataRoot, "Documents", "broken-link"));
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       dataRoot,
@@ -2740,7 +2740,7 @@ describe("AppFileService", () => {
   });
 
   test("returns clear iOS simulator-only errors without invoking simctl for physical devices", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
       fileSystem: new TestAppFileFileSystem(),
@@ -2773,7 +2773,7 @@ describe("AppFileService", () => {
   });
 
   test("maps missing iOS app containers to actionable simulator errors", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.missing.app' data`,
       new Error(
@@ -2797,7 +2797,7 @@ describe("AppFileService", () => {
   });
 
   test("maps unavailable iOS simulators to actionable errors", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
       new Error("No such device or device is shutdown"),
@@ -2820,7 +2820,7 @@ describe("AppFileService", () => {
   });
 
   test("does not let iOS app file paths escape the resolved app container", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
       fileSystem: new TestAppFileFileSystem(),
@@ -2842,7 +2842,7 @@ describe("AppFileService", () => {
   });
 
   test("maps iOS externalFiles to explicit unsupported capability errors", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
       fileSystem: new TestAppFileFileSystem(),

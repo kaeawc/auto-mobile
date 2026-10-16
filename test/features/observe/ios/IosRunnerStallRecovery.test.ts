@@ -176,7 +176,11 @@ describe("iOS stalled command recovery", () => {
   });
 
   test("preserves stall evidence when there is no budget for recovery and a refetch", async () => {
-    const result = await subject.getViewHierarchy(undefined, undefined, false, 0, undefined, 99);
+    const result = await subject.getViewHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      timeoutMs: 99,
+    });
     expect(result.hierarchy.unavailableReason).toBe("runner_stalled");
     expect(restartCalls).toBe(0);
     expect(commands).toHaveLength(1);
@@ -186,7 +190,11 @@ describe("iOS stalled command recovery", () => {
     const controller = new AbortController();
     onRequest = () => controller.abort(new Error("observation cancelled"));
     await expect(
-      subject.getViewHierarchy(undefined, undefined, false, 0, controller.signal),
+      subject.getViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        signal: controller.signal,
+      }),
     ).rejects.toThrow("observation cancelled");
     expect(restartCalls).toBe(0);
   });

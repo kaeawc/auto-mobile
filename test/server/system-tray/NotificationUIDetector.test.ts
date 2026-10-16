@@ -473,8 +473,8 @@ describe("NotificationUIDetector", () => {
       const deps = buildDeps();
       deps.adbFactory = () => ({
         getDeviceTimestampMs: async () => 0,
-        executeCommand: async (_command, _timeout, _buffer, _retry, signal) => {
-          commandSignal = signal;
+        executeCommand: async (_command, options) => {
+          commandSignal = options?.signal;
           return { stdout: "", stderr: "" };
         },
       });

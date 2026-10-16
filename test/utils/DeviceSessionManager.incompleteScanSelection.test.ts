@@ -23,7 +23,7 @@ describe("DeviceSessionManager selection on an incomplete booted-device scan", (
     ]);
     deviceUtils.setAndroidDiscoveryIncomplete("adb devices timed out");
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceUtils, new FakeSimctl() as never),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceUtils, new FakeSimctl()),
     );
 
     const error = await manager.findOrStartAndroidDevice().catch((caught: unknown) => caught);
@@ -51,7 +51,7 @@ describe("DeviceSessionManager selection on an incomplete booted-device scan", (
     simctl.setBootedSimulators([{ deviceId: "BBBB", name: "iPhone B", platform: "ios" }]);
     simctl.setBootedSimulatorsError(new Error("simctl list timed out"));
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl as never),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),
     );
 
     const error = await manager.findOrStartIosDevice().catch((caught: unknown) => caught);

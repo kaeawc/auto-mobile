@@ -54,6 +54,10 @@ const fixtures: Record<string, Node> = {
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   },
+  prototype_data_actions_v1: {
+    ...label,
+    onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

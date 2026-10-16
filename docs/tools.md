@@ -724,6 +724,9 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 `carousel` nodes and `pager.indicator` require `prototype_carousel_v1`, with the same refusal.
 `scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
 `prototype_refresh_v1`, with the same refusal.
+`setData`, `appendData` and `removeData` actions (a tap changing `/data`, with a `change` event per
+write and `baseRevision` required for later `/data` patches) require `prototype_data_actions_v1`,
+with the same refusal; see [data actions](design-docs/plat/android/prototype-ux.md#data-actions-12519).
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).

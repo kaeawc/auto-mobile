@@ -10,6 +10,7 @@ import {
   type KeyInstance,
 } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
+import { prototypeDataActionsError } from "./prototypeDataActions";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -480,15 +481,16 @@ function jsonCost(value: unknown, depth = 0): number {
   );
 }
 /** Data uses the emit payload cost after its own stricter depth-first walk. */
-export function prototypeDataError(value: unknown): PrototypeValidationError | undefined {
+export function prototypeDataError(
+  value: unknown,
+  maxBytes: number = contract.limits.MAX_PROTOTYPE_DATA_BYTES,
+): PrototypeValidationError | undefined {
   if (!object(value)) {
     return fail("data", "Expected object");
   }
   return (
     walkDataValue(value, "data", 1) ??
-    (jsonCost(value) > contract.limits.MAX_PROTOTYPE_DATA_BYTES
-      ? fail("data", "Data byte limit exceeded")
-      : undefined)
+    (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
   );
 }
 
@@ -1160,6 +1162,7 @@ function validateValue(value: unknown): PrototypeValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     gridSpanErrors(context) ??
     repeatErrors(value, repeats) ??
+    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     pagerErrors(context) ??
     stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats);

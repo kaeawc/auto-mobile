@@ -25,6 +25,10 @@ import {
   type PrototypeAssetUpload,
 } from "../../prototype/prototypeAssets";
 import { validatePrototypeSpec } from "../../prototype/prototypeValidation";
+import {
+  isPrototypeDataWriteName,
+  prototypeDataWriteOf,
+} from "../../prototype/prototypeDataWriteEvent";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
@@ -200,6 +204,17 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema
     stacks: prototypeStacksSchema,
   })
   .superRefine((event, context) => {
+    // A data write is itself a change (#12519): it may omit validity but must carry its payload.
+    if (event.kind === "change" && isPrototypeDataWriteName(event.name)) {
+      if (prototypeDataWriteOf(event) === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["payload"],
+          message: "Invalid data write for a change event",
+        });
+      }
+      return;
+    }
     const field =
       event.kind === "change"
         ? "validity"

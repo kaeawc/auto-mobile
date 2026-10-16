@@ -16,7 +16,8 @@ export interface BenchmarkResult {
     version?: string;
   };
   /** appBuild: the installed app's versionName/versionCode/lastUpdateTime fingerprint. */
-  preflight: { log: string[]; durationSeconds: number; appBuild: string };
+  /** device: SDK/model/locale/size/density fingerprint (see describeDevice). */
+  preflight: { log: string[]; durationSeconds: number; appBuild: string; device: string };
   outcome: RunOutcome;
   audit: TranscriptAudit;
   comparison: Comparison;

@@ -116,7 +116,7 @@ function stumbleSection(result: BenchmarkResult): string[] {
 }
 
 function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
-  const { appBuild, suiteDigest, observedModel, claudeCodeVersion } = comparison;
+  const { appBuild, suiteDigest, observedModel, claudeCodeVersion, deviceFingerprint } = comparison;
   return [
     ...(appBuild && !appBuild.matches
       ? [`  ! baseline was recorded on ${appBuild.baseline}; deltas compare different app builds`]
@@ -124,6 +124,11 @@ function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
     ...(suiteDigest && !suiteDigest.matches
       ? [
           "  ! baseline was recorded with a different prompt or suite settings; deltas may not be comparable",
+        ]
+      : []),
+    ...(deviceFingerprint && !deviceFingerprint.matches
+      ? [
+          `  ! baseline was recorded on a different device (${deviceFingerprint.baseline}); deltas may not be comparable`,
         ]
       : []),
     ...(claudeCodeVersion && !claudeCodeVersion.matches
@@ -147,6 +152,7 @@ export function renderReport(result: BenchmarkResult): string {
     `${comparison.verdict.toUpperCase()}  ${result.suite}  ${formatDuration(outcome.wallClockSeconds)}`,
     `  device    ${result.deviceSerial} (preflight ${formatDuration(result.preflight.durationSeconds)}, not measured)`,
     `  app       ${result.preflight.appBuild ?? "unknown"}`,
+    `  env       ${result.preflight.device ?? "unknown"}`,
     ...baselineWarnings(comparison),
     `  claude    model=${model} version=${result.claude.version ?? "unknown"}`,
     `  artifacts ${result.runDirectory}`,
@@ -217,6 +223,9 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
   }
   if (result.claude.version) {
     baseline.claudeCodeVersion = result.claude.version;
+  }
+  if (result.preflight.device !== "unknown") {
+    baseline.deviceFingerprint = result.preflight.device;
   }
   return dump(
     {

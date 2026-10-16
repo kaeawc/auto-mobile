@@ -27,6 +27,7 @@ function result(
     baselineSuiteDigest?: string;
     baselineModel?: string;
     baselineClaudeVersion?: string;
+    baselineDevice?: string;
     appBuild?: string;
   } = {},
 ): BenchmarkResult {
@@ -48,7 +49,12 @@ function result(
     deviceSerial: "emulator-5554",
     suiteDigest: "suite0123456789a",
     claude: { requestedModel: "m", observedModel: "claude-test-model", version: "2.1.301" },
-    preflight: { log: [], durationSeconds: 4, appBuild: "versionName=1.0 versionCode=7" },
+    preflight: {
+      log: [],
+      durationSeconds: 4,
+      appBuild: "versionName=1.0 versionCode=7",
+      device: "sdk=36 model=pixel locale=en-US size=1080x2400 density=420",
+    },
     outcome,
     audit,
     comparison: compareRun(
@@ -62,12 +68,14 @@ function result(
         suiteDigest: options.baselineSuiteDigest,
         observedModel: options.baselineModel,
         claudeCodeVersion: options.baselineClaudeVersion,
+        deviceFingerprint: options.baselineDevice,
       },
       options.sequence,
       {
         appBuild: options.appBuild ?? "versionName=1.0 versionCode=7",
         suiteDigest: "suite0123456789a",
         claudeCodeVersion: "2.1.301",
+        deviceFingerprint: "sdk=36 model=pixel locale=en-US size=1080x2400 density=420",
       },
     ),
   };
@@ -158,6 +166,7 @@ describe("agent benchmark rendering", () => {
       suiteDigest: "suite0123456789a",
       observedModel: "claude-test-model",
       claudeCodeVersion: "2.1.301",
+      deviceFingerprint: "sdk=36 model=pixel locale=en-US size=1080x2400 density=420",
     });
     expect(suite.baselineToolSequence).toEqual(["observe", "tapOn"]);
   });
@@ -190,6 +199,14 @@ describe("agent benchmark rendering", () => {
     );
     const same = result(passing(), { baselineSuiteDigest: "suite0123456789a" });
     expect(renderReport(same)).not.toContain("different prompt or suite settings");
+  });
+
+  test("a baseline from another device environment is flagged", () => {
+    const other = result(passing(), {
+      baselineDevice: "sdk=34 model=pixel locale=de-DE size=1x1 density=1",
+    });
+    expect(renderReport(other)).toContain("! baseline was recorded on a different device (sdk=34");
+    expect(renderReport(other)).toContain("env       sdk=36 model=pixel");
   });
 
   test("a baseline from another Claude Code version is flagged", () => {

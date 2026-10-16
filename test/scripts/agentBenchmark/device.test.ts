@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   captureScreen,
   describeAppBuild,
+  describeDevice,
   parseOnlineSerials,
   resolveSerial,
   runPreflight,
@@ -116,6 +117,17 @@ describe("agent benchmark preflight", () => {
     expect(runner.adbCalls().at(-1)).toBe(
       `-s emulator-5554 shell am start -W -a android.intent.action.VIEW -d 'example:app/search?q=a b&x=$HOME' ${PACKAGE}`,
     );
+  });
+
+  test("the device fingerprint reads SDK, model, locale, and the effective size/density", async () => {
+    const runner = new FakeCommandRunner().onAdb("getprop", {
+      stdout:
+        "36\nsdk_gphone64_arm64\nen-US\nPhysical size: 1080x2400\nOverride size: 720x1600\nPhysical density: 420\n",
+    });
+    expect(await describeDevice(runner, "emulator-5554")).toBe(
+      "sdk=36 model=sdk_gphone64_arm64 locale=en-US size=720x1600 density=420",
+    );
+    expect(await describeDevice(new FakeCommandRunner(), "emulator-5554")).toBe("unknown");
   });
 
   test("the app build fingerprint comes from dumpsys package", () => {

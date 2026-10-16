@@ -65,10 +65,20 @@ describe("agent benchmark claude invocation", () => {
     expect(buildClaudeArgs(configured, "/c.json", "S")).toContain("suite-model");
   });
 
-  test("empty tool lists drop their flags", () => {
+  test("an empty allow list drops its flag; Bash is always denied", () => {
     const args = buildClaudeArgs(suite({ allowedTools: [], disallowedTools: [] }), "/c.json", "S");
     expect(args).not.toContain("--allowedTools");
-    expect(args).not.toContain("--disallowedTools");
+    expect(args.slice(args.indexOf("--disallowedTools"))).toEqual(["--disallowedTools", "Bash"]);
+    const extra = buildClaudeArgs(
+      suite({ disallowedTools: ["mcp__auto-mobile__openLink"] }),
+      "/c.json",
+      "S",
+    );
+    expect(extra.slice(extra.indexOf("--disallowedTools"))).toEqual([
+      "--disallowedTools",
+      "Bash",
+      "mcp__auto-mobile__openLink",
+    ]);
   });
 
   test("the system prompt pins the device and appends filled suite text", () => {

@@ -228,6 +228,39 @@ async function verifyInstalledApk(
   return `verified ${spec.packageName} is ${spec.apkPath}`;
 }
 
+const DEVICE_PROPERTIES =
+  "getprop ro.build.version.sdk; getprop ro.product.model; getprop persist.sys.locale; wm size; wm density";
+
+/**
+ * The device environment a run measured against (SDK level, model, locale, screen size,
+ * density), since hierarchy shape, scrolling, and timing all depend on it. Best effort:
+ * a device that cannot answer reports "unknown", which never matches a baseline.
+ */
+export async function describeDevice(runner: CommandRunner, serial: string): Promise<string> {
+  const result = await runner.run(
+    "adb",
+    ["-s", serial, "shell", DEVICE_PROPERTIES],
+    ADB_TIMEOUT_MS,
+  );
+  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim());
+  // `wm` prints the physical value and then any override; the override is what apps see.
+  const lastValue = (label: string) =>
+    lines
+      .filter((line) => line.includes(`${label}:`))
+      .map((line) => line.slice(line.indexOf(":") + 1).trim())
+      .at(-1);
+  const parts = [
+    ["sdk", lines[0]],
+    ["model", lines[1]],
+    ["locale", lines[2]],
+    ["size", lastValue("size")],
+    ["density", lastValue("density")],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+  return result.exitCode === 0 && parts.length === 5
+    ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
+    : "unknown";
+}
+
 export interface PreflightOutcome {
   /** What was done, one line per step. */
   log: string[];

@@ -11,10 +11,11 @@ import { join } from "node:path";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { compareRun } from "./compare";
+import { compareRun, containsBounded } from "./compare";
 import type { LoadedSuite } from "./config";
 import {
   captureScreen,
+  describeDevice,
   resolveSerial,
   runPreflight,
   screenTextForApp,
@@ -183,7 +184,7 @@ interface PreparedRun {
   serial: string;
   preflight: BenchmarkResult["preflight"];
   /** The reservation held through preflight; both calls are idempotent. */
-  device: { handOff: () => void; release: () => void };
+  reservation: { handOff: () => void; release: () => void };
 }
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
@@ -220,7 +221,7 @@ async function prepareReserved(
   options: RunOptions,
   deps: HarnessDeps,
   serial: string,
-  device: { handOff: () => void; release: () => void },
+  reservation: { handOff: () => void; release: () => void },
 ) {
   const { definition } = suite;
   const startedAt = runTimestamp(deps.timer.now());
@@ -247,16 +248,55 @@ async function prepareReserved(
   await deps.timer.sleep(definition.preflight.settleSeconds * 1000);
   const durationSeconds = (elapsedNow(deps.timer) - preflightStart) / 1000;
   deps.fs.writeFile(join(runDirectory, "preflight.log"), `${log.join("\n")}\n`);
+  await verifyStartScreen(suite, deps, serial, runDirectory);
+  const device = await deviceFingerprint(deps, serial);
   const { paths, claudeCwd } = allocateRunDirectories(options, deps, runDirectory);
   const prepared: PreparedRun = {
     runDirectory,
     claudeCwd,
     paths,
     serial,
-    preflight: { log, durationSeconds, appBuild },
-    device,
+    preflight: { log, durationSeconds, appBuild, device },
+    reservation,
   };
   return { startedAt, prepared };
+}
+
+/**
+ * Confirm preflight landed where the suite expects before paying for a run: a changed
+ * preference contract or a redirected deep link would otherwise hand Claude a different
+ * starting screen, and its recovery would leak into the baseline.
+ */
+async function verifyStartScreen(
+  suite: LoadedSuite,
+  deps: HarnessDeps,
+  serial: string,
+  runDirectory: string,
+) {
+  const expected = suite.definition.preflight.startScreenIncludes;
+  if (expected.length === 0) {
+    return;
+  }
+  const xml = await captureScreen(deps.runner, serial);
+  deps.fs.writeFile(join(runDirectory, "start-screen.xml"), xml);
+  const text = await screenTextForApp(xml, suite.definition.app.packageName);
+  const missing = expected.filter((needle) => !containsBounded(text, needle));
+  if (missing.length > 0) {
+    throw new Error(
+      `Preflight did not reach the expected start screen (missing: ${missing.join(", ")}); ` +
+        `see ${join(runDirectory, "start-screen.xml")}.`,
+    );
+  }
+}
+
+async function deviceFingerprint(deps: HarnessDeps, serial: string): Promise<string> {
+  try {
+    return await describeDevice(deps.runner, serial);
+  } catch (error) {
+    // Report metadata only: an unreadable environment is recorded as "unknown", never a match.
+    deps.log(`device fingerprint failed: ${errorMessage(error)}`);
+    return "unknown";
+  }
 }
 
 /** Create the run's temp and state directories, removing any already made if one fails. */
@@ -315,7 +355,7 @@ async function launchClaude(
   );
   // The private daemon claims the device on Claude's first tool call, so hand the daemon
   // claim over now; the benchmark lock stays held until the run ends.
-  run.device.handOff();
+  run.reservation.handOff();
   deps.log(`[${definition.name}] running claude (timeout ${definition.claude.timeoutSeconds}s)`);
   const start = elapsedNow(deps.timer);
   const exit = await deps.launcher.launch({
@@ -354,7 +394,7 @@ export async function runSuite(
       screen = await screenAfterRun(deps, prepared, definition.app.packageName);
     }
   } finally {
-    prepared.device.release();
+    prepared.reservation.release();
     await stopPrivateDaemon(deps, options, prepared.paths);
     deps.fs.remove(prepared.paths.auxSocketDir);
     deps.fs.remove(prepared.claudeCwd);
@@ -391,7 +431,12 @@ export async function runSuite(
       definition.verify,
       definition.baseline,
       definition.baselineToolSequence,
-      { appBuild: prepared.preflight.appBuild, suiteDigest: digest, claudeCodeVersion: version },
+      {
+        appBuild: prepared.preflight.appBuild,
+        suiteDigest: digest,
+        claudeCodeVersion: version,
+        deviceFingerprint: prepared.preflight.device,
+      },
     ),
   };
   deps.fs.writeFile(

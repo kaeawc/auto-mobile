@@ -1,4 +1,5 @@
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import { createSetActiveDeviceHandler } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
@@ -46,8 +47,6 @@ import {
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
 import {
   addDeviceTargetingToSchema,
@@ -85,11 +84,7 @@ async function resumeCtrlProxyIfCurrentlyBooted(
   ) {
     return;
   }
-  if (platform === "android") {
-    AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
-  } else {
-    IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
-  }
+  ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId);
 }
 
 // Schema definitions

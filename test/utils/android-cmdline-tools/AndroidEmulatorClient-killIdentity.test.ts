@@ -805,3 +805,21 @@ test("a serial absent from adb and the process table is still not running, and n
   expect((failure as Error).message).not.toContain("''");
   expect((failure as Error).message).toContain("emulator-5554");
 });
+
+// An unreadable process table (ps failure, spent deadline, Windows' unsupported table) is not
+// proof the emulator is gone: fail closed with an error the already-stopped classifier rejects.
+test("a serial absent from adb with an unreadable process table fails closed, not 'not running'", async () => {
+  const { client, stopper } = absentFromAdbFixture();
+  stopper.describeUnreadable = "Process table unsupported on win32";
+
+  const failure = await client
+    .killDevice(original, { processStop: { stopper } })
+    .catch((error: unknown) => error);
+
+  const message = (failure as Error).message;
+  expect(message).not.toContain("is not running");
+  expect(message.toLowerCase().includes("not running")).toBe(false);
+  expect(message).toContain("Process table unsupported on win32");
+  expect(message).toContain("emulator-5554");
+  expect(stopper.stopCalls).toEqual([]);
+});

@@ -51,10 +51,14 @@ export type EmulatorProcessStopOutcome =
       kind: "unidentified";
       identity: Extract<EmulatorProcessIdentity, { kind: "absent" | "ambiguous" | "unreadable" }>;
     };
+/** `unreadable` (failed, timed out, or unsupported table) is not proof that no process exists. */
+export type EmulatorSerialDescription =
+  | { kind: "read"; candidates: Candidate[] }
+  | { kind: "unreadable"; detail: string };
 export interface EmulatorProcessStopper {
   identify(target: StopTarget, options: StopOptions): Promise<EmulatorProcessIdentity>;
   /** Diagnostic only. These candidates are never authorization to signal. */
-  describeSerial(serial: string, options: StopOptions): Promise<Candidate[]>;
+  describeSerial(serial: string, options: StopOptions): Promise<EmulatorSerialDescription>;
   stop(target: StopTarget, options: StopOptions): Promise<EmulatorProcessStopOutcome>;
 }
 
@@ -219,14 +223,17 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       : { kind: "unreadable", detail: result.error ?? "Process table unavailable" };
   }
 
-  async describeSerial(serial: string, options: StopOptions): Promise<Candidate[]> {
+  async describeSerial(serial: string, options: StopOptions): Promise<EmulatorSerialDescription> {
     const result = await this.read(options);
-    return candidatesForSerial(result.value ?? [], serial, this.options.ownPid ?? process.pid).map(
-      ({ pid, command }) => ({
-        pid,
-        command,
-      }),
-    );
+    if (!result.value) {
+      return { kind: "unreadable", detail: result.error ?? "Process table unavailable" };
+    }
+    return {
+      kind: "read",
+      candidates: candidatesForSerial(result.value, serial, this.options.ownPid ?? process.pid).map(
+        ({ pid, command }) => ({ pid, command }),
+      ),
+    };
   }
 
   async stop(target: StopTarget, options: StopOptions): Promise<EmulatorProcessStopOutcome> {

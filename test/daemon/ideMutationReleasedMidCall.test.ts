@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -8,7 +9,6 @@ import {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
@@ -200,7 +200,7 @@ describe("idle release while the holder's device call is in flight", () => {
         }) as unknown as AndroidCtrlProxyManager,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

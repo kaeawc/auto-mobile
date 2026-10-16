@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import {
   emulatorProcessEscapeHint,
   type EmulatorProcessStopper,
@@ -35,7 +36,7 @@ import {
   type SystemUiAnrRecoveryResult,
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
-import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import { releasePoolDevice, releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { heldDeviceBindRefusal, isSameHolderSession } from "../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
@@ -3768,7 +3769,7 @@ export function bindUndoneIfUndelivered(
       await undoUndeliveredAcquisition(receipt, signal.reason);
       const boot = bootOf?.();
       // A session the undo had to leave in place keeps the device it runs on.
-      if (boot && !initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId) {
+      if (boot && !holderOf(initializedDevicePool()?.getDevice(boot.device.deviceId))) {
         await cancelUnownedColdBoot(boot);
       }
     });
@@ -4218,7 +4219,7 @@ export function liveHolderOtherThanThisRequest(deviceId: string): string | undef
   if (!daemonState.isInitialized()) {
     return undefined;
   }
-  const holder = daemonState.getDevicePool().getDevice(deviceId)?.sessionId;
+  const holder = holderOf(daemonState.getDevicePool().getDevice(deviceId));
   if (!holder || !daemonState.getSessionManager().getSession(holder)) {
     return undefined;
   }
@@ -4317,7 +4318,7 @@ function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> 
     // The pool tracks an Android emulator's process from the bind on. That alone is not
     // ownership: only a session holding the device keeps the emulator this call booted alive,
     // the same rule an iOS simulator's boot handle already follows (#11593).
-    if (devicePool.getDevice(boot.device.deviceId)?.sessionId) {
+    if (holderOf(devicePool.getDevice(boot.device.deviceId))) {
       logger.info(
         `[DeviceTools] Cold boot ${boot.device.deviceId} process ownership transferred before cleanup`,
       );
@@ -4364,7 +4365,7 @@ export async function rollBackUndeliveredBoot(
     deadlineMs: deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS,
   });
   try {
-    const holder = initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId;
+    const holder = holderOf(initializedDevicePool()?.getDevice(boot.device.deviceId));
     if (holder) {
       logger.info(
         `[DeviceTools] Leaving ${boot.device.deviceId} running: session ${holder} acquired it after the cancelled call released it`,
@@ -4667,7 +4668,7 @@ function captureSystemUiAnrInitialHolder(
   input: StartDeviceRunnerReadinessInput,
   devicePool: DevicePool | undefined,
 ): string | undefined {
-  const sessionId = devicePool?.getDevice(input.boot.device.deviceId)?.sessionId;
+  const sessionId = holderOf(devicePool?.getDevice(input.boot.device.deviceId));
   return sessionId && input.daemonState.getSessionManager().getSession(sessionId)
     ? sessionId
     : undefined;
@@ -4707,7 +4708,7 @@ function createSystemUiAnrRebooter(
         );
       }
     };
-    const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
+    const sessionId = holderOf(devicePool?.getDevice(candidate.device.deviceId));
     const session = sessionId ? manager?.getSession(sessionId) : undefined;
     return await rebootAndroidAfterSystemUiAnr({
       boot: candidate,
@@ -4731,7 +4732,7 @@ function createSystemUiAnrRebooter(
           !sessionId ||
           preservedSessionId !== sessionId ||
           devicePool.getDevice(replacement.id) !== replacement ||
-          replacement.sessionId !== sessionId
+          holderOf(replacement) !== sessionId
         ) {
           return;
         }
@@ -4753,7 +4754,7 @@ function createSystemUiAnrRebooter(
             },
           );
         } else {
-          await devicePool.releaseDevice(replacement.id, sessionId);
+          await releasePoolDevice(devicePool, replacement.id, sessionId);
         }
       },
       operations: {

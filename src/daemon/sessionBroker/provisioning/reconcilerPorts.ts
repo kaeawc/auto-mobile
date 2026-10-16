@@ -1,3 +1,4 @@
+import { holderOf } from "../../deviceBinding";
 /**
  * Production ports for the binding reconciler (#11173 part b, #11175): the daemon's real
  * device inventory, the `provisionDevice` path (exact matching, creation, boot, automation
@@ -409,9 +410,9 @@ export class PoolBindingDeviceClaims implements BindingDeviceClaims {
 
   async describe(device: DeviceInfo): Promise<BindingDeviceClaim> {
     const runtimes = this.runtimesOf(device);
-    const held = runtimes.find((pooled) => pooled.sessionId !== null);
+    const held = runtimes.find((pooled) => holderOf(pooled) !== null);
     if (held) {
-      return { kind: "held", reason: `session ${held.sessionId} holds ${held.id}` };
+      return { kind: "held", reason: `session ${holderOf(held)} holds ${held.id}` };
     }
     // The listing reports an unknown running state as isRunning:false, so the flag alone is not
     // evidence the device is stopped.
@@ -433,7 +434,7 @@ export class PoolBindingDeviceClaims implements BindingDeviceClaims {
 
   sessionsOn(device: DeviceInfo): string[] {
     return this.runtimesOf(device).flatMap((pooled) =>
-      pooled.sessionId ? [pooled.sessionId] : [],
+      holderOf(pooled) ? [holderOf(pooled)!] : [],
     );
   }
 
@@ -444,7 +445,7 @@ export class PoolBindingDeviceClaims implements BindingDeviceClaims {
       .some(
         (pooled) =>
           pooled.platform === "android" &&
-          pooled.sessionId !== null &&
+          holderOf(pooled) !== null &&
           !pooled.avdName &&
           pooled.name.startsWith("Unknown ("),
       );

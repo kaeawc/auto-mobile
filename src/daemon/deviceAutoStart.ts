@@ -1,3 +1,4 @@
+import { isErrored } from "./deviceBinding";
 import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
@@ -446,7 +447,7 @@ export class DeviceAutoStart {
     const findExisting = (request: DeviceAllocationRequest) =>
       this.port
         .getUnownedDevicesMatchingCriteria(request.criteria)
-        .find((device) => device.status !== "error" && !reservedDeviceIds.has(device.id));
+        .find((device) => !isErrored(device) && !reservedDeviceIds.has(device.id));
 
     for (const request of unheldRequests) {
       const existing = findExisting(request);

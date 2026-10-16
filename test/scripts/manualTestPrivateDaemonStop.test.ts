@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
@@ -150,7 +151,7 @@ test("pure stop-outcome classifier", async () => {
 
 function recordedCrash(f: Awaited<ReturnType<typeof stopFixture>>) {
   f.files.set(
-    `${f.spec.dir}/daemon-start.json`,
+    join(f.spec.dir, "daemon-start.json"),
     JSON.stringify({
       pid: 123,
       socketPath: f.spec.socketPath,
@@ -189,7 +190,7 @@ test.each(["missing", "different", "unknown", "socket", "pidfile", "pid", "missi
     const f = await stopFixture();
     recordedCrash(f);
     if (kind === "missing") {
-      f.files.delete(`${f.spec.dir}/daemon-start.json`);
+      f.files.delete(join(f.spec.dir, "daemon-start.json"));
     }
     if (["different", "unknown"].includes(kind)) {
       f.deps.processGeneration = {
@@ -235,7 +236,7 @@ test.each(["port", "socket", "home"])(
   async (kind) => {
     const f = await stopFixture();
     recordedCrash(f);
-    const path = `${options.batchDir}/batch.json`;
+    const path = join(options.batchDir, "batch.json");
     const manifest = JSON.parse(f.files.get(path)!);
     if (kind === "port") {
       manifest.options.basePort = 3000;
@@ -268,7 +269,7 @@ test("start persists captured daemon identity for subsequent crash fencing", asy
     ),
   ).toBe(0);
   const spec = derivePrivateDaemonBatch(options)[0];
-  expect(JSON.parse(f.files.get(`${spec.dir}/daemon-start.json`)!)).toMatchObject({
+  expect(JSON.parse(f.files.get(join(spec.dir, "daemon-start.json"))!)).toMatchObject({
     pid: 1234,
     startIdentity: "start-1234",
     socketPath: spec.socketPath,
@@ -281,7 +282,7 @@ test.each(["missing-start", "recorded-pid", "recorded-socket", "recorded-pidfile
   async (kind) => {
     const f = await stopFixture();
     recordedCrash(f);
-    const path = `${f.spec.dir}/daemon-start.json`;
+    const path = join(f.spec.dir, "daemon-start.json");
     const recorded = JSON.parse(f.files.get(path)!);
     if (kind === "missing-start") {
       delete recorded.startIdentity;

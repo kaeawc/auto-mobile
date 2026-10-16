@@ -330,7 +330,10 @@ test("native info refuses protected or non-product devices without appending any
     [device, [device.name]],
   ] as const) {
     const f = fixture();
-    f.files.set("/batch/batch.json", JSON.stringify({ options: { protectedDevices }, broker: {} }));
+    f.files.set(
+      join(resolve("/batch"), "batch.json"),
+      JSON.stringify({ options: { protectedDevices }, broker: {} }),
+    );
     expect(() =>
       f.ledger.info("phone", f.init, { sessionId: f.init.session.sessionUuid, nativeDevice }),
     ).toThrow(BrokerDeviceInfoRefusedError);

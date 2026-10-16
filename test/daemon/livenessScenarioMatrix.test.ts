@@ -1,8 +1,8 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
@@ -1680,7 +1680,7 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     forwarded: Array<{ tool: string; connection: string; settle(): void }>,
   ) {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
       scenario.daemon.state as never,

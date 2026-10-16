@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import type { SessionBrokerService } from "./sessionBroker/service";
 import type { SessionBrokerProtocolErrorCode } from "../models/sessionBrokerResult";
 import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
@@ -15,6 +16,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   cancelExecutionsCutBySessionRelease,
+  releasePoolDevice,
   releaseSessionAndDevice,
   type ReleaseCutExecutions,
 } from "./releaseSessionAndDevice";
@@ -1531,7 +1533,7 @@ async function releaseUnknownSession(
       pool.releaseRehydrationReservation?.(sessionId);
       // A session released while it was being created may already hold its device in the pool;
       // this frees it only if this session is the holder.
-      await pool.releaseDevice(deviceId, sessionId);
+      await releasePoolDevice(pool, deviceId, sessionId);
       return {
         success: true,
         result: {
@@ -1651,7 +1653,7 @@ function deviceLeaseActivitySourcesFor(state: DaemonStateAccess): DeviceLeaseAct
   const manager = state.getSessionManager();
   return withShutdownActivity(
     daemonDeviceLeaseActivitySources(
-      (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+      (id) => manager.getSessionForDevice?.(id) ?? holderOf(pool.getDevice?.(id)) ?? null,
     ),
     pool,
   );

@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -210,7 +211,9 @@ export class DeviceReservations {
     device: PooledDevice,
     client: (AutolockClient & { restartResumeSessionId?: string }) | undefined,
   ): void {
-    const session = device.sessionId ? this.port.sessionManager.getSession(device.sessionId) : null;
+    const session = holderOf(device)
+      ? this.port.sessionManager.getSession(holderOf(device)!)
+      : null;
     if (!session) {
       return;
     }
@@ -269,7 +272,7 @@ export class DeviceReservations {
     const candidate = device ? this.port.pooledSessionIdentities.get(device) : undefined;
     const session =
       candidate !== undefined &&
-      candidate.sessionId === device?.sessionId &&
+      candidate.sessionId === holderOf(device) &&
       candidate.assignedDevice === deviceId &&
       this.port.sessionManager.isLatestSessionIdentity(candidate)
         ? candidate

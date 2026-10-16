@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   brokerScenarios,
   runBrokerScenario,
@@ -228,7 +229,7 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
       const summary = await runBrokerScenario(scenario, f.context, { device: true });
       expect(summary.error).toBeUndefined();
       expect(summary.outcome).toBe("passed");
-      const bytes = f.files.get(`/fake-batch/evidence/${scenario.name}/summary.json`)!;
+      const bytes = f.files.get(join("/fake-batch", "evidence", scenario.name, "summary.json"))!;
       expect(JSON.parse(bytes)).toEqual(summary);
       expect(bytes).not.toContain("secret-");
       expect(f.resources.every((r) => r.state === "destroyed")).toBe(true);

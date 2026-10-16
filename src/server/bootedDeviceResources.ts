@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
@@ -834,7 +835,7 @@ function resolvePoolDeviceContext(
     poolInfo: {
       poolStatus,
       unhealthy: devicePool.getDeviceHealthMarker(device.deviceId),
-      assignedSession: pooledDevice.sessionId || undefined,
+      assignedSession: holderOf(pooledDevice) || undefined,
       recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
       avdName: pooledDevice.avdName,
       incarnation: pooledDevice.incarnation,

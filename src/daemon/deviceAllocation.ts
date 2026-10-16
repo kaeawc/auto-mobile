@@ -1,3 +1,4 @@
+import { bindDevice, holderOf, isIdle } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type Platform } from "../models";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -479,7 +480,7 @@ export class DeviceAllocation {
   ): Promise<void> {
     const idle = this.port
       .getDevicesMatchingRecoveryTarget(target)
-      .filter((device) => device.sessionId === null);
+      .filter((device) => holderOf(device) === null);
     if (idle.length === 0) {
       return;
     }
@@ -670,20 +671,15 @@ export class DeviceAllocation {
       const candidatesBeforeDiscovery = selectCandidates();
       // Only entries idle before discovery may be judged by this pass. A newly
       // released, added or replaced entry needs its own fresh snapshot.
-      const capturedEntries = new Set(
-        candidatesBeforeDiscovery.filter((device) => device.status === "idle"),
-      );
+      const capturedEntries = new Set(candidatesBeforeDiscovery.filter((device) => isIdle(device)));
       const [iosLiveness, androidPresence] = await raceWithDeadline(
         () =>
           Promise.all([
-            candidatesBeforeDiscovery.some(
-              (device) => device.status === "idle" && device.platform === "ios",
-            )
+            candidatesBeforeDiscovery.some((device) => isIdle(device) && device.platform === "ios")
               ? this.port.idleDeviceReaper.getIosLivenessSnapshot()
               : undefined,
             candidatesBeforeDiscovery.some(
-              (device) =>
-                device.status === "idle" && this.port.shouldValidatePooledDevicePresence(device),
+              (device) => isIdle(device) && this.port.shouldValidatePooledDevicePresence(device),
             )
               ? this.port.takeFreshPresenceDiscovery("android")
               : undefined,
@@ -851,7 +847,7 @@ export class DeviceAllocation {
   isCurrentIdleDeviceAssignable(device: PooledDevice, forSessionId?: string): boolean {
     return (
       this.port.isPooledEntryCurrent(device) &&
-      device.sessionId === null &&
+      holderOf(device) === null &&
       this.selectIdleDevice([device], forSessionId) === device &&
       this.port.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
     );
@@ -867,8 +863,8 @@ export class DeviceAllocation {
     let snapshotStale = [...capturedEntries].some(
       (entry) =>
         !this.port.isPooledEntryCurrent(entry) ||
-        entry.status !== "idle" ||
-        entry.sessionId !== null ||
+        !isIdle(entry) ||
+        holderOf(entry) !== null ||
         this.port.isReservedForAssignment(entry, forSessionId),
     );
     // One fresh Android sweep per pass (#6546), now taken outside the mutex.
@@ -940,8 +936,7 @@ export class DeviceAllocation {
     }
     const existingSession = this.port.sessionManager.getSession(sessionId);
     const assignmentSnapshot = this.port.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.port.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
@@ -970,7 +965,7 @@ export class DeviceAllocation {
 
   isIdleDeviceEligible(device: PooledDevice, forSessionId?: string): boolean {
     return (
-      device.status === "idle" &&
+      isIdle(device) &&
       this.port.isPotentialAllocationSupply(device) &&
       !this.port.isReservedForAssignment(device, forSessionId)
     );

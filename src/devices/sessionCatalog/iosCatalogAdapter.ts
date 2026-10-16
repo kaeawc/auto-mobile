@@ -337,17 +337,19 @@ async function readIosNativeCatalog(
   reader: IosNativeCatalogReader,
   signal: AbortSignal | undefined,
 ): Promise<readonly [AppleDeviceType[], IosNativeRuntime[]]> {
-  const [deviceTypes, runtimes] = await Promise.allSettled([
-    reader.getDeviceTypesChecked(signal),
-    reader.getRuntimesChecked(undefined, signal),
+  // Let both reads finish before reporting, preferring the device-type failure.
+  const settle = <T>(read: Promise<T>): Promise<() => T> =>
+    read.then(
+      (value) => () => value,
+      (error: unknown) => () => {
+        throw error;
+      },
+    );
+  const [takeDeviceTypes, takeRuntimes] = await Promise.all([
+    settle(reader.getDeviceTypesChecked(signal)),
+    settle(reader.getRuntimesChecked(undefined, signal)),
   ]);
-  if (deviceTypes.status === "rejected") {
-    throw deviceTypes.reason;
-  }
-  if (runtimes.status === "rejected") {
-    throw runtimes.reason;
-  }
-  return [deviceTypes.value, runtimes.value];
+  return [takeDeviceTypes(), takeRuntimes()];
 }
 
 export async function readIosSessionDeviceCatalog(

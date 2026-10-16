@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import captured from "../fixtures/session-broker/fake-lifecycle.json";
 import { beforeAll, expect, test } from "bun:test";
 import {
@@ -58,9 +58,7 @@ test.each(brokerScenarios.filter((s) => s.class === "fake"))(
       expect(summary.outcome).toBe("passed");
       expect(summary.requests.length).toBeGreaterThan(0);
       expect(summary.durationMs).toBeGreaterThanOrEqual(0);
-      const bytes = fs.files.get(
-        join(resolve("/fake-batch"), "evidence", scenario.name, "summary.json"),
-      )!;
+      const bytes = fs.files.get(join("/fake-batch", "evidence", scenario.name, "summary.json"))!;
       expect(JSON.parse(bytes)).toEqual(summary);
       for (const { token } of harness.context.clients) {
         expect(bytes).not.toContain(token);

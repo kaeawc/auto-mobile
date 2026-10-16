@@ -1,10 +1,11 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { Session } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -104,11 +105,17 @@ describe("UnixSocketServer device read lane (#10969)", () => {
     sessionDevices = new Map([["owner", "device-1"]]);
     blockers = new Map();
     started = [];
-    server = new UnixSocketServer(
+    server = createTestUnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
       fakeDaemonState(sessionDevices),
       new FakeTimer(),
+      null,
+      {},
+      undefined,
+      // The default lock's owner-generation probe costs ~250 ms on the first start in a
+      // process; these tests do not cover the lock.
+      { bindLock: { acquire: () => true, release: () => {} } },
     );
     server.deviceReadToolCallClassifier = (name) => READ_TOOLS.has(name);
     server.mcpClientFactory = async () => ({

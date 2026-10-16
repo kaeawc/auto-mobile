@@ -1,3 +1,4 @@
+import { isIdle, statusOf, holderOf } from "../../deviceBinding";
 import type { DevicePool } from "../../devicePool";
 import type { DeviceInfo } from "../../../models";
 
@@ -35,10 +36,10 @@ export function freeDeviceBusyReason(
   if (!runtime) {
     return undefined;
   }
-  if (runtime.status !== "idle") {
-    return `pooled runtime is ${runtime.status}`;
+  if (!isIdle(runtime)) {
+    return `pooled runtime is ${statusOf(runtime)}`;
   }
-  if (runtime.sessionId !== null) {
+  if (holderOf(runtime) !== null) {
     return "a session holds the runtime";
   }
   if (pool.isUnderShutdownReservation(runtime.id)) {

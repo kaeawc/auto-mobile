@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { expect, test } from "bun:test";
@@ -7,7 +8,6 @@ import {
   daemonShuttingDownMcpOutcome,
 } from "../../src/daemon/daemonShutdownOutcome";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -128,7 +128,7 @@ function createHarness(peerCloses = true) {
     }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
-  const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
+  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
   const internals = server as unknown as SocketServerInternals;
   const socket = new TerminalSocket(peerCloses);
   internals.acceptingRequests = true;

@@ -510,6 +510,7 @@ describe("device restart reserves the entire recovery window", () => {
       record: (intent) => {
         intents.push(intent);
         events.push("journal");
+        return "volatile";
       },
       resolve: () => {
         events.push("resolve");

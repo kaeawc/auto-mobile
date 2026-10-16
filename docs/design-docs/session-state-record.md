@@ -1,7 +1,8 @@
 # Session state record
 
 Design note for #11798 (one explicit state record per session UUID) and the two "Not verified"
-questions of #11799 (one serialized per-UUID row writer). It changes no code. Line numbers are
+questions of #11799 (one serialized per-UUID row writer). The S2 agreement findings below
+record the implemented shadow-only mapping; the remaining migration is proposed. Line numbers are
 `src/daemon/sessionManager.ts` at `4f6d25591e` unless a path says otherwise; the file is 13,903
 lines.
 
@@ -27,17 +28,19 @@ lines.
 
 ### 1.1 Per-UUID lifecycle state
 
-Every field is a private member of `SessionManager` (1613-1860). `U` = keyed by UUID,
+This inventory records the original private fields of `SessionManager` (1613-1860);
+the assignment, creation, release-before-publish and rebind groups now live in `SessionSlots`.
+Line numbers below are historical for the remaining manager fields. `U` = keyed by UUID,
 `S` = keyed by `Session` object identity (a `WeakMap`/`WeakSet`).
 
 | Concern                | Field (line)                                                                                                            | Key         |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------- |
 | Published              | `sessions` (1614)                                                                                                       | U           |
 | Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                    | U / device  |
-| Assignment             | `pendingSessionAssignments` (1800), `sharedSessionAssignments` (1801)                                                   | U           |
-| Creation               | `pendingSessionCreations` (1796), `pendingPersistedRecoveries` (1803), `claimedRecoverableRows` (1805)                  | U / S       |
-| Rebind                 | `pendingSessionRebinds` (1847), `deferredRebindCleanups` (1848)                                                         | U           |
-| Release before publish | `pendingSessionReleases` (1845)                                                                                         | U           |
+| Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                            | U           |
+| Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                  | U / S       |
+| Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                  | U           |
+| Release before publish | `pendingSessionReleases` (now `SessionSlots`)                                                                           | U           |
 | Release in flight      | `releasePromises` (1651), `activeReleasePromises` (1653), `releasingSessions` (1740)                                    | U / set / S |
 | Terminal fence         | `terminalReleaseSnapshots` (1856), `terminalReleaseReasonStates` (1733), `terminalReleaseReservations` (1735)           | U           |
 | Finalized identity     | `finalizedSessionReleases` (1688), `latestFinalizedSessionIdentities` (1723), `finalizedSessionIdentityRegistry` (1724) | S / U       |
@@ -349,10 +352,10 @@ could change behaviour, so it ships with its own test and is called out in the P
 | Existing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | New home                                                                                                                                      |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sessions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `state.session` of `live` / `rebinding` / `releasing`                                                                                         |
-| `pendingSessionAssignments`, `sharedSessionAssignments`                                                                                                                                                                                                                                                                                                                                                                                                                                              | `assigning`                                                                                                                                   |
-| `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows`                                                                                                                                                                                                                                                                                                                                                                                                                    | `creating.creation`, `creating.recovery`                                                                                                      |
-| `pendingSessionReleases`                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `releaseRequested` on `assigning` / `creating`                                                                                                |
-| `pendingSessionRebinds`, `deferredRebindCleanups`                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `rebinding.rebind` or `releasing.rebind` (cleanups stay a per-slot list)                                                                      |
+| `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                                                                                                                                                                                                                                                                                                                                                                                                         | `assigning`                                                                                                                                   |
+| `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                                                                                                                                                                                                                                                                                                                                                                                               | `creating.creation`, `creating.recovery`                                                                                                      |
+| `pendingSessionReleases` (now `SessionSlots`)                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `releaseRequested` on `assigning` / `creating`                                                                                                |
+| `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                                                                                                                                                                                                                                                                                                                                                                                               | `rebinding.rebind` or `releasing.rebind` (cleanups stay a per-slot list)                                                                      |
 | `releasePromises`, `releasingSessions`, `forced`, `commitFenced`, `stage`                                                                                                                                                                                                                                                                                                                                                                                                                            | `releasing.op` (`releasingSessions` is `tag === "releasing"`)                                                                                 |
 | `activeReleasePromises`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `releasing.op` plus `retiring` (a derived set across slots)                                                                                   |
 | `terminalReleaseSnapshots`, `terminalReleaseReasonStates`                                                                                                                                                                                                                                                                                                                                                                                                                                            | `fenced.snapshot` / `fenced.reason`; `releasing.fence`                                                                                        |
@@ -363,17 +366,70 @@ could change behaviour, so it ships with its own test and is called out in the P
 | `forcedNonTerminalReleases`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `ended.source = "forced"` plus the snapshot; the stuck op lives on in `retiring`                                                              |
 | Row facet: `pendingTerminalReleaseRetries`, `lateReleaseWrites`, `releaseDrainStarted`, `pendingNonTerminalReleaseSnapshots`, `owedSupersededRowReasserts`, `pendingSupersededRowReasserts`, `supersededRowsUnderPendingRelease`, `supersededReasonsBeingRewritten`, `supersededReleaseReasons`, `releaseReasonPredecessors`, `refusedReleaseWrites`, `releaseRowGenerations`, `persistedRowGenerations`, `issuedActivityWrites`, `retiredCreationRows`, `activityRowRePersists`, the retry backoffs | `SessionRowWriter` (#11799); #11798 does not move them                                                                                        |
 
-Predicates become tag reads:
+Predicate mappings (including the design-visible S2 shadow resolutions):
 
 - `isCurrentSession(s)`: `slot.session === s` and tag in {`live`, `rebinding`}, or `releasing` with
   `fence: "none"`.
-- `isAdmittedForAutomation(s)`: tag in {`live`, `rebinding`} and `slot.session === s`.
+- `isAdmittedForAutomation(s)`: current identity with no terminal fence and not in
+  `releasingSessions` during the shadow migration. See the S2 mapping below before replacing this
+  with a tag-only read.
 - `isLatestSessionIdentity(s)`: the slot's identity equals `s` (`creating` / `assigning` -> false).
-- `isSessionBeingRecreated(u)`: tag in {`assigning`, `creating`, `live`, `rebinding`}.
-- `getAllKnownSessionIds()`: store keys minus `ended` / `fenced`.
+- `isSessionBeingRecreated(u)`: tag in {`assigning`, `creating`, `live`, `rebinding`, `releasing`}.
+- `getAllKnownSessionIds()`: ordinary occupied tags, plus any `residue` flagged record, including
+  `absent`, `ended` and `fenced` during the shadow migration.
 - `getHeldDeviceSessions()`: the device index joined with the slot's `session`.
 
 `waitOutRecreationOf` / `waitOutReleaseOf` / `waitOutRebindOf` become `await slot.settled`.
+
+### S2 agreement findings
+
+These are design-visible S2 resolutions, preserving the existing predicates and all lifecycle
+behaviour. `getLegacyLifecycleView()` borrows the nine real maps through read-only interfaces;
+`isReleasing(session)` reads the identity-keyed WeakSet without enumerating it. Ten one-statement
+hooks observe creation/assignment start and end, publication, rebind start/end, release start/end,
+and unpublication (shared by ordinary and forced release). Production defaults to `log`:
+disagreements use `logger.debug`; exceptions from derivation/predicates are caught and warned.
+Tests set `throw`; `off` performs no reads. No probe result controls a lifecycle operation.
+
+1. **Published releases are still being recreated.** `releasing` joins the recreation tag set.
+   The WeakSet add precedes release-op installation, so that window also derives `releasing`.
+   S7 must preserve this meaning rather than treating recreation as only creation work.
+2. **A declined commit does not override a terminal fence.** Any published session with a held
+   terminal snapshot derives `releasing` with `fence: "terminal"`, including declined operations.
+   Current/admission remain false, known/recreated remain true. A real failed terminal write also
+   leaves a published session and fence with **no release operation**, even after settling;
+   deterministic coverage reproduces it and a later declined release. Thus the shadow
+   `releasing` tag cannot require an op payload. S5 must represent that held-fence state before
+   replacing the legacy maps. A newly raised fence can instead be lifted during a declined
+   release's live-row rewrite; `releasing -> live` remains legal.
+3. **Orphan bookkeeping is known residue.** `DerivedSlot.residue: true` retains membership for
+   `pendingSessionReleases`, `pendingSessionRebinds`, or `releasePromises` after publication,
+   creation and assignment are gone. It may decorate `absent`, `ended` or `fenced`;
+   `deriveAllSlots` includes an absent residue. The sweep observes orphan release requests;
+   a controlled forced release during a parked rebind reproduces an orphan rebind. Both clear
+   when outstanding work settles; a parked await can retain them indefinitely. S3/S4 must retain
+   these outstanding-work records in known-id reads until their continuations clean up, or
+   explicitly prove equivalent atomic cleanup. They must not silently drop them as absent.
+4. **Admission is not yet tag-only.** Release operations outlive removal, and can also outlive
+   WeakSet cleanup on a published incarnation. A non-terminal `releasing` tag can therefore be
+   current and admitted after that cleanup; a terminal-fenced published session remains blocked
+   even without WeakSet membership. The exact S2 mapping is current-by-tag/fence, then
+   `!view.isReleasing(publishedSession)` for admission. S5/S7 must preserve those windows before
+   collapsing admission to tags. Superseded/stale ops never replace a newer published identity.
+5. **Known and latest identity have separate precedence.** An unpublished release op remains
+   known even when its tag is `ended`/`fenced` (the same residue flag). Latest identity chooses
+   published, then rejects pending creation/assignment, then release-op identity, then the weak
+   finalized identity. The probe checks all three candidates and tests also retain older
+   incarnations. `getHeldDeviceSessions` is outside S2: it joins the separate device index and is
+   not a UUID-only predicate.
+
+The production known-id check is the constant-time six-map membership equivalent of
+`getAllKnownSessionIds()`, not an allocation of its complete union per hook. The agreement test
+additionally checks membership against the real public union after operations and individual
+microtask yields. Its 29 seeds (including a pinned corpus), 36 random steps per seed and three
+forced reincarnations run in `beforeAll`; the timed per-seed tests only assert results. It also
+performs a shutdown drain and rehydrates a guaranteed recoverable row with the shared in-memory
+persistence and journal filesystem. It uses no devices or SQLite.
 
 ## 5. Where `SessionRowWriter` sits
 
@@ -445,6 +501,9 @@ New code goes in proposed modules (SessionSlots and SessionRowWriter) so
 | S7  | Predicates become tag reads; the six hand predicates are deleted; `waitOut*Of` use `slot.settled`. An illegal transition throws under test and logs a warning plus a counter in production, so this PR stays behaviour-preserving. The rebind-during-release re-dispatch (§3.1) is split into its own PR if it changes behaviour.                                                                                    | M                      | S2, plus the unit tests of each predicate's call sites and one test per removed microtask-yield workaround.                                                                                          |
 | S8  | Its own issue, not part of closing #11798. Split `getSessionInternal` into pure `find` and explicit `expireIfDue`; migrate the 31 in-class readers (`getClock`, `getRotation`, `getNetworkCondition`...) to `find`. `expireIfDue` stays at every site where expiry is observable (routing, admission), so lazy expiry does not silently disappear for the 84 external callers; those migrate directory by directory. | M, then several S      | A lint-guarded test that `find` never schedules a release; the expiry tests move to `expireIfDue`.                                                                                                   |
 | S9  | Hand-off: slot code no longer reads row-facet fields; `rowPending` is the only row signal (stubbed `() => false` until W2). Closes #11798.                                                                                                                                                                                                                                                                           | S                      | Existing row-invariant suites unchanged.                                                                                                                                                             |
+
+S3 landed with `SessionSlots` owning the assignment and creation group as per-facet maps.
+S4 landed with SessionSlots owning the rebind group (pendingSessionRebinds, deferredRebindCleanups).
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.

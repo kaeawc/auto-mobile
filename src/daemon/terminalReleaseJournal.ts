@@ -29,14 +29,19 @@ export interface TerminalReleaseIntent {
   at: number;
 }
 
+export type TerminalReleaseDurability = "durable" | "volatile";
+
 export interface TerminalReleaseJournal {
   /**
    * Intents a previous daemon recorded and never confirmed. Reading also compacts a torn or
    * corrupt tail away, so later appends start on a clean line.
    */
   loadUnconfirmed(): TerminalReleaseIntent[];
-  /** Durably record an intent before its terminal write is attempted. */
-  record(intent: TerminalReleaseIntent): void;
+  /**
+   * Record an intent before its terminal write is attempted. Callers may free a device before
+   * its terminal row lands only when this returned "durable" (the W4 ordering contract).
+   */
+  record(intent: TerminalReleaseIntent): TerminalReleaseDurability;
   /**
    * Drop a session's intent: its terminal write landed, or its terminal fence was lifted. With
    * `reason`, only an intent for that reason is dropped, so an earlier write landing never drops
@@ -63,8 +68,8 @@ export interface TerminalReleaseJournal {
 export interface TerminalReleaseJournalFileSystem {
   /** The file's contents, or `undefined` when it does not exist. */
   readText(filePath: string): string | undefined;
-  /** Append `text` and fsync before returning. */
-  appendDurable(filePath: string, text: string): void;
+  /** Append and fsync; also sync the parent unless it is already known durable. */
+  appendDurable(filePath: string, text: string, syncDirectory?: boolean): void;
   /** Replace the file's contents durably (write a sibling, fsync, rename over). */
   replaceDurable(filePath: string, text: string): void;
   /** Remove the file; a missing file is not an error. */
@@ -97,13 +102,18 @@ export function terminalReleaseJournalPath(dataDir: string, daemonSessionId: str
   );
 }
 
-/** Journal used when none is attached (unit tests of unrelated behaviour). */
+/**
+ * Deliberate default outside the daemon: only Daemon.startOn attaches a file journal.
+ * Non-daemon use and unit tests therefore have no crash safety.
+ */
 export class NoopTerminalReleaseJournal implements TerminalReleaseJournal {
   loadUnconfirmed(): TerminalReleaseIntent[] {
     return [];
   }
 
-  record(): void {}
+  record(): TerminalReleaseDurability {
+    return "volatile";
+  }
 
   resolve(): void {}
 }
@@ -118,38 +128,44 @@ type JournalLine =
   | { kind: "intent"; intent: TerminalReleaseIntent }
   | { kind: "lifted"; sessionId: string };
 
-function parseLine(line: string): JournalLine | undefined {
+function parseLine(line: string, lineNumber: number, filePath: string): JournalLine | undefined {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch (error) {
-    // A torn or corrupt line carries no recoverable intent; the caller compacts it away.
-    logger.debug(`[TerminalReleaseJournal] Ignoring unparsable line: ${errorMessage(error)}`);
+    logger.warn(
+      `[TerminalReleaseJournal] Discarded corrupt line ${lineNumber} of ${filePath}: ${errorMessage(error)}`,
+      error,
+    );
     return undefined;
   }
-  if (typeof value !== "object" || value === null) {
-    return undefined;
+  if (typeof value === "object" && value !== null) {
+    const fields = value as Record<string, unknown>;
+    const { sessionId, reason, at } = fields;
+    if (typeof sessionId === "string" && sessionId.length > 0) {
+      if (fields.lifted === true) {
+        return { kind: "lifted", sessionId };
+      }
+      if (typeof reason === "string" && reason.length > 0 && Number.isFinite(at)) {
+        return { kind: "intent", intent: { sessionId, reason, at: at as number } };
+      }
+    }
   }
-  const fields = value as Record<string, unknown>;
-  const { sessionId } = fields;
-  if (typeof sessionId !== "string" || sessionId.length === 0) {
-    return undefined;
-  }
-  if (fields.lifted === true) {
-    return { kind: "lifted", sessionId };
-  }
-  const { reason, at } = fields;
-  if (typeof reason !== "string" || reason.length === 0 || !Number.isFinite(at)) {
-    return undefined;
-  }
-  return { kind: "intent", intent: { sessionId, reason, at: at as number } };
+  logger.warn(
+    `[TerminalReleaseJournal] Discarded corrupt line ${lineNumber} of ${filePath}: invalid journal record`,
+  );
+  return undefined;
 }
 
-/** Replay lines in order; returns whether any line was unusable. */
-function replayLines(lines: string[], intents: Map<string, TerminalReleaseIntent>): boolean {
+/** Replay complete lines in order, carrying their 1-based positions into diagnostics. */
+function replayLines(
+  lines: string[],
+  intents: Map<string, TerminalReleaseIntent>,
+  filePath: string,
+): boolean {
   let discarded = false;
-  for (const line of lines) {
-    const parsed = parseLine(line);
+  for (const [index, line] of lines.entries()) {
+    const parsed = parseLine(line, index + 1, filePath);
     if (parsed?.kind === "intent") {
       intents.set(parsed.intent.sessionId, parsed.intent);
     } else if (parsed?.kind === "lifted") {
@@ -179,6 +195,7 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   /** Intents known so far; until the file has been read, only this daemon's own (#11114). */
   private readonly intents = new Map<string, TerminalReleaseIntent>();
   private loaded = false;
+  private directorySynced = false;
 
   constructor(
     private readonly filePath: string,
@@ -220,10 +237,14 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     return peerPath === this.filePath ? undefined : peerPath;
   }
 
-  record(intent: TerminalReleaseIntent): void {
+  record(intent: TerminalReleaseIntent): TerminalReleaseDurability {
     this.ensureLoaded();
+    // Retain even a failed append in memory so this process can retry it; only a successful
+    // file and directory sync lets the caller rely on recovery after a crash.
+    this.intents.set(intent.sessionId, intent);
     try {
-      this.fileSystem.appendDurable(this.filePath, serialize(intent));
+      this.appendDurable(serialize(intent));
+      return "durable";
     } catch (error) {
       // The DB write is still attempted; only its crash-safety is lost for this release.
       logger.warn(
@@ -231,8 +252,8 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
           `${intent.sessionId}: ${errorMessage(error)}`,
         error,
       );
+      return "volatile";
     }
-    this.intents.set(intent.sessionId, intent);
   }
 
   resolve(sessionId: string, reason?: string): void {
@@ -250,7 +271,7 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     // Compaction failed (e.g. Windows EPERM) or is unsafe: the stale intent would terminalize a
     // live session on restart, so make the lift itself durable with an appended marker.
     try {
-      this.fileSystem.appendDurable(this.filePath, serializeLifted(sessionId));
+      this.appendDurable(serializeLifted(sessionId));
     } catch (error) {
       logger.warn(
         `[TerminalReleaseJournal] Failed to record the lifted fence of session ${sessionId}: ` +
@@ -258,6 +279,13 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
         error,
       );
     }
+  }
+
+  private appendDurable(text: string): void {
+    // A created file can survive a failed directory fsync. Keep retrying that sync even
+    // though the next append finds an existing file; existence is not durability.
+    this.fileSystem.appendDurable(this.filePath, text, !this.directorySynced);
+    this.directorySynced = true;
   }
 
   /**
@@ -296,10 +324,10 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     const lines = text.split("\n");
     // Everything after the last newline is a torn append (or empty when the file ends cleanly).
     const tornTail = lines.pop() ?? "";
-    const discarded = replayLines(lines, this.intents) || tornTail.length > 0;
-    if (discarded) {
+    const discarded = replayLines(lines, this.intents, this.filePath) || tornTail.length > 0;
+    if (tornTail.length > 0) {
       logger.warn(
-        `[TerminalReleaseJournal] Discarded a torn or corrupt tail of ${this.filePath}; ` +
+        `[TerminalReleaseJournal] Discarded a torn tail of ${this.filePath}; ` +
           `${this.intents.size} intent(s) kept`,
       );
     }
@@ -313,6 +341,7 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     try {
       if (intents.size === 0) {
         this.fileSystem.remove(this.filePath);
+        this.directorySynced = false;
       } else {
         this.fileSystem.replaceDurable(
           this.filePath,
@@ -362,14 +391,30 @@ export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalDirecto
       throw error;
     }
   },
-  appendDurable(filePath, text) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  appendDurable(filePath, text, syncDirectory = true) {
+    const firstCreatedDirectory = fs.mkdirSync(path.dirname(filePath), {
+      recursive: true,
+      mode: 0o700,
+    });
     const fd = fs.openSync(filePath, "a", 0o600);
     try {
       fs.writeSync(fd, text);
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
+    }
+    if (syncDirectory && process.platform !== "win32") {
+      fsyncPath(path.dirname(filePath), "r");
+      if (firstCreatedDirectory !== undefined) {
+        // Each new directory entry lives in its parent, including intermediate levels.
+        fsyncPath(path.dirname(firstCreatedDirectory), "r");
+        const remaining = path.relative(firstCreatedDirectory, path.dirname(filePath));
+        let createdDirectory = firstCreatedDirectory;
+        for (const segment of remaining ? remaining.split(path.sep) : []) {
+          createdDirectory = path.join(createdDirectory, segment);
+          fsyncPath(path.dirname(createdDirectory), "r");
+        }
+      }
     }
   },
   replaceDurable(filePath, text) {
@@ -498,8 +543,11 @@ function readDeadJournal(
   if (text !== undefined) {
     const lines = text.split("\n");
     // The last element is a torn append or empty; a corrupt line carries no intent.
-    lines.pop();
-    replayLines(lines, intents);
+    const tornTail = lines.pop() ?? "";
+    replayLines(lines, intents, filePath);
+    if (tornTail.length > 0) {
+      logger.warn(`[TerminalReleaseJournal] Discarded a torn tail of ${filePath}`);
+    }
   }
   return Array.from(intents.values());
 }

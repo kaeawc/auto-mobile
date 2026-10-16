@@ -15,6 +15,7 @@ const MINIMAL = {
   platform: "android",
   prompt: "../prompts/demo.md",
   app: { packageName: "com.example" },
+  verify: { answerIncludes: ["DONE"] },
 };
 
 describe("agent benchmark suite config", () => {
@@ -27,7 +28,7 @@ describe("agent benchmark suite config", () => {
       timeoutSeconds: 900,
       extraArgs: [],
     });
-    expect(suite.verify).toEqual({ answerIncludes: [], screenIncludes: [] });
+    expect(suite.verify).toEqual({ answerIncludes: ["DONE"], screenIncludes: [] });
     expect(suite.failurePatterns).toEqual([]);
   });
 
@@ -58,7 +59,7 @@ describe("agent benchmark suite config", () => {
     const promptPath = join(root, "benchmark", "agent", "prompts", "demo.md");
     const files: Record<string, string> = {
       [suitePath]:
-        "name: demo\nplatform: android\nprompt: ../prompts/demo.md\napp:\n  packageName: com.example\n  apkPath: build/app.apk\n",
+        "name: demo\nplatform: android\nprompt: ../prompts/demo.md\napp:\n  packageName: com.example\n  apkPath: build/app.apk\nverify:\n  answerIncludes: [DONE]\n",
       [promptPath]: "Do the thing.\n",
     };
     const fs = { readFile: (path: string) => files[path] ?? "" };
@@ -68,11 +69,27 @@ describe("agent benchmark suite config", () => {
     expect(suite.apkPath).toBe(join(root, "build", "app.apk"));
   });
 
+  test("a suite with no verification check is rejected", () => {
+    const withoutVerify = { ...MINIMAL, verify: undefined };
+    expect(() => parseSuiteDefinition(withoutVerify, "x.yml")).toThrow(
+      /verify: verify needs at least one answerIncludes or screenIncludes entry/,
+    );
+    expect(() =>
+      parseSuiteDefinition(
+        { ...MINIMAL, verify: { answerIncludes: [], screenIncludes: [] } },
+        "x.yml",
+      ),
+    ).toThrow(/without one a run passes without doing the task/);
+    expect(
+      parseSuiteDefinition({ ...MINIMAL, verify: { screenIncludes: ["Done"] } }, "x.yml").verify,
+    ).toEqual({ answerIncludes: [], screenIncludes: ["Done"] });
+  });
+
   test("an empty prompt is rejected", () => {
     const fs = {
       readFile: (path: string) =>
         path.endsWith(".yml")
-          ? "name: demo\nplatform: android\nprompt: p.md\napp:\n  packageName: com.example\n"
+          ? "name: demo\nplatform: android\nprompt: p.md\napp:\n  packageName: com.example\nverify:\n  answerIncludes: [DONE]\n"
           : "  \n",
     };
     expect(() => loadSuite(resolve("/s/demo.yml"), resolve("/repo"), fs)).toThrow(

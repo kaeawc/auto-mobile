@@ -49,9 +49,10 @@ for a usage error.
 
 ## What a run does
 
-1. **Preflight (not measured).** Resolves the device, optionally installs the APK, force-stops
-   the app, clears its data, seeds SharedPreferences, deep-links to the suite's start screen, and
-   waits `settleSeconds`.
+1. **Preflight (not measured).** Resolves the device, optionally installs the APK, and records the
+   installed app build (`versionName`, `versionCode`, `lastUpdateTime`) so results from different
+   builds are never mistaken for comparable. It then force-stops the app, clears its data, seeds
+   SharedPreferences, deep-links to the suite's start screen, and waits `settleSeconds`.
 2. **Claude run (measured).** Spawns `claude -p --output-format stream-json` from an empty temp
    directory, with the prompt on stdin. `wallClockSeconds` covers only this step.
 3. **Post-run (not measured).** Dumps the device screen with `uiautomator` when the suite has
@@ -68,8 +69,10 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   from its working directory and every parent, so running from anywhere inside the checkout
   (including `scratch/`) would still pull in this repository's `CLAUDE.md` and skills.
 - `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` is always set, so your own `~/.claude/CLAUDE.md` and
-  auto-memory don't shape the run. Two operators get comparable results for the same suite and
-  model.
+  auto-memory don't shape the run, and `--setting-sources project,local` skips your user settings,
+  so your hooks and enabled plugins don't apply either. (`--bare` would do this too, but it
+  requires API-key auth and would break subscription sign-in.) Two operators get comparable results
+  for the same suite and model.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
   (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
   (`<run>/logs`). Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the
@@ -92,7 +95,8 @@ A run's verdict comes only from hard signals; baselines never change it.
 | `failed`     | The run completed, but a `verify` check failed: the final answer or the device screen did not show the expected text.                                                                              |
 | `incomplete` | The process timed out or exited non-zero, the MCP server did not connect, the `result` event is missing or an error (for example `error_max_budget_usd`), or the transcript has unparseable lines. |
 
-`verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
+Every suite must have at least one `verify` check; otherwise a run could pass without doing the
+task. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
 must stand alone: it can't run on into a letter or digit, so `EXPECTED_COUNT: 3` doesn't match
 `EXPECTED_COUNT: 30`. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
 `uiautomator` dump taken after Claude exits. This is the oracle that catches an agent that

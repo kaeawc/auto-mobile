@@ -148,7 +148,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   deps.fs.mkdir(runDirectory);
   const preflightStart = deps.timer.now();
   deps.log(`[${definition.name}] preflight on ${serial}`);
-  const log = await runPreflight(deps.runner, {
+  const { log, appBuild } = await runPreflight(deps.runner, {
     serial,
     packageName: definition.app.packageName,
     apkPath: suite.apkPath,
@@ -179,7 +179,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     claudeCwd: deps.fs.makeTempDir("amb-cwd-"),
     paths,
     serial,
-    preflight: { log, durationSeconds },
+    preflight: { log, durationSeconds, appBuild },
   };
   return { startedAt, prepared };
 }

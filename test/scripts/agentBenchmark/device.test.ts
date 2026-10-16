@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   captureScreen,
   decodeXmlEntities,
+  describeAppBuild,
   parseOnlineSerials,
   resolveSerial,
   runPreflight,
@@ -61,7 +62,7 @@ describe("agent benchmark preflight", () => {
     const runner = new FakeCommandRunner()
       .onAdb("pm path", { stdout: `package:/data/app/${PACKAGE}/base.apk` })
       .onAdb("pm clear", { stdout: "Success\n" });
-    const log = await runPreflight(
+    const { log, appBuild } = await runPreflight(
       runner,
       preflightSpec({
         apkPath: "/repo/app.apk",
@@ -73,16 +74,19 @@ describe("agent benchmark preflight", () => {
     expect(runner.adbCalls()).toEqual([
       `${s} install -r -t /repo/app.apk`,
       `${s} shell pm path ${PACKAGE}`,
+      `${s} shell dumpsys package ${PACKAGE}`,
       `${s} shell am force-stop ${PACKAGE}`,
       `${s} shell pm clear ${PACKAGE}`,
       `${s} shell run-as ${PACKAGE} mkdir -p shared_prefs`,
       `${s} push /run/preflight/onboarding_prefs.xml /data/local/tmp/agent-benchmark-onboarding_prefs.xml`,
       `${s} shell run-as ${PACKAGE} cp /data/local/tmp/agent-benchmark-onboarding_prefs.xml shared_prefs/onboarding_prefs.xml`,
       `${s} shell rm -f /data/local/tmp/agent-benchmark-onboarding_prefs.xml`,
-      `${s} shell am start -W -a android.intent.action.VIEW -d example:app/screen ${PACKAGE}`,
+      `${s} shell am start -W -a android.intent.action.VIEW -d 'example:app/screen' ${PACKAGE}`,
     ]);
+    expect(appBuild).toBe("unknown");
     expect(log).toEqual([
       "installed /repo/app.apk",
+      "app build: unknown",
       `force-stopped ${PACKAGE}`,
       `cleared app data for ${PACKAGE}`,
       "seeded shared_prefs/onboarding_prefs.xml (onboarding_completed)",
@@ -95,8 +99,33 @@ describe("agent benchmark preflight", () => {
     await runPreflight(runner, preflightSpec({ clearAppData: false }));
     expect(runner.adbCalls()).toEqual([
       `-s emulator-5554 shell pm path ${PACKAGE}`,
+      `-s emulator-5554 shell dumpsys package ${PACKAGE}`,
       `-s emulator-5554 shell am force-stop ${PACKAGE}`,
     ]);
+  });
+
+  test("the deep link reaches the device shell as one quoted argument", async () => {
+    const runner = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: "package:/x.apk" })
+      .onAdb("pm clear", { stdout: "Success\n" });
+    await runPreflight(runner, preflightSpec({ launchUri: "example:app/search?q=a b&x=$HOME" }));
+    expect(runner.adbCalls().at(-1)).toBe(
+      `-s emulator-5554 shell am start -W -a android.intent.action.VIEW -d 'example:app/search?q=a b&x=$HOME' ${PACKAGE}`,
+    );
+  });
+
+  test("the app build fingerprint comes from dumpsys package", () => {
+    const dumpsys = [
+      "Packages:",
+      "  Package [dev.example.app] (abc):",
+      "    versionCode=42 minSdk=26 targetSdk=36",
+      "    versionName=1.2.3",
+      "    lastUpdateTime=2026-10-16 10:00:00",
+    ].join("\n");
+    expect(describeAppBuild(dumpsys)).toBe(
+      "versionName=1.2.3 versionCode=42 lastUpdateTime=2026-10-16 10:00:00",
+    );
+    expect(describeAppBuild("")).toBe("unknown");
   });
 
   test("a pm clear that does not report Success stops the run before seeding", async () => {

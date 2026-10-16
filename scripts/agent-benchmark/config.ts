@@ -81,7 +81,12 @@ const suiteSchema = z
     baseline: baselineSchema.optional(),
     baselineToolSequence: z.array(z.string().min(1)).optional(),
   })
-  .strict();
+  .strict()
+  .refine((suite) => suite.verify.answerIncludes.length + suite.verify.screenIncludes.length > 0, {
+    message:
+      "verify needs at least one answerIncludes or screenIncludes entry; without one a run passes without doing the task",
+    path: ["verify"],
+  });
 
 export type SuiteBaseline = z.infer<typeof baselineSchema>;
 export type SuiteDefinition = z.infer<typeof suiteSchema>;

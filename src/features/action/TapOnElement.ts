@@ -10,6 +10,7 @@ import { ANDROID_PRE_TAP_BOUNDS_EPSILON_PX, describeFocusTarget } from "./tapFoc
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
 import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
+import { invalidateIosCacheOnSuccess, tapViaVoiceOver } from "./tapIosVoiceOver";
 import { FocusVerifier } from "./tapFocusVerifier";
 import { pollSearchUntil } from "./searchUntilPoller";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
@@ -37,10 +38,7 @@ import {
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
-import {
-  assertLongPressFitsRequestBudget,
-  resolveVoiceOverActivateCtrlProxyTimeoutMs,
-} from "./gestureTransportTimeout";
+import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -738,8 +736,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         undefined,
         signal,
       );
-      confirmActivation(result, () => this.invalidateIosCacheOnSuccess({ success: true }));
-      this.invalidateIosCacheOnSuccess(result);
+      confirmActivation(result, () => invalidateIosCacheOnSuccess(this.device, { success: true }));
+      invalidateIosCacheOnSuccess(this.device, result);
       // The runner's "first of N candidate owners" note must reach the caller (#10082).
       return {
         success: result.success,
@@ -4299,23 +4297,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
-  private invalidateIosCacheOnSuccess(result: { success: boolean }): void {
-    if (result.success) {
-      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-    }
-  }
-
-  /**
-   * Execute iOS tap using VoiceOver accessibility actions.
-   * Falls back if no label is resolvable or activation is confirmed not performed.
-   *
-   * @param action - The tap action to perform
-   * @param element - The target element
-   * @param x - Fallback X coordinate
-   * @param y - Fallback Y coordinate
-   * @param durationMs - Long press duration in milliseconds
-   */
-  private async executeIOSTapWithVoiceOver(
+  /** VoiceOver activation with a coordinate-tap fallback; see {@link tapViaVoiceOver}. */
+  private executeIOSTapWithVoiceOver(
     action: string,
     element: Element,
     x: number,
@@ -4323,63 +4306,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     fenceOptions?: IosTapOptions,
   ): Promise<void> {
-    const { displayFence: fence, signal } = this.readIosTapOptions(fenceOptions);
-    // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
-    const label =
-      (element["ios-accessibility-label"] as string | undefined) ??
-      (typeof element["content-desc"] === "string" && element["content-desc"]
-        ? element["content-desc"]
-        : undefined) ??
-      (typeof element.text === "string" && element.text ? element.text : undefined);
-
-    if (!label) {
-      logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
-        displayFence: fence,
-        signal,
-      });
-      return;
-    }
-
-    // Map action to VoiceOver action
-    const voiceOverAction: "activate" | "long_press" =
-      action === "longPress" ? "long_press" : "activate";
-
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestVoiceOverActivate(
-      label,
-      voiceOverAction,
-      resolveVoiceOverActivateCtrlProxyTimeoutMs(voiceOverAction, durationMs),
-      undefined,
-      {
-        bounds: element.bounds,
-        duration: action === "longPress" ? durationMs : undefined,
-      },
-    );
-
-    this.confirmVoiceOverActivation(result);
-
-    if (!result.success) {
-      logger.warn(
-        `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
-          `falling back to coordinate tap at (${x}, ${y})`,
-      );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
-        displayFence: fence,
-        signal,
-      });
-    }
-  }
-
-  private confirmVoiceOverActivation(result: CtrlProxyActionResult): void {
-    if (result.dispatched && result.acknowledged !== true) {
-      throw indeterminateTapError(result.error);
-    }
-    this.invalidateIosCacheOnSuccess(result);
-  }
-
-  private readIosTapOptions(options?: IosTapOptions): IosTapOptions {
-    return options ?? {};
+    return tapViaVoiceOver({
+      device: this.device,
+      action,
+      element,
+      point: { x, y },
+      durationMs,
+      fenceOptions: fenceOptions ?? {},
+      coordinateTap: (opts) => this.executeiOSTapWithCoordinates(action, x, y, durationMs, opts),
+    });
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {

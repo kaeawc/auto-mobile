@@ -1,16 +1,13 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 
 // #11162 item 1: the owner-disconnect release must not release a live owner whose reconnecting
@@ -52,14 +49,7 @@ async function setUp(checkIntervalMs?: number): Promise<Rig> {
   sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => releaseReasons.push(reason));
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  const devicePool = new DevicePool(
-    createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-    }),
-  );
+  const devicePool = makePool(sessionManager, "test-daemon-session-id", { timer, deviceManager });
   await devicePool.initializeWithDevices([DEVICE]);
   await devicePool.bindOrReuseDeviceSession(
     OWNER_SESSION,

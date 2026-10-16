@@ -1,6 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
-import { DevicePool } from "../../src/daemon/devicePool";
 import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   type OfflineEpisode,
@@ -10,13 +10,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { TransitionalSimulatorState } from "../../src/models/TransitionalSimulator";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const POLL_MS = 5_000;
 const HELD: BootedDevice = { deviceId: "sim-held", name: "iPhone 16", platform: "ios" };
@@ -72,18 +69,14 @@ async function simulatorMonitor() {
   const ids = new FakeIdGenerator();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new SimulatorListingManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      idGenerator: ids,
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer, ids),
-      recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-      deviceSessionContinuityEnabled: false,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    idGenerator: ids,
+    deviceManager: manager,
+    emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer, ids),
+    recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+    deviceSessionContinuityEnabled: false,
+  });
   const image = (device: BootedDevice): DeviceInfo => ({
     name: device.name,
     platform: "ios",

@@ -55,12 +55,14 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
 function buildDaemon(timer: FakeTimer): Daemon {
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    new CountingIdGenerator("daemon-session"),
-    new FakeDatabaseInitializer(),
-    new FakeStartupFailureTracker(),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: new FakeDatabaseInitializer(),
+      startupFailureTracker: new FakeStartupFailureTracker(),
+    },
   );
 }
 
@@ -452,12 +454,14 @@ describe("Daemon startup device discovery", () => {
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      persistence as unknown as DeviceSessionRepository,
-      new CountingIdGenerator("daemon-session"),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: persistence as unknown as DeviceSessionRepository,
+        idGenerator: new CountingIdGenerator("daemon-session"),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const internals = daemon;
     const bootedDevices: BootedDevice[] = [

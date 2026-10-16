@@ -30,9 +30,10 @@ async function rehydratedDaemon() {
   const timer = new FakeTimer();
   const daemon = new Daemon(
     {},
-    undefined,
-    timer,
-    new DeviceSessionRepository(await createTestDatabase(), timer),
+    {
+      timer,
+      deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+    },
   );
   const sessionManager = daemon.getSessionManager();
   const internals = daemon as unknown as DaemonMonitorInternals;

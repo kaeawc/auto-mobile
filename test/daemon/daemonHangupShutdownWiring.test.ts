@@ -28,9 +28,11 @@ describe("Daemon hangup shutdown wiring (#11156)", () => {
   test("daemon shutdown handlers include SIGHUP", () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const hangup = spyOn(processLifecycle, "installHangupShutdownHandler").mockImplementation(
       () => {},

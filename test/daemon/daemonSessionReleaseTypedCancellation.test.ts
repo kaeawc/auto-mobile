@@ -71,9 +71,11 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     // Only the release under test may end the session.
     daemon.getSessionManager().stopCleanupTimer();

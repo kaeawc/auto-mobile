@@ -103,9 +103,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
 
     expect(await settlesOnMicrotasksAlone(daemon.stop())).toBe(true);
@@ -120,7 +122,14 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     let notifiedAt: number | undefined;
@@ -202,9 +211,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     timer.enableAutoAdvance();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const runStages = shutdownCleanupModule.runShutdownCleanupStages;
     const lists: Array<readonly ShutdownCleanupStage[]> = [];
@@ -235,7 +246,14 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     setVideoStreamSocketServerForTesting({
@@ -290,9 +308,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     timer.enableAutoAdvance();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const events: string[] = [];
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
@@ -322,9 +342,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     timer.enableAutoAdvance();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const events: string[] = [];
     // A stage that outlives its deadline by seconds, the way a recording finalizer can.
@@ -354,9 +376,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     timer.enableAutoAdvance();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     daemon.registerTransportForTesting("wedged-http", {
       close: () => new Promise<void>(() => {}),

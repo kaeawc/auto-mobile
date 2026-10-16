@@ -381,10 +381,12 @@ describe("managed execution recovery is gated before publication", () => {
     const { timer, sessions } = await persisted();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
-      new FakeIdGenerator(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new FakeIdGenerator(),
+      },
     );
     managers.push(daemon.getSessionManager());
     // Replace only the session persistence boundary; keep the real constructor's recovery listener.
@@ -412,10 +414,12 @@ describe("managed execution recovery is gated before publication", () => {
     const { timer, sessions } = await persisted();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
-      new FakeIdGenerator(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new FakeIdGenerator(),
+      },
     );
     const original = daemon.getSessionManager();
     managers.push(original);
@@ -461,10 +465,12 @@ describe("managed execution recovery is gated before publication", () => {
       const { timer, sessions } = await persisted();
       const daemon = new Daemon(
         {},
-        new FakeInstalledAppsRepository(),
-        timer,
-        new FakeDeviceSessionRepository(),
-        new FakeIdGenerator(),
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer,
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+          idGenerator: new FakeIdGenerator(),
+        },
       );
       managers.push(daemon.getSessionManager());
       const installed = Reflect.get(daemon.getSessionManager(), "managedExecutionRecoveryListener");

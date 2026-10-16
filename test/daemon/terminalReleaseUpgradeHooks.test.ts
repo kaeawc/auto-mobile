@@ -142,9 +142,10 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(await createTestDatabase(), timer),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+      },
     );
   });
 

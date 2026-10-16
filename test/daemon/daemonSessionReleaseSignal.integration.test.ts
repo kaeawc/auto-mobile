@@ -62,7 +62,7 @@ describe("Daemon session-release signal wiring", () => {
     // file DB (CLAUDE.md unit-test guard, issue #3067). The Daemon threads this
     // repository straight into its SessionManager (daemon.ts).
     const db = await createTestDatabase();
-    const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
     const sessionManager = daemon.getSessionManager();
 
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
@@ -88,7 +88,7 @@ describe("Daemon session-release signal wiring", () => {
     const db = await createTestDatabase();
     const timer = new FakeTimer();
     const repository = new DeviceSessionRepository(db);
-    const daemon = new Daemon({}, undefined, timer, repository);
+    const daemon = new Daemon({}, { timer, deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const internals = daemon as unknown as DaemonHeartbeatMonitorInternals;
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
@@ -132,7 +132,7 @@ describe("Daemon session-release signal wiring", () => {
   test("does not publish a terminal release before persistence succeeds", async () => {
     const db = await createTestDatabase();
     const repository = new DeviceSessionRepository(db);
-    const daemon = new Daemon({}, undefined, undefined, repository);
+    const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const internals = daemon as unknown as DaemonSessionReleaseInternals;
@@ -191,9 +191,11 @@ describe("Daemon session-release signal wiring", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
+      {
+        timer,
+        deviceSessionRepository:
+          new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
+      },
     );
     const devicePool = daemon.getDevicePool();
     const sessionManager = daemon.getSessionManager();
@@ -257,7 +259,7 @@ describe("Daemon session-release signal wiring", () => {
         "session-rebind-navigation",
       ),
     );
-    const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
     const sessionManager = daemon.getSessionManager();
 
     try {

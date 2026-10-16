@@ -29,22 +29,14 @@ function inertGuard(): IncumbentOwnerGuard {
 function daemonWithToken(token: string | undefined): Daemon {
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    new FakeTimer(),
-    new FakeDeviceSessionRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => 1_000,
-    () => token,
-    undefined,
-    inertGuard(),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer: new FakeTimer(),
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      processBirthTime: () => 1_000,
+      processGenerationToken: () => token,
+      incumbentOwnerGuard: inertGuard(),
+    },
   );
 }
 

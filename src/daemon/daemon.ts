@@ -2,10 +2,7 @@ import { holderOf } from "./deviceBinding";
 import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
-import {
-  createDefaultBindingExclusion,
-  type BindingExclusion,
-} from "./sessionBroker/provisioning/exclusion";
+import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -176,7 +173,6 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import {
   cleanupDaemonFiles,
   cleanupDaemonFilesSync,
-  PidFileLiveDaemonSessionIdProvider,
   readPidFileDataSync,
   isProcessRunning,
   type LiveDaemonSessionIdProvider,
@@ -187,7 +183,6 @@ import {
   DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
-import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
 import {
@@ -244,9 +239,9 @@ import {
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
 import { DefaultFileSystem } from "../utils/filesystem/DefaultFileSystem";
-import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
-import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
-import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
+import { DatabaseInitializer } from "../db/DatabaseInitializer";
+import { DatabaseHealthProbe } from "../db/DatabaseHealthProbe";
+import { StartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
 import { runStartupPrologue } from "./startupPrologue";
 import { createDaemonFatalProcessHandler } from "./daemonFatalHandler";
@@ -368,9 +363,8 @@ import {
   stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
+import { IdGenerator } from "../utils/IdGenerator";
 import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
-import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
@@ -416,7 +410,6 @@ import {
   type ObservationStreamHealth,
 } from "./ObservationStreamHealth";
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
-import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import {
   DAEMON_SHUTDOWN_STAGES,
@@ -428,10 +421,22 @@ import {
   type ShutdownCleanupStage,
 } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
+import { type ToolSelectionProfileProvenanceLoader } from "../server/toolSelectionProfileRegistry";
+
 import {
-  defaultToolSelectionProfileRegistry,
-  type ToolSelectionProfileProvenanceLoader,
-} from "../server/toolSelectionProfileRegistry";
+  resolveDaemonDependencies,
+  type DaemonDependencies,
+  type DatabaseHealthFailureRecovery,
+  type ManagedAdbServerShutdown,
+  type DaemonProcessBirthTimeProvider,
+  type DaemonProcessGenerationTokenProvider,
+} from "./daemonDependencies";
+
+export type {
+  DaemonDependencies,
+  DaemonProcessBirthTimeProvider,
+  DaemonProcessGenerationTokenProvider,
+};
 
 const HTTP_BODY_TIMEOUT_MS = 60_000;
 const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
@@ -482,8 +487,6 @@ function shutdownStage(
 }
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
-type DatabaseHealthFailureRecovery = (code: number, detail?: string) => void | Promise<void>;
-type ManagedAdbServerShutdown = () => Promise<void>;
 type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
   performancePush: ReturnType<typeof getPerformancePushServer>;
@@ -587,9 +590,6 @@ export function isProcessWideAdbServerReset(
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
-export type DaemonProcessBirthTimeProvider = () => number;
-export type DaemonProcessGenerationTokenProvider = () => string | undefined;
-
 /**
  * The steps of `Daemon.start()` that touch the machine: the process's working directory and
  * signal handlers, the PID file, the data directory, listening sockets, and the monitors that
@@ -622,16 +622,6 @@ export interface DaemonStartHost {
   startServicesAfterSocketBind(): Promise<void>;
   /** Navigation retention, forwarding-lease idle release, the orphan watchdog and broker reclaim. */
   startMaintenanceMonitors(): void;
-}
-
-/**
- * Captures a wall-clock approximation of this OS process's birth time, rather
- * than the later point at which daemon bootstrap constructs its generation.
- * `process.uptime()` is rooted at process creation, so it remains comparable to
- * the process-table birth timestamps read by DaemonManager.
- */
-function defaultDaemonProcessBirthTime(): number {
-  return Date.now() - Math.max(0, process.uptime() * 1_000);
 }
 
 interface CapturedDisconnectRecoveryOptions {
@@ -684,6 +674,11 @@ export async function findAvailableDaemonPort(
 }
 
 export class Daemon {
+  private readonly httpServerFactory: () => HttpServer;
+  private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
+  private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
+  private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
+  private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
@@ -823,36 +818,29 @@ export class Daemon {
   /** Exposed for tests only: the in-flight or settled startup provenance warm. */
   private androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
 
-  constructor(
-    options: DaemonOptions = {},
-    installedAppsRepository?: InstalledAppsStore,
-    timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(
-      undefined,
+  constructor(options: DaemonOptions = {}, dependencies: DaemonDependencies = {}) {
+    const {
       timer,
-    ),
-    idGenerator: IdGenerator = defaultIdGenerator,
-    databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
-    startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
-    databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer }),
-    recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery,
-    recoveryPolicyEnvironment: NodeJS.ProcessEnv = process.env,
-    managedAdbServerShutdown: ManagedAdbServerShutdown = stopManagedAdbServer,
-    toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
-    private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
-    processBirthTime: DaemonProcessBirthTimeProvider = defaultDaemonProcessBirthTime,
-    processGenerationToken: DaemonProcessGenerationTokenProvider = currentDaemonProcessGenerationToken,
-    private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider = new PidFileLiveDaemonSessionIdProvider(),
-    incumbentOwnerGuard: IncumbentOwnerGuard = new IncumbentOwnerGuard(),
-    private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
-      new AvdManagerService(),
-    /** Managed-binding exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
-    private readonly bindingExclusionFactory: (
-      timer: Timer,
-    ) => BindingExclusion = createDefaultBindingExclusion,
-    /** Host forward evidence is supplied by the production entry point only (#12220). */
-    private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence,
-  ) {
+      deviceSessionRepository,
+      idGenerator,
+      databaseInitializer,
+      startupFailureTracker,
+      databaseHealthProbe,
+      recoveryPolicyEnvironment,
+      managedAdbServerShutdown,
+      toolSelectionProfileProvenanceLoader,
+      processBirthTime,
+      processGenerationToken,
+      incumbentOwnerGuard,
+      installedAppsRepository,
+      recoverFromDatabaseHealthFailure,
+      ...retained
+    } = resolveDaemonDependencies(dependencies);
+    this.httpServerFactory = retained.httpServerFactory;
+    this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
+    this.avdManagerFactory = retained.avdManagerFactory;
+    this.bindingExclusionFactory = retained.bindingExclusionFactory;
+    this.foreignCtrlProxyForwardEvidence = retained.foreignCtrlProxyForwardEvidence;
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
       this.resolveStartupCompletion = resolve;
@@ -5892,27 +5880,8 @@ export class Daemon {
  * Start the daemon process
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
-  const daemon = new Daemon(
-    options,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    createForeignCtrlProxyForwardEvidence(),
-  );
+  const daemon = new Daemon(options, {
+    foreignCtrlProxyForwardEvidence: createForeignCtrlProxyForwardEvidence(),
+  });
   await daemon.start();
 }

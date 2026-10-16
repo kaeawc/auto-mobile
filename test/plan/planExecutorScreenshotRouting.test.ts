@@ -85,17 +85,18 @@ describe("PlanExecutor screenshot cancellation routing", () => {
     expect(cancellations.filter((event) => event.cancel === "device-A")).toHaveLength(2);
     expect(cancellations.filter((event) => event.cancel === "device-B")).toHaveLength(2);
     expect(events).toHaveLength(8);
-    for (let index = 1; index < events.length; index += 2) {
-      const event = events[index];
-      expect("step" in event).toBe(true);
-      if (!("step" in event)) {
-        throw new Error("Expected a step immediately after its cancellation");
-      }
-      expect(events[index - 1]).toEqual({
-        cancel: event.step.device === "A" ? "device-A" : "device-B",
-      });
-      expect(event.step.deviceId).toBeUndefined();
-      expect(event.step.sessionUuid).toBe(baseSessionUuid);
+    // Parallel tracks can interleave while a tool awaits its session ownership check.
+    // Each track must still cancel its own screenshot before every step.
+    for (const label of ["A", "B"]) {
+      const deviceEvents = events.filter((event) =>
+        "cancel" in event ? event.cancel === `device-${label}` : event.step.device === label,
+      );
+      expect(deviceEvents).toEqual([
+        { cancel: `device-${label}` },
+        { step: { device: label, platform: "android", sessionUuid: baseSessionUuid } },
+        { cancel: `device-${label}` },
+        { step: { device: label, platform: "android", sessionUuid: baseSessionUuid } },
+      ]);
     }
   });
 

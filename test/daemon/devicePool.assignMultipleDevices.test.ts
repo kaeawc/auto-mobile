@@ -31,6 +31,7 @@ import {
   FakeDeviceManagerWithExitedRecoveryProcess,
   FakeDeviceManagerWithFailingRecoveryStart,
   FakeDeviceManagerWithStartedProcess,
+  androidDeviceImage,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
@@ -349,13 +350,7 @@ describe("DevicePool", () => {
   describe("assignMultipleDevices", () => {
     test("evicts a started emulator when its process exits after readiness", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
@@ -391,13 +386,7 @@ describe("DevicePool", () => {
 
     test("defers a started emulator's process-exit cleanup while shutdown is reserved", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
@@ -430,13 +419,7 @@ describe("DevicePool", () => {
 
     test("does not publish a session when its started emulator exits during persistence", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const persistence = new DeferredDeviceSessionPersistence();
@@ -476,13 +459,7 @@ describe("DevicePool", () => {
       delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
         devicePool = makePool({ deviceManager: manager });
@@ -530,13 +507,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
         const incidents = new InMemoryEmulatorLossIncidentStore(
@@ -593,13 +564,7 @@ describe("DevicePool", () => {
 
     test("quarantines a process-exit session before incident persistence completes", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const backingStore = new InMemoryEmulatorLossIncidentStore(
@@ -682,13 +647,7 @@ describe("DevicePool", () => {
 
     test("keeps process-exit quarantine while eviction claims recovery", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const incidents = new InMemoryEmulatorLossIncidentStore(
@@ -746,13 +705,7 @@ describe("DevicePool", () => {
         new CountingIdGenerator("incident"),
       );
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       manager.deviceImages = images;
       devicePool = makePool({
@@ -805,13 +758,7 @@ describe("DevicePool", () => {
 
     test("settles a joining incident when shared recovery rejects", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const incidents = new InMemoryEmulatorLossIncidentStore(
@@ -865,13 +812,7 @@ describe("DevicePool", () => {
 
     test("records failed recovery spawn attempts", async () => {
       const images: DeviceInfo[] = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
+        androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
       ];
       const manager = new FakeDeviceManagerWithFailingRecoveryStart(images);
       const persistence = new FakeDeviceSessionPersistence();
@@ -946,13 +887,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
         devicePool = makePool({ deviceManager: manager });
@@ -983,13 +918,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
         devicePool = makePool({ deviceManager: manager });
@@ -1020,13 +949,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithDistinctStartedProcesses(images);
         devicePool = makePool({ deviceManager: manager });
@@ -1057,13 +980,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithExitedRecoveryProcess(images);
         devicePool = makePool({ deviceManager: manager });
@@ -1098,13 +1015,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithExitedInitialProcess(images);
         devicePool = makePool({ deviceManager: manager });
@@ -1128,13 +1039,7 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
         const images: DeviceInfo[] = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
-            source: "local",
-          },
+          androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
         ];
         const manager = new FakeDeviceManagerWithExitedRecoveryProcess(images, null, "SIGTERM");
         devicePool = makePool({ deviceManager: manager });
@@ -1169,14 +1074,10 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
-        {
-          name: "pixel_8_api_35",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
+        androidDeviceImage("pixel_8_api_35", "emulator-5554", {
           deviceType: "Pixel 8",
           source: "local",
-        },
+        }),
       ];
       devicePool = makePool({ deviceManager: manager });
       try {
@@ -1253,14 +1154,10 @@ describe("DevicePool", () => {
       async (allocationPath) => {
         const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
         fakeDeviceManager.deviceImages = [
-          {
-            name: "pixel_8_api_35",
-            platform: "android",
-            isRunning: false,
-            deviceId: "emulator-5554",
+          androidDeviceImage("pixel_8_api_35", "emulator-5554", {
             deviceType: "Pixel 8",
             source: "local",
-          },
+          }),
         ];
         devicePool = makePool({ lifecycleCoordinator });
         const owner = await lifecycleCoordinator.reserve(
@@ -1345,14 +1242,10 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
-        {
-          name: "pixel_8_api_35",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
+        androidDeviceImage("pixel_8_api_35", "emulator-5554", {
           deviceType: "Pixel 8",
           source: "local",
-        },
+        }),
       ];
       devicePool = makePool({ deviceManager: manager });
       try {
@@ -1389,15 +1282,7 @@ describe("DevicePool", () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
-      manager.deviceImages = [
-        {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          deviceId: "emulator-5554",
-          source: "local",
-        },
-      ];
+      manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
       devicePool = makePool({ deviceManager: manager });
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");

@@ -709,7 +709,7 @@ describe("deviceSnapshotManager", () => {
       ).rejects.toThrow("replacement failed");
       expect(store.deleteCalls).toEqual([]);
       expect(await repository.getSnapshot("cross-device")).toEqual(priorRecord);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
 
       await setDeviceSnapshotManagerDependencies({
         createCaptureProvider: (device) => ({
@@ -734,11 +734,11 @@ describe("deviceSnapshotManager", () => {
         scenario.expectedDeletes.map((options) => ({ snapshotName: "cross-device", options })),
       );
       expect((await repository.getSnapshot("cross-device"))?.deviceId).toBe(current.deviceId);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
       const deletionCount = store.deleteCalls.length;
       await captureDeviceSnapshot(current, { snapshotName: "cross-device", useVmSnapshot: false });
       expect(store.deleteCalls).toHaveLength(deletionCount);
-      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      expect(store.hasSnapshotInAnyScope("cross-device")).toBe(true);
     },
   );
 

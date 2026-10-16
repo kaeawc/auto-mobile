@@ -19,7 +19,7 @@
 1002	src/daemon/sessionBroker/sqliteStore.ts
 1181	src/daemon/sessionDeviceStateRestore.ts
 11453	src/daemon/sessionManager.ts
-8116	src/daemon/socketServer.ts
+8090	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
@@ -38,7 +38,7 @@
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
-4585	src/features/action/TapOnElement.ts
+4582	src/features/action/TapOnElement.ts
 1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1833	src/features/action/swipeon/SwipeOn.ts

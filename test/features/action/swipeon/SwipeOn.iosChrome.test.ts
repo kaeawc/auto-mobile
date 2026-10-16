@@ -7,7 +7,6 @@ import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecu
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import fixture from "../../../fixtures/observe/ios-reminders-xctest-noise-after.json";
 import type { ObserveResult } from "../../../../src/models";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeScreenshotCapturer } from "../../../fakes/FakeScreenshotCapturer";
@@ -49,7 +48,7 @@ function harness() {
   const finder = new FakeScrollableElementsQuery();
   const action = new SwipeOn(
     { name: "iOS fake", deviceId: "ios-chrome", platform: "ios" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       observeScreen,
       executeGesture: new FakeGestureExecutor(),

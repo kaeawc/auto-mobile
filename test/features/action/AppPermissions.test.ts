@@ -6,7 +6,7 @@ import { SetAndroidNotificationPolicyAccess } from "../../../src/features/action
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakePhotosAuthorizationVerifier } from "../../fakes/FakePhotosAuthorizationVerifier";
 import {
   CAPTURED_APP_ID,
@@ -551,7 +551,7 @@ describe("AppPermissions", () => {
   });
 
   test("sets and queries iOS simulator permissions through the same facade", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const tccReader: TccPermissionReader = {
       readPermissions: async () => [
         {
@@ -606,7 +606,7 @@ describe("AppPermissions", () => {
   });
 
   test("passes simulator Photos verification metadata through the facade", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const tccReader = new FixtureTccReader("full");
     const permissions = new AppPermissions(iosSimulator, { simctl, tccReader });
     const getResult = await permissions.getPermissions("com.example.app", {
@@ -657,7 +657,7 @@ describe("AppPermissions", () => {
   test("an authorized Photos verifier yields a successful facade operation", async () => {
     const photosVerifier = new FakePhotosAuthorizationVerifier("authorized");
     const permissions = new AppPermissions(iosSimulator, {
-      simctl: new FakeSimCtlClient(),
+      simctl: new FakeSimctl(),
       tccReader: new FixtureTccReader("full"),
       photosVerifier,
     });
@@ -682,7 +682,7 @@ describe("AppPermissions", () => {
 
   test("surfaces Photos readback failure as a non-fatal unverified facade operation", async () => {
     const permissions = new AppPermissions(iosSimulator, {
-      simctl: new FakeSimCtlClient(),
+      simctl: new FakeSimctl(),
       tccReader: {
         readPermissions: async () => {
           throw new Error("TCC unavailable");
@@ -720,7 +720,7 @@ describe("AppPermissions", () => {
     "reports a confirmed Photos failure separately for %s",
     async (permission) => {
       const permissions = new AppPermissions(iosSimulator, {
-        simctl: new FakeSimCtlClient(),
+        simctl: new FakeSimctl(),
         tccReader: new FixtureTccReader("full"),
         photosVerifier: new FakePhotosAuthorizationVerifier("limited"),
       });
@@ -871,7 +871,7 @@ describe("AppPermissions", () => {
   // for nothing at all must not report success.
   describe("rejects unsupported requests", () => {
     test("rejects the Android-only notificationPolicyAccess field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -888,7 +888,7 @@ describe("AppPermissions", () => {
     });
 
     test("rejects the Android-only scheduleExactAlarm field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -902,7 +902,7 @@ describe("AppPermissions", () => {
     });
 
     test("rejects the Android-only notificationsEnabled field on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -918,7 +918,7 @@ describe("AppPermissions", () => {
     test("rejects an Android-only boolean field on iOS even when it is false", async () => {
       // The presence check is `!== undefined`, so a FALSE value must still reject.
       // A regression to a truthiness check would silently accept `false` here.
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",
@@ -933,7 +933,7 @@ describe("AppPermissions", () => {
     });
 
     test("lists every unsupported field when several are supplied on iOS", async () => {
-      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimctl() });
 
       const result = await permissions.setPermissions("com.example.app", {
         action: "grant",

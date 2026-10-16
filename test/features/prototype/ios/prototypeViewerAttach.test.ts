@@ -18,7 +18,7 @@ import { ActionableError } from "../../../../src/models/ActionableError";
 import { FakePrototypeAgentClient } from "../../../fakes/FakePrototypeAgentClient";
 import { FakePrototypeAgentPorts } from "../../../fakes/FakePrototypeAgentInjection";
 import { FakePrototypeAgentConnector } from "../../../fakes/FakePrototypeAgentSocket";
-import { FakeSimCtlClient } from "../../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../../fakes/FakeSimctl";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -40,7 +40,7 @@ function harness(connect?: PrototypeAgentConnect) {
   const connections = new PrototypeViewerConnections();
   const files = new FakeFileSystem();
   files.setFile(PATH, JSON.stringify({ port: 1234, token: TOKEN }));
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   simctl.setContainerPath(BUNDLE, " /container\n");
   const client = new FakePrototypeAgentClient(HANDSHAKE);
   const calls: number[] = [];

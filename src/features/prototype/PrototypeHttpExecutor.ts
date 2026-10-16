@@ -77,6 +77,36 @@ function parseBody(text: string): PrototypeRequestJson | null {
   }
 }
 
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const FORBIDDEN_HEADER_VALUE = /[\0\r\n]/;
+
+/** RFC 9110 field syntax, checked before fetch so the outcome is `invalid_request`, not `network`. */
+function headerProblemOf(headers: Record<string, string> | undefined): string | undefined {
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (!HEADER_NAME.test(name)) {
+      return `Header name is not an HTTP token: ${JSON.stringify(name)}`;
+    }
+    if (FORBIDDEN_HEADER_VALUE.test(value)) {
+      return `Header ${name} has a value with a CR, LF or NUL character`;
+    }
+  }
+  return undefined;
+}
+
+/** Checks that need no network, so their outcome is deterministic. */
+function requestProblemOf(
+  request: PrototypeHttpRequest,
+): { code: PrototypeRequestErrorCode; message: string } | undefined {
+  const urlProblem = urlProblemOf(request.url);
+  if (urlProblem !== undefined) {
+    return { code: "invalid_url", message: urlProblem };
+  }
+  const headerProblem = headerProblemOf(request.headers);
+  return headerProblem === undefined
+    ? undefined
+    : { code: "invalid_request", message: headerProblem };
+}
+
 function urlProblemOf(raw: string): string | undefined {
   try {
     const url = new URL(raw);
@@ -118,9 +148,9 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
       durationMs: timer.now() - startedAt,
     });
 
-    const urlProblem = urlProblemOf(request.url);
-    if (urlProblem !== undefined) {
-      return fail("invalid_url", urlProblem);
+    const problem = requestProblemOf(request);
+    if (problem !== undefined) {
+      return fail(problem.code, problem.message);
     }
     if (signal.aborted) {
       return fail("cancelled", "Request was cancelled before it started.");

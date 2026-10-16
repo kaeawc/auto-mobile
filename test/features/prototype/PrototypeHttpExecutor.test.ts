@@ -162,6 +162,21 @@ describe("FetchPrototypeHttpExecutor", () => {
     });
   });
 
+  test("a header value with CR, LF or NUL is invalid_request without calling fetch", async () => {
+    let called = false;
+    const { executor } = executorFor(async () => {
+      called = true;
+      return body("{}");
+    });
+    for (const value of ["a\r\nX-Evil: 1", "a\nb", "a\0b"]) {
+      const outcome = await executor.execute({ ...request, headers: { "X-A": value } }, signal());
+      expect(failureCode(outcome)).toBe("invalid_request");
+    }
+    const badName = await executor.execute({ ...request, headers: { "bad name": "v" } }, signal());
+    expect(failureCode(badName)).toBe("invalid_request");
+    expect(called).toBe(false);
+  });
+
   test("returns connection_refused as a typed error, not a throw", async () => {
     const { executor } = executorFor(async () => {
       throw Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" });

@@ -14,7 +14,6 @@ import {
   type PrototypePatchQueue,
 } from "./prototypePatchAction";
 import { MAX_PROTOTYPE_PATCH_OPS } from "../features/prototype/prototypePatch";
-import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 import { prototypePlatformNotes } from "../features/prototype/prototypePlatformNotes";
 import { recordPrototypeTextShow } from "../features/prototype/prototypeTextTarget";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
@@ -44,6 +43,7 @@ import {
   type AndroidPrototypeClient,
 } from "../features/prototype/androidPrototypeTransport";
 import { PrototypeAdbReverseManager } from "../features/prototype/PrototypeAdbReverseManager";
+import { markIndeterminate, shownSpecOutcome } from "./prototypeShownOutcome";
 import { subscribePrototypeCleanup, type PrototypeEventLifecycle } from "./prototypeLifecycle";
 import {
   patchReverseStaging,
@@ -1379,7 +1379,10 @@ async function runMutation(
     return await mutate(target, args, displayId);
   } catch (error) {
     logger.warn("[prototype] Request failed", error);
-    return { success: false, error: toActionableError(error, "Prototype request failed").message };
+    return markIndeterminate({
+      success: false,
+      error: toActionableError(error, "Prototype request failed").message,
+    });
   }
 }
 
@@ -1826,7 +1829,7 @@ async function performMutation(
       id: target.id,
       spec: sendArgs.spec,
       replaceOthers: args.replaceOthers,
-      error: result.error,
+      result,
     });
     retireObservation(dependencies.cacheInvalidator, device, result);
     recordPrototypeTextShow(
@@ -1994,28 +1997,11 @@ function withdrawGeneration(ordering: ShowOrdering): void {
 function endShownSpec(
   store: PrototypeStatusStore,
   ordering: ShowOrdering,
-  outcome?: {
-    action: PrototypeMutation;
-    success: boolean;
-    id?: string;
-    spec?: unknown;
-    replaceOthers?: boolean;
-    error?: string | null;
-  },
+  outcome?: Parameters<typeof shownSpecOutcome>[0],
 ): void {
   if (ordering.specTicket !== undefined) {
-    const shown =
-      outcome?.action === "show" && outcome.success && outcome.id
-        ? {
-            id: outcome.id,
-            spec: outcome.spec as ShownSpecJson,
-            replaceOthers: outcome.replaceOthers,
-          }
-        : undefined;
-    // An additive device refusal is atomic: only this id's tentative spec is forgotten.
-    const refused =
-      outcome?.action === "show" && outcome.replaceOthers === false && !outcome.success;
-    store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, shown, refused);
+    const { shown, refusal } = outcome ? shownSpecOutcome(outcome) : {};
+    store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, shown, refusal);
   }
 }
 

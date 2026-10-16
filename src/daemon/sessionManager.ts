@@ -16,6 +16,7 @@ import {
   type LegacyLifecycleView,
 } from "./sessionSlots";
 import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
+import { PlanLabelRegistry } from "./planLabelRegistry";
 import {
   RecorderTeardownRetries,
   RECORDER_TEARDOWN_RECHECK_MS,
@@ -1641,24 +1642,9 @@ export class SessionManager {
     SessionReleaseSnapshot,
     PromiseWithResolvers<void>
   >();
-  // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
-  // it survives the base's removal. Consumed by takeDerivedLabelSessions.
-  private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
-  // Retain the base's terminal end while the cascade owns a still-published label (#11640).
-  private readonly endedLabelBases = new Map<
-    string,
-    { baseSessionId: string; releaseReason: string }
-  >();
-  /**
-   * Derived label sessions a plan run's allocation may mint right now, counted per open run
-   * (#11572). See {@link openPlanLabelMints}.
-   */
-  private readonly planLabelMints = new Map<string, number>();
-  /**
-   * Derived label sessions a plan run in this daemon minted, until their base is released
-   * (#11572). Only these may be recovered by name, after a device restart during their run.
-   */
-  private readonly runningPlanLabelSessions = new Set<string>();
+  private readonly planLabels = new PlanLabelRegistry({
+    hasSession: (sessionId) => this.sessions.has(sessionId),
+  });
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -3668,7 +3654,7 @@ export class SessionManager {
     claimedRow?: ClaimedCreationRow,
   ): Promise<Session> {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
-    const persistedTerminalRelease = this.planLabelMints.has(session.sessionId)
+    const persistedTerminalRelease = this.planLabels.isMinting(session.sessionId)
       ? undefined
       : this.unlessBeingReplaced(await this.getPersistedTerminalRelease(session.sessionId));
     if (persistedTerminalRelease) {
@@ -3697,7 +3683,7 @@ export class SessionManager {
     }
     this.observerSessions?.release(session.sessionId, "promotion");
     if (session.persistenceMetadata?.source === PLAN_LABEL_SESSION_SOURCE) {
-      this.runningPlanLabelSessions.add(session.sessionId);
+      this.planLabels.markRunning(session.sessionId);
     }
     this.sessions.set(session.sessionId, session);
     this.rowWriter.noteLive(session.sessionId);
@@ -11275,11 +11261,7 @@ export class SessionManager {
    */
   setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
     if (this.getSession(sessionId)) {
-      const derived = Object.values(labels).filter((labelSession) => labelSession !== sessionId);
-      if (derived.length > 0) {
-        const indexed = this.derivedLabelSessionsByBase.get(sessionId) ?? [];
-        this.derivedLabelSessionsByBase.set(sessionId, new Set([...indexed, ...derived]));
-      }
+      this.planLabels.indexDerivedLabels(sessionId, labels);
     }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
   }
@@ -11295,27 +11277,7 @@ export class SessionManager {
    * settles.
    */
   openPlanLabelMints(baseSessionId: string, labels: DeviceLabelMap): () => void {
-    const derived = [...new Set(Object.values(labels))].filter(
-      (labelSession) => labelSession !== baseSessionId,
-    );
-    for (const labelSession of derived) {
-      this.planLabelMints.set(labelSession, (this.planLabelMints.get(labelSession) ?? 0) + 1);
-    }
-    let open = true;
-    return () => {
-      if (!open) {
-        return;
-      }
-      open = false;
-      for (const labelSession of derived) {
-        const remaining = (this.planLabelMints.get(labelSession) ?? 1) - 1;
-        if (remaining > 0) {
-          this.planLabelMints.set(labelSession, remaining);
-        } else {
-          this.planLabelMints.delete(labelSession);
-        }
-      }
-    };
+    return this.planLabels.openPlanLabelMints(baseSessionId, labels);
   }
 
   /** The persisted creator of a session being created: a plan run's label mint marks its row. */
@@ -11323,7 +11285,7 @@ export class SessionManager {
     sessionId: string,
     persistenceSource: string | undefined,
   ): string | undefined {
-    return this.planLabelMints.has(sessionId) ? PLAN_LABEL_SESSION_SOURCE : persistenceSource;
+    return this.planLabels.creatorSource(sessionId, persistenceSource, PLAN_LABEL_SESSION_SOURCE);
   }
 
   /**
@@ -11332,10 +11294,10 @@ export class SessionManager {
    * when a release is superseded: they belong to the incarnation that ended.
    */
   private liftPlanLabelFenceForMint(sessionId: string): void {
-    if (!this.planLabelMints.has(sessionId) || this.sessions.has(sessionId)) {
+    if (!this.planLabels.isMintableAndNotLive(sessionId)) {
       return;
     }
-    this.endedLabelBases.delete(sessionId);
+    this.planLabels.clearEndedBase(sessionId);
     this.liftTerminalFence(sessionId, undefined, false, () => {
       this.slotShadowProbe.check(sessionId, "plan-label-fence-lifted");
       this.sessionSlots.deleteTerminalReasonState(sessionId);
@@ -11362,7 +11324,7 @@ export class SessionManager {
       !persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason);
     // A row this daemon did not mint under a still-running plan is a previous run's, whatever its
     // reason (a restarted daemon finds the old `daemon-shutdown` row): not a handoff to recover.
-    if (recoverable && this.runningPlanLabelSessions.has(sessionId)) {
+    if (recoverable && this.planLabels.isRunning(sessionId)) {
       return;
     }
     throw new TerminalSessionError(sessionId, {
@@ -11380,12 +11342,7 @@ export class SessionManager {
    * `sessionId` is not a known derived label session (#11111).
    */
   getBaseSessionOfDerivedLabel(sessionId: string): string | undefined {
-    for (const [base, derived] of this.derivedLabelSessionsByBase) {
-      if (derived.has(sessionId)) {
-        return base;
-      }
-    }
-    return undefined;
+    return this.planLabels.getBaseSessionOfDerivedLabel(sessionId);
   }
 
   /**
@@ -11398,7 +11355,7 @@ export class SessionManager {
    * {@link getOrCreateSession}, and an id whose prefix is no live session is a session of its own.
    */
   private refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void {
-    if (this.planLabelMints.has(sessionId) || this.sessionSlots.hasRecovery(sessionId)) {
+    if (this.planLabels.isMinting(sessionId) || this.sessionSlots.hasRecovery(sessionId)) {
       return;
     }
     const baseSessionId = this.liveBaseOfDerivedId(sessionId);
@@ -11426,17 +11383,9 @@ export class SessionManager {
 
   /** The live session `sessionId` reads as a `${base}:${label}` of, the longest such prefix. */
   private liveBaseOfDerivedId(sessionId: string): string | undefined {
-    for (
-      let separatorIndex = sessionId.lastIndexOf(":");
-      separatorIndex > 0;
-      separatorIndex = sessionId.lastIndexOf(":", separatorIndex - 1)
-    ) {
-      const candidate = sessionId.slice(0, separatorIndex);
-      if (this.peekSession(candidate)) {
-        return candidate;
-      }
-    }
-    return undefined;
+    return this.planLabels.liveBaseOfDerivedId(sessionId, (candidate) =>
+      Boolean(this.peekSession(candidate)),
+    );
   }
 
   /**
@@ -11476,18 +11425,11 @@ export class SessionManager {
    * that are already gone; the caller checks each one.
    */
   takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
-    const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
-    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
-      for (const labelSessionId of derived ?? []) {
-        if (this.sessions.has(labelSessionId)) {
-          this.endedLabelBases.set(labelSessionId, { baseSessionId, releaseReason });
-        }
-      }
-    }
-    this.derivedLabelSessionsByBase.delete(baseSessionId);
-    // The base is being released: its plan run, and with it every label session's, is over.
-    derived?.forEach((labelSession) => this.runningPlanLabelSessions.delete(labelSession));
-    return derived ? [...derived] : [];
+    return this.planLabels.takeDerivedLabelSessions(
+      baseSessionId,
+      releaseReason,
+      isTerminalReleaseReason,
+    );
   }
 
   /**
@@ -11701,7 +11643,7 @@ export class SessionManager {
     if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return undefined;
     }
-    const retained = this.endedLabelBases.get(label.sessionId);
+    const retained = this.planLabels.retainedEndedBase(label.sessionId);
     if (retained) {
       return retained;
     }
@@ -12925,7 +12867,7 @@ export class SessionManager {
     }
     this.sessions.delete(sessionId);
     this.slotShadowProbe.check(sessionId, "unpublished");
-    this.endedLabelBases.delete(sessionId);
+    this.planLabels.clearEndedBase(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
     this.networkConditionGeneration.delete(sessionId);

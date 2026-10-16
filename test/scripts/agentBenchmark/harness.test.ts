@@ -88,18 +88,25 @@ function setup(transcript: string, launchMs = 42_000) {
     .onAdb("exec-out cat", { stdout: SCREEN })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
   const launches: ClaudeLaunchSpec[] = [];
+  const claims: string[] = [];
   const logs: string[] = [];
   const deps: HarnessDeps = {
     runner,
     timer,
     idGenerator: new CountingIdGenerator("run"),
-    deviceClaims: { foreignOwner: async () => undefined },
+    deviceClaims: {
+      reserve: async (serial) => {
+        claims.push(`reserve ${serial}`);
+        return { release: () => claims.push(`release ${serial}`) };
+      },
+    },
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
     launcher: {
       async launch(spec) {
         launches.push(spec);
+        claims.push("launch");
         timer.advanceTime(launchMs);
         fs.writeFile(spec.stdoutPath, transcript);
         return { exitCode: 0, timedOut: false };
@@ -112,7 +119,7 @@ function setup(transcript: string, launchMs = 42_000) {
     serverEntry: "/repo/dist/src/index.js",
     claudeCommand: "claude",
   };
-  return { timer, fs, runner, launches, logs, deps, options };
+  return { timer, fs, runner, launches, logs, claims, deps, options };
 }
 
 const PASSING = new TranscriptBuilder()
@@ -316,6 +323,10 @@ describe("agent benchmark harness", () => {
       CLAUDE_CODE_DISABLE_THINKING: "1",
       CLAUDE_CODE_SUBAGENT_MODEL: "haiku",
       CLAUDE_ADDITIONAL_DIRECTORIES: "/elsewhere",
+      DISABLE_PROMPT_CACHING: "1",
+      DISABLE_PROMPT_CACHING_OPUS: "1",
+      ENABLE_PROMPT_CACHING_1H_BEDROCK: "1",
+      FORCE_PROMPT_CACHING_5M: "1",
       ANTHROPIC_API_KEY: "sk-test",
       ANTHROPIC_MODEL: "provider-model-id",
       CLAUDE_CODE_USE_BEDROCK: "1",
@@ -333,6 +344,10 @@ describe("agent benchmark harness", () => {
       "CLAUDE_CODE_DISABLE_THINKING",
       "CLAUDE_CODE_SUBAGENT_MODEL",
       "CLAUDE_ADDITIONAL_DIRECTORIES",
+      "DISABLE_PROMPT_CACHING",
+      "DISABLE_PROMPT_CACHING_OPUS",
+      "ENABLE_PROMPT_CACHING_1H_BEDROCK",
+      "FORCE_PROMPT_CACHING_5M",
     ]) {
       expect({ name, value: env[name] }).toEqual({ name, value: undefined });
     }
@@ -362,9 +377,34 @@ describe("agent benchmark harness", () => {
     expect(fs.readFile(artifact("baseline.yml"))).toContain(`suiteDigest: ${result.suiteDigest}`);
   });
 
+  test("the device claim is held through preflight and released before Claude starts", async () => {
+    const { claims, runner, deps, options } = setup(PASSING);
+    const order: string[] = [];
+    const inner = deps.runner;
+    deps.runner = {
+      run: (command, args, timeoutMs, env) => {
+        if (args.includes("pm") && args.includes("clear")) {
+          order.push(`pm clear with ${claims.at(-1)}`);
+        }
+        return inner.run(command, args, timeoutMs, env);
+      },
+    };
+    await runSuite(loadedSuite(), options, deps);
+    expect(order).toEqual(["pm clear with reserve emulator-5554"]);
+    expect(claims).toEqual(["reserve emulator-5554", "release emulator-5554", "launch"]);
+    expect(runner.adbCalls().some((call) => call.includes("pm clear"))).toBe(true);
+  });
+
+  test("a failed preflight releases the device claim", async () => {
+    const { claims, runner, deps, options } = setup(PASSING);
+    runner.onAdb("pm clear", { stdout: "Failed\n" });
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(/did not succeed/);
+    expect(claims).toEqual(["reserve emulator-5554", "release emulator-5554"]);
+  });
+
   test("an unreadable foreign claim also keeps the device untouched", async () => {
     const { runner, deps, options } = setup(PASSING);
-    deps.deviceClaims = { foreignOwner: async () => ({ unreadable: true }) };
+    deps.deviceClaims = { reserve: async () => ({ refusedBy: { unreadable: true } }) };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /claimed by another AutoMobile session \(an unreadable claim\)/,
     );
@@ -393,8 +433,10 @@ describe("agent benchmark harness", () => {
   test("a device claimed by another AutoMobile session is never touched", async () => {
     const { runner, launches, fs, deps, options } = setup(PASSING);
     deps.deviceClaims = {
-      foreignOwner: async (serial) =>
-        serial === "emulator-5554" ? { pid: 4242, unreadable: false } : undefined,
+      reserve: async (serial) =>
+        serial === "emulator-5554"
+          ? { refusedBy: { pid: 4242, unreadable: false } }
+          : { release: () => undefined },
     };
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /emulator-5554 is claimed by another AutoMobile session \(pid 4242\)/,

@@ -38,6 +38,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ForwardLeaseForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
@@ -247,17 +248,39 @@ const realFs: HarnessFs = {
 };
 
 /**
- * The canonical checker daemons use before allocating a device: the CtrlProxy forwarding
- * lease, the current and 0.0.84 allocation claims, unreadable claims, and live forwards,
- * each confirmed against its owner daemon.
+ * The canonical ownership rules daemons use before allocating a device (the CtrlProxy
+ * forwarding lease, current and 0.0.84 allocation claims, unreadable claims, and live
+ * CtrlProxy forwards, each confirmed against its owner), then this process's own claim.
+ * The claim names no control socket: the harness serves none, so other daemons judge it
+ * by this process's liveness alone instead of lapsing it after their startup grace.
  */
 const realDeviceClaims: DeviceClaims = {
-  async foreignOwner(serial) {
-    const ownership = new ForwardLeaseForeignDeviceOwnership();
-    await ownership.refresh([serial]);
-    const pid = ownership.foreignOwnerPid(serial);
-    const unreadable = ownership.foreignClaimUnreadable(serial);
-    return pid === undefined && !unreadable ? undefined : { pid, unreadable };
+  async reserve(serial) {
+    const ownership = new ForwardLeaseForeignDeviceOwnership(
+      process.pid,
+      undefined,
+      undefined,
+      () => undefined,
+      undefined,
+      createForeignCtrlProxyForwardEvidence(),
+    );
+    const refusal = async () => {
+      await ownership.refresh([serial]);
+      return {
+        refusedBy: {
+          pid: ownership.foreignOwnerPid(serial),
+          unreadable: ownership.foreignClaimUnreadable(serial),
+        },
+      };
+    };
+    const current = await refusal();
+    if (current.refusedBy.pid !== undefined || current.refusedBy.unreadable) {
+      return current;
+    }
+    if (!(await ownership.claim(serial))) {
+      return refusal();
+    }
+    return { release: () => ownership.release(serial) };
   },
 };
 

@@ -128,6 +128,24 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
 ]);
 
+/**
+ * Run-shaping families matched by prefix: prompt caching switches (global, per model, and
+ * per provider, e.g. `DISABLE_PROMPT_CACHING_OPUS`, `ENABLE_PROMPT_CACHING_1H_BEDROCK`),
+ * which change cost and latency.
+ */
+const RUN_SHAPING_CLAUDE_PREFIXES = [
+  "DISABLE_PROMPT_CACHING",
+  "ENABLE_PROMPT_CACHING",
+  "FORCE_PROMPT_CACHING",
+];
+
+export function isRunShapingClaudeVariable(key: string): boolean {
+  return (
+    RUN_SHAPING_CLAUDE_VARIABLES.has(key) ||
+    RUN_SHAPING_CLAUDE_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
+}
+
 /** The launch environment for Claude: isolated server env without run-shaping Claude overrides. */
 export function claudeLaunchEnv(
   inherited: Record<string, string | undefined>,
@@ -135,7 +153,7 @@ export function claudeLaunchEnv(
 ): Record<string, string> {
   return Object.fromEntries(
     Object.entries(isolatedServerEnv(inherited, paths)).filter(
-      ([key]) => !RUN_SHAPING_CLAUDE_VARIABLES.has(key),
+      ([key]) => !isRunShapingClaudeVariable(key),
     ),
   );
 }

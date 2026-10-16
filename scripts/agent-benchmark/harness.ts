@@ -63,13 +63,20 @@ export interface HarnessFs {
   sha256(path: string): string;
 }
 
-/** Who else holds a device, by the same ownership rules every AutoMobile daemon applies. */
+/** A device allocation claim this process holds. */
+export interface DeviceReservation {
+  release(): void;
+}
+
+/** Device allocation claims, under the same ownership rules every AutoMobile daemon applies. */
 export interface DeviceClaims {
   /**
-   * The foreign owner of `serial`: its PID, or `unreadable` when a claim exists that names
-   * nobody readable. Undefined when the device is free.
+   * Claim `serial` for this process, or report who holds it: a PID, or `unreadable` when a
+   * claim exists that names nobody readable.
    */
-  foreignOwner(serial: string): Promise<{ pid?: number; unreadable: boolean } | undefined>;
+  reserve(
+    serial: string,
+  ): Promise<DeviceReservation | { refusedBy: { pid?: number; unreadable: boolean } }>;
 }
 
 export interface HarnessDeps {
@@ -172,20 +179,50 @@ interface PreparedRun {
   paths: ServerPaths;
   serial: string;
   preflight: BenchmarkResult["preflight"];
+  /** Release the device claim held through preflight (idempotent). */
+  releaseDevice(): void;
 }
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
-  const { definition } = suite;
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
-  // Preflight clears app data, so never touch a device another AutoMobile session holds.
-  // (Taking the claim here would block the run's own daemon from claiming it later.)
-  const owner = await deps.deviceClaims.foreignOwner(serial);
-  if (owner !== undefined) {
-    const holder = owner.pid === undefined ? "an unreadable claim" : `pid ${owner.pid}`;
+  // Preflight clears app data, so hold this device's allocation claim through it: another
+  // AutoMobile session (or a concurrent benchmark) is refused instead of racing it.
+  // launchClaude releases it just before the run's own private daemon needs to claim it.
+  const reservation = await deps.deviceClaims.reserve(serial);
+  if ("refusedBy" in reservation) {
+    const { pid } = reservation.refusedBy;
+    const holder = pid === undefined ? "an unreadable claim" : `pid ${pid}`;
     throw new Error(
       `${serial} is claimed by another AutoMobile session (${holder}); stop it before benchmarking.`,
     );
   }
+  const release = once(() => reservation.release());
+  try {
+    return await prepareReserved(suite, options, deps, serial, release);
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
+function once(action: () => void): () => void {
+  let done = false;
+  return () => {
+    if (!done) {
+      done = true;
+      action();
+    }
+  };
+}
+
+async function prepareReserved(
+  suite: LoadedSuite,
+  options: RunOptions,
+  deps: HarnessDeps,
+  serial: string,
+  releaseDevice: () => void,
+) {
+  const { definition } = suite;
   const startedAt = runTimestamp(deps.timer.now());
   const runId = deps.idGenerator.next().slice(0, 8);
   const runDirectory = join(options.outputRoot, definition.name, `${startedAt}-${runId}`);
@@ -210,7 +247,20 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   await deps.timer.sleep(definition.preflight.settleSeconds * 1000);
   const durationSeconds = (deps.timer.now() - preflightStart) / 1000;
   deps.fs.writeFile(join(runDirectory, "preflight.log"), `${log.join("\n")}\n`);
-  // runSuite's cleanup only covers a fully prepared run, so undo a partial setup here.
+  const { paths, claudeCwd } = allocateRunDirectories(options, deps, runDirectory);
+  const prepared: PreparedRun = {
+    runDirectory,
+    claudeCwd,
+    paths,
+    serial,
+    preflight: { log, durationSeconds, appBuild },
+    releaseDevice,
+  };
+  return { startedAt, prepared };
+}
+
+/** Create the run's temp and state directories, removing any already made if one fails. */
+function allocateRunDirectories(options: RunOptions, deps: HarnessDeps, runDirectory: string) {
   const tempDirs: string[] = [];
   const makeTempDir = (prefix: string) => {
     const dir = deps.fs.makeTempDir(prefix);
@@ -227,14 +277,7 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     };
     deps.fs.mkdir(paths.dbDir);
     deps.fs.mkdir(paths.logDir);
-    const prepared: PreparedRun = {
-      runDirectory,
-      claudeCwd: makeTempDir("amb-cwd-"),
-      paths,
-      serial,
-      preflight: { log, durationSeconds, appBuild },
-    };
-    return { startedAt, prepared };
+    return { paths, claudeCwd: makeTempDir("amb-cwd-") };
   } catch (error) {
     tempDirs.forEach((dir) => deps.fs.remove(dir));
     throw error;
@@ -270,6 +313,8 @@ async function launchClaude(
     join(run.runDirectory, "claude-command.json"),
     `${JSON.stringify({ command: options.claudeCommand, args, cwd: run.claudeCwd }, null, 2)}\n`,
   );
+  // The private daemon claims the device on Claude's first tool call; hand it over now.
+  run.releaseDevice();
   deps.log(`[${definition.name}] running claude (timeout ${definition.claude.timeoutSeconds}s)`);
   const start = deps.timer.now();
   const exit = await deps.launcher.launch({
@@ -308,6 +353,7 @@ export async function runSuite(
       screen = await screenAfterRun(deps, prepared, definition.app.packageName);
     }
   } finally {
+    prepared.releaseDevice();
     await stopPrivateDaemon(deps, options, prepared.paths);
     deps.fs.remove(prepared.paths.auxSocketDir);
     deps.fs.remove(prepared.claudeCwd);

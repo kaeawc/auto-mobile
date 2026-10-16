@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import * as sessionConfig from "../../src/models/sessionConfig";
+import * as sessionConfig from "../../src/devices/sessionConfig";
 import {
   assertSessionOwnerRunning,
   daemonSupportsSessionBroker,
@@ -8,7 +8,7 @@ import {
   resolveSessionConfig,
   SESSION_BROKER_V1_CAPABILITY,
   SessionConfigError,
-} from "../../src/models/sessionConfig";
+} from "../../src/devices/sessionConfig";
 import { logger } from "../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 

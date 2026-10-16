@@ -48,8 +48,8 @@ import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
 import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
-import { SESSION_EXPERIMENTAL_CAPABILITY } from "../models/sessionConfig";
-import type { SessionBrokerResult } from "../models/sessionBrokerResult";
+import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
+import type { SessionBrokerResult } from "../devices/sessionBrokerResult";
 import { idleReleaseField } from "../daemon/releaseReasons";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";

@@ -30,7 +30,7 @@ import {
   SESSION_EXPERIMENTAL_CAPABILITY,
   parseSessionConfig,
   parseSessionConfigSource,
-} from "../../src/models/sessionConfig";
+} from "../../src/devices/sessionConfig";
 import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
 import { createFrameBrokerDaemonClient, type BrokerDaemonClient } from "./brokerDaemonClient";
 import { BrokerDeviceLedger, BrokerDeviceInfoRefusedError } from "./brokerDeviceLedger";

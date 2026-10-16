@@ -6,7 +6,7 @@ import {
   renderClientRequest,
   planExpectations,
 } from "../../scripts/manual-test/brokerBatch";
-import { parseSessionConfig } from "../../src/models/sessionConfig";
+import { parseSessionConfig } from "../../src/devices/sessionConfig";
 import { parseSessionBrokerHostConfig } from "../../src/daemon/sessionBroker/hostConfig";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { brokerBatchInput } from "./manualTestPrivateDaemonFixture";

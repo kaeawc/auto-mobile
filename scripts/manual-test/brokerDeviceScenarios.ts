@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { osSelectorMatchesVersion } from "../../src/devices/sessionRequirements/version";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { BROKER_CLEANUP_TIMEOUT_MS } from "./brokerDaemonClient";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import type { LedgerDevicesView } from "./brokerDeviceLedger";

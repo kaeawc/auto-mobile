@@ -2,7 +2,7 @@ import type { BrokerDaemonClient } from "../../scripts/manual-test/brokerDaemonC
 import type {
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../../src/models/sessionBrokerResult";
+} from "../../src/devices/sessionBrokerResult";
 
 type Reply<T> = T | Error;
 /** Scripted queues retain their last reply for repeated status polls. */

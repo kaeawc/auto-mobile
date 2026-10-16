@@ -14,7 +14,7 @@ import type {
 import { runBrokerScenarioCli } from "../../scripts/manual-test/broker-scenario";
 import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
 import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

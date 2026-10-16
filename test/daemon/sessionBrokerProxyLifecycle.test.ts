@@ -10,8 +10,8 @@ import {
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
-import type { SessionConfig } from "../../src/models/sessionConfig";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionConfig } from "../../src/devices/sessionConfig";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

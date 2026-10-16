@@ -4,7 +4,7 @@ import type {
 } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
-import type { SessionBrokerFailure } from "../../models/sessionBrokerResult";
+import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
 
 export class SessionBrokerFailureError extends ActionableError {
   constructor(readonly failure: SessionBrokerFailure) {

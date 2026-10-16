@@ -185,11 +185,11 @@ import {
   acquireSessionThroughDaemon,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
 } from "./sessionBrokerProxyAcquisition";
-import type { SessionConfig } from "../models/sessionConfig";
+import type { SessionConfig } from "../devices/sessionConfig";
 import type {
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../models/sessionBrokerResult";
+} from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
 import {

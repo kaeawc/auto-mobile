@@ -3,7 +3,7 @@ import {
   parseSessionBrokerHostConfig,
   type SessionBrokerHostConfig,
 } from "../../src/daemon/sessionBroker/hostConfig";
-import { parseSessionConfig, type SessionConfig } from "../../src/models/sessionConfig";
+import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 
 const clientSchema = z

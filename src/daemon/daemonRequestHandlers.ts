@@ -1,6 +1,6 @@
 import { holderOf } from "./deviceBinding";
 import type { SessionBrokerService } from "./sessionBroker/service";
-import type { SessionBrokerProtocolErrorCode } from "../models/sessionBrokerResult";
+import type { SessionBrokerProtocolErrorCode } from "../devices/sessionBrokerResult";
 import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
 import {
   handleAbandonBrokerSessionRequest,

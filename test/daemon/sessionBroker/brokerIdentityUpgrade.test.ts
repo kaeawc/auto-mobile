@@ -14,7 +14,7 @@ import {
   type BindingRegistryDatabase,
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { TeardownDeviceArgs } from "../../../src/server/deviceTools";
-import type { SessionConfig } from "../../../src/models/sessionConfig";
+import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { Kysely } from "kysely";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { createTestDatabase } from "../../db/testDbHelper";

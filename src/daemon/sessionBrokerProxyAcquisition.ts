@@ -1,9 +1,9 @@
-import { daemonSupportsSessionBroker, type SessionConfig } from "../models/sessionConfig";
+import { daemonSupportsSessionBroker, type SessionConfig } from "../devices/sessionConfig";
 import type {
   SessionBrokerFailure,
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../models/sessionBrokerResult";
+} from "../devices/sessionBrokerResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";

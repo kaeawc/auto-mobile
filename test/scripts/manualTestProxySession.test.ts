@@ -13,8 +13,8 @@ import {
 } from "../../scripts/manual-test/proxy-session";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
-import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/models/sessionConfig";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/devices/sessionConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 const posixTest = process.platform === "win32" ? test.skip : test;
 const dir = resolve("/session");

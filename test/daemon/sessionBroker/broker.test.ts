@@ -9,7 +9,7 @@ import {
   type SqliteBindingRegistry,
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { parseSessionConfig, type SessionConfig } from "../../../src/models/sessionConfig";
+import { parseSessionConfig, type SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 

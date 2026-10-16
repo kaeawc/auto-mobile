@@ -53,8 +53,8 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
-import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./models/sessionConfig";
-import type { SessionBrokerResult } from "./models/sessionBrokerResult";
+import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./devices/sessionConfig";
+import type { SessionBrokerResult } from "./devices/sessionBrokerResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
 import { sweepNativeHelperOrphans } from "./utils/nativeHelpers/sweepNativeHelperOrphans";

@@ -2,7 +2,7 @@ import "./harnessLogSink";
 import type {
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../../src/models/sessionBrokerResult";
+} from "../../src/devices/sessionBrokerResult";
 import { z } from "zod";
 import { toActionableError } from "../../src/models/ActionableError";
 import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketServer/LineFramer";

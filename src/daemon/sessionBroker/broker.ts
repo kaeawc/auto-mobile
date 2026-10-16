@@ -7,12 +7,12 @@ import {
   type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
-import type { SessionConfig } from "../../models/sessionConfig";
+import type { SessionConfig } from "../../devices/sessionConfig";
 import type {
   SessionBrokerFailure,
   SessionBrokerReleaseResult,
   SessionBrokerResult,
-} from "../../models/sessionBrokerResult";
+} from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";

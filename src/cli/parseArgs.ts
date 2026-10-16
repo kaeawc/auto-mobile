@@ -8,7 +8,7 @@ import {
   SESSION_CONFIG_FLAG,
   SessionConfigError,
   resolveSessionConfig,
-} from "../models/sessionConfig";
+} from "../devices/sessionConfig";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {

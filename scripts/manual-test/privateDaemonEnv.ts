@@ -13,7 +13,7 @@ import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard
 import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerTypes";
 import { resolveDatabasePathFromEnvironment } from "../../src/db/database";
 import { SESSION_BROKER_HOST_CONFIG_ENV } from "../../src/daemon/sessionBroker/hostConfig";
-import { SESSION_CONFIG_ENV } from "../../src/models/sessionConfig";
+import { SESSION_CONFIG_ENV } from "../../src/devices/sessionConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import {

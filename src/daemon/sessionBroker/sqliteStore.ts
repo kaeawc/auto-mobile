@@ -1,5 +1,5 @@
 import type { Kysely, Selectable, Transaction } from "kysely";
-import type { SessionBrokerFailure } from "../../models/sessionBrokerResult";
+import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";

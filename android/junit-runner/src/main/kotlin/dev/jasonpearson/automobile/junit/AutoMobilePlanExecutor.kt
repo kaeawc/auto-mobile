@@ -167,6 +167,7 @@ internal object AutoMobilePlanExecutor {
     planPath: String,
     parameters: Map<String, Any>,
     options: AutoMobilePlanExecutionOptions,
+    timings: PlanExecutorTimings = PlanExecutorTimings(),
   ): AutoMobilePlanExecutionResult {
 
     val startTime = System.currentTimeMillis()
@@ -215,7 +216,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       // Execute the processed plan
-      val result = executeProcessedPlan(processedPlanContent, options, secretValues)
+      val result = executeProcessedPlan(processedPlanContent, options, secretValues, timings)
 
       val executionTime = System.currentTimeMillis() - startTime
 
@@ -322,6 +323,7 @@ internal object AutoMobilePlanExecutor {
     planContent: String,
     options: AutoMobilePlanExecutionOptions,
     secretValues: List<String>,
+    timings: PlanExecutorTimings,
   ): InternalExecutionResult {
     return executePlanFromStep(
       planContent,
@@ -329,6 +331,7 @@ internal object AutoMobilePlanExecutor {
       startStep = 0,
       recoveryAlreadyAttempted = false,
       secretValues = secretValues,
+      timings = timings,
     )
   }
 
@@ -354,6 +357,7 @@ internal object AutoMobilePlanExecutor {
     secretValues: List<String>,
     deviceIdOverride: String? = null,
     sessionUuidOverride: String? = null,
+    timings: PlanExecutorTimings,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
@@ -495,6 +499,7 @@ internal object AutoMobilePlanExecutor {
             deviceOwnedWaitMs,
             parsed.retryAfterMs,
             parsed.code,
+            timings,
           )
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
@@ -509,7 +514,7 @@ internal object AutoMobilePlanExecutor {
         )
         if (holdForRecovery) releaseHeldSession(sessionUuid)
         releaseTakenOverSession()
-        deviceOwnedSleeper(delayMs)
+        timings.deviceOwnedSleeper(delayMs)
         deviceOwnedWaits++
         deviceOwnedWaitMs += delayMs
         // A refusal consumes no executePlan retry; the next pass is the same attempt number.
@@ -532,7 +537,7 @@ internal object AutoMobilePlanExecutor {
       if (holdForRecovery) releaseHeldSession(sessionUuid)
       releaseTakenOverSession()
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
-      Thread.sleep(retryBackoffMs)
+      Thread.sleep(timings.retryBackoffMs)
     }
 
     val failureMessage =
@@ -564,6 +569,7 @@ internal object AutoMobilePlanExecutor {
       planContent = planContent,
       recoveryAlreadyAttempted = recoveryAlreadyAttempted,
       secretValues = secretValues,
+      timings = timings,
       heldSessionUuid = attemptSessionUuid.takeIf { holdForRecovery },
     )
   }
@@ -670,6 +676,7 @@ internal object AutoMobilePlanExecutor {
     recoveryAlreadyAttempted: Boolean,
     secretValues: List<String>,
     heldSessionUuid: String? = null,
+    timings: PlanExecutorTimings,
   ): InternalExecutionResult {
     // The daemon kept the failed attempt's session and device for recovery (#10834). Only the
     // resumed plan takes it over (and releases it); every other outcome releases it here.
@@ -788,6 +795,7 @@ internal object AutoMobilePlanExecutor {
         startStep = resumeStep,
         recoveryAlreadyAttempted = true, // prevent recursive recovery
         secretValues = secretValues,
+        timings = timings,
         deviceIdOverride = failedStepContext.deviceId,
         sessionUuidOverride = failedStepContext.sessionUuid,
       )
@@ -1382,9 +1390,6 @@ internal object AutoMobilePlanExecutor {
 
   // ── Retry helpers ────────────────────────────────────────────────────────
 
-  private const val RETRY_BACKOFF_MS = 2000L
-  @JvmStatic internal var retryBackoffMs: Long = RETRY_BACKOFF_MS
-
   private fun callDaemonToolForAttempt(
     toolName: String,
     arguments: JsonObject,
@@ -1461,13 +1466,6 @@ internal object AutoMobilePlanExecutor {
 
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
   private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
-  private const val DEVICE_OWNED_DEFAULT_BUDGET_MS = 30_000L
-
-  /** Total time to wait for another session to release the device before giving up. */
-  @JvmStatic internal var deviceOwnedWaitBudgetMs: Long = DEVICE_OWNED_DEFAULT_BUDGET_MS
-
-  /** Seam over [Thread.sleep] so the device-held wait is instant in tests. */
-  @JvmStatic internal var deviceOwnedSleeper: (Long) -> Unit = { Thread.sleep(it) }
 
   /**
    * Longest the runner waits on a recording-finalize refusal (#11360). The daemon advertises its
@@ -1496,15 +1494,21 @@ internal object AutoMobilePlanExecutor {
   /**
    * Total wait budget for this refusal. For the finalize codes the daemon's `retryAfterMs` is the
    * finalize time STILL REMAINING, so it bounds the total: [waitedMs] already spent plus that hint,
-   * clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] and never below [deviceOwnedWaitBudgetMs]
-   * (#11360, #11538). Every other code, and a refusal with no hint, keeps the plain budget.
+   * clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] and never below
+   * [PlanExecutorTimings.deviceOwnedWaitBudgetMs] (#11360, #11538). Every other code, and a refusal
+   * with no hint, keeps the plain budget.
    */
-  private fun deviceOwnedBudgetMs(waitedMs: Long, retryAfterMs: Long?, code: String?): Long {
+  private fun deviceOwnedBudgetMs(
+    waitedMs: Long,
+    retryAfterMs: Long?,
+    code: String?,
+    timings: PlanExecutorTimings,
+  ): Long {
     val hintMs = positiveRetryAfterMs(retryAfterMs)
-    if (code !in FINALIZE_WAIT_CODES || hintMs == null) return deviceOwnedWaitBudgetMs
+    if (code !in FINALIZE_WAIT_CODES || hintMs == null) return timings.deviceOwnedWaitBudgetMs
     // The hint is clamped before the addition so a hint near Long.MAX_VALUE cannot wrap negative.
     val untilFinalized = minOf(waitedMs + hintMs, DEVICE_FINALIZE_WAIT_CAP_MS)
-    return maxOf(deviceOwnedWaitBudgetMs, untilFinalized)
+    return maxOf(timings.deviceOwnedWaitBudgetMs, untilFinalized)
   }
 
   /**
@@ -1512,15 +1516,17 @@ internal object AutoMobilePlanExecutor {
    * the remaining budget; null once the budget is spent. For the finalize codes ([code]) the
    * daemon's `retryAfterMs` only bounds the total wait (up to 150 s, #11360); each step stays at
    * the ordinary backoff so a finalize that finishes early is noticed on the next poll (#11538).
-   * For every other code a hint lengthens a step and never extends [deviceOwnedWaitBudgetMs].
+   * For every other code a hint lengthens a step and never extends
+   * [PlanExecutorTimings.deviceOwnedWaitBudgetMs].
    */
   internal fun deviceOwnedBackoffDelayMs(
     waitsSoFar: Int,
     waitedMs: Long,
     retryAfterMs: Long? = null,
     code: String? = null,
+    timings: PlanExecutorTimings = PlanExecutorTimings(),
   ): Long? {
-    val remaining = deviceOwnedBudgetMs(waitedMs, retryAfterMs, code) - waitedMs
+    val remaining = deviceOwnedBudgetMs(waitedMs, retryAfterMs, code, timings) - waitedMs
     if (remaining <= 0) return null
     val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
     val backoff = minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS)

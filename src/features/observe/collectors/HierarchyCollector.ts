@@ -1,3 +1,4 @@
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
@@ -116,7 +117,7 @@ export class HierarchyCollector {
     const errorStr = String(error);
     if (
       device.platform === "android" &&
-      (errorStr.includes("WebSocket not connected") ||
+      (errorStr.includes(WEBSOCKET_NOT_CONNECTED_MESSAGE) ||
         errorStr.includes("Failed to connect to accessibility service"))
     ) {
       try {

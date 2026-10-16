@@ -22,13 +22,12 @@ export async function readAndroidPackageProcesses(
 ): Promise<{ processes: AndroidPackageProcess[]; isRunning: boolean; stdout: string }> {
   const output = await new DefaultRetryExecutor(options.timer ?? defaultTimer).executeOrThrow(
     () =>
-      adb.executeCommand(
-        "shell dumpsys activity processes",
-        5_000,
-        DUMPSYS_MAX_BUFFER,
-        true,
-        options.signal,
-      ),
+      adb.executeCommand("shell dumpsys activity processes", {
+        timeoutMs: 5_000,
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
+        signal: options.signal,
+      }),
     {
       maxAttempts: 2,
       expectedFailure: {

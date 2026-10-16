@@ -12,7 +12,7 @@ import type {
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
 } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 
@@ -145,7 +145,7 @@ export class CtrlProxyPackages {
           cancelScreenshotBackoff: false,
           createRequestId: () =>
             createTimestampedId(operation, this.context.timer, this.context.idGenerator),
-          notConnectedError: () => failure("WebSocket not connected"),
+          notConnectedError: () => failure(WEBSOCKET_NOT_CONNECTED_MESSAGE),
           timeoutError: (timeout) => failure(`${timeoutLabel} timeout after ${timeout}ms`),
           unsupportedCommandError: (_messageType, error) => failure(error),
         },

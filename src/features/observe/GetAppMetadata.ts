@@ -116,13 +116,11 @@ export async function getAndroidAppMetadataFromAdb(
 ): Promise<AppMetadataResult | null> {
   let result: ExecResult;
   try {
-    result = await adb.executeCommand(
-      `shell dumpsys package ${shellQuote(packageName)}`,
-      options.timeoutMs,
-      DUMPSYS_MAX_BUFFER,
-      undefined,
-      options.signal,
-    );
+    result = await adb.executeCommand(`shell dumpsys package ${shellQuote(packageName)}`, {
+      timeoutMs: options.timeoutMs,
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+      signal: options.signal,
+    });
   } catch (error) {
     if (options.optional) {
       // Optional version enrichment may be unavailable without failing the resource read.

@@ -54,11 +54,11 @@ export class ClockOperations {
       adapter ??
         new AndroidDeviceClockAdapter(
           {
-            executeCommand: (...args) =>
+            executeCommand: (command, options) =>
               this.dependencies
                 .adbFactory()
                 .create(this.dependencies.device())
-                .executeCommand(...args),
+                .executeCommand(command, options),
           },
           this.clockSignal,
         ),

@@ -175,12 +175,10 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     logger.info(`[WORK_PROFILE_MONITOR] Refreshing packages for user ${userId}`);
 
     try {
-      const result = await this.adb.executeCommand(
-        `shell pm list packages --user ${userId}`,
-        ADB_COMMAND_TIMEOUT_MS,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+        timeoutMs: ADB_COMMAND_TIMEOUT_MS,
+        noRetry: true,
+      });
 
       const packages = this.parsePackageList(result.stdout);
       const timestampMs = this.timer.now();

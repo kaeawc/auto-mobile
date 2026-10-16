@@ -21,7 +21,7 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { createTimestampedId } from "../../../utils/IdGenerator";
 import { SDK_CAPABILITIES_USER_ID_CAPABILITY } from "./ctrlProxyProtocol";
 import { normalizeStorageWriteOptions } from "../../storage/storageTypes";
@@ -47,7 +47,7 @@ export function isCtrlProxyStorageUnavailableError(error: unknown): boolean {
   const message = errorMessage(error);
   return (
     message === "Failed to connect to accessibility service" ||
-    message === "WebSocket not connected"
+    message === WEBSOCKET_NOT_CONNECTED_MESSAGE
   );
 }
 
@@ -160,7 +160,7 @@ export class CtrlProxyStorage {
       }
       const ws = this.context.getWebSocket();
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
+        throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
       }
       // Optional commands require an advertised capability, including on the first read.
       const commands = await this.context.getSupportedCommands?.();

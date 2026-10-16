@@ -1,5 +1,5 @@
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 /**
  * Type representing the detected accessibility service
@@ -31,21 +31,21 @@ export interface AccessibilityDetector {
   resolveState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AndroidAccessibilityState | null>;
 
   /** Gesture decision: retry unavailable evidence once, respecting probe backoff. */
   resolveTalkBackState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null>;
 
   /** Optional for compatibility with existing injected detectors. */
   resolveTalkBackStateWithConfirmation?(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<TalkBackStateConfirmation>;
 
   /**
@@ -55,7 +55,7 @@ export interface AccessibilityDetector {
   isCtrlProxyServiceEnabled(
     deviceId: string,
     adb?: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null>;
 
   /**
@@ -69,7 +69,7 @@ export interface AccessibilityDetector {
   isAccessibilityEnabled(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean>;
 
   /**
@@ -83,7 +83,7 @@ export interface AccessibilityDetector {
   detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AccessibilityService>;
 
   /**
@@ -105,7 +105,7 @@ export async function resolveTalkBackStateConfirmation(
   detector: AccessibilityDetector,
   deviceId: string,
   adb: AdbExecutor,
-  featureFlags?: FeatureFlagService,
+  featureFlags?: FeatureFlagReader,
 ): Promise<TalkBackStateConfirmation> {
   if (detector.resolveTalkBackStateWithConfirmation) {
     return detector.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags);

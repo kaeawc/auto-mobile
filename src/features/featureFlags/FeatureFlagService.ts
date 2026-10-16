@@ -22,6 +22,9 @@ interface FeatureFlagState {
   config?: FeatureFlagConfig | null;
 }
 
+/** Read-only view of the flag service; most consumers only ask `isEnabled`. */
+export type FeatureFlagReader = Pick<FeatureFlagService, "isEnabled">;
+
 export class FeatureFlagService {
   private static instance: FeatureFlagService | null = null;
   private readonly definitionByKey: Map<FeatureFlagKey, FeatureFlagDefinition>;

@@ -16,7 +16,7 @@ import {
   type H264Profile,
 } from "./h264Level";
 import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
-import { WhipClient, type WhipClientOptions } from "./WhipClient";
+import { WhipClient, type WhipClientOptions, type WhipSignalingClient } from "./WhipClient";
 import type { H264CaptureSourceMetrics } from "./H264CaptureSource";
 
 /**
@@ -77,7 +77,7 @@ export interface WebRtcPublisherDeps {
   /** Factory for peer connections (injectable for tests). */
   createPeerConnection?: (iceServers: RTCIceServer[]) => RTCPeerConnection;
   /** Factory for the WHIP client (injectable for tests). */
-  createWhipClient?: (options: WhipClientOptions) => WhipClient;
+  createWhipClient?: (options: WhipClientOptions) => WhipSignalingClient;
   timer?: Timer;
   /**
    * Called at the start of each (re)establish, before the offer is built. The
@@ -194,6 +194,19 @@ export interface WebRtcStreamDescriptor {
   consumerCount?: number;
 }
 
+/** The publisher operations the stream manager drives; {@link WebRtcPublisher} is the implementation. */
+export type WebRtcStreamPublisher = Pick<
+  WebRtcPublisher,
+  | "start"
+  | "stop"
+  | "getDescriptor"
+  | "primeH264ParameterSets"
+  | "notifySourceFailed"
+  | "writeH264Chunk"
+  | "endOfH264Packet"
+  | "writePcmAudioChunk"
+>;
+
 /**
  * Publishes a live H.264 stream to a coordination server over WHIP using werift.
  * Feed the raw Annex-B elementary stream via {@link writeH264Chunk}; the
@@ -211,7 +224,7 @@ export interface WebRtcStreamDescriptor {
 export class WebRtcPublisher {
   private readonly config: WebRtcPublisherConfig;
   private readonly createPeerConnection: (iceServers: RTCIceServer[]) => RTCPeerConnection;
-  private readonly whip: WhipClient;
+  private readonly whip: WhipSignalingClient;
   private readonly timer: Timer;
   private readonly onBeforeEstablish?: () => Promise<void> | void;
   private readonly onConnected?: () => Promise<void> | void;

@@ -1,3 +1,4 @@
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -15,7 +16,6 @@ import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
@@ -386,7 +386,7 @@ describe("DevicePool", () => {
       await withProcessPlatform("linux", async () => {
         let simctlBootedCalls = 0;
         const androidDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           isAvailable: async () => false,
           getBootedSimulators: async () => {
             simctlBootedCalls++;
@@ -396,7 +396,7 @@ describe("DevicePool", () => {
             simctlBootedCalls++;
             throw new Error("simctl should not be queried");
           },
-        } as unknown as SimCtlClient;
+        });
         const fakeEmulator = {
           getBootedDevices: async () => [androidDevice],
           getBootedDevicesChecked: async () => [androidDevice],
@@ -426,7 +426,7 @@ describe("DevicePool", () => {
     test("keeps Android devices when Linux iOS discovery fails after availability", async () => {
       await withProcessPlatform("linux", async () => {
         const androidDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
-        const fakeSimctl = {
+        const fakeSimctl = fakeDeviceManagerSimctl({
           isAvailable: async () => true,
           getBootedSimulators: async () => {
             throw new Error("simctl unavailable");
@@ -434,7 +434,7 @@ describe("DevicePool", () => {
           getBootedSimulatorsChecked: async () => {
             throw new Error("simctl unavailable");
           },
-        } as unknown as SimCtlClient;
+        });
         const fakeEmulator = {
           getBootedDevices: async () => [androidDevice],
           getBootedDevicesChecked: async () => [androidDevice],

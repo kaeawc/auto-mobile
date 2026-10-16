@@ -1,3 +1,4 @@
+import type { TypingSession } from "./TypingSession";
 import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
 import type { AndroidModeTyper, AndroidModeTypeRequest } from "./AndroidModeTyper";
 import type {
@@ -11,9 +12,9 @@ import type { InsertTextState } from "../../observe/android/ctrlProxyProtocol";
 import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
-import { segmentGraphemes } from "../SendKeys";
+import { segmentGraphemes } from "./AndroidTypingConstants";
 import {
-  buildAndroidInputTextCommand,
+  buildAndroidInputTextPlan,
   canJoinAndroidInputText,
 } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 
@@ -28,6 +29,7 @@ interface AndroidEventAllProgress {
   sinceLastInsertEvents: boolean;
 }
 export interface EventAllTyperHost {
+  session: TypingSession;
   hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean;
   graphemeCodePoints(graphemes: string[]): string;
   markPartialAfterPriorMutation(
@@ -35,9 +37,6 @@ export interface EventAllTyperHost {
     previouslyMutated: boolean,
   ): TextActionResult;
   textClient: Pick<SendKeysTextClient, "replace">;
-  isCaretUnsafe(): boolean;
-  isPasswordField(): boolean;
-  setPasswordField(value: boolean): void;
   insertText(
     text: string,
     options?: Parameters<SendKeysTextClient["insert"]>[1],
@@ -98,7 +97,7 @@ export class EventAllTyper implements AndroidModeTyper {
     display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const graphemes = segmentGraphemes(text);
-    if (this.host.isCaretUnsafe() || !(await this.hasAndroidKeyEvent(graphemes))) {
+    if (this.host.session.androidCaretUnsafe || !(await this.hasAndroidKeyEvent(graphemes))) {
       const result =
         operation === "replace"
           ? await this.host.textClient.replace(text)
@@ -117,8 +116,10 @@ export class EventAllTyper implements AndroidModeTyper {
       }
       // An explicit eventAll skips auto routing's password check; keep a password's text out of
       // batched adb command lines and error messages all the same.
-      this.host.isPasswordField() ||
-        this.host.setPasswordField(this.host.hasFocusedPasswordField(focusResult.hierarchy));
+      this.host.session.typingPasswordField ||
+        (this.host.session.typingPasswordField = this.host.hasFocusedPasswordField(
+          focusResult.hierarchy,
+        ));
     }
 
     const { result: clearResult, unchangedWarning } = await this.host.clearForReplace(
@@ -276,7 +277,7 @@ export class EventAllTyper implements AndroidModeTyper {
    * character, so its text never appears in a single adb command line, log or error.
    */
   private async eventAllKeyEventRunEnd(graphemes: string[], index: number): Promise<number> {
-    if (this.host.isPasswordField()) {
+    if (this.host.session.typingPasswordField) {
       return index;
     }
     while (
@@ -300,7 +301,7 @@ export class EventAllTyper implements AndroidModeTyper {
     }
     // The process may have typed part of the run before failing, so any failure is partial.
     return this.host.executeKeyEventPlanSafely(
-      { commands: [buildAndroidInputTextCommand(run.join(""))], textLength: run.join("").length },
+      buildAndroidInputTextPlan(run.join("")),
       true,
       signal,
     );
@@ -387,7 +388,7 @@ export class EventAllTyper implements AndroidModeTyper {
   }
 
   private describeGraphemes(graphemes: string[]): string {
-    return this.host.isPasswordField()
+    return this.host.session.typingPasswordField
       ? passwordTextPlaceholder(graphemes.join(""))
       : this.host.graphemeCodePoints(graphemes);
   }

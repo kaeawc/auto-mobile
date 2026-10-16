@@ -1,6 +1,6 @@
 import { Platform } from "./Platform";
 import { FormFactor } from "./DeviceMatchCriteria";
-import type { VirtualDeviceCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
+import type { VirtualDeviceCapabilityInventory } from "../features/device/virtualDeviceCapabilities";
 import type { DeviceDisplays } from "./DisplayPanel";
 
 /** Internal matching evidence; symbol keys are excluded from JSON tool payloads. */

@@ -67,7 +67,6 @@ class PlanRecoveryInteractionTest {
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
-    AutoMobilePlanExecutor.retryBackoffMs = 2000L
   }
 
   // ── #10090 x #10093 x recovery ──────────────────────────────────────────
@@ -227,11 +226,11 @@ class PlanRecoveryInteractionTest {
 
   @Test
   fun `a resumed run retried under a fresh session releases the held one first`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
     daemon.cannedFailure = failedPayload { it }
     daemon.setToolEnabledFailures[1] = "Request timed out"
 
-    val result = executeSimplePlan(maxRetries = 1)
+    val result =
+      executeSimplePlan(maxRetries = 1, timings = PlanExecutorTimings(retryBackoffMs = 0L))
 
     assertTrue(result.success)
     val heldSession = daemon.sessionUuidArgs[0]
@@ -424,11 +423,15 @@ class PlanRecoveryInteractionTest {
       AutoMobilePlanExecutionOptions(aiAssistance = true),
     )
 
-  private fun executeSimplePlan(maxRetries: Int = 0): AutoMobilePlanExecutionResult =
+  private fun executeSimplePlan(
+    maxRetries: Int = 0,
+    timings: PlanExecutorTimings = PlanExecutorTimings(),
+  ): AutoMobilePlanExecutionResult =
     AutoMobilePlanExecutor.execute(
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
+      timings,
     )
 
   private fun resultMessage(result: AutoMobilePlanExecutionResult, stepIndex: Int): String? {

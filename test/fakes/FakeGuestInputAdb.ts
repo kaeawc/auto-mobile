@@ -29,14 +29,19 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
     this.apiLevel = level ?? 34;
   }
 
-  setTypingDuration(timer: FakeTimer, durationMs: number): void {
+  /**
+   * `durationMs` is when the app finishes consuming the events; `hostExitMs` (default: the same)
+   * is when the host `cmd` client exits. On a real API 36 device the host exits once the events
+   * are handed to the system, well before the app has consumed them (#12599).
+   */
+  setTypingDuration(timer: FakeTimer, durationMs: number, hostExitMs = durationMs): void {
     this.typingDeadline = { timer, at: timer.now() + durationMs };
-    // API 31+: the host adb client stays attached until typing completes, unless it is killed.
+    // API 31+: the host adb client exits at hostExitMs, unless it was killed first.
     timer.setTimeout(() => {
       if (this.apiLevel >= 31 && !this.clientKilled) {
         this.host.resolve({ stdout: "", stderr: "" });
       }
-    }, durationMs);
+    }, hostExitMs);
   }
 
   isTyping(): boolean {

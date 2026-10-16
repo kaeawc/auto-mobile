@@ -418,9 +418,45 @@ export class SqliteSessionBrokerStore {
     errorCode = "session_preparation_failed",
     retryable = false,
   ): Promise<DestructionTicket | undefined> {
+    return this.failWhere(requestId, owner, { error, errorCode, retryable });
+  }
+
+  /**
+   * Terminalizes an acquisition that ended without committing, decided in the same transaction
+   * as the write: a recovery pass's earlier snapshot must never fail a request whose preparation
+   * has since activated it.
+   */
+  async failInterruptedAcquisition(
+    requestId: string,
+    owner: BindingProcessIdentity,
+    error: string,
+  ): Promise<DestructionTicket | undefined> {
+    return this.failWhere(requestId, owner, {
+      error,
+      errorCode: "session_preparation_failed",
+      retryable: false,
+      onlyFrom: "acquiring",
+    });
+  }
+
+  private async failWhere(
+    requestId: string,
+    owner: BindingProcessIdentity,
+    failure: {
+      error: string;
+      errorCode: string;
+      retryable: boolean;
+      onlyFrom?: BrokerRequestRecord["state"];
+    },
+  ): Promise<DestructionTicket | undefined> {
+    const { error, errorCode, retryable, onlyFrom } = failure;
     return this.db.transaction().execute(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
-      if (request.state === "released" || request.state === "failed") {
+      if (
+        request.state === "released" ||
+        request.state === "failed" ||
+        (onlyFrom !== undefined && request.state !== onlyFrom)
+      ) {
         return undefined;
       }
       let ticket: DestructionTicket | undefined;

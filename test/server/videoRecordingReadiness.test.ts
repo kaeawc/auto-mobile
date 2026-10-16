@@ -6,7 +6,7 @@ import {
 } from "../../src/server/videoRecordingTools";
 
 test("video recording requires CtrlProxy only when startup highlights need it", () => {
-  const registry = ToolRegistry as any;
+  const registry = ToolRegistry;
   const originalRegister = registry.registerDeviceAware;
   let readiness: ((args: VideoRecordingArgs) => string) | undefined;
 

@@ -5276,6 +5276,14 @@ export class Daemon {
     this.socketServer = server as UnixSocketServer | null;
   }
 
+  /** Test seam: register an HTTP transport double that shutdown must close. */
+  registerTransportForTesting(
+    sessionId: string,
+    transport: Pick<StreamableHTTPServerTransport, "close">,
+  ): void {
+    this.transports.set(sessionId, transport as StreamableHTTPServerTransport);
+  }
+
   /** Test seam: behave as if shutdown had already started, without running it. */
   markShutdownInProgressForTesting(): void {
     this.shutdownInProgress = true;

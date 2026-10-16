@@ -1293,7 +1293,7 @@ export class LaunchApp extends BaseVisualChange {
     const foregroundPollIntervalMs = 200;
     let observationTimestampMs: number | undefined;
 
-    const launchResult = await this.observedInteraction(
+    const launchResult = await this.observedInteraction<LaunchAppResult>(
       async () => {
         if (displayedMetricsCollector) {
           displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>

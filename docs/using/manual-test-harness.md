@@ -64,6 +64,19 @@ selector; OS uses the product requirement contract. See
 [session broker operator/consumer contract](../design-docs/session-broker-experiment.md)
 for valid defaults and requirements; the harness uses those product parsers.
 
+The batch also carries the product's catalog classification keys, validated by
+the same host-config parser and copied into `broker/host-config.json`:
+`androidProfileArchetypes` (AVD profile id to `phone` or `tablet`, for example
+`{ "medium_phone": "phone" }`) and `iosClassifications` (simulator device type
+identifier to model type). Omit them and the broker fails the first acquisition
+with `catalog_metadata_invalid` ("lacks current archetype metadata").
+
+Android `os` values are the Android release major or version (for example
+`{ "kind": "major", "major": 16 }` with `preferredVersion: "16"`), never the API
+level (36). Among installed images of the same release the resolver prefers the
+`google_apis` flavor over `google_apis_playstore`, which can stay adb
+`unauthorized` for many minutes after boot.
+
 `--max-devices` defaults to **2**, with a hard cap of **4**, and must cover
 `totalDeviceCap`. Zero pooling is the default: `idlePoolCap: 0` and
 `reuseCleanDevices: false`. Reserve `init --allow-reuse` for a deliberate

@@ -78,14 +78,13 @@ export async function createFakeBrokerDaemon(
     owner,
     sessionDisposition: options.liveDisposition
       ? (sessionUuid) => (sessions.peekSession(sessionUuid) ? "live" : "gone")
-      : undefined,
+      : () => disposition,
     limits: {
       totalDeviceCap: options.capacity ?? 1,
       sessionCap: options.capacity ?? 1,
       idlePoolCap: 0,
     },
     reuseCleanDevices: false,
-    sessionDisposition: () => disposition,
     catalog: async () =>
       iosCatalog(
         unavailable

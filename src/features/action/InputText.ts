@@ -3,7 +3,7 @@ import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textT
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
-import { BaseVisualChange } from "./BaseVisualChange";
+import { BaseVisualChange, type ObservedActionResult } from "./BaseVisualChange";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -130,7 +130,7 @@ const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory)
   };
 };
 
-function assertInputNotAborted(signal?: AbortSignal, result?: { retryable?: boolean }): void {
+function assertInputNotAborted(signal?: AbortSignal, result?: ObservedActionResult): void {
   if (result?.retryable !== false) {
     signal?.throwIfAborted();
   }

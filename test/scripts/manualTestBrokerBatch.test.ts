@@ -163,3 +163,30 @@ test("injected identities number attempts independently per client", () => {
   expect(requests.next("i-phone")).toBe("batch-i-phone-1");
   expect(new BrokerBatchRequestIds(ids).next("a-phone")).toBe("next-batch-a-phone-1");
 });
+
+test("catalog classification passes through to the rendered host config", () => {
+  const input = brokerBatchInput();
+  const host = renderHostConfig(parseBrokerBatch(input));
+  expect(host.androidProfileArchetypes).toEqual(input.androidProfileArchetypes);
+  expect(host.iosClassifications).toEqual(input.iosClassifications);
+});
+
+test("omitted classification keys fall back to product defaults", () => {
+  const input: Record<string, unknown> = { ...brokerBatchInput() };
+  delete input.androidProfileArchetypes;
+  delete input.iosClassifications;
+  const host = renderHostConfig(parseBrokerBatch(input));
+  expect(host.androidProfileArchetypes).toEqual({});
+  expect(host.iosClassifications).toEqual([]);
+});
+
+test.each([
+  { androidProfileArchetypes: { medium_phone: "watch" } },
+  { androidProfileArchetypes: [] },
+  { iosClassifications: [{ simulatorDeviceTypeIdentifier: "", modelType: { family: "duo" } }] },
+  { iosClassifications: "nope" },
+])("invalid classification input is refused by the product parser: %j", (fields) => {
+  expect(() => parseBrokerBatch({ ...brokerBatchInput(), ...fields })).toThrow(
+    "Invalid session broker host configuration",
+  );
+});

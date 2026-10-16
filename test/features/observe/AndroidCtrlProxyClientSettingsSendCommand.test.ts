@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type WebSocket from "ws";
+import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
@@ -10,14 +11,19 @@ import type { BaseResult } from "../../../src/features/observe/shared/types";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
+import { FakeWindow } from "../../fakes/FakeWindow";
 
 class RecordingSocket extends FakeWebSocket {
   readonly frames: string[] = [];
   sendError?: Error;
+  onFrame?: (data: string) => void;
 
   override send(data: string): void {
     if (this.sendError) {
@@ -25,6 +31,7 @@ class RecordingSocket extends FakeWebSocket {
     }
     super.send(data);
     this.frames.push(data);
+    this.onFrame?.(data);
   }
 }
 
@@ -32,9 +39,16 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const ids = new CountingIdGenerator("delegate");
+  const device = {
+    deviceId: "settings-send-command",
+    platform: "android" as const,
+    name: "Android",
+    isEmulator: true,
+  };
+  const adb = new FakeAdbExecutor();
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "settings-send-command", platform: "android", name: "Android", isEmulator: true },
-    new FakeAdbExecutor(),
+    device,
+    adb,
     () => socket as unknown as WebSocket,
     timer,
     new FakeInstalledAppsRepository(),
@@ -64,6 +78,8 @@ async function harness() {
     backoffCancels++;
   };
   return {
+    device,
+    adb,
     client,
     timer,
     socket,
@@ -72,6 +88,73 @@ async function harness() {
     cancels: () => backoffCancels,
   };
 }
+
+test("cancelled Rotate sends the auto-rotate restore put through the real settings client", async () => {
+  const h = await harness();
+  const controller = new AbortController();
+  let autoRotate = "1";
+  h.socket.onFrame = (data) => {
+    const frame: { type: string; requestId: string; key: string; value?: string } =
+      JSON.parse(data);
+    if (frame.type === "request_settings_put" && frame.key === "accelerometer_rotation") {
+      autoRotate = frame.value ?? "";
+      if (autoRotate === "0") {
+        controller.abort(new Error("Rotation cancelled"));
+      }
+    }
+    queueMicrotask(() => {
+      void h.client["handleWebSocketMessage"](
+        JSON.stringify({
+          type: frame.type.replace("request_", "") + "_result",
+          requestId: frame.requestId,
+          success: true,
+          found: frame.key === "accelerometer_rotation",
+          value: frame.key === "accelerometer_rotation" ? autoRotate : undefined,
+          totalTimeMs: 0,
+        }),
+      );
+    });
+  };
+  h.adb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920", ""));
+  h.adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
+  const rotate = new Rotate(h.device, h.adb, h.timer);
+  const observeScreen = new FakeObserveScreen();
+  observeScreen.setObserveResult(() => ({
+    timestamp: h.timer.now(),
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: { node: {} },
+  }));
+  const window = new FakeWindow();
+  window.configureCachedActiveWindow(null);
+  window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
+  Object.assign(rotate, { awaitIdle: new FakeAwaitIdle(), observeScreen, window });
+  AndroidCtrlProxyClient.registerForTesting(h.client, h.device.deviceId);
+  try {
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        rotate.execute("landscape", undefined, undefined, controller.signal),
+      ),
+    ).rejects.toThrow("Rotation cancelled");
+    expect(controller.signal.aborted).toBe(true);
+    expect(
+      h.socket.frames
+        .map((data): { type: string; key: string; value?: string } => JSON.parse(data))
+        .filter((frame) => frame.type === "request_settings_put")
+        .map(({ key, value }) => ({ key, value })),
+    ).toEqual([
+      { key: "accelerometer_rotation", value: "0" },
+      { key: "accelerometer_rotation", value: "1" },
+    ]);
+    expect(autoRotate).toBe("1");
+    expect(h.manager.getPendingCount()).toBe(0);
+    expect(h.adb.getExecutedCommands().some((command) => command.includes("settings put"))).toBe(
+      false,
+    );
+  } finally {
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+  }
+});
 
 const perf = new NoOpPerformanceTracker();
 const methods = [
@@ -173,29 +256,52 @@ for (const method of methods) {
     });
 
     for (const alreadyAborted of [true, false]) {
-      for (const ambient of [true, false]) {
-        test(`settles ${alreadyAborted ? "pre-aborted" : "in-flight"} ${ambient ? "ambient" : "explicit"} cancellation without pending work`, async () => {
+      for (const explicitSignal of [undefined, new AbortController().signal]) {
+        test(`ignores ${alreadyAborted ? "pre-aborted" : "in-flight"} ambient cancellation ${explicitSignal ? "with" : "without"} an explicit live signal`, async () => {
           const h = await harness();
           const controller = new AbortController();
           if (alreadyAborted) {
             controller.abort(new Error("cancelled"));
           }
-          // An explicit, live signal must not replace an ambient cancellation signal.
-          const pending = ambient
-            ? runWithAbortSignal(controller.signal, () =>
-                method.invoke(h.client, new AbortController().signal),
-              )
-            : method.invoke(h.client, controller.signal);
-          expect(h.manager.getPendingCount()).toBe(alreadyAborted ? 0 : 1);
+          const pending = runWithAbortSignal(controller.signal, () =>
+            method.invoke(h.client, explicitSignal),
+          );
+          expect(h.manager.getPendingCount()).toBe(1);
           if (!alreadyAborted) {
             h.timer.advanceTime(3);
             controller.abort(new Error("cancelled"));
           }
-          expect(await pending).toEqual(failure("Error: cancelled", alreadyAborted ? 0 : 3));
+          expect(h.socket.frames).toEqual([method.literal]);
+          expect(h.manager.getPendingCount()).toBe(1);
+          await h.client["handleWebSocketMessage"](
+            JSON.stringify({
+              type: `settings_${method.operation}_result`,
+              requestId: id,
+              success: true,
+              totalTimeMs: 7,
+            }),
+          );
+          expect(await pending).toMatchObject({ success: true, totalTimeMs: 7 });
           expect(h.manager.getPendingCount()).toBe(0);
-          expect(h.socket.frames).toHaveLength(alreadyAborted ? 0 : 1);
         });
       }
+
+      test(`settles ${alreadyAborted ? "pre-aborted" : "in-flight"} explicit cancellation without pending work`, async () => {
+        const h = await harness();
+        const controller = new AbortController();
+        if (alreadyAborted) {
+          controller.abort(new Error("cancelled"));
+        }
+        const pending = method.invoke(h.client, controller.signal);
+        expect(h.manager.getPendingCount()).toBe(alreadyAborted ? 0 : 1);
+        if (!alreadyAborted) {
+          h.timer.advanceTime(3);
+          controller.abort(new Error("cancelled"));
+        }
+        expect(await pending).toEqual(failure("Error: cancelled", alreadyAborted ? 0 : 3));
+        expect(h.manager.getPendingCount()).toBe(0);
+        expect(h.socket.frames).toHaveLength(alreadyAborted ? 0 : 1);
+      });
     }
 
     test("turns a send exception into a typed failure and removes the request", async () => {

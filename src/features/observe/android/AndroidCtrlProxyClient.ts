@@ -4615,7 +4615,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const startTime = this.timer.now();
     const failure = (error: string): T => options.failure(error, this.timer.now() - startTime);
     try {
-      const abortSignal = combineWithAmbientAbort(options.signal);
+      // Cleanup/restore callers such as Rotate must survive a cancelled ambient signal.
+      const abortSignal = options.signal;
       abortSignal?.throwIfAborted();
       return await sendCommand<T>(
         {

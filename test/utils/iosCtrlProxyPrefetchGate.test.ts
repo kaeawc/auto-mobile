@@ -39,7 +39,7 @@ describe("IosCtrlProxyBuilder prefetch prerequisite gate", function () {
         return null;
       },
     } as PrefetchBuilder & { needsRebuildCalls: number; buildCalls: number };
-    IosCtrlProxyBuilder.setPrefetchBuilderForTesting(recordingBuilder);
+    IosCtrlProxyBuilder.configure({ prefetchBuilder: recordingBuilder });
   });
 
   afterEach(function () {
@@ -50,7 +50,7 @@ describe("IosCtrlProxyBuilder prefetch prerequisite gate", function () {
   });
 
   test("does not reach the builder when iOS prerequisites are absent", async function () {
-    IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(false));
+    IosCtrlProxyBuilder.configure({ prerequisiteDetector: detectorReturning(false) });
 
     IosCtrlProxyBuilder.prefetchBuild();
     // Draining the prefetch must resolve null without throwing, so the daemon
@@ -64,7 +64,7 @@ describe("IosCtrlProxyBuilder prefetch prerequisite gate", function () {
   });
 
   test("reaches the builder when iOS prerequisites are present", async function () {
-    IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(true));
+    IosCtrlProxyBuilder.configure({ prerequisiteDetector: detectorReturning(true) });
 
     IosCtrlProxyBuilder.prefetchBuild();
     await IosCtrlProxyBuilder.waitForPrefetch();

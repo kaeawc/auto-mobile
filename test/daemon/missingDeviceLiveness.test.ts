@@ -66,7 +66,7 @@ function harness() {
   const port: MissingDeviceLivenessPoolPort = {
     getDevices: () => devices,
     getRefreshMissingDeviceMisses: () => misses,
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getDeviceManager: () => manager,
     getRefreshGeneration: () => generation,
     shouldRebootDisconnectedAndroidDevice: () => reboot,

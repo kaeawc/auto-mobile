@@ -382,9 +382,9 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
-  sessionId: string | null; // Session currently using it, null if idle
-  status: BindingStatus; // Binding state
-  health?: DeviceHealth; // Absent means healthy
+  readonly sessionId: string | null; // Session currently using it, null if idle
+  readonly status: BindingStatus; // Binding state
+  readonly health?: DeviceHealth; // Absent means healthy
   lastUsedAt: number; // Last usage timestamp
   assignmentCount: number; // How many times assigned
   errorCount: number; // Consecutive errors
@@ -1935,7 +1935,7 @@ export class DevicePool {
   private createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
     return {
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getIntentionalShutdowns: () => this.intentionalShutdowns,
       assertReadinessReservationOwner: (device, client) =>
         this.assertReadinessReservationOwner(device, client),
@@ -1960,7 +1960,7 @@ export class DevicePool {
       noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getDeviceManager: () => this.deviceManager,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
@@ -2010,7 +2010,8 @@ export class DevicePool {
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      addPooledDevice: (device) => this.devices.set(device.id, device),
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
       identityEvidenceForBootedDevice: (device) =>
         this.runtimeIdentity.identityEvidenceForBootedDevice(device),
@@ -2366,7 +2367,7 @@ export class DevicePool {
     return createAdbServerResetQuarantine(
       {
         noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
-        getAssignmentMutex: () => this.assignmentMutex,
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
         getStartedDeviceProcesses: () => this.startedDeviceProcesses,

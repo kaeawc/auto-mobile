@@ -1,6 +1,6 @@
 import { ActionableError } from "../../../models/ActionableError";
 import { isDeviceLostError } from "../../../models/DeviceLostError";
-import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import { StaleDisplayError } from "../../observe/StaleDisplayError";
 import type { SwipeResult } from "../../../models/SwipeResult";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { Timer } from "../../../utils/interfaces/Timer";

@@ -40,7 +40,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { withStaleDisplay } from "../../models/StaleDisplayError";
+import { withStaleDisplay } from "../observe/StaleDisplayError";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";

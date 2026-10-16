@@ -62,7 +62,7 @@ export class HandleIntentChooser extends BaseVisualChange {
       async (observeResult: ObserveResult) => {
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
-          return { success: false, error: "View hierarchy not found" };
+          return { success: false, detected: false, error: "View hierarchy not found" };
         }
 
         throwIfAborted(signal);

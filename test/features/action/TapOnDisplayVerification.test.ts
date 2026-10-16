@@ -1,6 +1,6 @@
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { runWithToolDispatchReporter } from "../../../src/utils/ToolDispatchContext";

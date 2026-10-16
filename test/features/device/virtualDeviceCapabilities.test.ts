@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildAndroidAvdCapabilityInventory,
   iosSimulatorCapabilityInventory,
-} from "../../../src/features/device-control/virtualDeviceCapabilities";
+} from "../../../src/features/device/virtualDeviceCapabilities";
 
 describe("virtual device capability inventories", () => {
   test("normalizes configured Android hardware features into stable, deduplicated identifiers", () => {

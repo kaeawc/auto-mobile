@@ -14,7 +14,7 @@ import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDevice
 import { logger } from "../../../utils/logger";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import type { Timer } from "../../../utils/SystemTimer";
-import type { ResolvedPrototypeAgent } from "../../prototype-agent/PrototypeAgentProvider";
+import type { ResolvedPrototypeAgent } from "./PrototypeAgentProvider";
 import type { PrototypeAgentConnections } from "./iosPrototypeTransport";
 import {
   connectPrototypeAgent,

@@ -652,6 +652,7 @@ export const BROKER_ACCEPTANCE_SCENARIOS = [
   "parallel-acquire",
   "release-destroy-verification",
   "multi-client-crash-isolation",
+  "cross-client-isolation-live",
   "capacity-refusal-and-replay",
   "daemon-restart-with-live-sessions",
 ] as const;

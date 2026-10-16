@@ -412,15 +412,30 @@ export class SessionBroker {
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     await Promise.allSettled([...this.preparationOwners.keys()]);
-    const requests = await this.options.store.listRecoverableRequests();
+    const requests = (await this.options.store.listRecoverableRequests()).filter(
+      (request) => sameProcess(request.owner, this.options.owner) && request.sessionId,
+    );
+    // Shutdown is not the consumer's release (#12451): an active session keeps its device for the
+    // restarted provider, which adopts it once the same session UUID is re-owned natively. Only a
+    // release the consumer already began is finished here.
     await Promise.allSettled(
       requests
-        .filter(
-          (request) =>
-            sameProcess(request.owner, this.options.owner) &&
-            (request.state === "active" || request.state === "releasing") &&
-            request.sessionId,
-        )
+        .filter((request) => request.state === "active")
+        .map((request) =>
+          this.options.store
+            .relinquishForRestart(request.requestId, this.options.owner)
+            .catch((error: unknown) => {
+              // Unmarked, the successor treats the session as a crashed owner's and retires it.
+              logger.warn(
+                `Session request ${request.requestId} could not be kept for restart: ${errorMessage(error)}`,
+                error,
+              );
+            }),
+        ),
+    );
+    await Promise.allSettled(
+      requests
+        .filter((request) => request.state === "releasing")
         .map((request) => this.release(request.sessionId!)),
     );
     await this.joinReleases();
@@ -472,8 +487,41 @@ export class SessionBroker {
       await this.redriveAbandonedSession(request);
       return;
     }
+    if ((await this.recoverRestartHandoff(request)) !== "terminal") {
+      return;
+    }
     // Only another process generation's receipt can need takeover; ours never does.
     await this.options.store.recoverRequest(request.requestId, this.options.owner);
+  }
+
+  /**
+   * A gracefully relinquished session is adopted while its session survives the restart (live, or
+   * a still-valid restart reservation). Only a session that is gone falls through to ordinary
+   * dead-owner recovery, which records `session_owner_exited` and destroys the device. A crashed
+   * owner never relinquished, so its receipts take that terminal path directly.
+   */
+  private async recoverRestartHandoff(
+    request: BrokerRequestRecord,
+  ): Promise<"adopted" | "pending" | "terminal"> {
+    if (!request.restartHandoff || request.state !== "active" || !request.sessionId) {
+      return "terminal";
+    }
+    const disposition = this.options.sessionDisposition
+      ? await this.options.sessionDisposition(request.sessionId)
+      : "gone";
+    if (disposition === "gone") {
+      return "terminal";
+    }
+    const adoption = await this.options.store.adoptRestartHandoff(
+      request.requestId,
+      this.options.owner,
+    );
+    if (adoption === "adopted") {
+      logger.info(
+        `Session request ${request.requestId} adopted session ${request.sessionId} after a provider restart`,
+      );
+    }
+    return adoption === "not-handoff" ? "terminal" : adoption;
   }
 
   /** Forgets terminal receipts past their replay window. Returns how many were pruned. */

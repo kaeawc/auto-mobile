@@ -409,6 +409,9 @@ private struct Instance {
                     return .object(binding)
                 })
             }
+        case .string("setData")?, .string("appendData")?, .string("removeData")?:
+            if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
+            if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
         default:
             break
         }
@@ -416,6 +419,23 @@ private struct Instance {
             fields["requireValid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
         }
         return .object(fields)
+    }
+
+    /// Only a whole `{index}` segment binds (#12519), so item content cannot inject pointer syntax.
+    private func bindDataPath(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { $0 == "{index}" ? String(index) : String($0) }
+            .joined(separator: "/")
+    }
+
+    /// A data action's value binding, bound like an `emit.context` entry: `item` and `index` become
+    /// literals of this row, and a `state` key interpolates.
+    private func bindDataValue(_ binding: [String: JSONValue]) -> JSONValue {
+        if let field = binding["item"]?.stringValue { return .object(["value": item[field] ?? .null]) }
+        if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
+        var bound = binding
+        bindString("state", in: &bound)
+        return .object(bound)
     }
 
     private func bindCondition(_ condition: JSONValue) -> JSONValue {

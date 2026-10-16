@@ -28,6 +28,9 @@ enum PrototypeLimits {
     static let maxDataArrayItems = 500
     static let maxDataPointerLength = 256
     static let maxDataBytes = 262_144
+    /// `MAX_PROTOTYPE_DATA_WRITE_BYTES`: the host validator's byte cost of `data` after a device
+    /// `setData`, `appendData` or `removeData` write.
+    static let maxDataWriteBytes = 262_144
 
     /// Agent-side depth/array backstop, in the host's sorted UTF-16 member order. Data is depth 1.
     /// The host's byte-cost rule is not duplicated: there is no Swift validator twin, and the
@@ -55,6 +58,42 @@ enum PrototypeLimits {
             if !number.isFinite { throw violation(path, "Invalid data value") }
         case .null: throw violation(path, "Invalid data value")
         case .string, .bool: break
+        }
+    }
+
+    /// The data after a device write must satisfy the data depth and array limits and the byte cost
+    /// `maxDataWriteBytes`, as `prototypeDataError` does on the host. Unlike `guardData`, bytes are
+    /// counted here because a write grows data after the show's own size check.
+    static func guardDataWrite(_ data: [String: JSONValue]) throws {
+        try guardData(data)
+        if dataByteCost(.object(data), depth: 0) > maxDataWriteBytes {
+            throw violation("data", "Data byte limit exceeded")
+        }
+    }
+
+    /// The host's `jsonCost`: numbers cost 32, strings and booleans their JSON text, containers
+    /// their separators plus members. Nesting past the emit payload depth costs everything.
+    static func dataByteCost(_ value: JSONValue, depth: Int) -> Int {
+        guard depth <= maxEmitPayloadDepth else { return .max }
+        switch value {
+        case .null: return 4
+        case .number: return 32
+        case let .bool(flag): return flag ? 4 : 5
+        case let .string(text): return PrototypeEmitContext.quotedByteCount(text) ?? .max
+        case let .array(items):
+            return saturatingSum(2 + max(0, items.count - 1), items.map { dataByteCost($0, depth: depth + 1) })
+        case let .object(fields):
+            let members = fields.map { key, member -> Int in
+                let keyCost = PrototypeEmitContext.quotedByteCount(key) ?? .max
+                return keyCost == .max ? .max : saturatingSum(keyCost + 1, [dataByteCost(member, depth: depth + 1)])
+            }
+            return saturatingSum(2 + max(0, fields.count - 1), members)
+        }
+    }
+
+    private static func saturatingSum(_ base: Int, _ parts: [Int]) -> Int {
+        parts.reduce(base) { total, part in
+            part == .max || total == .max ? .max : total + part
         }
     }
 

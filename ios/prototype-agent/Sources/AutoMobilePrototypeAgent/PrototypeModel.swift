@@ -30,9 +30,12 @@ final class PrototypeModel {
 
     private func publish(_ next: PrototypeSession, replacingSpec: Bool = false) {
         onSessionChange?(next)
-        // Only show and dismissal change structure; state transitions must not invalidate readers
-        // of an unchanged (non-Equatable) spec merely by copying the session back.
-        if replacingSpec || session.isShown != next.isShown { spec = next.spec }
+        // Only show, dismissal and a device data write (#12519, which rebuilds the drawn tree)
+        // change structure; state transitions must not invalidate readers of an unchanged
+        // (non-Equatable) spec merely by copying the session back.
+        if replacingSpec || session.isShown != next.isShown || session.dataRevision != next.dataRevision {
+            spec = next.spec
+        }
         session = next
         if let selected = expandedSelect {
             let root = next.spec?.root

@@ -32,6 +32,7 @@ enum PrototypeAgentProtocol {
         windowChromeCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
+        dataActionsCapability,
         textFieldOptionsCapability,
         gesturesCapability,
         carouselCapability,
@@ -93,6 +94,10 @@ enum PrototypeAgentProtocol {
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let checksCapability = "prototype_checks_v1"
     static let dataModelCapability = "prototype_data_model_v1"
+    /// `setData`, `appendData` and `removeData` change `/data` from a tap and report each write as a
+    /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
+    /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
+    static let dataActionsCapability = "prototype_data_actions_v1"
     /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
     /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"

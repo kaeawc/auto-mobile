@@ -215,6 +215,7 @@ private struct PrototypeSubstitutionGuard {
             try field(action, "key", path: path, scope: scope)
             try field(action, "value", path: path, scope: scope)
         case "emit": try field(action, "name", path: path, scope: scope)
+        case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
         case "toggle", "increment", "decrement":
             try field(action, "key", path: path, scope: scope)
         default: break

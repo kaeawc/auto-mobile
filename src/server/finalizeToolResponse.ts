@@ -141,6 +141,7 @@ export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "launchApp",
   "tapAny",
   "dragAndDrop",
+  "dragPath",
   "selectAllText",
   "pressButton",
   "systemTray",

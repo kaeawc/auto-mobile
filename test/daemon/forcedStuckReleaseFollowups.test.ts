@@ -95,13 +95,10 @@ async function harness() {
   const persistence = new ParkablePersistence();
   const keepAwake = new ParkedKeepAwake();
   const rotations: string[] = [];
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    () => keepAwake,
-    undefined,
-    {
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => keepAwake,
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       rotation: (device) => ({
@@ -110,7 +107,7 @@ async function harness() {
         },
       }),
     },
-  );
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [first, second]);
@@ -307,7 +304,9 @@ describe("the force threshold and its fence (#11058 item 2)", () => {
 describe("a forced stuck release keeps the release's own reason (#11361 item 2)", () => {
   /** The daemon that starts after this one, reading the same rows. */
   function restartedDaemon(h: Awaited<ReturnType<typeof harness>>): SessionManager {
-    const next = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    const next = new SessionManager(h.timer, h.persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     managers.push(next);
     return next;
   }

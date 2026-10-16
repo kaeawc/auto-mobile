@@ -1,4 +1,19 @@
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
+import {
+  parseInputGestureParams,
+  parseInputKeyParams,
+  parseInputPressButtonParams,
+  parseInputSwipeParams,
+  parseInputTapParams,
+  parseInputTypeTextParams,
+} from "./inputRouteParams";
+import {
+  DISPATCH_HELD_INPUT_METHODS,
+  GESTURE_FRAME_METHODS,
+  inputRouteFor,
+  type InputRoute,
+  type InputRouteMethod,
+} from "./inputRoutes";
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
@@ -208,8 +223,6 @@ import { PressButton } from "../features/action/PressButton";
 import {
   INPUT_KEY_IOS_UNSUPPORTED_ERROR,
   InputKey,
-  SUPPORTED_INPUT_KEYS,
-  isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
 import {
@@ -928,17 +941,6 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
-// Stroke frames need no extra hold: no signal reaches their atomic runner command;
-// stroke lift handles cancellation. IDE writes run outside the input queue and remain
-// tracked until their atomic command replies, with no abort listener after send.
-const DISPATCH_HELD_INPUT_METHODS: ReadonlySet<string> = new Set([
-  "input/typeText",
-  "input/key",
-  "input/pressButton",
-  "input/tap",
-  "input/swipe",
-]);
-
 /** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
 const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
   "ide/updateService",
@@ -1012,13 +1014,6 @@ interface InputDeviceGate {
   /** Who sent the frame; only the device's holder may drive a held device (#10698). */
   requester?: () => string | undefined;
 }
-
-/** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
-const GESTURE_FRAME_METHODS = {
-  start: "input/gestureStart",
-  move: "input/gestureMove",
-  end: "input/gestureEnd",
-} as const;
 
 /** What held the device when a `gestureStart` was admitted (#11541). */
 export interface StrokeAdmission {
@@ -1159,15 +1154,7 @@ interface AndroidAppendTextOptions {
   signal?: AbortSignal;
 }
 
-type InputTargetAction =
-  | "input/tap"
-  | "input/swipe"
-  | "input/typeText"
-  | "input/pressButton"
-  | "input/key"
-  | "input/gestureStart"
-  | "input/gestureMove"
-  | "input/gestureEnd";
+type InputTargetAction = InputRouteMethod;
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
@@ -5491,31 +5478,34 @@ export class UnixSocketServer {
         ? this.inputRequester(request, socketSessionId)
         : undefined,
     };
-    if (request.method === "input/tap") {
-      return await this.handleInputTap(request, socketSessionId, input);
-    }
-    if (request.method === "input/swipe") {
-      return await this.handleInputSwipe(request, socketSessionId, input);
-    }
-    if (request.method === "input/typeText") {
-      return await this.handleInputTypeText(request, socketSessionId, input);
-    }
-    if (request.method === "input/pressButton") {
-      return await this.handleInputPressButton(request, socketSessionId, input);
-    }
-    if (request.method === "input/key") {
-      return await this.handleInputKey(request, socketSessionId, input);
-    }
-    if (request.method === "input/gestureStart") {
-      return await this.handleInputGesture(request, "start", socketSessionId, input);
-    }
-    if (request.method === "input/gestureMove") {
-      return await this.handleInputGesture(request, "move", socketSessionId, input);
-    }
-    if (request.method === "input/gestureEnd") {
-      return await this.handleInputGesture(request, "end", socketSessionId, input);
+    const route = inputRouteFor(request.method);
+    if (route) {
+      return await this.dispatchInputRoute(route, request, socketSessionId, input);
     }
     return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
+  }
+
+  /** Runs the handler an `input/*` route table entry names. */
+  private async dispatchInputRoute(
+    route: InputRoute,
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    input: InputRequestContext,
+  ): Promise<any | undefined> {
+    switch (route.handler) {
+      case "tap":
+        return await this.handleInputTap(request, socketSessionId, input);
+      case "swipe":
+        return await this.handleInputSwipe(request, socketSessionId, input);
+      case "typeText":
+        return await this.handleInputTypeText(request, socketSessionId, input);
+      case "pressButton":
+        return await this.handleInputPressButton(request, socketSessionId, input);
+      case "key":
+        return await this.handleInputKey(request, socketSessionId, input);
+      case "gesture":
+        return await this.handleInputGesture(request, route.gestureKind!, socketSessionId, input);
+    }
   }
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
@@ -6998,54 +6988,6 @@ export class UnixSocketServer {
     }
   }
 
-  private parseInputGestureParams(
-    params: unknown,
-    method: string,
-  ): {
-    platform: "android";
-    deviceId?: string;
-    gestureId: string;
-    x: number;
-    y: number;
-    cancel: boolean;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error(`${method} requires params object`);
-    }
-    const args = params as Record<string, unknown>;
-    // Streaming gestures have no XCUITest equivalent, so the wire is Android-only. A client that
-    // reaches here for iOS bypassed the tool-selection check; reject rather than silently degrade.
-    if (args.platform !== "android") {
-      throw new Error(`${method} is only supported on platform 'android'`);
-    }
-    if (typeof args.gestureId !== "string" || args.gestureId.length === 0) {
-      throw new Error(`${method} requires a non-empty gestureId`);
-    }
-    const x = this.requireGestureCoordinate(args.x, method);
-    const y = this.requireGestureCoordinate(args.y, method);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error(`${method} deviceId must be a string when provided`);
-    }
-    if (args.cancel !== undefined && typeof args.cancel !== "boolean") {
-      throw new Error(`${method} cancel must be a boolean when provided`);
-    }
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      gestureId: args.gestureId,
-      x,
-      y,
-      cancel: args.cancel === true,
-    };
-  }
-
-  private requireGestureCoordinate(value: unknown, method: string): number {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`${method} requires numeric x and y params`);
-    }
-    return value;
-  }
-
   private async handleInputTypeText(
     request: DaemonRequest,
     socketSessionId?: string,
@@ -7797,299 +7739,28 @@ export class UnixSocketServer {
     }
   }
 
-  private parseInputTapParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    x: number;
-    y: number;
-    duration?: number;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/tap requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/tap requires platform 'android' or 'ios'");
-    }
-    // Reject NaN AND ±Infinity (finiteness), matching parseInputSwipeParams. Number.isNaN
-    // alone lets ±Infinity through, violating the "numeric x and y" contract (#3615).
-    if (
-      typeof args.x !== "number" ||
-      !Number.isFinite(args.x) ||
-      typeof args.y !== "number" ||
-      !Number.isFinite(args.y)
-    ) {
-      throw new Error("input/tap requires numeric x and y params");
-    }
-    this.validateInputTapOptions(args);
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      x: args.x,
-      y: args.y,
-      duration: args.duration,
-      frameContext: args.frameContext,
-    };
+  private parseInputTapParams(params: unknown) {
+    return parseInputTapParams(params);
   }
 
-  private validateInputTapOptions(args: Record<string, unknown>): asserts args is Record<
-    string,
-    unknown
-  > & {
-    duration?: number;
-    deviceId?: string;
-    frameContext?: string;
-  } {
-    if (
-      args.duration !== undefined &&
-      (typeof args.duration !== "number" || !Number.isInteger(args.duration))
-    ) {
-      throw new Error("input/tap duration must be an integer number of milliseconds when provided");
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/tap deviceId must be a string when provided");
-    }
-    if (
-      args.frameContext !== undefined &&
-      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
-    ) {
-      throw new Error("input/tap frameContext must be a non-empty string when provided");
-    }
+  private parseInputSwipeParams(params: unknown) {
+    return parseInputSwipeParams(params);
   }
 
-  private parseInputSwipeParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    startX: number;
-    startY: number;
-    endX: number;
-    endY: number;
-    durationMs: number;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/swipe requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/swipe requires platform 'android' or 'ios'");
-    }
-    this.validateInputSwipeGeometry(args);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/swipe deviceId must be a string when provided");
-    }
-    if (
-      args.frameContext !== undefined &&
-      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
-    ) {
-      throw new Error("input/swipe frameContext must be a non-empty string when provided");
-    }
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      startX: args.startX,
-      startY: args.startY,
-      endX: args.endX,
-      endY: args.endY,
-      durationMs: args.durationMs ?? 300,
-      frameContext: args.frameContext,
-    };
+  private parseInputTypeTextParams(params: unknown) {
+    return parseInputTypeTextParams(params);
   }
 
-  private validateInputSwipeCoordinates(args: Record<string, unknown>): void {
-    if (
-      typeof args.startX !== "number" ||
-      !Number.isFinite(args.startX) ||
-      typeof args.startY !== "number" ||
-      !Number.isFinite(args.startY) ||
-      typeof args.endX !== "number" ||
-      !Number.isFinite(args.endX) ||
-      typeof args.endY !== "number" ||
-      !Number.isFinite(args.endY)
-    ) {
-      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
-    }
+  private parseInputPressButtonParams(params: unknown) {
+    return parseInputPressButtonParams(params);
   }
 
-  private validateInputSwipeGeometry(args: Record<string, unknown>): asserts args is Record<
-    string,
-    unknown
-  > & {
-    startX: number;
-    startY: number;
-    endX: number;
-    endY: number;
-    durationMs?: number;
-  } {
-    this.validateInputSwipeCoordinates(args);
-    if (
-      args.durationMs !== undefined &&
-      (typeof args.durationMs !== "number" ||
-        !Number.isInteger(args.durationMs) ||
-        args.durationMs < 1 ||
-        args.durationMs > 60_000)
-    ) {
-      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
-    }
+  private parseInputKeyParams(params: unknown) {
+    return parseInputKeyParams(params);
   }
 
-  private parseInputTypeTextParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    text: string;
-    submit: boolean;
-    append: boolean;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/typeText requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    const supportedParams = new Set([
-      "platform",
-      "deviceId",
-      "text",
-      "submit",
-      "mode",
-      "frameContext",
-      "sessionUuid",
-    ]);
-    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
-    if (unsupportedParams.length > 0) {
-      throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
-    }
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/typeText requires platform 'android' or 'ios'");
-    }
-    this.validateInputTypeTextContent(args);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/typeText deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/typeText");
-    // "append" adds to the focused field instead of replacing it, which is what
-    // an interactive client mirroring one keystroke at a time needs: the default
-    // replace semantics would leave only the last character typed (#3351).
-    if (args.mode !== undefined && args.mode !== "append") {
-      throw new Error('input/typeText mode must be "append" when provided');
-    }
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      text: args.text,
-      submit: args.submit ?? false,
-      append: args.mode === "append",
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private validateInputTypeTextContent(
-    args: Record<string, unknown>,
-  ): asserts args is Record<string, unknown> & { text: string; submit?: boolean } {
-    if (typeof args.text !== "string" || args.text.length === 0) {
-      throw new Error("input/typeText requires non-empty string text param");
-    }
-    if (args.submit !== undefined && typeof args.submit !== "boolean") {
-      throw new Error("input/typeText submit must be a boolean when provided");
-    }
-  }
-
-  private parseInputPressButtonParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    button: string;
-    responseButton: string;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/pressButton requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/pressButton requires platform 'android' or 'ios'");
-    }
-    if (typeof args.button !== "string") {
-      throw new Error("input/pressButton requires button");
-    }
-    const supportedButtons = [
-      "home",
-      "back",
-      "menu",
-      "power",
-      "volume_up",
-      "volume_down",
-      "recent",
-      "app_switch",
-    ];
-    if (!supportedButtons.includes(args.button)) {
-      throw new Error(`input/pressButton button must be one of: ${supportedButtons.join(", ")}`);
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/pressButton deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/pressButton");
-    const button = args.button === "app_switch" ? "recent" : args.button;
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      button,
-      responseButton: args.button,
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private parseInputKeyParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    key: InputKeyName;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/key requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "key", "frameContext", "sessionUuid"]);
-    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
-    if (unsupportedParams.length > 0) {
-      throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
-    }
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/key requires platform 'android' or 'ios'");
-    }
-    if (typeof args.key !== "string") {
-      throw new Error("input/key requires key");
-    }
-    if (!isInputKeyName(args.key)) {
-      throw new Error(`input/key key must be one of: ${SUPPORTED_INPUT_KEYS.join(", ")}`);
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/key deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/key");
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      key: args.key,
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private validateFrameContextParam(frameContext: unknown, action: string): void {
-    if (
-      frameContext !== undefined &&
-      (typeof frameContext !== "string" || frameContext.length === 0)
-    ) {
-      throw new Error(`${action} frameContext must be a non-empty string when provided`);
-    }
+  private parseInputGestureParams(params: unknown, method: string) {
+    return parseInputGestureParams(params, method);
   }
 
   /**

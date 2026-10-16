@@ -89,11 +89,9 @@ class Run {
   }
 
   newManager(): SessionManager {
-    const manager = new SessionManager(
-      this.timer,
-      this.persistence,
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(this.timer, this.persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId(`fault-daemon-${++this.managerGeneration}`);
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(11));

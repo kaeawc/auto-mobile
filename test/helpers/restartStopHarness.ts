@@ -130,12 +130,10 @@ export function restartStopHarness() {
     manager.setBootedDevices(platform, [device]);
     manager.setDeviceImages(platform, [device]);
     const persistence = new FakeDeviceSessionPersistence();
-    const sessions = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-    );
+    const sessions = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    });
     sessions.attachDaemonSessionId("stop-hold-daemon");
     const journalFiles = new FakeTerminalReleaseJournalFileSystem();
     const journal = new FileTerminalReleaseJournal("stop-hold-journal", journalFiles);

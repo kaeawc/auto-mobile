@@ -1347,6 +1347,35 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  private pathGestureHistory: Array<{
+    points: Array<{ x: number; y: number; offsetMs: number }>;
+    frameContext?: string;
+  }> = [];
+  private pathGestureResult: CtrlProxySwipeResult | null = null;
+
+  setPathGestureResult(result: CtrlProxySwipeResult): void {
+    this.pathGestureResult = result;
+  }
+
+  getPathGestureHistory() {
+    return this.pathGestureHistory;
+  }
+
+  async requestPathGesture(
+    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
+    _timeoutMs?: number,
+    frameContext?: string,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    await this.applyDelay("pathGesture");
+    this.checkFailure("pathGesture");
+    this.pathGestureHistory.push({ points: points.map((point) => ({ ...point })), frameContext });
+    return {
+      ...(this.pathGestureResult ?? { success: true, totalTimeMs: points.at(-1)?.offsetMs ?? 0 }),
+      dispatched: true,
+      acknowledged: true,
+    };
+  }
+
   async requestAction(
     action: string,
     resourceId?: string,

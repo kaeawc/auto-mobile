@@ -1,5 +1,6 @@
 import {
   SessionManager,
+  type SessionManagerOptions,
   type Session,
   type SessionDeviceAssigner,
   TerminalSessionError,
@@ -20,9 +21,12 @@ export function slotAgreementRig(
   persistence = new FakeDeviceSessionPersistence(),
   fs = new FakeTerminalReleaseJournalFileSystem(),
   timer = new FakeTimer(),
-  keepAwake?: ConstructorParameters<typeof SessionManager>[3],
+  keepAwake?: SessionManagerOptions["keepScreenAwakeRestorer"],
 ) {
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier(), keepAwake);
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: keepAwake,
+  });
   manager.stopCleanupTimer();
   manager.attachDaemonSessionId("shadow-daemon");
   manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));

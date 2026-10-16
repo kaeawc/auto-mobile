@@ -15,7 +15,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
-`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
+`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
@@ -51,7 +51,7 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `multiTouch`, `observe`, `openLink`,
+`biometricAuth`, `dragAndDrop`, `dragPath`, `homeScreen`, `launchApp`, `multiTouch`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
@@ -261,6 +261,25 @@ element targeting, `swipeAt` coordinate-to-coordinate travel, and multi-finger
 - **Limits.** A stationary stroke (tap, long press) relies on the platform accepting a
   zero-length multi-finger path; how apps see that on each OS is unverified until it is
   checked on a device.
+
+`swipeOn.fromEdge` (`left`, `right`, `top`, `bottom`) starts a raw swipe at a screen or
+panel edge and moves inward, for navigation drawers, the iOS interactive swipe-back,
+and edge-pull panels. `direction` must be the inward finger direction (`left` edge ->
+`right`, `right` -> `left`, `top` -> `down`, `bottom` -> `up`; `gestureType:
+"scrollTowardsDirection"` is resolved first). The touch starts `edgeInset` px (iOS
+points) inside the edge, an integer from 0 to 50, default 4, so it stays inside iOS's
+roughly 20 pt swipe-back recognizer zone. `at` (0 to 1, default 0.5) is the position
+along the edge, and the swipe travels 70% of the screen or panel extent. `fromEdge`
+cannot be combined with `container`, `lookFor`, or `autoTarget: true` (an edge swipe
+never auto-targets a scrollable). Without `display` the edge is the content edge (system
+bars excluded) unless `includeSystemInsets: true` selects the physical screen edge; with
+`display`, the selected panel's own edges are used, and omitting `includeSystemInsets`
+keeps the full panel rect while `false` uses its content edge. Android gesture
+navigation reserves a strip at the physical left and right edges for back, and the
+bottom edge for home, so a very-near-edge swipe there may be taken by the system rather
+than the app; prefer the default content-edge mode or a larger `edgeInset` when that
+happens. Named system gestures ("system back") are not provided. `swipeAt` support for
+these options follows once that tool lands.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
@@ -1239,6 +1258,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`. |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                       |
@@ -1636,7 +1656,60 @@ during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
 a plain pinch. Android and iOS share this convention.
 
+To rotate **without zooming**, keep the finger distance constant: pass
+<code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
+together with <code>rotationDegrees</code>. <code>direction</code> is still a required
+argument but is ignored when the distance does not change, so the fingers never
+drift toward a zoom; equal distances are clamped and (on iOS) rounded together
+so they stay equal. Negative and larger-than-360 values are passed through as
+given. This is a two-finger rotate gesture, not the device <code>rotate</code>
+tool, which changes screen orientation.
+
+```json
+{ "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
+```
+
 </details>
+
+### dragPath
+
+`dragPath` is disabled by default; enable it with `setToolEnabled`. It drives one
+finger down, along a polyline, and up using the CtrlProxy streaming stroke
+protocol, so it covers signatures and drawing canvases, Android unlock patterns,
+dragging a slider thumb to a coordinate, and long press then drag (for example a
+text-selection handle). On Android it streams start/move/end frames; on iOS the
+runner follows the whole timed path in one request (private XCTest touch
+synthesis, main display only), which needs a runner built from this revision
+(feature `path_gesture_v1`) and fails before any input on an older one.
+
+- `points`: 2 to 100 `{ x, y, durationMs? }` vertices. `durationMs` (1 to 5000,
+  default 200) is the time spent moving from the previous point to this one and
+  is ignored on the first point. Long segments are sent as moves at most 50 ms
+  apart.
+- `holdMs` (0 to 3000, default 0): press and hold at the first point before
+  moving. `releaseHoldMs` (0 to 3000, default 0): keep the finger down at the last
+  point before lifting.
+- `coordinateSpace` (`absolute` default, `normalized`, `percent`), `snapshotId`,
+  `display` and `layer` behave as in `tapAt`. Every point must lie inside the
+  screen; the first bad point is named in the error and nothing is dispatched.
+- Total finger-down time (holds plus segments) is capped at 20 seconds and must
+  fit the remaining request budget with 2 seconds of headroom; otherwise the call
+  is rejected before any input.
+- An aborted, timed-out or failed call always lifts the finger with a cancelling
+  end. A failure after the finger went down reports that the stroke may have
+  partially run; observe before retrying.
+
+```json
+{
+  "points": [
+    { "x": 0.2, "y": 0.3 },
+    { "x": 0.2, "y": 0.7, "durationMs": 400 },
+    { "x": 0.8, "y": 0.7, "durationMs": 400 }
+  ],
+  "coordinateSpace": "normalized",
+  "holdMs": 100
+}
+```
 
 ### Semantic accessibility links
 

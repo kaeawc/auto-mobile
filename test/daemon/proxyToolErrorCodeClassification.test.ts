@@ -36,9 +36,17 @@ function makeProxy(structured: boolean): Classifier {
     },
     daemonManager: new FakeDaemonManager(),
     autoStartDaemon: false,
-  }) as unknown as Classifier;
-  proxy.structuredToolErrorCodes = structured;
-  return proxy;
+  });
+  // Bracket access reaches the private classification seams without a type-erasing cast.
+  proxy["structuredToolErrorCodes"] = structured;
+  return {
+    structuredToolErrorCodes: structured,
+    isPreDispatchDaemonSessionError: (error) => proxy["isPreDispatchDaemonSessionError"](error),
+    isUnknownToolError: (error) => proxy["isUnknownToolError"](error),
+    isRecoverableUnknownToolError: (error) => proxy["isRecoverableUnknownToolError"](error),
+    isRecoverableDaemonSessionError: (error) => proxy["isRecoverableDaemonSessionError"](error),
+    frontendRegistersTool: (name) => proxy["frontendRegistersTool"](name),
+  };
 }
 
 /** What the daemon puts on the wire for `error`, rebuilt into the error the proxy sees. */

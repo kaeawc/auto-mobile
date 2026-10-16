@@ -51,11 +51,9 @@ describe("device hold current-behavior characterization (#11803)", () => {
     cleanups = [];
     foreignOwner = undefined;
     booted = { deviceId: "emulator-8621", name: "Read device", platform: "android" };
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     markers = new InMemoryDeviceHealthMarkers(timer);
     brokerHeld = false;
     const bindings: BindingExclusion = {

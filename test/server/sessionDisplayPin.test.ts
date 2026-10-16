@@ -79,11 +79,9 @@ let restoreFactory: () => void;
 
 beforeEach(async () => {
   timer = new FakeTimer();
-  sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const utils = new FakeDeviceUtils();
   restoreFactory = snapshotPlatformDeviceManagerFactory();
   PlatformDeviceManagerFactory.setInstance(utils);

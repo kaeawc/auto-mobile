@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
-import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
+import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isToolUnavailableWireError } from "../../src/server/toolUnavailableError";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -12,7 +12,7 @@ import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 /**
  * Issue #10177: a tool the server registers but gates off (debug-only,
  * embedded-SDK-only, plan-only) must reach the daemon proxy with a structured
- * marker, while a name the registry has never heard of must not carry one. Both
+ * marker, while a name the registry has never heard of carries `daemon_unknown_tool` (#11821), never the unavailable marker. Both
  * keep the historical `Unknown tool: ...` text and -32603 wire code.
  */
 describe("gated tools carry a structured marker over the MCP wire (issue #10177)", () => {
@@ -73,11 +73,14 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
     expect(isToolUnavailableWireError(error)).toBe(true);
   });
 
-  test("a name the registry never registered carries no marker", async () => {
+  test("a name the registry never registered carries the unknown-tool code, not the unavailable marker", async () => {
     const error = await callError("__never_registered__");
     expect(error.code).toBe(-32603);
     expect(error.message).toBe("MCP error -32603: Unknown tool: __never_registered__");
-    expect(error.data).toBeUndefined();
+    expect(error.data).toEqual({
+      code: DAEMON_UNKNOWN_TOOL_CODE,
+      toolName: "__never_registered__",
+    });
     expect(isToolUnavailableWireError(error)).toBe(false);
   });
 

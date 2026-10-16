@@ -91,6 +91,7 @@ const CLASSIFICATION: Classification = {
     "criticalSection",
     "deviceSnapshot",
     "dragAndDrop",
+    "dragPath",
     "executePlan",
     "explore",
     "highlight",

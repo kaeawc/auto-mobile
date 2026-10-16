@@ -12,7 +12,9 @@ import { drainUntil } from "../helpers/fakeTimerStepping";
 async function createContext(cancelDeviceExecutions?: () => Promise<number>) {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const devices = ["emulator-5554", "emulator-5556"].map((deviceId) => ({
     deviceId,
     name: deviceId,

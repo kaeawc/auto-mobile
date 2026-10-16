@@ -34,11 +34,9 @@ interface World {
 /** The base past its idle deadline and not yet scanned; its label well inside its own. */
 async function expiredUnscannedBase(): Promise<World> {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const released: string[] = [];
   manager.onSessionRelease((sessionId) => {

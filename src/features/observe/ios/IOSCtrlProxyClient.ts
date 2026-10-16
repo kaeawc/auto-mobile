@@ -91,7 +91,7 @@ import {
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
 import type { BaseResult } from "../shared/types";
-import type { SwipeRequestOptions } from "../shared/types";
+import type { GestureTimingResult, SwipeRequestOptions } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
@@ -489,6 +489,14 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
   ): Promise<CtrlProxyDragResult>;
 
+  requestPathGesture(
+    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
+    timeoutMs?: number,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>>;
+
   requestPinch(
     centerX: number,
     centerY: number,
@@ -873,6 +881,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     "drag",
     "pinch",
     "multi_finger_swipe_result",
+    "path_gesture_result",
     "action",
     "press_key",
     "press_button",
@@ -3904,6 +3913,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       undefined,
       onDispatch,
     );
+  }
+
+  async requestPathGesture(
+    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
+    timeoutMs?: number,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return this.gestures.requestPathGesture(points, timeoutMs, frameContext, signal, onDispatch);
   }
 
   async requestPinch(

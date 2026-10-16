@@ -26,11 +26,9 @@ async function harness(failures: number, baseline = false, mixedFailure = false)
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   let calls = 0;
   let remainingFailures = failures;
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         calls++;
         if (remainingFailures-- > 0) {
@@ -56,7 +54,7 @@ async function harness(failures: number, baseline = false, mixedFailure = false)
         return { status: "restored" as const };
       },
     }),
-  );
+  });
   manager.stopCleanupTimer();
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);

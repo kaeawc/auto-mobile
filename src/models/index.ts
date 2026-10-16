@@ -108,3 +108,5 @@ export * from "./DeviceSnapshot";
 export * from "./Appearance";
 export * from "./SetUIStateOptions";
 export * from "./SetUIStateResult";
+export * from "./DragPathOptions";
+export * from "./DragPathResult";

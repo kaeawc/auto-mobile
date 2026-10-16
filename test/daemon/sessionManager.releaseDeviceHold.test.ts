@@ -51,19 +51,17 @@ async function harness() {
       return { status: "restored" as const };
     },
   });
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    record("keep-awake"),
-    record("biometric"),
-    {
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: record("keep-awake"),
+    biometricEnrollmentRestorer: record("biometric"),
+    restorers: {
       networkCondition: record("network"),
       clock: record("clock"),
       rotation: record("rotation"),
       screenReader: record("screen-reader"),
     },
-  );
+  });
   manager.stopCleanupTimer();
   managers.push(manager);
   const session = await manager.createSession(SESSION, DEVICE, "android");

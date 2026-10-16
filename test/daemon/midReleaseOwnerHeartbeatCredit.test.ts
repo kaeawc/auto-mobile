@@ -50,19 +50,15 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     callInFlight = true;
     reaped = [];
     persistence = new ParkablePersistence();
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => {} }),
         clock: () => ({
           restore: () => (restoreMs === 0 ? Promise.resolve() : timer.sleep(restoreMs)),
         }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     session = await manager.createSession(SESSION, DEVICE, "android");
     manager.setClock(session, {

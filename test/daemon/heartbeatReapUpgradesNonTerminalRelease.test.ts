@@ -88,18 +88,14 @@ describe("a non-terminal release whose teardown outlasts lease + grace, owner st
 
   beforeEach(async () => {
     timer = new FakeTimer();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         // `adb unroot` restarts adbd; the restore finishes only once the device reconnects.
         clock: () => ({ restore: () => timer.sleep(CLOCK_RESTORE_MS) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     reaped = [];
     announced = [];
@@ -191,17 +187,13 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     timer.setCurrentTime(0);
     callInFlight = false;
     persistence = new ParkablePersistence();
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         clock: () => ({ restore: () => timer.sleep(SCAN_MS / 2) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     reaped = [];
     forcedAt = [];

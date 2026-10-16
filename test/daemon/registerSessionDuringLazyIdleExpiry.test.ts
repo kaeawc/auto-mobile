@@ -67,11 +67,9 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     restoreStarted = false;
     const restored = Promise.withResolvers<void>();
     finishRestore = restored.resolve;
-    manager = new SessionManager(
-      timer,
-      new DeviceSessionRepository(db, timer),
-      () => new FakeDbWriteBarrier(),
-      () => ({
+    manager = new SessionManager(timer, new DeviceSessionRepository(db, timer), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({
         restore: async () => {
           restoreStarted = true;
           await restored.promise;
@@ -79,7 +77,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
           return { status: "restored" as const };
         },
       }),
-    );
+    });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-a");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-a"]));

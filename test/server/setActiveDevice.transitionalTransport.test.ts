@@ -308,11 +308,9 @@ async function arrangePool(returns: boolean) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const utils = new FakeDeviceUtils();
-  sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   sessions.stopCleanupTimer();
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "transitional-selection", {

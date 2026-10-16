@@ -38,11 +38,9 @@ describe("device gesture recording start holder admission (#11665)", () => {
 
   beforeEach(async () => {
     timer = new FakeTimer();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [device]);

@@ -61,7 +61,7 @@ import {
   type HarnessDeps,
   type HarnessFs,
 } from "./harness";
-import { buildClaudeArgs, buildMcpConfig, systemPromptFor } from "./invocation";
+import { buildClaudeArgs, buildMcpConfig, providerIdentity, systemPromptFor } from "./invocation";
 import { renderReport, renderSummary } from "./render";
 import type { BenchmarkResult } from "./result";
 
@@ -521,6 +521,8 @@ function serverDigest(claudeCommand: string): string {
         new TextEncoder().encode(`${process.platform}-${process.arch}-${familySync() ?? "none"}`),
     },
     { path: "claude-command", read: () => claudeCommandIdentity(claudeCommand) },
+    // Provider and routing settings reach Claude unscrubbed; record which backend served it.
+    { path: "provider", read: () => new TextEncoder().encode(providerIdentity(process.env)) },
   ]);
 }
 

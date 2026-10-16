@@ -288,3 +288,43 @@ export function buildClaudeArgs(
   }
   return args;
 }
+
+const PROVIDER_FLAGS = [
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+];
+const PROVIDER_URLS = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_VERTEX_BASE_URL",
+];
+const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
+
+/**
+ * A non-secret identity of the backend Claude will use: which provider is selected, the
+ * host (never credentials or paths) of any base URL, the region, and model-routing
+ * variables. Provider settings pass through to Claude on purpose, so they are recorded
+ * rather than scrubbed: the same model through another backend can differ in latency.
+ */
+export function providerIdentity(env: Record<string, string | undefined>): string {
+  const host = (value: string) => {
+    try {
+      return new URL(value).host;
+    } catch {
+      // Not a URL: record that it was set, without echoing the value.
+      return "(unparseable)";
+    }
+  };
+  const set = (key: string) => env[key] !== undefined && env[key] !== "";
+  const routing = Object.keys(env)
+    .filter((key) => /^ANTHROPIC_(?:DEFAULT_\w+_)?MODEL$|^ANTHROPIC_SMALL_FAST_MODEL$/.test(key))
+    .filter(set);
+  return [
+    ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
+    ...PROVIDER_URLS.filter(set).map((key) => `${key}=${host(env[key] as string)}`),
+    ...[...PROVIDER_REGIONS, ...routing].filter(set).map((key) => `${key}=${env[key]}`),
+  ]
+    .sort()
+    .join("\n");
+}

@@ -307,7 +307,7 @@ async function verifyInstalledApk(
 // persist.sys.locale is unset until someone changes the locale (common on emulators), so
 // fall back to ro.product.locale on the device while still printing exactly one line.
 const DEVICE_PROPERTIES =
-  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
+  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; settings get secure enabled_accessibility_services; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
 
 /** The shared WindowManager reader, over this harness's command runner. */
 function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
@@ -333,6 +333,20 @@ function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
       };
     },
   };
+}
+
+/** Enabled accessibility service packages, sorted ("none" when unset or empty). */
+function accessibilityServices(raw: string | undefined): string | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = raw.trim();
+  if (value === "" || value === "null") {
+    return "none";
+  }
+  return [...new Set(value.split(":").map((component) => component.split("/")[0]))]
+    .sort()
+    .join("+");
 }
 
 /** An animation scale setting: "null" is the 1.0 default, and 0 (animations off) is valid. */
@@ -397,6 +411,8 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["locale", lines[2]],
     // System-image updates within one API level change framework and accessibility behavior.
     ["build", lines[3]],
+    // TalkBack and other services change how interaction tools tap and scroll.
+    ["a11y", accessibilityServices(lines[4])],
     ["size", lastValue("size")],
     ["density", lastValue("density")],
     ["font", scales.font],
@@ -406,7 +422,7 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["theme", parseNightMode(lines.filter(Boolean).at(-1) ?? "")],
     ["rotation", await liveRotation(runner, serial)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-  return result.exitCode === 0 && parts.length === 10
+  return result.exitCode === 0 && parts.length === 11
     ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
     : "unknown";
 }

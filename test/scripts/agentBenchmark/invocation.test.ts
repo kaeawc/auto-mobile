@@ -5,6 +5,7 @@ import {
   buildMcpConfig,
   fillPlaceholders,
   isolatedServerEnv,
+  providerIdentity,
   systemPromptFor,
 } from "../../../scripts/agent-benchmark/invocation";
 
@@ -166,5 +167,31 @@ describe("agent benchmark isolated server environment", () => {
       AUTOMOBILE_DB_DIR: "/run/db",
       AUTOMOBILE_LOG_DIR: "/run/logs",
     });
+  });
+});
+
+describe("agent benchmark provider identity", () => {
+  test("records provider, base URL host, region, and routing without secrets", () => {
+    const identity = providerIdentity({
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      ANTHROPIC_BASE_URL: "https://user:secret@proxy.example.com/v1?key=abc",
+      AWS_REGION: "us-west-2",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "routed-sonnet",
+      ANTHROPIC_API_KEY: "sk-secret",
+      AWS_SECRET_ACCESS_KEY: "secret",
+    });
+    expect(identity).toBe(
+      [
+        "ANTHROPIC_BASE_URL=proxy.example.com",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
+        "AWS_REGION=us-west-2",
+        "CLAUDE_CODE_USE_BEDROCK=1",
+      ].join("\n"),
+    );
+    expect(identity).not.toContain("secret");
+    expect(providerIdentity({})).toBe("");
+    expect(providerIdentity({ ANTHROPIC_BASE_URL: "not a url" })).toBe(
+      "ANTHROPIC_BASE_URL=(unparseable)",
+    );
   });
 });

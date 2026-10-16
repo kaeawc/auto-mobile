@@ -464,7 +464,7 @@ test("foreignControl sends a gated tapOn with the other client's grant and repor
       ok: false,
       result: {
         isError: true,
-        structuredContent: { success: false, code: "device_outside_broker_grant" },
+        structuredContent: { success: false, code: "device_outside_bound_session" },
         content: [],
       },
     }),
@@ -481,7 +481,7 @@ test("foreignControl sends a gated tapOn with the other client's grant and repor
   );
   const [ca, cb] = harness.context.clients;
   const foreign = harness.context.deviceOps!.foreignControl!;
-  expect(await foreign(ca, cb)).toEqual({ code: "device_outside_broker_grant" });
+  expect(await foreign(ca, cb)).toEqual({ code: "device_outside_bound_session" });
   const argv = f.calls.at(-1)!;
   expect(argv.slice(0, 2)).toEqual(["call", "tapOn"]);
   expect(JSON.parse(argv[2]).sessionUuid).toBe("session-b");

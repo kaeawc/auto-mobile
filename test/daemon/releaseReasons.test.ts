@@ -22,6 +22,15 @@ import {
 import { DEVICE_LOSS_REASON_PREFIX } from "../../src/utils/deviceLossCancellationReason";
 
 describe("session release-reason table (#11258)", () => {
+  test.each(["binding-ownership-lost", "managed-slot-ownership-lost"])(
+    "preserves the terminal ownership fence for %s",
+    (reason) => {
+      expect(isTerminalReleaseReason(reason)).toBe(true);
+      expect(releaseReasonStrength(reason)).toBe(2);
+      expect(releaseReasonMayReplace("daemon-shutdown", reason)).toBe(false);
+    },
+  );
+
   test("proxy-local idle reasons qualify wires without entering daemon decisions", () => {
     expect(isIdleReleaseReason("replay-lease-expired")).toBe(true);
     expect(idleReleaseField("replay-lease-expired")).toEqual({ idle: true });
@@ -108,7 +117,7 @@ describe("session release-reason table (#11258)", () => {
       "heartbeat-timeout",
       "missing-first-heartbeat",
       "owner-disconnected",
-      "managed-slot-ownership-lost",
+      "binding-ownership-lost",
       "daemon-shutdown",
       "device-restart:x",
       "unknown",
@@ -147,6 +156,7 @@ describe("session release-reason table (#11258)", () => {
         "lazy-expiry",
         "missing-first-heartbeat",
         "owner-disconnected",
+        "binding-ownership-lost",
         "managed-slot-ownership-lost",
         "rehydration-owner-timeout",
         "restart-recovery-timeout",

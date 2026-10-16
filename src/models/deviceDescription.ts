@@ -11,7 +11,7 @@ export type DeviceLifecycleState =
   | "unavailable";
 export type DeviceReadinessState = "unknown" | "not_ready" | "ready";
 export type DevicePoolStatus = "idle" | "assigned" | "error";
-export type DeviceHeldBy = "managed_slot" | "other_daemon";
+export type DeviceHeldBy = "session_broker" | "other_daemon";
 export type DeviceSessionOwnership = "owned" | "awaiting-owner";
 
 export interface CapabilityInventoryEntry {
@@ -74,8 +74,8 @@ export interface DeviceDescription {
     readiness: { state: DeviceReadinessState };
     poolStatus: DevicePoolStatus | null;
     /**
-     * Present only when the device is held outside generic allocation: `managed_slot` (allocation
-     * refuses with `device_assigned_to_managed_slot`) or `other_daemon` (`device_owned_by_other_daemon`).
+     * Present only when the device is held outside generic allocation: `binding` (allocation
+     * refuses with `device_assigned_to_binding`) or `other_daemon` (`device_owned_by_other_daemon`).
      * `poolStatus` reports `assigned` for such a device even when this daemon holds no session on it.
      */
     heldBy?: DeviceHeldBy;

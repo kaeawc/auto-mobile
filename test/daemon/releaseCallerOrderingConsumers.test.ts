@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   managedExecutionSessionsFrom,
   type ManagedExecutionSessionManager,
-} from "../../src/daemon/managedSlots/managedExecutionRelease";
+} from "../../src/daemon/sessionBroker/provisioning/executionRelease";
 import {
   registerDerivedLabelSessionReleaseCascade,
   type DerivedLabelSessionSource,

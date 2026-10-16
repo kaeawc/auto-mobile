@@ -1,6 +1,6 @@
 import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
-import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import { brokerConnectionPlatformRefusal } from "../daemon/sessionBroker/connectionScope";
 import {
   getLiveDeadlineMs,
   getLiveTextRequestState,
@@ -41,7 +41,7 @@ import {
 } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
-import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "../daemon/sessionBroker/provisioning/executionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -385,7 +385,7 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
-import { assertManagedConnectionPlainToolCall } from "./managedConnectionToolGate";
+import { assertBrokerConnectionPlainToolCall } from "./brokerConnectionToolGate";
 import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
@@ -1003,7 +1003,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // Refused here, before session routing: a bound session that does not match the target would
       // otherwise surface as a generic routing error instead of the typed refusal (#11268).
       const rawSessionArg = (toolParams as Record<string, unknown>)?.sessionUuid;
-      assertManagedConnectionPlainToolCall({
+      assertBrokerConnectionPlainToolCall({
         daemonMode,
         requiresDevice: false,
         toolName: name,
@@ -1053,9 +1053,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       } else {
         const managedBinding =
           daemonMode && daemonState.isInitialized()
-            ? daemonState.getManagedConnectionScopes().get(requestMcpSessionId)
+            ? daemonState.getBrokerConnectionScopes().get(requestMcpSessionId)
             : undefined;
-        const refusal = managedConnectionPlatformRefusal({
+        const refusal = brokerConnectionPlatformRefusal({
           binding:
             !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
               ? managedBinding
@@ -1065,7 +1065,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             rawArgs.platform === "android" || rawArgs.platform === "ios"
               ? rawArgs.platform
               : undefined,
-          slotPlatformOf: (sessionUuid) => {
+          grantedPlatformOf: (sessionUuid) => {
             const session = daemonState.getSessionManager().peekSession(sessionUuid);
             return session?.assignedDevice
               ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
@@ -1097,7 +1097,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             (tool.isDeviceReadOnlyCall?.(toolParams) === true ||
               (daemonMode &&
                 daemonState.isInitialized() &&
-                daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
+                daemonState.getBrokerConnectionScopes().get(requestMcpSessionId) !== undefined)),
           tool.isDeviceReadOnlyCall?.(toolParams) === true,
         );
       }
@@ -1290,8 +1290,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       );
     }
 
-    // A managed connection controls only its own slots (#11178).
-    assertManagedConnectionPlainToolCall({
+    // A managed connection controls only its own bindings (#11178).
+    assertBrokerConnectionPlainToolCall({
       daemonMode,
       requiresDevice: tool.requiresDevice === true,
       toolName: name,

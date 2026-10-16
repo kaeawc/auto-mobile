@@ -6,7 +6,7 @@
 2026-10-15T14:34:18.4479788Z error: ENOENT reading "/home/runner/work/auto-mobile/auto-mobile/src/server/ResourceRegistry.ts"
 2026-10-15T14:34:18.4479898Z -------------------------------
 2026-10-15T14:34:18.4479902Z 
-2026-10-15T14:34:18.4480289Z ##[group]test/server/deviceTools.provisionDevice.managedSlotPreBoot.test.ts:
+2026-10-15T14:34:18.4480289Z ##[group]test/server/deviceTools.provisionDevice.bindingPreBoot.test.ts:
 2026-10-15T14:34:18.4480295Z 
 2026-10-15T14:34:18.4480377Z # Unhandled error between tests
 2026-10-15T14:34:18.4480439Z -------------------------------

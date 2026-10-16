@@ -5,9 +5,9 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
-  ManagedSlotOwnershipUnconfirmedError,
-  ManagedSlotOwnershipLostError,
-} from "../../src/daemon/managedSlots/managedSlotRefusal";
+  BindingOwnershipUnconfirmedError,
+  BindingOwnershipLostError,
+} from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -1881,7 +1881,7 @@ describe("ADB server reset session recovery", () => {
   });
 });
 
-describe("managed slot ownership automation admission", () => {
+describe("binding ownership automation admission", () => {
   test("the lazy ownership gate throws typed unconfirmed and lost refusals with pinned payloads", () => {
     const timer = new FakeTimer();
     const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1894,28 +1894,28 @@ describe("managed slot ownership automation admission", () => {
     );
     try {
       expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();
-      const unconfirmed = new ManagedSlotOwnershipUnconfirmedError("resumed");
+      const unconfirmed = new BindingOwnershipUnconfirmedError("resumed");
       expect(unconfirmed.toPayload()).toEqual({
-        code: "managed_slot_ownership_unconfirmed",
+        code: "binding_ownership_unconfirmed",
         sessionUuid: "resumed",
         retryable: true,
         retryAfterMs: 1_000,
       });
-      const lost = new ManagedSlotOwnershipLostError("resumed");
+      const lost = new BindingOwnershipLostError("resumed");
       expect(lost).toMatchObject({
         code: "session_ownership_lost",
         retryable: false,
         nextAction: "acquire_new_session",
-        details: { sessionUuid: "resumed", reason: "managed-slot-ownership-lost" },
+        details: { sessionUuid: "resumed", reason: "binding-ownership-lost" },
       });
       expect(lost.details).not.toHaveProperty("idle");
       refusal = unconfirmed;
       expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(
-        ManagedSlotOwnershipUnconfirmedError,
+        BindingOwnershipUnconfirmedError,
       );
       refusal = lost;
       expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(
-        ManagedSlotOwnershipLostError,
+        BindingOwnershipLostError,
       );
       refusal = undefined;
       expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();

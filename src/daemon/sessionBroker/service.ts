@@ -14,16 +14,16 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
-import type { ManagedSlotAcquisition } from "../managedSlots/managedSlotAcquisition";
-import { defaultManagedSlotToolInvoker } from "../managedSlots/daemonManagedSlotAcquisition";
-import { readToolPayload } from "../managedSlots/managedSlotReconcilerPorts";
-import type { ManagedExecutionRelease } from "../managedSlots/managedExecutionRelease";
-import type { ManagedSlotJournal } from "../managedSlots/slotJournal";
+import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
+import { defaultBindingToolInvoker } from "./provisioning/daemonDeviceAcquisition";
+import { readToolPayload } from "./provisioning/reconcilerPorts";
+import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
+import type { BindingJournal } from "./registry/bindingJournal";
 import {
-  defaultSlotRegistryPath,
-  type SqliteSlotRegistry,
-} from "../managedSlots/sqliteSlotRegistry";
-import { computeSlotScopeKey, type SlotProcessIdentity } from "../managedSlots/slotRegistry";
+  defaultBindingRegistryPath,
+  type SqliteBindingRegistry,
+} from "./registry/sqliteBindingRegistry";
+import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
@@ -38,8 +38,8 @@ export interface SessionBrokerHostLock {
 
 /** Existing PID/generation lock primitive, held for the lifetime of the broker service. */
 export function sessionBrokerHostLock(
-  owner: SlotProcessIdentity,
-  path = `${defaultSlotRegistryPath()}.session-broker.lock`,
+  owner: BindingProcessIdentity,
+  path = `${defaultBindingRegistryPath()}.session-broker.lock`,
 ): SessionBrokerHostLock {
   return {
     acquire: () => {
@@ -61,11 +61,11 @@ export function sessionBrokerHostLock(
 
 export interface OpenSessionBrokerServiceOptions {
   config: SessionBrokerHostConfig;
-  registry: SqliteSlotRegistry;
-  acquisition: Pick<ManagedSlotAcquisition, "acquire">;
-  release: Pick<ManagedExecutionRelease, "releaseExecution">;
-  journal: Pick<ManagedSlotJournal, "owner" | "redriveSlot">;
-  owner: SlotProcessIdentity;
+  registry: SqliteBindingRegistry;
+  acquisition: Pick<BrokerDeviceAcquisition, "acquire">;
+  release: Pick<BrokerExecutionRelease, "releaseExecution">;
+  journal: Pick<BindingJournal, "owner" | "redriveBinding">;
+  owner: BindingProcessIdentity;
   timer: Timer;
   sessionDisposition: NonNullable<SessionBrokerOptions["sessionDisposition"]>;
   /** Already rehydrated base sessions; generic work must be drained before opting in. */
@@ -98,7 +98,7 @@ function nativeCatalogReader(config: SessionBrokerHostConfig) {
 
 /**
  * Opens one exclusive host service using the existing native assignment/journal authority.
- * Legacy slot/free-pool inventory must be drained before opting in; it cannot disappear from cap
+ * Legacy binding/free-pool inventory must be drained before opting in; it cannot disappear from cap
  * accounting merely because it was created by another allocation path.
  */
 export async function openSessionBrokerService(
@@ -107,7 +107,7 @@ export async function openSessionBrokerService(
   const lock = options.hostLock ?? sessionBrokerHostLock(options.owner);
   lock.acquire();
   try {
-    const scopeKey = computeSlotScopeKey(SESSION_BROKER_SCOPE);
+    const scopeKey = computeBindingScopeKey(SESSION_BROKER_SCOPE);
     await assertBrokerInventoryOwned(options.registry, scopeKey);
     await assertBrokerSessionsOwned(options, scopeKey);
     const scope = await options.registry.ensureScope(SESSION_BROKER_SCOPE);
@@ -120,10 +120,10 @@ export async function openSessionBrokerService(
     const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
-      managedSlotAcquisition: options.acquisition,
-      managedExecutionRelease: options.release,
+      brokerDeviceAcquisition: options.acquisition,
+      brokerExecutionRelease: options.release,
       registry: options.registry,
-      managedSlotJournal: options.journal,
+      bindingJournal: options.journal,
       ...(reset
         ? {
             resetIosBaseline: reset.reset.bind(reset),
@@ -166,7 +166,7 @@ function nativeIosBaselineReset(): IosBaselineReset {
       // The ordinary lifecycle handler joins device controllers and invalidates caches before
       // erasure. A raw simctl shutdown would skip that provider bookkeeping.
       const result = readToolPayload(
-        await defaultManagedSlotToolInvoker("killDevice", { device }, undefined),
+        await defaultBindingToolInvoker("killDevice", { device }, undefined),
       );
       if (result.isError || result.payload.success === false) {
         throw new ActionableError(
@@ -218,7 +218,7 @@ async function assertBrokerSessionsOwned(
 }
 
 async function assertBrokerInventoryOwned(
-  registry: SqliteSlotRegistry,
+  registry: SqliteBindingRegistry,
   scopeKey: string,
 ): Promise<void> {
   const resources = await registry.sessionBrokerStore(scopeKey).listResources();
@@ -230,12 +230,12 @@ async function assertBrokerInventoryOwned(
   const foreign = (await registry.snapshotManagedDevices()).some(
     (device) =>
       device.scopeKey !== scopeKey ||
-      device.holder !== "slot" ||
-      device.slotIndex === null ||
-      !occupied.has(device.slotIndex),
+      device.holder !== "session_broker" ||
+      device.bindingIndex === null ||
+      !occupied.has(device.bindingIndex),
   );
-  const foreignJournal = (await registry.listOpenSlotJournal()).some(
-    (entry) => entry.scopeKey !== scopeKey || !occupied.has(entry.slotIndex),
+  const foreignJournal = (await registry.listOpenBindingJournal()).some(
+    (entry) => entry.scopeKey !== scopeKey || !occupied.has(entry.bindingIndex),
   );
   if (foreign || foreignJournal) {
     throw new ActionableError(

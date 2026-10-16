@@ -1,0 +1,82 @@
+{
+  "prepareSession": {
+    "contractVersion": 1,
+    "requestId": "fake-1",
+    "outcome": "ready",
+    "sessionUuid": "00000000-0000-4000-8000-000000000001",
+    "profile": {
+      "platform": "ios",
+      "metadataState": "current",
+      "simulatorDeviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+      "modelIdentifier": "iPhone18,2",
+      "archetype": "phone",
+      "modelType": {
+        "family": "iphone",
+        "variant": "pro-max"
+      },
+      "runtimeId": "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+      "osVersion": "27.0",
+      "compatibility": "supported"
+    },
+    "cleanupPending": false
+  },
+  "status": {
+    "contractVersion": 1,
+    "requestId": "fake-1",
+    "outcome": "ready",
+    "sessionUuid": "00000000-0000-4000-8000-000000000001",
+    "profile": {
+      "platform": "ios",
+      "metadataState": "current",
+      "simulatorDeviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+      "modelIdentifier": "iPhone18,2",
+      "archetype": "phone",
+      "modelType": {
+        "family": "iphone",
+        "variant": "pro-max"
+      },
+      "runtimeId": "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+      "osVersion": "27.0",
+      "compatibility": "supported"
+    },
+    "cleanupPending": false
+  },
+  "refusal": {
+    "contractVersion": 1,
+    "requestId": "fake-3",
+    "outcome": "failed",
+    "sessionUuid": null,
+    "profile": null,
+    "cleanupPending": false,
+    "failure": {
+      "code": "capacity_exhausted",
+      "message": "session-cap-reached",
+      "retryable": false
+    }
+  },
+  "release": {
+    "sessionUuid": "00000000-0000-4000-8000-000000000001",
+    "outcome": "released"
+  },
+  "releasedStatus": {
+    "contractVersion": 1,
+    "requestId": "fake-1",
+    "outcome": "released",
+    "sessionUuid": "00000000-0000-4000-8000-000000000001",
+    "profile": {
+      "platform": "ios",
+      "metadataState": "current",
+      "simulatorDeviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+      "modelIdentifier": "iPhone18,2",
+      "archetype": "phone",
+      "modelType": {
+        "family": "iphone",
+        "variant": "pro-max"
+      },
+      "runtimeId": "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+      "osVersion": "27.0",
+      "compatibility": "supported"
+    },
+    "cleanupPending": false
+  }
+}

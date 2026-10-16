@@ -62,7 +62,7 @@ class PrototypeStorageRestorerTest {
       restore.spec.state,
     )
     assertEquals(json("""{"items":["latte"]}"""), restore.spec.data!!["cart"])
-    assertEquals(JsonPrimitive("T"), restore.spec.data!!["title"])
+    assertEquals(JsonPrimitive("T"), restore.spec.data["title"])
     assertEquals(listOf("state:dark", "state:count", "data:/cart"), restore.applied)
     assertEquals(emptyList(), restore.dropped)
   }
@@ -157,7 +157,7 @@ class PrototypeStorageRestorerTest {
         stored(1, "data:/title" to JsonPrimitive(3), "data:/extra" to JsonPrimitive("kept")),
       )
     assertEquals(JsonPrimitive("T"), restore.spec.data!!["title"])
-    assertEquals(JsonPrimitive("kept"), restore.spec.data!!["extra"])
+    assertEquals(JsonPrimitive("kept"), restore.spec.data["extra"])
     assertEquals(listOf("data:/extra"), restore.applied)
     assertEquals(
       listOf(PrototypeStorageDrop("data:/title", PrototypeStorageDropReason.MISMATCH)),

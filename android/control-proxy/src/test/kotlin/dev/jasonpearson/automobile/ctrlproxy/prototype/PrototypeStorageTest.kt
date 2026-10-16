@@ -130,7 +130,7 @@ class PrototypeStorageTest {
     assertNull(store.stored("prefs"))
     assertEquals(listOf("prefs"), store.deletes)
     assertEquals(emptyList<PrototypeStorageKeyBytes>(), opened.session!!.report().keys)
-    assertEquals(2, opened.session!!.report().version)
+    assertEquals(2, opened.session.report().version)
   }
 
   @Test
@@ -295,7 +295,7 @@ class PrototypeStorageTest {
     assertNull(store.stored("prefs"))
     timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
     assertEquals(emptyList<Any>(), store.saves)
-    assertEquals(emptyList<PrototypeStorageKeyBytes>(), opened.session!!.report().keys)
+    assertEquals(emptyList<PrototypeStorageKeyBytes>(), opened.session.report().keys)
     // The prototype on screen keeps its live values.
     assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["dark"])
     // Later writes store only what changed since.

@@ -1657,21 +1657,24 @@ the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
-`verified: false`; `setAppPermissions` returns a structured failure with
-`success: false`, `applied: true`, `verified: false`, and
+`verified: false`; by default `setAppPermissions` returns a non-fatal unverified
+success with `success: true`, `applied: true`, `verified: false`, a warning, and
 `code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` after dispatching a full Photos grant.
-Only an app-level verifier reporting `authorized` can establish full access;
-`limited`, `denied`, or `notDetermined` yields `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`.
-A `photos` or `all` grant whose effective full access cannot be verified is
-reported as a failed operation. For `all`, the whole `all` entry fails even
-though non-Photos services were dispatched; `applied: true` marks the dispatch.
-Verification is unavailable from the default host verifier without app instrumentation:
+An unobservable verifier or a verifier/TCC-readback exception keeps this outcome;
+the warning is aggregated in `warnings` and the operation counts as changed.
+Only an app-level verifier reporting `authorized` yields `verified: true`, with
+no code or warning. A positive `limited`, `denied`, `notDetermined`, or `addOnly`
+observation yields `success: false`, `applied: true`, `verified: false`,
+`PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`, and an actionable error. For `all`, this
+keeps the successful `all` dispatch operation and adds a separate failed `photos`
+operation; only the Photos entry counts as failed. Each operation exposes its
+own permission in `stepId`, its result, and any code, including non-fatal codes.
+A real verifier needs target-app instrumentation (design option C, still a follow-up):
 launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
 insufficient. Results include `accessLevel` (`readWrite` for Photos and
 `addOnly` for photos-add); an unverified stored Photos grant includes
-`evidence: "storedTccGrant"`. Effective native status still requires app
-instrumentation. Granting `photos-add` remains a dispatch success with
+`evidence: "storedTccGrant"`. Granting `photos-add` remains a dispatch success with
 `accessLevel: "addOnly"` and does not establish full access. No simulator/runtime
 combination is currently verified to give effective full access through
 `simctl privacy grant`; simulator verification with the Playground probe is still

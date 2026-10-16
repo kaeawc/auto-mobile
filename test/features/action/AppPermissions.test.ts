@@ -626,15 +626,16 @@ describe("AppPermissions", () => {
       action: "grant",
       permissions: ["photos"],
     });
-    expect(setResult).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
+    expect(setResult).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
     expect(setResult.operations[0]).toMatchObject({
-      success: false,
-      changedCount: 0,
-      failedCount: 1,
+      stepId: "ios_simctl_privacy:grant:photos",
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
       code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
       result: {
         permission: "photos",
-        success: false,
+        success: true,
         applied: true,
         verified: false,
         code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
@@ -642,12 +643,15 @@ describe("AppPermissions", () => {
         evidence: "storedTccGrant",
       },
     });
-    expect(setResult.error).toBe(setResult.operations[0].error);
-    expect(setResult.error).toContain("Photos grant was dispatched via simctl");
-    expect(setResult.operations[0].result).toHaveProperty("error", setResult.error);
-    expect(setResult).not.toHaveProperty("warnings");
-    expect(setResult.operations[0]).not.toHaveProperty("warning");
-    expect(setResult.operations[0].result).not.toHaveProperty("warning");
+    expect(setResult).not.toHaveProperty("error");
+    expect(setResult.operations[0]).not.toHaveProperty("error");
+    expect(setResult.operations[0].result).not.toHaveProperty("error");
+    expect(setResult.operations[0].warning).toContain("Photos grant was dispatched via simctl");
+    expect(setResult.warnings).toEqual([setResult.operations[0].warning]);
+    expect(setResult.operations[0].result).toHaveProperty(
+      "warning",
+      setResult.operations[0].warning,
+    );
   });
 
   test("an authorized Photos verifier yields a successful facade operation", async () => {
@@ -676,7 +680,7 @@ describe("AppPermissions", () => {
     ]);
   });
 
-  test("surfaces Photos readback failure as a typed facade failure after dispatch", async () => {
+  test("surfaces Photos readback failure as a non-fatal unverified facade operation", async () => {
     const permissions = new AppPermissions(iosSimulator, {
       simctl: new FakeSimCtlClient(),
       tccReader: {
@@ -689,28 +693,80 @@ describe("AppPermissions", () => {
       action: "grant",
       permissions: ["photos"],
     });
-    expect(result).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
+    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
     expect(result.operations[0]).toMatchObject({
-      success: false,
-      changedCount: 0,
-      failedCount: 1,
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
       code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
       result: {
-        success: false,
+        success: true,
         applied: true,
         verified: false,
         code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
         accessLevel: "readWrite",
       },
     });
-    expect(result.error).toBe(result.operations[0].error);
-    expect(result.error).toContain("Photos grant was dispatched via simctl");
-    expect(result.operations[0].result).toHaveProperty("error", result.error);
+    expect(result).not.toHaveProperty("error");
+    expect(result.operations[0]).not.toHaveProperty("error");
+    expect(result.operations[0].result).not.toHaveProperty("error");
+    expect(result.operations[0].warning).toContain("Photos grant was dispatched via simctl");
     expect(result.operations[0].result).not.toHaveProperty("evidence");
-    expect(result).not.toHaveProperty("warnings");
-    expect(result.operations[0]).not.toHaveProperty("warning");
-    expect(result.operations[0].result).not.toHaveProperty("warning");
+    expect(result.warnings).toEqual([result.operations[0].warning]);
+    expect(result.operations[0].result).toHaveProperty("warning", result.operations[0].warning);
   });
+
+  test.each(["photos", "all"])(
+    "reports a confirmed Photos failure separately for %s",
+    async (permission) => {
+      const permissions = new AppPermissions(iosSimulator, {
+        simctl: new FakeSimCtlClient(),
+        tccReader: new FixtureTccReader("full"),
+        photosVerifier: new FakePhotosAuthorizationVerifier("limited"),
+      });
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        permissions: [permission],
+      });
+      expect(result).toMatchObject({
+        success: false,
+        changedCount: permission === "all" ? 1 : 0,
+        failedCount: 1,
+      });
+      expect(result.operations).toHaveLength(permission === "all" ? 2 : 1);
+      const failedOperation = result.operations[permission === "all" ? 1 : 0];
+      expect(failedOperation).toMatchObject({
+        stepId: "ios_simctl_privacy:grant:photos",
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+        result: {
+          permission: "photos",
+          success: false,
+          applied: true,
+          verified: false,
+          accessLevel: "readWrite",
+          code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+        },
+      });
+      expect(result.error).toBe(failedOperation.error);
+      expect(result.error).toContain("PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite");
+      expect(failedOperation.result).toHaveProperty("error", result.error);
+      expect(result).not.toHaveProperty("warnings");
+      if (permission === "all") {
+        expect(result.operations[0]).toMatchObject({
+          stepId: "ios_simctl_privacy:grant:all",
+          success: true,
+          changedCount: 1,
+          failedCount: 0,
+          result: { permission: "all", success: true, applied: true },
+        });
+        expect(result.operations[0]).not.toHaveProperty("code");
+        expect(result.operations[0]).not.toHaveProperty("error");
+      }
+    },
+  );
 
   test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {
     const iosPhysicalClient = new RecordingPhysicalPrivacyClient();

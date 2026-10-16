@@ -1,6 +1,6 @@
 # iOS Photos full access: establishing and verifying `PHAccessLevelReadWrite`
 
-Status: host structured failure and injectable verification implemented (issue #12317);
+Status: host non-fatal unverified success, typed observed failure, and injectable verification implemented (issue #12317);
 simulator verification with the Playground probe is still owed. Nothing here is device-verified.
 Related: #12316 (readback classification), #12368 (merged: Photos grants return
 `verified:false` and readback `unknown`).
@@ -11,12 +11,21 @@ Related: #12316 (readback classification), #12368 (merged: Photos grants return
 (`src/utils/ios-cmdline-tools/IosPermissionsBackend.ts`) and stores a `kTCCServicePhotos` row. The issue's controlled
 matrix (iOS 26.5, Xcode 26.6) shows the app's own
 `PHPhotoLibrary.authorizationStatus(for: .readWrite)` still reads `notDetermined` after that grant, and `.addOnly` only
-becomes `authorized` after `photos-add`. The host now reports a dispatched Photos grant as a structured failure with
-`success: false, applied: true, verified: false` and `code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` by default
+becomes `authorized` after `photos-add`. The host reports a dispatched Photos grant as a non-fatal unverified success with
+`success: true, applied: true, verified: false`, a warning, and `code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` by default
 (`src/features/action/IosSimulatorPermissions.ts`, `classifyIosSimulatorPermission` and `verifyPhotosGrant`), and
 `PhotosAuthorizationVerifier` is an injectable seam for target-app instrumentation. Only an `authorized` read/write
-status yields verified success; `limited`, `denied`, and `notDetermined` return `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`.
-An unobservable or throwing verifier returns `PHOTOS_FULL_ACCESS_UNVERIFIED`. Stored TCC grants remain evidence only.
+status yields verified success without a code or warning; positive `limited`, `denied`, `notDetermined`, and `addOnly`
+observations return a typed failure with `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`, `applied: true`, `verified: false`,
+`accessLevel: "readWrite"`, and an actionable error. An unobservable or throwing verifier, or a TCC-readback exception,
+returns non-fatal `PHOTOS_FULL_ACCESS_UNVERIFIED` success. Exceptions are logged at warning level. Stored TCC grants
+remain evidence only. A readback exception returns the unverified outcome before consulting the verifier.
+
+For `all`, a confirmed Photos failure keeps a successful `all` dispatch result (`applied: true`) and adds a separate
+failed `photos` result. Non-Photos services are not marked failed. Only the Photos entry increments `failedCount`;
+the top-level error is the first failed result's error. The facade maps each result to its own operation with a
+permission-specific `stepId` and exposes its code, including a non-fatal unverified code. Unverified successes count
+as changed, and their warnings are aggregated in `warnings`.
 
 No simulator/runtime combination is currently verified to give effective full access through `simctl privacy grant`.
 Physical iOS device permission limits are unchanged.
@@ -72,7 +81,9 @@ The existing `ios/Playground/Sources/PhotosAuthorizationProbe.swift` writes
 The iOS SDK (`ios/auto-mobile-sdk`) already runs inside integrated apps and has host-readable inspection channels. A
 `PhotosAuthorizationInspector` could publish the same JSON from the real target. Then `verifyPhotosGrant` could return
 `verified: true` only when the snapshot is fresh and `readWrite.name == "authorized"`. Cost: SDK API surface, a freshness
-rule (the snapshot is only as new as the last app launch/foreground), and it only helps SDK apps. Not implemented.
+rule (the snapshot is only as new as the last app launch/foreground), and it only helps SDK apps. A real
+`PhotosAuthorizationVerifier` needs this target-app instrumentation; the production default remains unobservable.
+Not implemented; this is follow-up work.
 
 ### D. Different TCC writes (needs device experiments)
 
@@ -93,15 +104,16 @@ not a supported interface and may break between runtimes.
 ## Recommended path
 
 1. Use option B's existing probe so the experiments in D and the cold-restart check have an independent reader.
-2. `setAppPermissions` now returns a structured `PHOTOS_FULL_ACCESS_UNVERIFIED` failure after dispatch by default,
-   with `applied: true`, `verified: false`, and instructions to launch the app and check
+2. `setAppPermissions` returns non-fatal `PHOTOS_FULL_ACCESS_UNVERIFIED` success after dispatch by default,
+   with `success: true`, `applied: true`, `verified: false`, and a warning to launch the app and check
    `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only is insufficient and `photos-add` remains
-   a separate dispatch success. `getAppPermissions` still classifies a stored Photos grant as `unknown`,
+   a separate dispatch success. Unobservable status and verifier/TCC-readback exceptions keep this outcome;
+   warnings aggregate and the operation counts as changed. `getAppPermissions` still classifies a stored Photos grant as `unknown`,
    `verified: false`, with `evidence: "storedTccGrant"`.
 3. Verify a sequence with the Playground probe before claiming support for any simulator/runtime range. No such
-   combination is currently verified. The host keeps returning a structured failure without target-app instrumentation;
-   its injectable verifier can report `verified: true` only for an `authorized` read/write status. A `limited`,
-   `denied`, or `notDetermined` status returns `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED` instead of a warning.
+   combination is currently verified. The host keeps returning non-fatal unverified success without target-app instrumentation;
+   its injectable verifier can report `verified: true` only for an `authorized` read/write status. A positive `limited`,
+   `denied`, `notDetermined`, or `addOnly` observation returns `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED` failure instead of a warning.
 4. Option C for SDK-integrated apps to allow a real `verified: true`.
 
 ## Device checks owed

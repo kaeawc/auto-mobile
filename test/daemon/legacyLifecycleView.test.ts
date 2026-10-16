@@ -41,7 +41,6 @@ test("real manager adapter follows publish, releasing, operation and finalized i
   const view = rig.manager.getLegacyLifecycleView();
   const mapNames = {
     sessions: "sessions",
-    pendingRebinds: "pendingSessionRebinds",
     releaseOps: "releasePromises",
     terminalSnapshots: "terminalReleaseSnapshots",
     recoveredTerminalIntents: "recoveredTerminalReleaseIntents",
@@ -54,6 +53,7 @@ test("real manager adapter follows publish, releasing, operation and finalized i
   expect(view.pendingAssignments).toBe(slots.assignments);
   expect(view.pendingCreations).toBe(slots.creations);
   expect(view.pendingReleases).toBe(slots.releaseRequests);
+  expect(view.pendingRebinds).toBe(slots.rebinds);
   const creation = rig.manager.createSession("id", "fake-id", "android");
   expect(view.pendingCreations.has("id")).toBe(true);
   const session = await creation;

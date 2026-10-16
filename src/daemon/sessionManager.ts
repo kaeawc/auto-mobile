@@ -1803,7 +1803,9 @@ export class SessionManager {
     SharedSessionAssignment,
     PendingSessionCreation,
     DeviceSession,
-    PendingSessionRelease
+    PendingSessionRelease,
+    PendingSessionRebind,
+    DeferredRebindCleanup
   >();
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
@@ -1845,15 +1847,6 @@ export class SessionManager {
    */
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
-  /** Rebinds that a release must await before it can remove the live binding. */
-  private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
-  private readonly deferredRebindCleanups = new Map<
-    DeferredRebindCleanup,
-    {
-      sessionId: string;
-      deviceId: string;
-    }
-  >();
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
   private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
@@ -4751,7 +4744,7 @@ export class SessionManager {
   ): Promise<Session> {
     const { access, requestDeadlineMs, callerExecutionId } =
       this.resolveSessionAcquisitionOptions(accessOptions);
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
       return await this.getOrCreateSession(
@@ -5930,7 +5923,7 @@ export class SessionManager {
       return existing;
     }
 
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
       return await this.rebindSession(sessionId, assignedDevice, platform, options);
@@ -5951,7 +5944,7 @@ export class SessionManager {
       options.deferCleanup,
     );
     const rebind = { session: existing, promise };
-    this.pendingSessionRebinds.set(sessionId, rebind);
+    this.sessionSlots.setRebind(sessionId, rebind);
     this.slotShadowProbe.check(sessionId, "rebind-start");
     try {
       return await promise;
@@ -5961,8 +5954,8 @@ export class SessionManager {
       }
       return await this.rejectRefusedRebind(existing, rebind, error);
     } finally {
-      if (this.pendingSessionRebinds.get(sessionId) === rebind) {
-        this.pendingSessionRebinds.delete(sessionId);
+      if (this.sessionSlots.getRebind(sessionId) === rebind) {
+        this.sessionSlots.deleteRebind(sessionId);
         this.slotShadowProbe.check(sessionId, "rebind-end");
       }
     }
@@ -5976,8 +5969,8 @@ export class SessionManager {
     const sessionId = existing.sessionId;
     // The failed write never published its binding. End a terminal UUID after the rebind's
     // promise has rejected, so the release cannot wait on the very rebind adopting it.
-    if (this.pendingSessionRebinds.get(sessionId) === rebind) {
-      this.pendingSessionRebinds.delete(sessionId);
+    if (this.sessionSlots.getRebind(sessionId) === rebind) {
+      this.sessionSlots.deleteRebind(sessionId);
     }
     const adoption = this.endSessionTerminallyReleasedInRow(existing);
     // Include the row read and any release it starts: the inner rebind already rejected.
@@ -6145,7 +6138,7 @@ export class SessionManager {
 
   /** Flush only matching receipts; release, a later rebind and shutdown all commit once. */
   flushDeferredRebindCleanups(filter: { sessionId?: string; deviceId?: string } = {}): void {
-    for (const [cleanup, owner] of this.deferredRebindCleanups) {
+    for (const [cleanup, owner] of this.sessionSlots.deferredCleanups) {
       if (
         (filter.sessionId === undefined || filter.sessionId === owner.sessionId) &&
         (filter.deviceId === undefined || filter.deviceId === owner.deviceId)
@@ -6177,7 +6170,7 @@ export class SessionManager {
     const finish = () => {
       this.timer.clearTimeout(bound);
       this.iosAppNetworkLeases.stop(leaseKey);
-      this.deferredRebindCleanups.delete(cleanup);
+      this.sessionSlots.deleteDeferredCleanup(cleanup);
     };
     const settle = () => {
       if (resolved) {
@@ -6273,7 +6266,7 @@ export class SessionManager {
       }
     }, capMs);
     deadline.unref?.();
-    this.deferredRebindCleanups.set(cleanup, {
+    this.sessionSlots.setDeferredCleanup(cleanup, {
       sessionId: oldView.sessionId,
       deviceId: oldView.assignedDevice,
     });
@@ -6478,7 +6471,7 @@ export class SessionManager {
     if (session.assignedDevice !== expectedDeviceId) {
       throw new SessionNoLongerOwnsDeviceError(session.sessionId, expectedDeviceId);
     }
-    if (this.pendingSessionRebinds.has(session.sessionId)) {
+    if (this.sessionSlots.hasRebind(session.sessionId)) {
       throw new SessionRebindingError(session.sessionId);
     }
     const existing = this.terminalReleaseReservations.get(session.sessionId);
@@ -6580,7 +6573,7 @@ export class SessionManager {
         pendingAssignments: this.sessionSlots.assignments,
         pendingCreations: this.sessionSlots.creations,
         pendingReleases: this.sessionSlots.releaseRequests,
-        pendingRebinds: this.pendingSessionRebinds,
+        pendingRebinds: this.sessionSlots.rebinds,
         releaseOps: this.releasePromises,
         terminalSnapshots: this.terminalReleaseSnapshots,
         recoveredTerminalIntents: this.recoveredTerminalReleaseIntents,
@@ -6745,7 +6738,7 @@ export class SessionManager {
     const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
     this.slotShadowProbe.check(sessionId, "release-start");
-    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const pendingRebind = this.sessionSlots.getRebind(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
@@ -7183,7 +7176,7 @@ export class SessionManager {
   private canStartSessionSetup(session: Session): boolean {
     return (
       !this.releasingSessions.has(session) &&
-      this.pendingSessionRebinds.get(session.sessionId)?.session !== session &&
+      this.sessionSlots.getRebind(session.sessionId)?.session !== session &&
       this.sessions.get(session.sessionId) === session
     );
   }
@@ -8136,7 +8129,7 @@ export class SessionManager {
   }
 
   private isRebindUnderWay(session: Session): boolean {
-    return this.pendingSessionRebinds.get(session.sessionId)?.session === session;
+    return this.sessionSlots.getRebind(session.sessionId)?.session === session;
   }
 
   /**
@@ -8416,7 +8409,7 @@ export class SessionManager {
 
   /** Resolve once the rebind in flight for this incarnation, if any, has ended. Never rejects. */
   private async waitOutRebindOf(session: Session): Promise<void> {
-    const rebind = this.pendingSessionRebinds.get(session.sessionId);
+    const rebind = this.sessionSlots.getRebind(session.sessionId);
     if (rebind?.session !== session) {
       return;
     }
@@ -13246,7 +13239,7 @@ export class SessionManager {
         ...this.sessions.keys(),
         ...this.sessionSlots.creations.keys(),
         ...this.sessionSlots.assignments.keys(),
-        ...this.pendingSessionRebinds.keys(),
+        ...this.sessionSlots.rebinds.keys(),
         ...this.sessionSlots.releaseRequests.keys(),
         ...this.releasePromises.keys(),
       ]),

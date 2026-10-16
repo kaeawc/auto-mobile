@@ -292,6 +292,42 @@ function insufficientAndroidExactPrecision(
   });
 }
 
+/**
+ * Same-version tie-break: the plain `google_apis` flavor first (it boots
+ * adb-authorized quickly; Play Store images can stay unauthorized for minutes),
+ * then the system image package name for a deterministic order.
+ */
+function androidTieBreakIdentity(release: AndroidCatalogRelease): string {
+  return `${release.flavor === "google_apis" ? "0" : "1"}|${release.systemImagePackage}`;
+}
+
+/** `os` takes the Android release (16), not the API level (36); say so when it is clearly confused. */
+function androidApiLevelHint(
+  selector: EffectiveOsSelector,
+  releases: Array<AndroidCatalogRelease & { osVersion: string }>,
+): RequirementResult<never> | undefined {
+  const requested =
+    selector.kind === "major" ? selector.major : parseNumericVersion(selector.version);
+  const requestedMajor =
+    typeof requested === "number"
+      ? requested
+      : requested.ok
+        ? Number(requested.value.components[0])
+        : undefined;
+  const confused = releases.find(
+    (release) =>
+      release.apiLevel === requestedMajor &&
+      Number(release.osVersion.split(".")[0]) !== requestedMajor,
+  );
+  return confused
+    ? failure(
+        "missing_installed_runtime",
+        `No installed runtime satisfies ${describeOsSelector(selector)}. Android os selectors use the release version (for example 16), not the API level; API level ${confused.apiLevel} is Android ${confused.osVersion}.`,
+        { field: "os" },
+      )
+    : undefined;
+}
+
 function chooseAndroidRelease(
   selector: EffectiveOsSelector,
   preferredVersion: string,
@@ -309,12 +345,12 @@ function chooseAndroidRelease(
         { field: "os.version" },
       );
     }
-    return noRuntimeResult(selector, releases);
+    return androidApiLevelHint(selector, valid) ?? noRuntimeResult(selector, releases);
   }
   const ordered = stableReleaseSort(
     satisfying,
     (release) => release.osVersion,
-    (release) => release.systemImagePackage,
+    androidTieBreakIdentity,
   );
   if (selector.kind === "exact") {
     return success({ release: ordered[0], by: "exact" });

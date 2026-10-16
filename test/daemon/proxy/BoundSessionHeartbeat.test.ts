@@ -4,7 +4,11 @@ import {
   BoundSessionHeartbeat,
   type BoundSessionHeartbeatPort,
 } from "../../../src/daemon/proxy/BoundSessionHeartbeat";
-import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/daemonErrors";
+import {
+  DaemonBoundSessionExpiredError,
+  daemonInternalErrors,
+} from "../../../src/daemon/proxy/daemonErrors";
+import type { LatestHeartbeatAsk } from "../../../src/daemon/proxy/ProxySessionState";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
 import {
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
@@ -18,12 +22,14 @@ import {
 } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
+const { HeldSessionNotFoundError } = daemonInternalErrors;
 const LEASH_MS = 10_000;
 
 function harness() {
   const timer = new FakeTimer();
   const state = new ProxySessionState();
   const log: string[] = [];
+  const reestablishmentChecks: string[] = [];
   const ownedDeviceSessions = new Set<string>();
   const flags = { closing: false, claimable: true, firstOnConnection: false, otherDaemon: false };
   const heldSessions = new Set<string>();
@@ -41,7 +47,10 @@ function harness() {
   const port: BoundSessionHeartbeatPort = {
     requireClient: () => client as never,
     boundSessionHeartbeatParams: (sessionUuid, claim) => ({ sessionUuid, claim }),
-    answersOwnershipReestablishment: () => flags.firstOnConnection,
+    answersOwnershipReestablishment: (_client, id) => {
+      reestablishmentChecks.push(id);
+      return flags.firstOnConnection;
+    },
     noteHeartbeatDaemonInstance: () => flags.otherDaemon,
     noteDaemonIdleEvidence: (id) => {
       log.push(`idle:${id}`);
@@ -97,6 +106,7 @@ function harness() {
     state,
     timer,
     log,
+    reestablishmentChecks,
     flags,
     answers,
     calls,
@@ -383,5 +393,65 @@ describe("BoundSessionHeartbeat.sendBoundSessionHeartbeat", () => {
     h.answers.error = new Error("socket closed");
     await expect(h.bound.sendBoundSessionHeartbeat()).rejects.toThrow("socket closed");
     expect(h.state.latestHeartbeatAsked).toBeUndefined();
+  });
+});
+
+describe("BoundSessionHeartbeat.askSessionHeartbeat", () => {
+  const firstAsk = (): LatestHeartbeatAsk => ({ notFound: false, handoff: false });
+
+  test("an acknowledged ask notes idle evidence and leaves the ask untouched", async () => {
+    const h = harness();
+    const asked = firstAsk();
+    await h.bound.askSessionHeartbeat("a", true, asked);
+    expect(h.log).toEqual(["idle:a"]);
+    expect(h.reestablishmentChecks).toEqual(["a"]);
+    expect(asked).toEqual({ notFound: false, handoff: false });
+  });
+
+  test("a recoverable handoff answered on the first ask is rethrown to be asked again and marked as a handoff", async () => {
+    const h = harness();
+    h.ownedDeviceSessions.add("a");
+    h.answers.error = notFound("daemon-restart");
+    const asked = firstAsk();
+    await expect(h.bound.askSessionHeartbeat("a", true, asked)).rejects.toBe(h.answers.error);
+    expect(asked).toEqual({ notFound: true, handoff: true });
+  });
+
+  test("an unreasoned first not-found is rethrown to be asked again, not marked as a handoff", async () => {
+    const h = harness();
+    h.answers.error = notFound();
+    const asked = firstAsk();
+    await expect(h.bound.askSessionHeartbeat("a", true, asked)).rejects.toBe(h.answers.error);
+    expect(asked).toEqual({ notFound: true, handoff: false });
+  });
+
+  test("the second ask's not-found is decided here and raised as a held-session answer", async () => {
+    const h = harness();
+    const asked: LatestHeartbeatAsk = { notFound: true, handoff: false };
+    h.answers.error = notFound();
+    const error = await h.bound
+      .askSessionHeartbeat("a", true, asked)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeldSessionNotFoundError);
+    expect((error as InstanceType<typeof HeldSessionNotFoundError>).outcome).toEqual({
+      kind: "stopped",
+    });
+    expect(asked).toEqual({ notFound: true, handoff: false });
+  });
+
+  test("a held session (no ask record) never asks again and is raised as a held-session answer", async () => {
+    const h = harness();
+    h.answers.error = notFound();
+    const error = await h.bound.askSessionHeartbeat("a", false).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeldSessionNotFoundError);
+  });
+
+  test("any other failure is rethrown after noting connection evidence", async () => {
+    const h = harness();
+    h.answers.error = new Error("socket closed");
+    const asked = firstAsk();
+    await expect(h.bound.askSessionHeartbeat("a", true, asked)).rejects.toBe(h.answers.error);
+    expect(asked).toEqual({ notFound: false, handoff: false });
+    expect(h.reestablishmentChecks).toEqual(["a"]);
   });
 });

@@ -260,28 +260,23 @@ describe("session-only broker lifecycle", () => {
 
   test("a failed request recovery does not starve later durable cleanup", async () => {
     options.limits = { totalDeviceCap: 2, sessionCap: 2 };
-    await ready("first");
+    const first = await ready("first");
     const second = await ready("second");
     devices.canDestroy = false;
     await broker.release(second);
     devices.canDestroy = true;
-    const original = options.store.recoverRequest.bind(options.store);
-    const recover = spyOn(options.store, "recoverRequest").mockImplementation((id, owner) => {
-      if (id === "first") {
-        throw new Error("request-specific recovery failure");
-      }
-      return original(id, owner);
+    const consulted: string[] = [];
+    options.sessionDisposition = (sessionUuid) => {
+      consulted.push(sessionUuid);
+      throw new Error("request-specific recovery failure");
+    };
+    broker = new SessionBroker(options);
+    await broker.recover();
+    expect(consulted).toEqual([first]);
+    expect(await broker.status("second")).toMatchObject({
+      outcome: "released",
+      cleanupPending: false,
     });
-    try {
-      await broker.recover();
-      expect(await broker.status("second")).toMatchObject({
-        outcome: "released",
-        cleanupPending: false,
-      });
-      expect(recover.mock.calls.map(([id]) => id)).toEqual(["first", "second"]);
-    } finally {
-      recover.mockRestore();
-    }
   });
 
   test("release/reacquire can reuse only a reset device and fresh session identity", async () => {

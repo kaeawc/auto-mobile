@@ -245,8 +245,12 @@ async function assertBrokerInventoryOwned(
 }
 
 /** Explicit owner of the recovery loop, including interruptible idle waiting and a joined stop. */
+/** Receipt retention runs at most this often; pruning is not urgent and takes the write lock. */
+export const RECEIPT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
 export class SessionBrokerService {
   private stopped = false;
+  private lastPruneAtMs: number | undefined;
   private running: Promise<void> | undefined;
   private closing: Promise<void> | undefined;
   private wake: (() => void) | undefined;
@@ -255,7 +259,7 @@ export class SessionBrokerService {
     readonly broker: SessionBroker,
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
   ) {}
 
   start(): void {
@@ -288,6 +292,21 @@ export class SessionBrokerService {
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
       }
+      await this.pruneIfDue();
+    }
+  }
+
+  private async pruneIfDue(): Promise<void> {
+    const now = this.timer.now();
+    if (this.lastPruneAtMs !== undefined && now - this.lastPruneAtMs < RECEIPT_PRUNE_INTERVAL_MS) {
+      return;
+    }
+    this.lastPruneAtMs = now;
+    try {
+      await this.broker.pruneReceipts();
+    } catch (error) {
+      // Retention is housekeeping; a busy registry only delays it to the next interval.
+      logger.warn(`Session broker receipt retention failed: ${errorMessage(error)}`, error);
     }
   }
 

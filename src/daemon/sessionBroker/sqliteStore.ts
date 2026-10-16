@@ -2,6 +2,7 @@ import type { Kysely, Selectable, Transaction } from "kysely";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";
 import type { BindingExecOwnerLiveness, BindingProcessIdentity } from "./registry/bindingRegistry";
 import { chooseIdleEvictions, selectAdmission, type BrokerLimits } from "./admission";
@@ -24,6 +25,12 @@ import {
 } from "./store";
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
+
+const TERMINAL_REQUEST_STATES = ["released", "failed"] as const;
+
+function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
+  return state === "released" || state === "failed";
+}
 
 function requestRecord(row: Selectable<BrokerRequestsTable>): BrokerRequestRecord {
   const { restartHandoff, ...owner } = JSON.parse(row.owner_json) as BindingProcessIdentity & {
@@ -123,6 +130,7 @@ export class SqliteSessionBrokerStore {
     private readonly scopeKey: string,
     private readonly isOwnerLive: BindingExecOwnerLiveness,
     private readonly ids: IdGenerator = defaultIdGenerator,
+    private readonly clock: Pick<Timer, "now"> = defaultTimer,
   ) {}
 
   async getRequest(requestId: string): Promise<BrokerRequestRecord | undefined> {
@@ -145,6 +153,119 @@ export class SqliteSessionBrokerStore {
   async listRequests(): Promise<BrokerRequestRecord[]> {
     const rows = await this.db.selectFrom("session_broker_requests").selectAll().execute();
     return rows.map(requestRecord);
+  }
+
+  /**
+   * The receipts a recovery pass can still act on, read without a write transaction: every
+   * non-terminal request, plus an abandoned one whose granted session may still need draining
+   * because its device is not yet confirmed destroyed. Settled terminal receipts are skipped, so
+   * the pass costs nothing per finished request however many accumulate.
+   */
+  async listRecoverableRequests(): Promise<BrokerRequestRecord[]> {
+    const rows = await this.db
+      .selectFrom("session_broker_requests")
+      .selectAll()
+      .where((eb) =>
+        eb.or([
+          eb("state", "not in", TERMINAL_REQUEST_STATES),
+          eb.and([
+            eb("state", "=", "failed"),
+            eb("error_code", "=", SESSION_REQUEST_ABANDONED_CODE),
+            eb("session_id", "is not", null),
+            eb.exists(
+              eb
+                .selectFrom("session_broker_resources")
+                .select("session_broker_resources.resource_id")
+                .whereRef(
+                  "session_broker_resources.resource_id",
+                  "=",
+                  "session_broker_requests.resource_id",
+                )
+                .where("session_broker_resources.state", "!=", "destroyed"),
+            ),
+          ]),
+        ]),
+      )
+      .execute();
+    return rows.map(requestRecord);
+  }
+
+  /**
+   * Deletes terminal receipts that became terminal at least `retentionMs` ago and hold no
+   * undestroyed resource, oldest first, at most `limit` per call. Their destroyed resource
+   * tombstones go with them unless a retained receipt still names that resource. A receipt with
+   * no terminal time (written before retention existed) is stamped now instead, so it gets a
+   * full window. A pruned identity answers as unknown, exactly as one never seen.
+   */
+  async pruneTerminalRequests(retentionMs: number, limit: number): Promise<number> {
+    if (!Number.isFinite(retentionMs) || retentionMs < 0 || !Number.isInteger(limit) || limit < 1) {
+      throw new ActionableError(
+        "Receipt retention needs a non-negative window and a positive limit",
+      );
+    }
+    return this.db.transaction().execute(async (trx) => {
+      const now = this.clock.now();
+      await trx
+        .updateTable("session_broker_requests")
+        .set({ terminal_at_ms: now })
+        .where("state", "in", TERMINAL_REQUEST_STATES)
+        .where("terminal_at_ms", "is", null)
+        .execute();
+      const expired = await trx
+        .selectFrom("session_broker_requests")
+        .select("request_id")
+        .where("state", "in", TERMINAL_REQUEST_STATES)
+        .where("terminal_at_ms", "<=", now - retentionMs)
+        .where(({ not, exists, selectFrom }) =>
+          not(
+            exists(
+              selectFrom("session_broker_resources")
+                .select("session_broker_resources.resource_id")
+                .whereRef(
+                  "session_broker_resources.request_id",
+                  "=",
+                  "session_broker_requests.request_id",
+                )
+                .where("session_broker_resources.state", "!=", "destroyed"),
+            ),
+          ),
+        )
+        .orderBy("terminal_at_ms")
+        .orderBy("request_id")
+        .limit(limit)
+        .execute();
+      const ids = expired.map((row) => row.request_id);
+      if (ids.length === 0) {
+        return 0;
+      }
+      // Tombstones still named by a retained receipt keep answering its profile.
+      await trx
+        .deleteFrom("session_broker_resources")
+        .where("request_id", "in", ids)
+        .where("state", "=", "destroyed")
+        .where(({ not, exists, selectFrom }) =>
+          not(
+            exists(
+              selectFrom("session_broker_requests")
+                .select("session_broker_requests.request_id")
+                .whereRef(
+                  "session_broker_requests.resource_id",
+                  "=",
+                  "session_broker_resources.resource_id",
+                )
+                .where("session_broker_requests.request_id", "not in", ids),
+            ),
+          ),
+        )
+        .execute();
+      await trx
+        .updateTable("session_broker_resources")
+        .set({ request_id: null })
+        .where("request_id", "in", ids)
+        .execute();
+      await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
+      return ids.length;
+    });
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
@@ -178,6 +299,7 @@ export class SqliteSessionBrokerStore {
           error: failure.message,
           error_code: failure.code,
           retryable: failure.retryable ? 1 : 0,
+          terminal_at_ms: this.clock.now(),
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -212,6 +334,7 @@ export class SqliteSessionBrokerStore {
           error: null,
           error_code: null,
           retryable: null,
+          terminal_at_ms: null,
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -249,6 +372,7 @@ export class SqliteSessionBrokerStore {
             error: SESSION_REQUEST_ABANDONED_MESSAGE,
             error_code: SESSION_REQUEST_ABANDONED_CODE,
             retryable: 0,
+            terminal_at_ms: this.clock.now(),
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -539,10 +663,7 @@ export class SqliteSessionBrokerStore {
         .where("resource_id", "=", resource.resourceId)
         .execute();
       if (resource.requestId) {
-        const request = await this.readRequest(trx, resource.requestId);
-        if (request?.state === "releasing" && request.resourceId === resource.resourceId) {
-          await this.updateRequest(trx, request.requestId, { state: "released" });
-        }
+        await this.settleRequestAfterDestruction(trx, resource);
       }
       return true;
     });
@@ -646,6 +767,26 @@ export class SqliteSessionBrokerStore {
       });
       return "adopted";
     });
+  }
+
+  private async settleRequestAfterDestruction(
+    trx: Transaction<BindingRegistryDatabase>,
+    resource: BrokerResourceRecord,
+  ): Promise<void> {
+    const request = await this.readRequest(trx, requireValue(resource.requestId, "No request"));
+    if (request?.resourceId !== resource.resourceId) {
+      return;
+    }
+    if (request.state === "releasing") {
+      await this.updateRequest(trx, request.requestId, { state: "released" });
+    } else if (request.state === "failed") {
+      // Confirmed cleanup changes the receipt's answer, so its replay window restarts here.
+      await trx
+        .updateTable("session_broker_requests")
+        .set({ terminal_at_ms: this.clock.now() })
+        .where("request_id", "=", request.requestId)
+        .execute();
+    }
   }
 
   private async reserve(
@@ -889,9 +1030,10 @@ export class SqliteSessionBrokerStore {
       >
     >,
   ): Promise<BrokerRequestRecord> {
+    const terminal = isTerminalState(changes.state) ? { terminal_at_ms: this.clock.now() } : {};
     const row = await trx
       .updateTable("session_broker_requests")
-      .set(changes)
+      .set({ ...changes, ...terminal })
       .where("request_id", "=", id)
       .returningAll()
       .executeTakeFirstOrThrow();

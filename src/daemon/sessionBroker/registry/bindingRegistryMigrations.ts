@@ -13,6 +13,7 @@ import * as freeDeviceDeletionFailedDeletes005 from "./migrations/2026_10_13_005
 import * as freeDeviceStop003 from "./migrations/2026_10_10_003_free_device_stop_state";
 import * as sessionBrokerFailure007 from "./migrations/2026_10_15_007_session_broker_failure_retryable";
 import * as sessionBroker006 from "./migrations/2026_10_15_006_session_broker";
+import * as receiptRetention009 from "./migrations/2026_10_16_009_session_broker_receipt_retention";
 
 /**
  * The binding registry's own migration set (#11174). Statically imported rather than read from a
@@ -29,6 +30,7 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_15_006_session_broker": sessionBroker006,
   "2026_10_15_007_session_broker_failure_retryable": sessionBrokerFailure007,
   "2026_10_16_008_retire_slot_features": retireSlot008,
+  "2026_10_16_009_session_broker_receipt_retention": receiptRetention009,
 };
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {

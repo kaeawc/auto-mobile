@@ -24,13 +24,21 @@ const batchSchema = z
     limits: z.object({ totalDeviceCap: cap, sessionCap: cap, idlePoolCap: cap }).strict(),
     reuseCleanDevices: z.boolean(),
     defaults: z.object({ ios: z.unknown().optional(), android: z.unknown().optional() }).strict(),
+    // Product host-config parser owns both shapes; the Android/iOS resolvers require them.
+    androidProfileArchetypes: z.unknown().optional(),
+    iosClassifications: z.unknown().optional(),
     clients: z.array(clientSchema),
   })
   .strict();
 
 export type BrokerBatchClient = z.infer<typeof clientSchema>;
-export type BrokerBatch = Omit<z.infer<typeof batchSchema>, "defaults"> & {
+export type BrokerBatch = Omit<
+  z.infer<typeof batchSchema>,
+  "defaults" | "androidProfileArchetypes" | "iosClassifications"
+> & {
   defaults: SessionBrokerHostConfig["defaults"];
+  androidProfileArchetypes: SessionBrokerHostConfig["androidProfileArchetypes"];
+  iosClassifications: SessionBrokerHostConfig["iosClassifications"];
 };
 export interface BrokerBatchOptions {
   maxDevices?: number;
@@ -61,12 +69,16 @@ export function renderClientRequest(client: BrokerBatchClient, requestId: string
 }
 
 export function renderHostConfig(
-  batch: Pick<z.infer<typeof batchSchema>, "limits" | "defaults" | "reuseCleanDevices">,
+  batch: Pick<z.infer<typeof batchSchema>, "limits" | "defaults" | "reuseCleanDevices"> &
+    Partial<Pick<z.infer<typeof batchSchema>, "androidProfileArchetypes" | "iosClassifications">>,
 ): SessionBrokerHostConfig {
   return parseSessionBrokerHostConfig({
     contractVersion: 1,
     limits: batch.limits,
     defaults: batch.defaults,
+    // Undefined keys fall back to the product defaults ({} and []).
+    androidProfileArchetypes: batch.androidProfileArchetypes,
+    iosClassifications: batch.iosClassifications,
     reuseCleanDevices: batch.reuseCleanDevices,
   });
 }
@@ -93,7 +105,12 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
       throw new Error(`Client ${client.name} requires explicit ${client.platform} defaults.`);
     }
   }
-  return { ...batch, defaults: host.defaults };
+  return {
+    ...batch,
+    defaults: host.defaults,
+    androidProfileArchetypes: host.androidProfileArchetypes,
+    iosClassifications: host.iosClassifications,
+  };
 }
 
 /** One injected batch identity, with explicit per-client attempt numbers. Persist before reuse. */

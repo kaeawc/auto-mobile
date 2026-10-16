@@ -1975,7 +1975,7 @@ export class TapAnyElement extends BaseVisualChange {
           warnings.add(warning);
         }
       };
-      const result = await this.observedInteraction(
+      const result = await this.observedInteraction<TapAnyElementResult>(
         (observeResult, fence) =>
           this.tapObservedElement({
             options,

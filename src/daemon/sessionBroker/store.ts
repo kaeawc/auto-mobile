@@ -42,6 +42,8 @@ export interface BrokerRequestsTable {
   error: string | null;
   error_code: string | null;
   retryable: number | null;
+  /** Clock time the receipt became terminal; null while live or for an unstamped legacy row. */
+  terminal_at_ms: number | null;
 }
 
 export interface BrokerResourcesTable {

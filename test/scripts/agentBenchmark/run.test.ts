@@ -2,12 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import { loadSuite } from "../../../scripts/agent-benchmark/config";
 import {
+  adbClientIdentity,
   bundleDigest,
   dryRunReport,
   importClosure,
   parseCliArgs,
   resolveSuitePath,
 } from "../../../scripts/agent-benchmark/run";
+
+describe("agent benchmark adb client identity", () => {
+  test("uses the SDK platform-tools adb the server prefers, and its version output", () => {
+    const seen: string[] = [];
+    const version = (adb: string) => {
+      seen.push(adb);
+      return "Android Debug Bridge version 1.0.41\nVersion 35.0.2\n";
+    };
+    expect(adbClientIdentity({ ANDROID_HOME: "/sdk" }, version)).toBe(
+      "Android Debug Bridge version 1.0.41\nVersion 35.0.2",
+    );
+    expect(seen[0]).toEndWith("/platform-tools/adb");
+    expect(adbClientIdentity({}, () => undefined)).toBe("unavailable:adb");
+  });
+});
 
 describe("agent benchmark dry run", () => {
   test("the MCP config carries the inherited adb routing the real run will use", () => {

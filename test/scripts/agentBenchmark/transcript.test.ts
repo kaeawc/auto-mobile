@@ -375,6 +375,19 @@ describe("agent benchmark transcript audit", () => {
     ]);
   });
 
+  test("an invalid parent_tool_use_id fails the transcript", () => {
+    const event = (parent: unknown) =>
+      JSON.stringify({ type: "assistant", parent_tool_use_id: parent, message: { content: [] } });
+    const audit = auditTranscript(
+      `${INIT}${event(123)}\n${event(" ")}\n${event(null)}\n${event("toolu_parent")}\n`,
+      NO_PATTERNS,
+    );
+    expect(audit.parseErrors).toEqual([
+      "line 4: invalid parent_tool_use_id",
+      "line 5: invalid parent_tool_use_id",
+    ]);
+  });
+
   test("a terminal result without a final answer fails the transcript", () => {
     const result = JSON.stringify({ type: "result", subtype: "success", is_error: false });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);

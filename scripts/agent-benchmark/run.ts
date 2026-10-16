@@ -44,6 +44,7 @@ import {
 } from "../../src/daemon/foreignDeviceOwnership";
 import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { resolveAndroidSdkRoot } from "../../src/utils/android-cmdline-tools/androidSdkRoot";
 import { getSharedDevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import {
   readExclusiveLockContent,
@@ -506,6 +507,24 @@ function claudeCommandIdentity(command: string): Uint8Array {
   }
 }
 
+/**
+ * The adb client the measured server will run: AdbClient prefers the SDK's platform-tools/adb
+ * (ANDROID_HOME / ANDROID_SDK_ROOT) over PATH, and platform-tools releases differ in command
+ * behavior and latency. Its `adb version` output names both the release and the install path.
+ */
+export function adbClientIdentity(
+  env: Record<string, string | undefined>,
+  version: (adb: string) => string | undefined = (adb) => {
+    const result = spawnSync(adb, ["version"], { encoding: "utf8", timeout: 5_000 });
+    return result.status === 0 ? result.stdout : undefined;
+  },
+): string {
+  const sdk = resolveAndroidSdkRoot(env);
+  const adb = sdk ? `${sdk}/platform-tools/adb` : "adb";
+  const output = version(adb)?.trim();
+  return output ? output : `unavailable:${adb}`;
+}
+
 function serverDigest(claudeCommand: string): string {
   const tree = (dir: string) =>
     readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
@@ -531,6 +550,7 @@ function serverDigest(claudeCommand: string): string {
     { path: "claude-command", read: () => claudeCommandIdentity(claudeCommand) },
     // Provider and routing settings reach Claude unscrubbed; record which backend served it.
     { path: "provider", read: () => new TextEncoder().encode(providerIdentity(process.env)) },
+    { path: "adb", read: () => new TextEncoder().encode(adbClientIdentity(process.env)) },
   ]);
 }
 

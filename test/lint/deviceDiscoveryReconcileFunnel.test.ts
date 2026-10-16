@@ -142,19 +142,16 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 2,
       reason: "Publishes pool epoch/label per serial; reconciles before resolvePoolDeviceContext.",
     },
-    "src/server/deviceTools.ts": {
-      calls: 3,
+    "src/features/deviceLifecycle/deviceLifecycleCore.ts": {
+      calls: 4,
       reason:
-        "Teardown precondition, pre-boot serial validation, and start lifecycle target route " +
-        "their discoveries through the funnel.",
+        "Teardown precondition, pre-boot serial validation, start lifecycle target, and the " +
+        "shutdown preflight (moved here from deviceTools.ts and deviceToolsShutdown.ts, #11827) " +
+        "route their discoveries through the funnel.",
     },
     "src/server/deviceToolsStartupLease.ts": {
       calls: 1,
       reason: "Startup offline-recovery classification uses fresh discovery and reconciles first.",
-    },
-    "src/server/deviceToolsShutdown.ts": {
-      calls: 1,
-      reason: "Shutdown preflight reconciles discovery before pooled identity decisions.",
     },
     "src/server/deviceToolsListing.ts": {
       calls: 1,
@@ -306,9 +303,8 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/daemon.ts",
       "src/daemon/socketServer.ts",
       "src/server/bootedDeviceResources.ts",
-      "src/server/deviceTools.ts",
+      "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/deviceToolsStartupLease.ts",
-      "src/server/deviceToolsShutdown.ts",
       "src/server/deviceToolsListing.ts",
       "src/server/deviceToolsProvisioning.ts",
       "src/server/utilityTools.ts",

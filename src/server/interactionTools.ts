@@ -3460,7 +3460,7 @@ export function registerInteractionTools() {
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
       result.success,
-      async (closeSignal) => keyboardFactory(device).execute("close", closeSignal),
+      async (closeSignal) => keyboardFactory(device).execute("close", { signal: closeSignal }),
       signal,
     );
     const response = createStructuredToolResponse({
@@ -3650,7 +3650,7 @@ export function registerInteractionTools() {
       }
       throwIfAborted(signal);
       const keyboard = keyboardFactory(device);
-      const result = await keyboard.execute(args.action, signal);
+      const result = await keyboard.execute(args.action, { signal });
       throwIfAborted(signal);
 
       const response = createStructuredToolResponse(result);
@@ -3720,7 +3720,7 @@ export function registerInteractionTools() {
   ) => {
     try {
       const clipboard = clipboardFactory(device);
-      const result = await clipboard.execute(args.action, args.text, signal);
+      const result = await clipboard.execute(args.action, args.text, { signal });
 
       let message = formatClipboardMessage(result);
 

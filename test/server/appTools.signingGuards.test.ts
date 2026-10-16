@@ -41,7 +41,7 @@ describe("install/uninstall signing guard arguments", () => {
     appTools.configure("uninstallApp", {
       createUninstallApp: () => ({
         execute: async (...args) => {
-          calls.push(args.slice(0, 5));
+          calls.push(args);
           return { success: true, packageName: "a.b", keepData: false, wasInstalled: true };
         },
       }),
@@ -49,8 +49,10 @@ describe("install/uninstall signing guard arguments", () => {
     const handler = ToolRegistry.getTool("uninstallApp")?.deviceAwareHandler;
     await handler?.(device, { appId: "a.b", expectedSigningSha256: [SIGNER_A] });
     await handler?.(device, { appId: "a.b" });
-    expect(calls[0]?.[4]).toEqual({ expectedSigningSha256: [SIGNER_A] });
-    expect(calls[1]).toHaveLength(4);
+    expect((calls[0]?.[1] as UninstallAppCall | undefined)?.guard).toEqual({
+      expectedSigningSha256: [SIGNER_A],
+    });
+    expect((calls[1]?.[1] as UninstallAppCall | undefined)?.guard).toBeUndefined();
   });
 
   test("installApp forwards guards and surfaces a typed refusal", async () => {
@@ -75,7 +77,7 @@ describe("install/uninstall signing guard arguments", () => {
         allowDestructiveRecovery: false,
       }),
     ).rejects.toBeInstanceOf(SigningGuardError);
-    expect(calls[0]?.[3]).toEqual({
+    expect((calls[0]?.[1] as InstallAppCall | undefined)?.guard).toEqual({
       expectedSigningSha256: [SIGNER_A],
       allowDestructiveRecovery: false,
     });

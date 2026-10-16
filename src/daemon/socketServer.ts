@@ -13,6 +13,7 @@ import {
   type InputTapParams,
   type InputTypeTextParams,
 } from "./inputRouteParams";
+import { IDE_DEVICE_MUTATION_METHODS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -314,7 +315,6 @@ export const MCP_FORWARD_START_HEADROOM_MS = 100;
  */
 export const MAX_MCP_FORWARD_REROUTES = 3;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
-const STARTUP_PROBE_METHODS = new Set(["ide/status", "ide/ping"]);
 
 function socketRequestId(parsed: unknown): string | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -947,14 +947,6 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
-
-/** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
-const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
-  "ide/updateService",
-  "ide/setKeyValue",
-  "ide/removeKeyValue",
-  "ide/clearKeyValueFile",
-]);
 
 /** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
 interface IdeMutationCall {

@@ -1771,7 +1771,7 @@ export class SessionManager {
    * see {@link runNetworkConditionMutationExclusive}.
    */
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
-  private readonly sessionSlots = new SessionSlots<
+  private readonly sessionSlots = /* rowPending stubbed until W2 (#11799) */ new SessionSlots<
     Promise<Session>,
     SharedSessionAssignment,
     PendingSessionCreation,

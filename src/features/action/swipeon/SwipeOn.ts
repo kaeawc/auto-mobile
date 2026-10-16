@@ -104,7 +104,7 @@ import { prepareTargetDisplayAction, type RenderedObservationReader } from "../T
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
-import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { assessSwipeNavigation } from "./swipeNavigation";
@@ -231,7 +231,7 @@ export class SwipeOn extends BaseVisualChange {
   private geometry!: ElementGeometry;
   private accessibilityService!: AndroidCtrlProxyClient;
   private accessibilityDetector!: AccessibilityDetector;
-  private featureFlags!: FeatureFlagService;
+  private featureFlags!: FeatureFlagReader;
   private overlayDetector: OverlayDetector;
   private autoTargetSelector: AutoTargetSelectorService;
   private talkBackExecutor: TalkBackSwipeExecutor;

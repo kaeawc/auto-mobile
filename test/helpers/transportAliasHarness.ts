@@ -97,11 +97,9 @@ export async function transportAliasHarness(
     adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(options.avd, ""));
   }
   const adbFactory = new FakeAdbClientFactory(adb);
-  const sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   sessions.stopCleanupTimer();
   const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]);
   const registryTimer: unknown = Reflect.get(ToolRegistry, "timer");

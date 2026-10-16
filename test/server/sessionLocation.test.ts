@@ -35,11 +35,9 @@ const flush = async () => {
 };
 const harness = () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const registry = new LocationRouteRegistry(timer);
   registerLocationRouteSessionCleanup(manager, { registry });
   return { timer, manager, registry };

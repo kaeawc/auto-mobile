@@ -94,6 +94,19 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     NSString *_Nullable *_Nullable errorMessage
 );
 
+/// Synthesizes one finger travelling through `count` points, reaching points[i] at offsets[i]
+/// seconds after touch down (offsets[0] is the touch-down time), then lifting. A hold is two
+/// consecutive points at the same place. Mirrors the other synthesizers' failure contract:
+/// `symbolsUnavailable` is YES only when the private classes/selectors are missing.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePath(
+    const CGPoint *points,
+    const NSTimeInterval *offsets,
+    NSUInteger count,
+    NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
+    NSString *_Nullable *_Nullable errorMessage
+);
+
 /// Synthesizes a two-finger pinch through XCTest private event APIs.
 /// Returns NO with a descriptive error message when the private symbols are unavailable
 /// or synthesis fails. Objective-C exceptions are caught and reported through errorMessage.

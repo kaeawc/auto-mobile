@@ -38,7 +38,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.setSupersededRowReassertBackoff(fixedBackoff(RETRY_DELAY_MS));
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
@@ -60,7 +60,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
   test("successful own-row release and guarded rebind use the unguarded microtask budget", async () => {
     manager.attachDaemonSessionId("daemon-1");
-    const unguarded = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    const unguarded = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     unguarded.stopCleanupTimer();
     try {
       await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
@@ -365,7 +365,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -519,11 +521,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       land = resolve;
     });
     let superseded = false;
-    const released = manager.releaseSessionUnlessSuperseded(
-      SESSION,
-      DEVICE_LOSS,
-      () => !superseded,
-    );
+    const released = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks();
     const before = {
       ...(await store.getSession(SESSION))!,
@@ -733,7 +733,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
@@ -1124,7 +1126,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);

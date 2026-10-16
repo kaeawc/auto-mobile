@@ -269,6 +269,12 @@ JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 2. **Enumerate landed work** in `<START>..origin/main`:
    - Merged PRs: `gh pr list --state merged --search "merged:>=<DATE>" --json number,title,closingIssuesReferences` (or by commit range).
    - Closed issues: `gh issue list --state closed --search "closed:>=<DATE>" --json number,title,labels`.
+   - Open issues awaiting device verification, with **no date filter**:
+     `gh issue list --state open --label needs-device-verify --json number,title,labels`.
+     These are implemented and merged but kept open until a device confirms them,
+     so they never appear in the closed-issue query. Skip any also labelled
+     `physical-device` unless this run has that hardware, and any labelled
+     `epic` (verify its children instead).
    - Map each to a **type**: _bug-fix_ (reproduce → confirm fixed) or _feature/spec_ (exercise → confirm the output/effect exists).
 3. **Scope the changed tool surface** for regression risk:
    `git log --oneline <START>..HEAD | grep -viE "README test count badges|deps"` and
@@ -533,7 +539,13 @@ private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
    daemon-session/environment artifact.
 3. **Comment the verification result** on each closed issue / merged PR you
    confirmed (fixed / not-fixed / blocked, with the evidence).
-4. Summarize: what's genuinely done, what regressed, what's still blocked and why,
+4. **Settle every `needs-device-verify` issue you exercised.** On PASS/FIXED:
+   comment the evidence (device, OS, build, the field checked), remove the
+   `needs-device-verify` label and close the issue as completed. On
+   NOT-FIXED/REGRESSED: keep it open, keep the label, and comment the evidence
+   (file a separate issue only for a new defect). On BLOCKED: keep it open and
+   comment what blocked it.
+5. Summarize: what's genuinely done, what regressed, what's still blocked and why,
    and any release-checklist items (e.g. re-cut the ctrlproxy APK / iOS runner so a
    runner-gated feature reaches users; version bump).
 

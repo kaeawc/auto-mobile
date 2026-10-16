@@ -382,11 +382,16 @@ function noRuntimeResult(
   const unusable = releases.some(
     (release) =>
       release.installed &&
-      (release.osVersion === undefined ||
-        !parseNumericVersion(release.osVersion).ok ||
+      release.osVersion !== undefined &&
+      (!parseNumericVersion(release.osVersion).ok ||
         (release.metadataState !== "current" &&
           osSelectorMatchesVersion(selector, release.osVersion))),
   );
+  // An installed image whose Android release is unknown (an API level newer than the
+  // table) cannot satisfy any selector, but it must not poison unrelated ones (#12788).
+  const unrecognized = releases.filter(
+    (release) => release.installed && release.osVersion === undefined,
+  ).length;
   return unusable
     ? failure(
         "catalog_metadata_invalid",
@@ -394,7 +399,11 @@ function noRuntimeResult(
       )
     : failure(
         "missing_installed_runtime",
-        `No installed runtime satisfies ${describeOsSelector(selector)}.`,
+        `No installed runtime satisfies ${describeOsSelector(selector)}.${
+          unrecognized > 0
+            ? ` ${unrecognized} installed system image(s) were skipped because their Android release is not recognized.`
+            : ""
+        }`,
       );
 }
 

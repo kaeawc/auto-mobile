@@ -698,12 +698,19 @@ private fun RenderPrototypeNodeContent(
     "scroll" -> {
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
+      val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       val scrolling =
         if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
+        else if (refresh != null) Modifier.verticalScroll(scroll)
         else modifier.verticalScroll(scroll)
-      Box(scrolling) {
+      val content: @Composable BoxScope.() -> Unit = {
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
+      if (refresh != null) {
+        PrototypeRefreshBox(refresh, node.checked, modifier, interact) {
+          Box(scrolling, content = content)
+        }
+      } else Box(scrolling, content = content)
     }
     "stack" ->
       Box(modifier, contentAlignment = node.style.alignment) {

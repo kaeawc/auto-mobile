@@ -115,7 +115,9 @@ describe("remaining session row writes (#11557)", () => {
     // Warm lifecycle modules and SQL statements once; cold initialization is not the race under test.
     const warmTimer = new FakeTimer();
     const warmStore = new DeferredRowRepository(db, warmTimer);
-    const warmManager = new SessionManager(warmTimer, warmStore, () => new FakeDbWriteBarrier());
+    const warmManager = new SessionManager(warmTimer, warmStore, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     warmManager.stopCleanupTimer();
     try {
       await warmManager.createSession("warm-row-writes", DEVICE, "android", 60_000);
@@ -134,7 +136,7 @@ describe("remaining session row writes (#11557)", () => {
     timer.setCurrentTime(1_000);
     store = new DeferredRowRepository(db, timer);
     peer = new DeviceSessionRepository(db, timer);
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
@@ -182,7 +184,9 @@ describe("remaining session row writes (#11557)", () => {
     store.releaseGates = [firstWrite.promise, secondWrite.promise, restoreWrite.promise];
     store.failRewrites = 1;
     let firstSuperseded = false;
-    const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !firstSuperseded);
+    const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !firstSuperseded,
+    });
     await settle();
     expect(store.releases).toEqual([reason]);
     firstSuperseded = true;
@@ -196,7 +200,9 @@ describe("remaining session row writes (#11557)", () => {
     await settle();
     expect(store.liveRowRewrites).toBe(2);
     let secondSuperseded = false;
-    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !secondSuperseded);
+    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !secondSuperseded,
+    });
     await settle();
     expect(store.releases).toEqual([reason, reason]);
     await timer.advanceTimeAsync(40);
@@ -745,7 +751,7 @@ describe("remaining session row writes (#11557)", () => {
       expect(store.releases.slice(writesBefore)).toEqual(["session-creation-cancelled"]);
       expect(store.releaseGenerations.slice(writesBefore)).toEqual([undefined]);
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({ terminal: true });
-      const later = new SessionManager(timer, peer, () => new FakeDbWriteBarrier());
+      const later = new SessionManager(timer, peer, { barrier: () => new FakeDbWriteBarrier() });
       later.stopCleanupTimer();
       later.attachDaemonSessionId("daemon-later");
       later.attachLiveDaemonSessionIds(() => new Set(["daemon-later"]));
@@ -771,7 +777,7 @@ describe("remaining session row writes (#11557)", () => {
       timer.advanceTime(100);
       // A new daemon reads persisted stamps on its own session clock, including after a wall step.
       manager.stopCleanupTimer();
-      manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+      manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-recovery");
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-recovery"]));

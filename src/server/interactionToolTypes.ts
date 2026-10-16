@@ -1,4 +1,4 @@
-import type { SwipeOnOptions } from "../models/SwipeOnOptions";
+import type { SwipeEdge, SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
 import type { DragAndDropTarget } from "../models/DragAndDropOptions";
@@ -149,6 +149,10 @@ export interface SwipeOnArgs {
   apexPause?: number;
   returnSpeed?: number;
   speed?: "slow" | "normal" | "fast";
+  durationMs?: number;
+  fromEdge?: SwipeEdge;
+  edgeInset?: number;
+  at?: number;
   layer?: HierarchyLayer;
   platform?: Platform;
 }

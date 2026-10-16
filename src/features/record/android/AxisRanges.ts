@@ -35,15 +35,25 @@ export type GestureScaler = CoordScaler | TimedCoordScaler;
  * and inverted raw X for screen Y; 270 reverses those inversions.
  */
 export function buildScaler(ranges: AxisRanges): CoordScaler {
+  // Replay treats native points as half-open [0, size), so the digitizer maximum
+  // (which scales to exactly the display size after rounding) must land on size - 1.
+  const clampToDisplay = (value: number, size: number): number =>
+    Math.min(Math.max(value, 0), Math.max(size - 1, 0));
   const scaleX = (rawX: number, inverted: boolean): number =>
-    Math.round(
-      ((inverted ? ranges.xMax - rawX : rawX - ranges.xMin) / (ranges.xMax - ranges.xMin + 1)) *
-        ranges.displayWidth,
+    clampToDisplay(
+      Math.round(
+        ((inverted ? ranges.xMax - rawX : rawX - ranges.xMin) / (ranges.xMax - ranges.xMin + 1)) *
+          ranges.displayWidth,
+      ),
+      ranges.displayWidth,
     );
   const scaleY = (rawY: number, inverted: boolean): number =>
-    Math.round(
-      ((inverted ? ranges.yMax - rawY : rawY - ranges.yMin) / (ranges.yMax - ranges.yMin + 1)) *
-        ranges.displayHeight,
+    clampToDisplay(
+      Math.round(
+        ((inverted ? ranges.yMax - rawY : rawY - ranges.yMin) / (ranges.yMax - ranges.yMin + 1)) *
+          ranges.displayHeight,
+      ),
+      ranges.displayHeight,
     );
   return {
     toScreenPoint(rawX: number, rawY: number): { x: number; y: number } {

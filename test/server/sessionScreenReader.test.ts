@@ -79,13 +79,11 @@ interface HarnessOptions {
 function harness(options: HarnessOptions = {}) {
   const timer = new FakeTimer();
   const devices = new FakeScreenReaderDevices();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       ...(options.screenReaderBackoff ? { screenReaderBackoff: options.screenReaderBackoff } : {}),
@@ -99,7 +97,7 @@ function harness(options: HarnessOptions = {}) {
         },
       }),
     },
-  );
+  });
   /** The `accessibility` tool's recording: slot written in beforeChange, as accessibilityTools does. */
   const toggleInSession = (
     sessionUuid: string,

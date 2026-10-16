@@ -144,6 +144,101 @@ BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
 #endif
 }
 
+BOOL ObjCExceptionCatcher_synthesizePath(
+    const CGPoint *points,
+    const NSTimeInterval *offsets,
+    NSUInteger count,
+    NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
+    NSString *_Nullable *_Nullable errorMessage
+) {
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = NO;
+    }
+    if (points == NULL || offsets == NULL || count < 2) {
+        if (errorMessage != NULL) {
+            *errorMessage = @"path synthesis needs at least two points";
+        }
+        return NO;
+    }
+#if TARGET_OS_IOS
+    __block BOOL success = NO;
+    __block NSString *failure = nil;
+    __block BOOL unavailable = NO;
+
+    NSException *exception = ObjCExceptionCatcher_tryBlock(^{
+        Class pathClass = NSClassFromString(@"XCPointerEventPath");
+        Class recordClass = NSClassFromString(@"XCSynthesizedEventRecord");
+
+        if (pathClass == Nil || recordClass == Nil) {
+            unavailable = YES;
+            failure = @"XCTest private path event synthesis classes are unavailable";
+            return;
+        }
+        if (![pathClass instancesRespondToSelector:@selector(initForTouchAtPoint:offset:)] ||
+            ![pathClass instancesRespondToSelector:@selector(moveToPoint:atOffset:)] ||
+            ![pathClass instancesRespondToSelector:@selector(liftUpAtOffset:)]) {
+            unavailable = YES;
+            failure = @"XCPointerEventPath does not support the expected path selectors";
+            return;
+        }
+        if (![recordClass instancesRespondToSelector:@selector(initWithName:interfaceOrientation:)] ||
+            ![recordClass instancesRespondToSelector:@selector(addPointerEventPath:)] ||
+            ![recordClass instancesRespondToSelector:@selector(synthesizeWithError:)]) {
+            unavailable = YES;
+            failure = @"XCSynthesizedEventRecord does not support the expected synthesis selectors";
+            return;
+        }
+
+        XCSynthesizedEventRecord *record = [[recordClass alloc]
+            initWithName:@"AutoMobile path gesture"
+            interfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
+        ];
+        XCPointerEventPath *path = [[pathClass alloc]
+            initForTouchAtPoint:points[0]
+            offset:offsets[0]
+        ];
+        for (NSUInteger index = 1; index < count; index++) {
+            [path moveToPoint:points[index] atOffset:offsets[index]];
+        }
+        NSTimeInterval last = offsets[count - 1];
+        [path liftUpAtOffset:(last > 0.05 ? last : 0.05)];
+        [record addPointerEventPath:path];
+
+        NSError *synthesisError = nil;
+        success = [record synthesizeWithError:&synthesisError];
+        if (!success) {
+            NSString *description = synthesisError.localizedDescription != nil ? synthesisError.localizedDescription : @"unknown error";
+            failure = [NSString stringWithFormat:@"path synthesis failed: %@", description];
+        }
+    });
+
+    if (exception != nil) {
+        NSString *reason = exception.reason != nil ? exception.reason : @"no reason";
+        failure = [NSString stringWithFormat:@"Objective-C exception during path synthesis: %@ - %@",
+                   exception.name, reason];
+    }
+    if (!success) {
+        if (symbolsUnavailable != NULL) {
+            *symbolsUnavailable = unavailable;
+        }
+        if (errorMessage != NULL) {
+            *errorMessage = failure != nil ? failure : @"path synthesis failed";
+        }
+    }
+
+    return success;
+#else
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = YES;
+    }
+    if (errorMessage != NULL) {
+        *errorMessage = @"XCTest private path event synthesis is only available on iOS";
+    }
+    return NO;
+#endif
+}
+
 BOOL ObjCExceptionCatcher_synthesizePinch(
     CGFloat centerX,
     CGFloat centerY,

@@ -85,6 +85,7 @@ const API_LEVEL_TO_VERSION: Record<number, string> = {
   34: "14",
   35: "15",
   36: "16",
+  37: "17",
 };
 
 export function apiLevelToVersion(apiLevel: number): string | undefined {
@@ -430,6 +431,7 @@ function parseDeviceMetadata(props: Map<string, string>): Pick<AvdConfig, "devic
 
 function parseApiMetadata(props: Map<string, string>): Pick<AvdConfig, "apiLevel" | "osVersion"> {
   const sysdir = props.get("image.sysdir.1");
+  // Dotted directories (`android-37.0`, `android-36.1`) carry the API level in the first component.
   const match = sysdir?.match(/android-(\d+)/);
   if (!match) {
     return {};

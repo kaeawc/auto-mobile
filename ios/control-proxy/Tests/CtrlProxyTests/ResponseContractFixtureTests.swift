@@ -39,6 +39,7 @@ final class ResponseContractFixtureTests: XCTestCase {
 
         let genericTypes: [ResponseType] = [
             .tapCoordinatesResult, .swipeResult, .multiFingerSwipeResult, .dragResult, .pinchResult,
+            .pathGestureResult,
             .setTextResult, .appendTextResult, .clearTextResult, .imeActionResult, .selectAllResult,
             .pressKeyResult, .pressButtonResult, .pressHomeResult, .pressBackResult, .recentAppsResult,
             .actionResult, .launchAppResult, .resetPermissionsResult, .highlightResponse,

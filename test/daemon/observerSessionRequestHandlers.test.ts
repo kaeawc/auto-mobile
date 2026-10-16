@@ -61,7 +61,9 @@ describe("registration-only daemon requests", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     const barrier = new FakeDbWriteBarrier();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => barrier);
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => barrier,
+    });
     registry = new ObserverSessionRegistry(timer, 10000);
     manager.setObserverSessionRegistry(registry);
     poolLookups = 0;
@@ -328,7 +330,7 @@ describe("registration-only daemon requests", () => {
   test("registration returns a retry failure at the release deadline without an observer", async () => {
     const persistence = new DeferredReleasePersistence();
     manager.stopCleanupTimer();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     manager.setObserverSessionRegistry(registry);
     await manager.createSession(sessionId, "device-a", "android");
     const release = manager.releaseSession(sessionId, "explicit-release");
@@ -364,7 +366,7 @@ describe("registration-only daemon requests", () => {
   test("registration succeeds as an observer after an in-flight release rejects", async () => {
     const persistence = new DeferredReleasePersistence();
     manager.stopCleanupTimer();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     manager.setObserverSessionRegistry(registry);
     await manager.createSession(sessionId, "device-a", "android");
     const release = manager.releaseSession(sessionId, "device-restart:device-a");

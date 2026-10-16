@@ -1,5 +1,9 @@
 import type { Kysely, Selectable, Transaction } from "kysely";
-import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
+import {
+  SESSION_OWNER_EXITED_CODE,
+  SESSION_OWNER_EXITED_MESSAGE,
+  type SessionBrokerFailure,
+} from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -701,9 +705,8 @@ export class SqliteSessionBrokerStore {
       await this.updateRequest(trx, requestId, {
         owner_json: JSON.stringify(owner),
         state: "failed",
-        error:
-          "Session owner exited before relinquishing its device; cleanup remains owned by the broker",
-        error_code: "session_owner_exited",
+        error: SESSION_OWNER_EXITED_MESSAGE,
+        error_code: SESSION_OWNER_EXITED_CODE,
       });
       return ticket;
     });

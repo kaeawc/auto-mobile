@@ -15,12 +15,12 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
-`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
+`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
@@ -51,7 +51,7 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`biometricAuth`, `dragAndDrop`, `dragPath`, `homeScreen`, `launchApp`, `multiTouch`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
@@ -213,6 +213,73 @@ duration must be at most 3000 ms, and forward + pause + return must be at most
 5000 ms. Both schema and action reject unsafe timing before the forward swipe;
 increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
 These timing options require `boomerang: true`.
+
+`swipeOn.durationMs` sets the forward-stroke duration exactly instead of a `speed`
+preset. It is an integer from 1 to 3000 ms (the gesture transport allows a 5000 ms
+request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined with
+`speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
+by the schema and the action before any dispatch. Velocity follows from swipe
+distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
+what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
+existing 5000 ms boomerang budget still applies. Real limits: the value sent is the
+requested duration, not a measured one. Android accessibility gesture strokes complete
+at the last emitted event rather than the planned duration, and the injection path may
+quantize very short strokes, so treat durations below roughly 50 ms as a "very fast
+fling" request rather than exact timing; the effective minimum on each platform is not
+yet measured. Verify the resulting velocity on
+a device when a test depends on a pager or dismiss threshold.
+
+### Multi-finger gestures
+
+`multiTouch` performs a simultaneous 2 to 5 finger `tap`, `longPress`, or `swipe`.
+It is a dedicated tool (default-off, like `pinchOn`) rather than a `fingers` option on
+`tapAt`/`swipeOn`: it keeps the multi-pointer wire request, finger layout and capability
+gate in one place, and leaves the single-finger tools unchanged. `tapOn`/`tapAny`
+element targeting, `swipeAt` coordinate-to-coordinate travel, and multi-finger
+`doubleTap` are not covered.
+
+- **Layout.** `x`/`y` (with `coordinateSpace`) is the center of a horizontal row of
+  fingers, `fingerSpacing` px apart (default 10% of the width, kept within 40 to 160;
+  allowed 10 to 400). The row is shifted to stay on screen; a row wider than the
+  screen is refused. Fingers share one stroke, so a left or right swipe leaves the
+  fingers trailing each other along the travel axis; swipe up or down for fingers
+  side by side. The result's `points` lists every down point and `x1`/`y1`/`x2`/`y2`
+  the first finger's stroke.
+- **Swipe.** `direction` is required, and `distance` (default 30% of the travel axis) is
+  clamped to the room left so every finger stays on screen; a swipe with under 20 px of
+  room is refused, and a clamp is reported in `warning`.
+- **Duration.** `tap` holds 50 ms. `longPress` takes `durationMs` 500 to 3000 (default 1000) and `swipe` 1 to 3000 (default 300); the cap is the 5000 ms gesture request
+  minus 2000 ms of dispatch headroom.
+- **Layers.** With `layer`, every finger's down point is checked before dispatch.
+- **Android.** Two fingers use the existing CtrlProxy request. Three to five fingers
+  need the `multi_finger_gesture_v1` capability: an older APK would silently perform
+  two fingers, so the request is refused before dispatch with an actionable error.
+- **iOS.** The same fingers go through the runner's multi-finger stroke. A request that
+  was written but not acknowledged is reported as `outcomeIndeterminate` and is not
+  retryable, because it may already have landed.
+- **Limits.** A stationary stroke (tap, long press) relies on the platform accepting a
+  zero-length multi-finger path; how apps see that on each OS is unverified until it is
+  checked on a device.
+
+`swipeOn.fromEdge` (`left`, `right`, `top`, `bottom`) starts a raw swipe at a screen or
+panel edge and moves inward, for navigation drawers, the iOS interactive swipe-back,
+and edge-pull panels. `direction` must be the inward finger direction (`left` edge ->
+`right`, `right` -> `left`, `top` -> `down`, `bottom` -> `up`; `gestureType:
+"scrollTowardsDirection"` is resolved first). The touch starts `edgeInset` px (iOS
+points) inside the edge, an integer from 0 to 50, default 4, so it stays inside iOS's
+roughly 20 pt swipe-back recognizer zone. `at` (0 to 1, default 0.5) is the position
+along the edge, and the swipe travels 70% of the screen or panel extent. `fromEdge`
+cannot be combined with `container`, `lookFor`, or `autoTarget: true` (an edge swipe
+never auto-targets a scrollable). Without `display` the edge is the content edge (system
+bars excluded) unless `includeSystemInsets: true` selects the physical screen edge; with
+`display`, the selected panel's own edges are used, and omitting `includeSystemInsets`
+keeps the full panel rect while `false` uses its content edge. Android gesture
+navigation reserves a strip at the physical left and right edges for back, and the
+bottom edge for home, so a very-near-edge swipe there may be taken by the system rather
+than the app; prefer the default content-edge mode or a larger `edgeInset` when that
+happens. Named system gestures ("system back") are not provided. `swipeAt` support for
+these options follows once that tool lands.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
@@ -700,6 +767,8 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 `onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
 `prototype_gestures_v1`, with the same refusal before uploads or show.
+`scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
+`prototype_refresh_v1`, with the same refusal.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
@@ -727,12 +796,19 @@ The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it f
 iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
 `pinned:false` and no `savedAt` because the simulator cannot recover the save time.
 `deleteSaved` also accepts the authored prototype id on iOS.
-Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
-not available yet: save still succeeds with `pinned:"unsupported"`. iOS places the app icon
-on the home screen; deleting the prototype removes it, and `removeIcon:true` warns that
-separate icon removal does not apply. On Android deletion warns that
-an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
-home-screen icon may remain. Store failures return actionable errors with `errorCode`:
+On Android, `save` with `pin:true` then asks the launcher to pin a home-screen shortcut and
+reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher's "Add to home
+screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
+signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
+`device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
+the same save is safe. `autoConfirm:true` (needs `pin`) only adds a reminder: accepting the launcher
+dialog automatically is tracked in #12266. `deleteSaved` disables the shortcut; the disabled icon
+stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
+CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
+shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,
+`pin` is ignored (`pinned:"unsupported"`): the app icon is on the home screen, deleting the
+prototype removes it, and `removeIcon:true` warns that separate icon removal does not apply.
+Store failures return actionable errors with `errorCode`:
 `invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
 `duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
 `total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,
@@ -1221,21 +1297,23 @@ settled screenshot is eligible.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                                                                                                                |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                    |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
-| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals; opt-in with `setToolEnabled`.                                                                        |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                  |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                              |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                             |
+| Tool                          | What it does                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                            |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals; opt-in with `setToolEnabled`.                                                                                |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`. |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                       |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                                       |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                              |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                          |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                      |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                     |
 
 ### Tap, swipe, and form search options
 
@@ -1625,7 +1703,60 @@ during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
 a plain pinch. Android and iOS share this convention.
 
+To rotate **without zooming**, keep the finger distance constant: pass
+<code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
+together with <code>rotationDegrees</code>. <code>direction</code> is still a required
+argument but is ignored when the distance does not change, so the fingers never
+drift toward a zoom; equal distances are clamped and (on iOS) rounded together
+so they stay equal. Negative and larger-than-360 values are passed through as
+given. This is a two-finger rotate gesture, not the device <code>rotate</code>
+tool, which changes screen orientation.
+
+```json
+{ "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
+```
+
 </details>
+
+### dragPath
+
+`dragPath` is disabled by default; enable it with `setToolEnabled`. It drives one
+finger down, along a polyline, and up using the CtrlProxy streaming stroke
+protocol, so it covers signatures and drawing canvases, Android unlock patterns,
+dragging a slider thumb to a coordinate, and long press then drag (for example a
+text-selection handle). On Android it streams start/move/end frames; on iOS the
+runner follows the whole timed path in one request (private XCTest touch
+synthesis, main display only), which needs a runner built from this revision
+(feature `path_gesture_v1`) and fails before any input on an older one.
+
+- `points`: 2 to 100 `{ x, y, durationMs? }` vertices. `durationMs` (1 to 5000,
+  default 200) is the time spent moving from the previous point to this one and
+  is ignored on the first point. Long segments are sent as moves at most 50 ms
+  apart.
+- `holdMs` (0 to 3000, default 0): press and hold at the first point before
+  moving. `releaseHoldMs` (0 to 3000, default 0): keep the finger down at the last
+  point before lifting.
+- `coordinateSpace` (`absolute` default, `normalized`, `percent`), `snapshotId`,
+  `display` and `layer` behave as in `tapAt`. Every point must lie inside the
+  screen; the first bad point is named in the error and nothing is dispatched.
+- Total finger-down time (holds plus segments) is capped at 20 seconds and must
+  fit the remaining request budget with 2 seconds of headroom; otherwise the call
+  is rejected before any input.
+- An aborted, timed-out or failed call always lifts the finger with a cancelling
+  end. A failure after the finger went down reports that the stroke may have
+  partially run; observe before retrying.
+
+```json
+{
+  "points": [
+    { "x": 0.2, "y": 0.3 },
+    { "x": 0.2, "y": 0.7, "durationMs": 400 },
+    { "x": 0.8, "y": 0.7, "durationMs": 400 }
+  ],
+  "coordinateSpace": "normalized",
+  "holdMs": 100
+}
+```
 
 ### Semantic accessibility links
 

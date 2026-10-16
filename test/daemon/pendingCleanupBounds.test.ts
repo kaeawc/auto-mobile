@@ -63,14 +63,10 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000_000);
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
     restorers,
-  );
+  });
   const deviceManager = new FakeDeviceUtils();
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "cleanup-bounds", {
@@ -422,13 +418,9 @@ for (const [reason, forced] of [
     const write = spyOn(persistence, "markReleased").mockImplementation(() => gate.promise);
     dispose.push(() => write.mockRestore());
     const startedAtMs = h.timer.now();
-    const release = h.manager.releaseSession(
-      "old",
-      reason,
-      false,
-      undefined,
-      reason === "cleanup-expired" ? { expiryOrigin: "cleanup-expired" } : undefined,
-    );
+    const release = h.manager.releaseSession("old", reason, {
+      ...(reason === "cleanup-expired" ? { expiryOrigin: "cleanup-expired" } : undefined),
+    });
     await flush();
     const entry = { sessionId: "old", startedAtMs };
     expect(h.manager.getTerminalReleasesInProgress()).toEqual(
@@ -1284,7 +1276,7 @@ test("internal hung setup transfer stays uncapped with the default polling hint"
   const gate = Promise.withResolvers<void>();
   const setup = h.manager.trackSessionSetup(session, () => gate.promise);
   await flush();
-  const release = h.manager.releaseSession("old", "released", true);
+  const release = h.manager.releaseSession("old", "released", { allowExpired: true });
   await flush();
   await h.timer.advanceTimeAsync(1_000, flush);
   await release;
@@ -1527,7 +1519,7 @@ test("declined final commit fence cannot force a parked live-row rewrite", async
   const release = h.manager.releaseSessionUnlessSuperseded(
     "kept",
     `device-disconnected:${android.deviceId}`,
-    () => ++checks < 2,
+    { commitFence: () => ++checks < 2 },
   );
   await flush();
   expect(checks).toBe(2);
@@ -1592,9 +1584,11 @@ test("an undecided commit fence still forces wedged teardown at its deadline", a
   const release = h.manager.releaseSessionUnlessSuperseded(
     "wedged-fence",
     `device-disconnected:${android.deviceId}`,
-    () => {
-      fenceChecks++;
-      return true;
+    {
+      commitFence: () => {
+        fenceChecks++;
+        return true;
+      },
     },
   );
   await flush();

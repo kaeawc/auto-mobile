@@ -44,8 +44,10 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
 
   const setup = async (devices: BootedDevice[]) => {
     const timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();

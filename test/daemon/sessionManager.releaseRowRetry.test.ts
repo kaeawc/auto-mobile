@@ -36,7 +36,7 @@ describe("the row of a released session (#11557)", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.setSupersededRowReassertBackoff(fixedBackoff(REWRITE_RETRY_DELAY_MS));
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(RELEASE_RETRY_DELAY_MS));
@@ -71,7 +71,9 @@ describe("the row of a released session (#11557)", () => {
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);

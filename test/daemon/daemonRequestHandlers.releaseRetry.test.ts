@@ -33,7 +33,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
     barrier = new FakeDbWriteBarrier();
-    manager = new SessionManager(timer, persistence, () => barrier);
+    manager = new SessionManager(timer, persistence, { barrier: () => barrier });
     // Drive the sweep explicitly, rather than firing every periodic tick on advance.
     manager.stopCleanupTimer();
     const deviceManager = new FakeDeviceManager(

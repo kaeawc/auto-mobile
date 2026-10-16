@@ -923,13 +923,18 @@ export class PinchOn extends BaseVisualChange {
     const minDistance = Math.max(PINCH_MIN_DISTANCE_PX, minDimension * 0.1);
 
     let { distanceStart, distanceEnd } = this.inferDistances(options, minDimension);
+    const isPureRotation = distanceStart === distanceEnd;
 
-    if (options.direction === "out" && distanceEnd <= distanceStart) {
-      distanceEnd = Math.min(maxDistance, distanceStart * 1.5);
-    }
+    // A pure rotation (equal finger distances) must stay equal: the direction nudges below would
+    // otherwise turn it into a 1.5x zoom (#12536).
+    if (!isPureRotation) {
+      if (options.direction === "out" && distanceEnd <= distanceStart) {
+        distanceEnd = Math.min(maxDistance, distanceStart * 1.5);
+      }
 
-    if (options.direction === "in" && distanceStart <= distanceEnd) {
-      distanceStart = Math.min(maxDistance, distanceEnd * 1.5);
+      if (options.direction === "in" && distanceStart <= distanceEnd) {
+        distanceStart = Math.min(maxDistance, distanceEnd * 1.5);
+      }
     }
 
     distanceStart = clamp(distanceStart, minDistance, maxDistance);

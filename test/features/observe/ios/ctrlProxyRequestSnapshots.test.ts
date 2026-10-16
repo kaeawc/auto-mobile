@@ -270,6 +270,22 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
   },
   {
+    name: "request_path_gesture",
+    builder: "CtrlProxyGestures.requestPathGesture",
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context, undefined, async () => [
+        "path_gesture_v1",
+      ]).requestPathGesture(
+        [
+          { x: 12.5, y: 24.25, offsetMs: 0 },
+          { x: 12.5, y: 24.25, offsetMs: 300 },
+          { x: 40.75, y: 80.5, offsetMs: 700 },
+        ],
+        5000,
+        "frame-42",
+      ),
+  },
+  {
     name: "request_multi_finger_swipe",
     builder: "CtrlProxyGestures.requestMultiFingerSwipe",
     invoke: (h) =>

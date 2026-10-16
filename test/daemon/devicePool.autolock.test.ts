@@ -186,12 +186,10 @@ describe("DevicePool autolock", () => {
         return { status: "restored" as const };
       },
     };
-    const restoringManager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => restorer,
-    );
+    const restoringManager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => restorer,
+    });
     const restoringPool = new DevicePool(
       createDevicePoolDependencies(restoringManager, "daemon-session-1", {
         timer: timer,
@@ -592,11 +590,9 @@ describe("DevicePool autolock", () => {
       const restorationStarted = new Promise<void>((resolve) => {
         restoreStarted = resolve;
       });
-      const restoringManager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({
+      const restoringManager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({
           restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
@@ -604,7 +600,7 @@ describe("DevicePool autolock", () => {
             return { status: "restored" as const };
           },
         }),
-      );
+      });
       const restoringPool = new DevicePool(
         createDevicePoolDependencies(restoringManager, "daemon-session-1", {
           timer: timer,
@@ -658,11 +654,9 @@ describe("DevicePool autolock", () => {
       const restorationStarted = new Promise<void>((resolve) => {
         restoreStarted = resolve;
       });
-      const restoringManager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({
+      const restoringManager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({
           restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
@@ -670,7 +664,7 @@ describe("DevicePool autolock", () => {
             return { status: "restored" as const };
           },
         }),
-      );
+      });
       const restoringPool = new DevicePool(
         createDevicePoolDependencies(restoringManager, "daemon-session-1", {
           timer: timer,

@@ -151,7 +151,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
-      const mgr = new SessionManager(timer, repo, () => current);
+      const mgr = new SessionManager(timer, repo, { barrier: () => current });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
 
@@ -174,7 +174,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const { repo, activity } = makeRepo();
       const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
-      const mgr = new SessionManager(timer, repo, () => draining);
+      const mgr = new SessionManager(timer, repo, { barrier: () => draining });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.recordHeartbeat("s1");

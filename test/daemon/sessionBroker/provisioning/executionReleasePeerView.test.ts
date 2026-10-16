@@ -254,17 +254,15 @@ describe("managed execution release peer view", () => {
         expect(faults.calls.claimExecution).toBe(2);
         expect(reowner.ownershipState(SESSION)).toBe("unconfirmed");
         const writes: string[] = [];
-        const manager = new SessionManager(
-          timer,
-          new FakeDeviceSessionPersistence(),
-          () => new FakeDbWriteBarrier(),
-          () => ({
+        const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
             restore: async () => {
               writes.push("restore");
               return { status: "restored" as const };
             },
           }),
-        );
+        });
         manager.stopCleanupTimer();
         await manager.createSession(SESSION, DEVICE, "android");
         manager.setKeepScreenAwake(SESSION, { applied: true });

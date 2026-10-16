@@ -62,6 +62,11 @@ public protocol GesturePerforming: Sendable {
     )
         throws
 
+    // MARK: - Path Gestures
+
+    /// One finger down at the first point, through each later point at its offset, then up.
+    func path(points: [PathGesturePoint]) throws
+
     // MARK: - Pinch Gestures
 
     /// Pinch at center with explicit starting and ending finger distances.
@@ -191,6 +196,10 @@ extension GesturePerforming {
         throws
     {
         try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+    }
+
+    public func path(points _: [PathGesturePoint]) throws {
+        throw CommandError.invalidParameter("path", "unsupported by this gesture performer")
     }
 
     public func doubleTap(x _: Double, y _: Double) throws {

@@ -949,13 +949,31 @@ function openWhenErrors(
     ? fail(`${path}.openWhen.key`, `${name} requires a boolean state key`)
     : undefined;
 }
+/** Pull-to-refresh needs a vertical scroll, and its declared key must hold a boolean. */
+function refreshErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  const refresh = value.type === "scroll" ? object(value.refresh) : undefined;
+  if (!refresh) {
+    return undefined;
+  }
+  if (value.axis === "horizontal") {
+    return fail(`${path}.refresh`, "Pull-to-refresh needs a vertical scroll");
+  }
+  const key = refresh.stateKey;
+  return typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean"
+    ? fail(`${path}.refresh.stateKey`, "Refresh requires a boolean state key")
+    : undefined;
+}
 function sheetBindingErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const error = openWhenErrors(value, path, state);
+    const error = openWhenErrors(value, path, state) ?? refreshErrors(value, path, state);
     if (error) {
       return forItem(error, item);
     }
@@ -984,6 +1002,7 @@ function boundKeys(value: Record<string, unknown>): string[] {
     value.hourKey,
     value.minuteKey,
     object(value.trailing)?.stateKey,
+    value.type === "scroll" ? object(value.refresh)?.stateKey : undefined,
   ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
     ? object(value.openWhen)
@@ -1000,7 +1019,8 @@ function controlErrors(
     componentBindingErrors(value, path, state) ??
     selectionErrors(value, path, state) ??
     trailingErrors(value, path, state) ??
-    openWhenErrors(value, path, state)
+    openWhenErrors(value, path, state) ??
+    refreshErrors(value, path, state)
   );
 }
 /**

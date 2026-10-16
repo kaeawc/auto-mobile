@@ -114,11 +114,9 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   beforeEach(async () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [DEVICE]);
     pool = new DevicePool(

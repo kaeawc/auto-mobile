@@ -171,6 +171,7 @@ const genericTypes = new Set([
   "tap_coordinates_result",
   "swipe_result",
   "multi_finger_swipe_result",
+  "path_gesture_result",
   "drag_result",
   "pinch_result",
   "set_text_result",

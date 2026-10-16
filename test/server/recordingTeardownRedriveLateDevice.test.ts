@@ -70,11 +70,9 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     repo = new FakeVideoRecordingRepository();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     markers = new InMemoryDeviceHealthMarkers(timer);
     incarnation = undefined;

@@ -4,6 +4,7 @@ import {
   buildClaudeArgs,
   buildMcpConfig,
   fillPlaceholders,
+  isolatedServerEnv,
   systemPromptFor,
 } from "../../../scripts/agent-benchmark/invocation";
 
@@ -101,6 +102,35 @@ describe("agent benchmark claude invocation", () => {
           },
         },
       },
+    });
+  });
+});
+
+describe("agent benchmark isolated server environment", () => {
+  test("strips inherited AutoMobile state overrides but keeps shared device claims", () => {
+    const env = isolatedServerEnv(
+      {
+        PATH: "/bin",
+        HOME: "/home/me",
+        UNSET: undefined,
+        AUTOMOBILE_DB_PATH: "/resident.db",
+        AUTO_MOBILE_DB_PATH: "/legacy.db",
+        AUTOMOBILE_DATA_DIR: "/resident-data",
+        AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/resident.sock",
+        AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/tmp/resident.lock",
+        AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+      },
+      PATHS,
+    );
+    expect(env).toEqual({
+      PATH: "/bin",
+      HOME: "/home/me",
+      AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+      AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-abc",
+      AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
+      AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",
+      AUTOMOBILE_DB_DIR: "/run/db",
+      AUTOMOBILE_LOG_DIR: "/run/logs",
     });
   });
 });

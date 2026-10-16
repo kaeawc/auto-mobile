@@ -151,9 +151,16 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
   ];
 }
 
+/**
+ * Case-insensitive match that must not continue into a letter or digit on either
+ * side, so `EXPECTED_COUNT: 3` does not match `EXPECTED_COUNT: 30`.
+ */
+export function containsBounded(haystack: string, needle: string): boolean {
+  return new RegExp(`(?<![A-Za-z0-9])${RegExp.escape(needle)}(?![A-Za-z0-9])`, "i").test(haystack);
+}
+
 function missingFrom(haystack: string, needles: string[]): string[] {
-  const lower = haystack.toLowerCase();
-  return needles.filter((needle) => !lower.includes(needle.toLowerCase()));
+  return needles.filter((needle) => !containsBounded(haystack, needle));
 }
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {

@@ -29,7 +29,7 @@ bun scripts/agent-benchmark/run.ts --suite bug-repro
 bun scripts/agent-benchmark/run.ts --all
 bun scripts/agent-benchmark/run.ts --all --dry-run       # validate suites, print the claude command
 bun scripts/agent-benchmark/run.ts --suite ux-flow --model claude-sonnet-5-5 --json
-bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-repro/20261016T010203Z
+bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-repro/20261016T010203Z-1a2b3c4d
 ```
 
 | Option                             | Meaning                                                                                |
@@ -52,7 +52,7 @@ for a usage error.
 1. **Preflight (not measured).** Resolves the device, optionally installs the APK, force-stops
    the app, clears its data, seeds SharedPreferences, deep-links to the suite's start screen, and
    waits `settleSeconds`.
-2. **Claude run (measured).** Spawns `claude -p --output-format stream-json` from the per-run
+2. **Claude run (measured).** Spawns `claude -p --output-format stream-json` from an empty temp
    directory, with the prompt on stdin. `wallClockSeconds` covers only this step.
 3. **Post-run (not measured).** Dumps the device screen with `uiautomator` when the suite has
    screen checks, then stops the run's private daemon.
@@ -64,12 +64,16 @@ for a usage error.
 Each run is isolated so earlier runs and your own setup cannot change the result:
 
 - `--strict-mcp-config` with a generated config: only the auto-mobile server is available.
-- Claude runs from the per-run directory, so this repository's `CLAUDE.md` and skills are not
-  discovered implicitly.
+- Claude runs from an empty temp directory outside the repository. Claude Code loads `CLAUDE.md`
+  from its working directory and every parent, so running from anywhere inside the checkout
+  (including `scratch/`) would still pull in this repository's `CLAUDE.md` and skills.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
   (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
-  (`<run>/logs`). The ADB coordination directory is shared on purpose, so a resident daemon's
-  device claims are still respected. Stop other sessions on the target device before a run.
+  (`<run>/logs`). AutoMobile state overrides inherited from your shell, such as
+  `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_DAEMON_SOCKET_PATH`, and the legacy `AUTO_MOBILE_*` names, are
+  removed first, because an explicit override would otherwise win over the run's values. The ADB
+  coordination directory is shared on purpose, so a resident daemon's device claims are still
+  respected. Stop other sessions on the target device before a run.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`.
 
 ## Verdicts
@@ -82,8 +86,9 @@ A run's verdict comes only from hard signals; baselines never change it.
 | `failed`     | The run completed, but a `verify` check failed: the final answer or the device screen did not show the expected text.                                                                              |
 | `incomplete` | The process timed out or exited non-zero, the MCP server did not connect, the `result` event is missing or an error (for example `error_max_budget_usd`), or the transcript has unparseable lines. |
 
-`verify.answerIncludes` checks Claude's final reply, case-insensitively. Suite prompts ask for a
-fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
+`verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
+must stand alone: it can't run on into a letter or digit, so `EXPECTED_COUNT: 3` doesn't match
+`EXPECTED_COUNT: 30`. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
 `uiautomator` dump taken after Claude exits. This is the oracle that catches an agent that
 _reports_ success without achieving it.
 
@@ -147,7 +152,8 @@ failed run.
 
 ## Artifacts
 
-Each run writes to `scratch/agent-benchmarks/<suite>/<timestamp>/`:
+Each run writes to `scratch/agent-benchmarks/<suite>/<timestamp>-<id>/`. The short random id keeps two
+runs of the same suite that start in the same second apart.
 
 | File                             | Contents                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------- |

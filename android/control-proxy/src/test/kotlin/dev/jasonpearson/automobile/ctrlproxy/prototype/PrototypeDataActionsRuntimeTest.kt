@@ -387,4 +387,28 @@ class PrototypeDataActionsRuntimeTest {
     assertTrue(events.isEmpty())
     assertEquals(2, runtime.items()!!.size)
   }
+
+  @Test
+  fun `a state write is revalidated against the data an earlier action in the list changed`() =
+    runTest {
+      val spec =
+        validated(
+          """{"id":"p","window":{"placement":{"type":"fullscreen"}},"state":{"k_a":true,"k_b":true},""" +
+            """"data":{"items":[{"id":"a"}]},"root":{"type":"column","children":[""" +
+            """{"type":"button","label":"Go","onTap":[""" +
+            """{"type":"appendData","path":"/data/items","value":{"value":{"id":"b"}}},""" +
+            """{"type":"setState","key":"k_b","value":"oops"}]},""" +
+            """{"type":"column","repeat":{"items":{"path":"/items"},"as":"item"},"children":[""" +
+            """{"type":"switch","stateKey":"k_{item.id}"}]}]}}""",
+        )
+      val runtime = runtime(spec)
+
+      val failure = runCatching {
+        runtime.handle(tap(runtime.renderModel().root.children[0].source?.onTap))
+      }
+
+      assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
+      // The live prototype never holds a string where a row's switch needs a boolean.
+      assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["k_b"])
+    }
 }

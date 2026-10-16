@@ -194,7 +194,9 @@ class RetrofitPrototypeHttpClient(
     when {
       body == null -> EMPTY_BODY
       body is JsonPrimitive && body.isString -> body.content.toRequestBody(TEXT)
-      else -> JSON_CODEC.encodeToString(JsonElement.serializer(), body).toRequestBody(JSON)
+      else ->
+        JSON_CODEC.encodeToString(JsonElement.serializer(), PrototypeRequests.sortedKeys(body))
+          .toRequestBody(JSON)
     }
 
   private fun received(

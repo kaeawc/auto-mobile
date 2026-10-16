@@ -43,6 +43,18 @@ object PrototypeRequests {
   const val EVENT_URL_MAX = 2048
   const val EVENT_MESSAGE_MAX = 512
 
+  /**
+   * [value] with every object's keys in sorted order (UTF-16 code units, `String.compareTo`),
+   * recursively, so a request body serializes the same bytes on every runtime. Arrays keep theirs.
+   */
+  fun sortedKeys(value: JsonElement): JsonElement =
+    when (value) {
+      is JsonObject ->
+        JsonObject(value.toSortedMap().mapValuesTo(LinkedHashMap()) { sortedKeys(it.value) })
+      is JsonArray -> JsonArray(value.map(::sortedKeys))
+      else -> value
+    }
+
   /** The `<into>__meta` pointer: the same path with `__meta` appended to its last segment. */
   fun metaPath(into: String): String = into + META_SUFFIX
 
@@ -159,6 +171,7 @@ object PrototypeRequestResolver {
         is Parsed.Url -> parsed
       }
     val headers = linkedMapOf<String, String>()
+    val headerNames = HashSet<String>()
     val query = target.segments.toMutableList()
     // Query entries are set in sorted key order (UTF-16 code units), whatever order they were
     // authored in, so every platform builds the same URL.
@@ -170,13 +183,18 @@ object PrototypeRequestResolver {
             ?: return invalidRequest(
               bindingFailure(raw, "$field.$name", inputs),
             )
-        if (field == "headers") headers[name] = text else setQuery(query, name, text)
+        if (field == "headers") {
+          if (!headerNames.add(name.lowercase())) {
+            return invalidRequest("headers.$name duplicates another header name")
+          }
+          headers[name] = text
+        } else setQuery(query, name, text)
       }
     }
     var body: JsonElement? = null
     action.body?.let { binding ->
       when (val resolved = PrototypeDataWriter.resolveValue(binding, inputs)) {
-        is PrototypeDataValue.Resolved -> body = resolved.value
+        is PrototypeDataValue.Resolved -> body = PrototypeRequests.sortedKeys(resolved.value)
         is PrototypeDataValue.Failure -> return invalidRequest("body: ${resolved.error.message}")
       }
     }

@@ -133,6 +133,17 @@ class HostPrototypeHttpClientTest {
   }
 
   @Test
+  fun `the frame body has its object keys sorted`() = runTest {
+    val client = client()
+    val body = Json.parseToJsonElement("""{"b":1,"a":{"d":1,"c":2}}""")
+    val pending = async { client.execute(request().copy(body = body)) }
+    runCurrent()
+
+    assertTrue(frames.single().contains(""""body":{"a":{"c":2,"d":1},"b":1}"""))
+    pending.cancel()
+  }
+
+  @Test
   fun `a frame without headers or a body omits them`() = runTest {
     val client = client()
     val pending = async {

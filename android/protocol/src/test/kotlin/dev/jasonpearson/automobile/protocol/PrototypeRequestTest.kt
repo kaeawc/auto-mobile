@@ -146,6 +146,30 @@ class PrototypeRequestTest {
   }
 
   @Test
+  fun `header names that differ only by case are refused`() {
+    val headers = request(""""headers":{"X-Test":"1","x-test":"2"}""")
+    assertEquals("root.onTap[0].headers[\"x-test\"]", failure(headers)?.path)
+    assertEquals(
+      PrototypeRequestErrorCode.INVALID_REQUEST,
+      (PrototypeRequestResolver.resolve(action(headers), "http://a.test", inputs)
+          as PrototypeResolvedRequestResult.Failure)
+        .error
+        .code,
+    )
+  }
+
+  @Test
+  fun `a json object body serializes with its keys sorted at every depth`() {
+    val body =
+      resolved(
+          request(""""method":"POST","body":{"value":{"b":1,"a":{"d":[{"z":1,"y":2}],"c":3}}}"""),
+          "http://a.test",
+        )
+        .body
+    assertEquals("""{"a":{"c":3,"d":[{"y":2,"z":1}]},"b":1}""", body.toString())
+  }
+
+  @Test
   fun `header and query bindings take every binding form and reject objects`() {
     assertValid(request(""""headers":{"A":{"state":"q"},"B":{"data":"/title"},"C":{"value":1}}"""))
     assertEquals(

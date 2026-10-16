@@ -2,7 +2,7 @@
 1033	src/constants/release.ts
 2869	src/ctrlProxy/CtrlProxyManager.ts
 4150	src/ctrlProxy/IOSCtrlProxyManager.ts
-1807	src/ctrlProxy/IosCtrlProxyBuilder.ts
+1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts

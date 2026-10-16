@@ -151,6 +151,24 @@ interface LocalRunnerHashPin {
   mtimeMs: number;
 }
 
+/** Process-wide collaborators and overrides; see {@link IosCtrlProxyBuilder.configure}. */
+export interface IosCtrlProxyBuilderSettings {
+  /** Expected IPA checksum; null resolves it from the release registry. */
+  expectedChecksum: string | null;
+  /** Expected runner checksum; null resolves it from the environment or registry. */
+  expectedRunnerChecksum: string | null;
+  expectedRunnerChecksumTarget: RunnerSha256Target | null;
+  /** Local-build switch (#5561); null reads the environment variable. */
+  useLocalBuild: boolean | null;
+  /** Pre-launch codesign/notarization gate (#4760). */
+  codesignVerifier: CtrlProxyCodesignVerifier;
+  timer: Timer;
+  /** Gate that skips the startup prefetch without a usable Xcode toolchain (#4407). */
+  prerequisiteDetector: IosPrerequisiteDetector;
+  /** Builder the startup prefetch drives; null uses `getInstance()`. */
+  prefetchBuilder: PrefetchBuilder | null;
+}
+
 /**
  * The narrow builder surface {@link IosCtrlProxyPrefetcher} drives.
  * Exposed so the prefetch gate can be tested without a real build/download
@@ -220,33 +238,22 @@ export class IosCtrlProxyBuilder {
   private static readonly METADATA_FILENAME = "ctrl-proxy-ios-bundle.json";
   private static readonly MIN_BUNDLE_SIZE_BYTES = 10000;
 
+  // Process-wide collaborators and policy overrides, injected as one settings object (tests,
+  // or a host that owns its lifecycle) instead of one mutable static per seam. Read lazily at
+  // each use so `configure()` always applies.
+  private static settings: IosCtrlProxyBuilderSettings = IosCtrlProxyBuilder.defaultSettings();
+
   // The process-wide startup prefetch (single flight, result, error). Its collaborators are
-  // the static seams below, read lazily so test overrides keep applying.
+  // read from `settings` lazily, so overrides keep applying.
   private static readonly prefetcher = new IosCtrlProxyPrefetcher({
-    timer: { now: () => IosCtrlProxyBuilder.timer.now() },
+    timer: { now: () => IosCtrlProxyBuilder.settings.timer.now() },
     prerequisiteDetector: {
-      hasIosPrerequisites: () => IosCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites(),
+      hasIosPrerequisites: () =>
+        IosCtrlProxyBuilder.settings.prerequisiteDetector.hasIosPrerequisites(),
     },
-    builder: () => IosCtrlProxyBuilder.prefetchBuilderOverride ?? IosCtrlProxyBuilder.getInstance(),
+    builder: () =>
+      IosCtrlProxyBuilder.settings.prefetchBuilder ?? IosCtrlProxyBuilder.getInstance(),
   });
-  private static expectedChecksumOverride: string | null = null;
-  private static expectedRunnerChecksumOverride: string | null = null;
-  private static expectedRunnerChecksumTargetOverride: RunnerSha256Target | null = null;
-  // Test seam for the local-build switch (#5561). null → read the env var.
-  private static useLocalBuildOverride: boolean | null = null;
-  private static timer: Timer = defaultTimer;
-
-  // Gate that decides whether the startup runner-bundle prefetch should run at
-  // all (issue #4407). Skips cleanly on hosts without a usable Xcode toolchain.
-  private static iosPrerequisiteDetector: IosPrerequisiteDetector =
-    new DefaultIosPrerequisiteDetector();
-  // Test seam for the builder the static prefetch drives; null uses getInstance().
-  private static prefetchBuilderOverride: PrefetchBuilder | null = null;
-
-  // Pre-launch codesign/notarization gate (issue #4760). Static seam mirrors
-  // `timer` so tests inject a fake and never spawn a real `codesign`/`spctl`.
-  private static codesignVerifier: CtrlProxyCodesignVerifier =
-    new DefaultCtrlProxyCodesignVerifier();
 
   // Singleton instances per configuration
   private static instances: Map<string, IosCtrlProxyBuilder> = new Map();
@@ -357,64 +364,35 @@ export class IosCtrlProxyBuilder {
   public static resetInstances(): void {
     IosCtrlProxyBuilder.instances.clear();
     IosCtrlProxyBuilder.prefetcher.reset();
-    IosCtrlProxyBuilder.expectedChecksumOverride = null;
-    IosCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
-    IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
-    IosCtrlProxyBuilder.useLocalBuildOverride = null;
-    IosCtrlProxyBuilder.timer = defaultTimer;
-    IosCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
-    IosCtrlProxyBuilder.prefetchBuilderOverride = null;
-    IosCtrlProxyBuilder.codesignVerifier = new DefaultCtrlProxyCodesignVerifier();
+    IosCtrlProxyBuilder.settings = IosCtrlProxyBuilder.defaultSettings();
+  }
+
+  /** Fresh defaults: no overrides, real timer, real detector and codesign verifier. */
+  private static defaultSettings(): IosCtrlProxyBuilderSettings {
+    return {
+      expectedChecksum: null,
+      expectedRunnerChecksum: null,
+      expectedRunnerChecksumTarget: null,
+      useLocalBuild: null,
+      codesignVerifier: new DefaultCtrlProxyCodesignVerifier(),
+      timer: defaultTimer,
+      prerequisiteDetector: new DefaultIosPrerequisiteDetector(),
+      prefetchBuilder: null,
+    };
   }
 
   /**
-   * Override the codesign/notarization verifier for testing (issue #4760). Null
-   * restores the default `codesign`/`spctl`-backed verifier.
+   * Inject collaborators and policy overrides for every builder in this process. Only the
+   * given keys change (they merge over the current settings); `null` restores the defaults,
+   * as does {@link resetInstances}. Because it merges, setting `expectedRunnerChecksum` alone
+   * keeps any earlier `expectedRunnerChecksumTarget`; pass the target explicitly to change it.
+   * Replaces one static `…ForTesting` setter per seam.
    */
-  public static setCodesignVerifierForTesting(verifier: CtrlProxyCodesignVerifier | null): void {
-    IosCtrlProxyBuilder.codesignVerifier = verifier ?? new DefaultCtrlProxyCodesignVerifier();
-  }
-
-  /**
-   * Override the timer for testing
-   */
-  public static setTimerForTesting(timer: Timer): void {
-    IosCtrlProxyBuilder.timer = timer;
-  }
-
-  /**
-   * Override checksum for tests
-   */
-  public static setExpectedChecksumForTesting(checksum: string | null): void {
-    IosCtrlProxyBuilder.expectedChecksumOverride = checksum;
-  }
-
-  /** Override the iOS-prerequisite gate for the prefetch (issue #4407). Null restores the default detector. */
-  public static setIosPrerequisiteDetectorForTesting(
-    detector: IosPrerequisiteDetector | null,
-  ): void {
-    IosCtrlProxyBuilder.iosPrerequisiteDetector = detector ?? new DefaultIosPrerequisiteDetector();
-  }
-
-  /** Override the builder driven by the static prefetch (issue #4407). Null restores getInstance(). */
-  public static setPrefetchBuilderForTesting(builder: PrefetchBuilder | null): void {
-    IosCtrlProxyBuilder.prefetchBuilderOverride = builder;
-  }
-
-  public static setExpectedRunnerChecksumForTesting(
-    checksum: string | null,
-    target: RunnerSha256Target | null = null,
-  ): void {
-    IosCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
-    IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
-  }
-
-  /**
-   * Override the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch for testing
-   * (issue #5561). Null restores reading the environment variable.
-   */
-  public static setUseLocalBuildForTesting(useLocalBuild: boolean | null): void {
-    IosCtrlProxyBuilder.useLocalBuildOverride = useLocalBuild;
+  public static configure(overrides: Partial<IosCtrlProxyBuilderSettings> | null): void {
+    IosCtrlProxyBuilder.settings =
+      overrides === null
+        ? IosCtrlProxyBuilder.defaultSettings()
+        : { ...IosCtrlProxyBuilder.settings, ...overrides };
   }
 
   /**
@@ -1038,7 +1016,7 @@ export class IosCtrlProxyBuilder {
   }
 
   private getExpectedChecksum(): string {
-    const override = IosCtrlProxyBuilder.expectedChecksumOverride;
+    const override = IosCtrlProxyBuilder.settings.expectedChecksum;
     if (override !== null) {
       return override;
     }
@@ -1046,7 +1024,7 @@ export class IosCtrlProxyBuilder {
   }
 
   private getExpectedRunnerChecksum(): string {
-    const override = IosCtrlProxyBuilder.expectedRunnerChecksumOverride;
+    const override = IosCtrlProxyBuilder.settings.expectedRunnerChecksum;
     if (override !== null) {
       return override;
     }
@@ -1063,7 +1041,7 @@ export class IosCtrlProxyBuilder {
   }
 
   private getExpectedRunnerChecksumTarget(): RunnerSha256Target {
-    const override = IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride;
+    const override = IosCtrlProxyBuilder.settings.expectedRunnerChecksumTarget;
     if (override !== null) {
       return override;
     }
@@ -1265,7 +1243,7 @@ export class IosCtrlProxyBuilder {
    */
   static isPinnedVersionUnverifiable(): boolean {
     if (
-      IosCtrlProxyBuilder.expectedChecksumOverride !== null ||
+      IosCtrlProxyBuilder.settings.expectedChecksum !== null ||
       IosCtrlProxyBuilder.isLocalBuildModeEnabled()
     ) {
       return false;
@@ -1508,7 +1486,7 @@ export class IosCtrlProxyBuilder {
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
   static isLocalBuildModeEnabled(): boolean {
-    const override = IosCtrlProxyBuilder.useLocalBuildOverride;
+    const override = IosCtrlProxyBuilder.settings.useLocalBuild;
     if (override !== null) {
       return override;
     }
@@ -1787,7 +1765,7 @@ export class IosCtrlProxyBuilder {
 
     let outcome: CodesignVerificationOutcome;
     try {
-      outcome = await IosCtrlProxyBuilder.codesignVerifier.verifyAppBundle(appPath);
+      outcome = await IosCtrlProxyBuilder.settings.codesignVerifier.verifyAppBundle(appPath);
     } catch (error) {
       // The codesign/spctl tools themselves errored (e.g. not installed). Treat
       // as a non-fatal warning by default so a broken toolchain does not block

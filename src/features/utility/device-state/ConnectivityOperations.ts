@@ -56,12 +56,7 @@ export class ConnectivityOperations {
     let stdout: string;
     try {
       const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const result = await adb.executeCommand(
-        ANDROID_CONNECTIVITY_READ_COMMAND,
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await adb.executeCommand(ANDROID_CONNECTIVITY_READ_COMMAND, { noRetry: true });
       stdout = result.stdout;
     } catch (error) {
       // Strategy 2: log, then return a typed failure — the tool reports the
@@ -259,7 +254,7 @@ export class ConnectivityOperations {
     adb: AdbExecutor,
     command: string,
   ): Promise<string | undefined> {
-    const result = await adb.executeCommand(command, undefined, undefined, true);
+    const result = await adb.executeCommand(command, { noRetry: true });
     const stdout = result.stdout;
     const stderr = result.stderr ?? "";
     return outputLooksLikeShellFailure(stdout, stderr)

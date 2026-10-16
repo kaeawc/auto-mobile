@@ -35,7 +35,9 @@ internal class BackgroundHeartbeatManager(
   // Sessions the daemon has acknowledged at least once; only then is a bare 404 a real loss.
   private val confirmed = ConcurrentHashMap.newKeySet<String>()
   private val unconfirmedMisses = ConcurrentHashMap<String, Int>()
-  @Volatile private var running = AtomicBoolean(false)
+  // The reference is swapped under startLock for each run: a loop owns the flag it was started
+  // with, so a new holder can start a fresh loop while an old one is still winding down.
+  @Volatile private var running: AtomicBoolean = AtomicBoolean(false)
   private val startLock = Any()
   private val refCount = AtomicInteger(0)
   @Volatile private var intervalMs: Long = 1_000L

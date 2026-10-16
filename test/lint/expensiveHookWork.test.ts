@@ -8,7 +8,7 @@ const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
 const BASELINE_FILE = path.join(import.meta.dir, "expensive-hook-work-baseline.txt");
 // Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 169;
+const BASELINE_CEILING = 167;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 

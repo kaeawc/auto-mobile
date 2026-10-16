@@ -5,7 +5,7 @@ import {
   resolveIosOpenUrlBackend,
   type IosOpenUrlBackendDeps,
 } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
 
 const simulatorUdid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
@@ -28,7 +28,7 @@ class SignalRecordingUrlLauncher extends FakeDeviceUrlLauncher {
 }
 
 function fakeDeps() {
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const launcher = new SignalRecordingUrlLauncher();
   const constructions = { simulator: 0, physical: 0 };
   const deps: IosOpenUrlBackendDeps = {

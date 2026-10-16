@@ -40,6 +40,7 @@ import {
   recoverRootlessAccessibilityService,
   type ObserveAccessibilityManagerFactory,
 } from "./android/ObserveAccessibilityRecovery";
+import { resolveViewHierarchyReadArgs, type ViewHierarchyReadRequest } from "./hierarchyReadArgs";
 
 function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
   const reason = result?.unavailableReason ?? "unknown";
@@ -139,12 +140,25 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   async getViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
+    perfOrRequest?: PerformanceTracker | ViewHierarchyReadRequest,
+    skipWaitForFreshArg?: boolean,
+    minTimestampArg?: number,
+    signalArg?: AbortSignal,
+    readOptionsArg?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult> {
+    const {
+      perf = new NoOpPerformanceTracker(),
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      signal,
+      readOptions,
+    } = resolveViewHierarchyReadArgs(
+      perfOrRequest,
+      skipWaitForFreshArg,
+      minTimestampArg,
+      signalArg,
+      readOptionsArg,
+    );
     if (this.device.platform !== "ios" && this.device.platform !== "android") {
       throw new Error("Unsupported platform");
     }

@@ -40,6 +40,10 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import AdmZip from "adm-zip";
 import type { IosPhysicalAppLister } from "../../../src/features/observe/ListInstalledApps";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandRest,
+} from "../../fakes/executeCommandOptionsOf";
 
 const playgroundBadgingOutput = readFileSync(
   path.join(import.meta.dir, "../../fixtures/android-playground-debug-badging.txt"),
@@ -77,27 +81,15 @@ class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
   postRestoreAbortController?: AbortController;
   private otherUserRestoreCompleted = false;
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, ...rest: ExecuteCommandRest): Promise<ExecResult> {
+    const options = executeCommandOptionsOf([command, ...rest]);
+    const { signal } = options;
     // Match AdbClient's explicit-or-ambient selection before dispatching.
     const resolvedSignal = this.honourRequestAbort ? (signal ?? getAbortSignal()) : signal;
     if (this.honourRequestAbort) {
       resolvedSignal?.throwIfAborted();
     }
-    let result = await super.executeCommand(
-      command,
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      resolvedSignal,
-      waitForProcessSettlementAfterAbort,
-    );
+    let result = await super.executeCommand(command, { ...options, signal: resolvedSignal });
     if (command.startsWith("install ") && ++this.installAttempts === 2 && this.reinstallOperation) {
       result = await this.reinstallOperation();
       if (this.honourRequestAbort) {
@@ -495,19 +487,16 @@ describe("InstallApp", () => {
 
       override async executeCommand(
         command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
+        ...rest: ExecuteCommandRest
       ): Promise<ExecResult> {
         if (command.includes("shell pm list packages --user 0")) {
           const response = this.listPackagesResponses.shift();
           if (response) {
-            await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+            await super.executeCommand(command, ...rest);
             return response;
           }
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, ...rest);
       }
     }
 
@@ -575,10 +564,7 @@ describe("InstallApp", () => {
 
       override async executeCommand(
         command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
+        ...rest: ExecuteCommandRest
       ): Promise<ExecResult> {
         if (command === "shell pm list packages --user 0") {
           this.listPackagesCalls++;
@@ -586,7 +572,7 @@ describe("InstallApp", () => {
             throw new Error("ADB disconnected after install");
           }
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, ...rest);
       }
     }
 

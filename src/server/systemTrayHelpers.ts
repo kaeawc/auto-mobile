@@ -69,6 +69,7 @@ import {
 import { getDeviceDataStreamServer } from "../daemon/deviceDataStreamSocketServer";
 import { serverConfig } from "../utils/ServerConfig";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
+import type { AdbExecuteOptions } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 // ============================================================================
 // Interfaces
@@ -87,10 +88,7 @@ export interface SystemTrayObserver {
 export interface SystemTrayAdb {
   executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
+    options?: AdbExecuteOptions,
   ): Promise<{ stdout: string; stderr: string }>;
   getDeviceTimestampMs(): Promise<number>;
 }
@@ -511,13 +509,11 @@ export const resolveAppLabel = async (
   try {
     const { adbFactory } = getSystemTrayDependencies();
     const adb = adbFactory(device);
-    const result = await adb.executeCommand(
-      `shell dumpsys package ${shellQuote(appId)}`,
-      undefined,
-      DUMPSYS_MAX_BUFFER,
-      true,
+    const result = await adb.executeCommand(`shell dumpsys package ${shellQuote(appId)}`, {
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+      noRetry: true,
       signal,
-    );
+    });
     return parseAppLabelFromDumpsys(result.stdout);
   } catch (error) {
     // Both the CtrlProxy fast path and this dumpsys fallback failed (e.g. app
@@ -2836,13 +2832,11 @@ const readDumpsysNotificationOutput = async (
   signal?: AbortSignal,
 ): Promise<string | undefined> => {
   try {
-    const result = await adb.executeCommand(
-      "shell dumpsys notification --noredact",
-      undefined,
-      DUMPSYS_MAX_BUFFER,
-      true,
+    const result = await adb.executeCommand("shell dumpsys notification --noredact", {
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+      noRetry: true,
       signal,
-    );
+    });
     return result.stdout;
   } catch (error) {
     signal?.throwIfAborted();
@@ -3033,10 +3027,7 @@ export const listSystemTrayNotifications = async (
     const endY = Math.floor(Math.max(observation.systemInsets.top, height * 0.35));
     await adbFactory(device).executeCommand(
       `shell input swipe ${x} ${startY} ${x} ${endY} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`,
-      undefined,
-      undefined,
-      undefined,
-      signal,
+      { signal },
     );
     swipes++;
     // Reconcile pages against a settled viewport: a mid-fling frame has not

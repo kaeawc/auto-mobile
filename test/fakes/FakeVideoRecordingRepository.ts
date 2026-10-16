@@ -37,6 +37,11 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     this.records.set(record.recordingId, {
       ...structuredClone(record),
       createdAt: existing?.createdAt ?? record.createdAt,
+      // Mirror the real upsert: a missing recorder daemon id keeps the stored one.
+      ...(record.recorderDaemonSessionId === undefined &&
+      existing?.recorderDaemonSessionId !== undefined
+        ? { recorderDaemonSessionId: existing.recorderDaemonSessionId }
+        : {}),
     });
   }
 

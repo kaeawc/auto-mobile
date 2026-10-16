@@ -56,7 +56,7 @@ describe("Android hinge angle read-back", () => {
         degrees: 180,
       });
       expect(execute.mock.calls).toEqual([
-        ["emu sensor get hinge-angle0", undefined, undefined, true, signal],
+        ["emu sensor get hinge-angle0", { noRetry: true, signal }],
       ]);
     } finally {
       execute.mockRestore();

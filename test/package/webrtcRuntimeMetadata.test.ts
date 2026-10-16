@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import ts from "typescript";
+import { dynamicImports, parseSource } from "../helpers/entrypointOrder";
 
 describe("packaged WebRTC runtime metadata", () => {
   // `reflect-metadata` is a side-effect polyfill that `build.ts` inlines into
@@ -16,29 +18,102 @@ describe("packaged WebRTC runtime metadata", () => {
   // before any module that could depend on it.
   test("the packaged entrypoint initializes runtime metadata first", async () => {
     const entrypoint = await Bun.file("src/index.ts").text();
-    const executableBody = entrypoint.replace(/^#!.*\r?\n/, "");
-    const importLines = executableBody.split(/\r?\n/).filter((line) => line.startsWith("import "));
+    expect(leadingImportViolations(entrypoint)).toEqual([]);
+  });
 
-    expect(importLines.slice(0, 3)).toEqual([
-      'import "./runtime/bunRuntimeGuard";',
-      'import "./daemon/processEntry";',
+  test("the leading-import guard fails when an import is reordered or given bindings", async () => {
+    const entrypoint = await Bun.file("src/index.ts").text();
+    const swapped = entrypoint
+      .replace('import "./daemon/processEntry";', "@@A@@")
+      .replace('import "./runtime/reflectMetadata";', 'import "./daemon/processEntry";')
+      .replace("@@A@@", 'import "./runtime/reflectMetadata";');
+    expect(swapped).not.toBe(entrypoint);
+    expect(leadingImportViolations(swapped)).not.toEqual([]);
+    const withBindings = entrypoint.replace(
       'import "./runtime/reflectMetadata";',
-    ]);
+      'import * as metadata from "./runtime/reflectMetadata";',
+    );
+    expect(leadingImportViolations(withBindings)).not.toEqual([]);
+    const inserted = entrypoint.replace(
+      'import "./runtime/bunRuntimeGuard";',
+      'import { errorMessage } from "./utils/describeUnknownError";\nimport "./runtime/bunRuntimeGuard";',
+    );
+    expect(leadingImportViolations(inserted)).not.toEqual([]);
   });
 
   test("the runtime guard and process entry modules import nothing", async () => {
-    const runtimeGuard = await Bun.file("src/runtime/bunRuntimeGuard.ts").text();
-    expect(runtimeGuard).not.toMatch(
-      /^\s*(import|export\s+\*\s+from|export\s+\{[^}]*\}\s+from)\b/m,
-    );
-    const processEntry = await Bun.file("src/daemon/processEntry.ts").text();
-    expect(processEntry).not.toMatch(
-      /^\s*(import|export\s+\*\s+from|export\s+\{[^}]*\}\s+from)\b/m,
-    );
+    for (const path of ["src/runtime/bunRuntimeGuard.ts", "src/daemon/processEntry.ts"]) {
+      expect(moduleDependencyViolations(await Bun.file(path).text())).toEqual([]);
+    }
+  });
+
+  test("the import-nothing guard fails on static, re-export and dynamic dependencies", () => {
+    for (const source of [
+      'import "./x";\nexport const a = 1;',
+      'export * from "./x";',
+      'export { a } from "./x";',
+      'export const lazy = () => import("./x");',
+      'import legacy = require("./x");',
+    ]) {
+      expect(moduleDependencyViolations(source)).not.toEqual([]);
+    }
+    expect(moduleDependencyViolations("export const a = 1;")).toEqual([]);
   });
 
   test("runtime metadata initialization loads reflect-metadata", async () => {
     const runtimeInit = await Bun.file("src/runtime/reflectMetadata.ts").text();
-    expect(runtimeInit.trim()).toBe('import "reflect-metadata";');
+    expect(sideEffectImportSpecifiers(runtimeInit)).toEqual(["reflect-metadata"]);
+    expect(parseSource(runtimeInit).statements).toHaveLength(1);
   });
 });
+
+/** The first three import statements of the entrypoint, as side-effect imports in this order. */
+function leadingImportViolations(source: string): string[] {
+  const imports = parseSource(source).statements.filter(ts.isImportDeclaration);
+  const expected = [
+    "./runtime/bunRuntimeGuard",
+    "./daemon/processEntry",
+    "./runtime/reflectMetadata",
+  ];
+  return expected.flatMap((specifier, index) => {
+    const declaration = imports[index];
+    if (!declaration) {
+      return [`missing import ${index} (${specifier})`];
+    }
+    const actual = ts.isStringLiteral(declaration.moduleSpecifier)
+      ? declaration.moduleSpecifier.text
+      : declaration.moduleSpecifier.getText();
+    if (actual !== specifier) {
+      return [`import ${index} is ${actual}, expected ${specifier}`];
+    }
+    return declaration.importClause ? [`import ${specifier} must be a side-effect import`] : [];
+  });
+}
+
+function sideEffectImportSpecifiers(source: string): string[] {
+  return parseSource(source)
+    .statements.filter(ts.isImportDeclaration)
+    .filter((declaration) => !declaration.importClause)
+    .map((declaration) => (declaration.moduleSpecifier as ts.StringLiteral).text);
+}
+
+/** A module that must stay dependency-free: no static, re-export or dynamic imports. */
+function moduleDependencyViolations(source: string): string[] {
+  const sf = parseSource(source);
+  const violations: string[] = [];
+  for (const statement of sf.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      violations.push(`static import ${statement.moduleSpecifier.getText()}`);
+    }
+    if (ts.isImportEqualsDeclaration(statement)) {
+      violations.push(`import-equals ${statement.moduleReference.getText()}`);
+    }
+    if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+      violations.push(`re-export from ${statement.moduleSpecifier.getText()}`);
+    }
+  }
+  for (const call of dynamicImports(sf)) {
+    violations.push(`dynamic import ${call.getText()}`);
+  }
+  return violations;
+}

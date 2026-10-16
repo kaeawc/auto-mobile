@@ -591,7 +591,7 @@ describe("explicit action display", () => {
     );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(screen("external"));
-    const swipe = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const swipe = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: sessionRenderedObservation,
@@ -603,7 +603,7 @@ describe("explicit action display", () => {
     expect(fakeAdb.getCommandCalls().at(-1)?.signal).toBe(signal);
     expect(observe.getExecuteOptions().at(-1)?.signal).toBe(signal);
 
-    const drag = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
+    const drag = new DragAndDrop(android, fakeAdb, autoTimer(), {
       lastRenderedObservation: sessionRenderedObservation,
     });
     drag.observeScreen = observe;
@@ -617,7 +617,7 @@ describe("explicit action display", () => {
       ).success,
     ).toBe(true);
 
-    const pinch = new PinchOn(android, fakeAdb as unknown as AdbClient, {
+    const pinch = new PinchOn(android, fakeAdb, {
       timer: autoTimer(),
       lastRenderedObservation: sessionRenderedObservation,
     });
@@ -738,7 +738,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const swipes: string[] = [];
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });
@@ -779,7 +779,7 @@ describe("explicit action display", () => {
       client as unknown as AndroidCtrlProxyClient,
     );
     try {
-      const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, timer);
+      const action = new DragAndDrop(android, fakeAdb, timer);
       Object.assign(action, {
         observedInteraction: async (run: (observation: ObserveResult) => Promise<object>) =>
           run(screen("internal")),
@@ -815,7 +815,7 @@ describe("explicit action display", () => {
       client as unknown as AndroidCtrlProxyClient,
     );
     try {
-      const action = new PinchOn(android, fakeAdb as unknown as AdbClient);
+      const action = new PinchOn(android, fakeAdb);
       Object.assign(action, {
         observedInteraction: async (run: () => Promise<object>) => run(),
         resolveTarget: async () => ({
@@ -1001,7 +1001,7 @@ describe("explicit action display", () => {
     ];
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
+    const action = new DragAndDrop(android, fakeAdb, autoTimer(), {
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -1031,7 +1031,7 @@ describe("explicit action display", () => {
     );
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
@@ -1049,7 +1049,7 @@ describe("explicit action display", () => {
     );
 
     const defaultCoordinates: number[] = [];
-    const defaultAction = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const defaultAction = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });
@@ -1338,7 +1338,7 @@ describe("explicit action display", () => {
     const unsupported: Array<Partial<SwipeOnOptions>> = [{ focusTarget: true }];
     const observe = new FakeObserveScreen();
     const fakeAdb = new FakeAdbClient();
-    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+    const action = new SwipeOn(android, fakeAdb, {
       timer: autoTimer(),
       observeScreen: observe,
     });

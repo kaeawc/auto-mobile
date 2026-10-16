@@ -8,7 +8,6 @@ import { DefaultElementGeometry } from "../../../../src/features/utility/Element
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { Element, ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
@@ -61,7 +60,7 @@ function harness({
   observe.setObserveResult(() => (gesture.getSwipeCalls().length ? after : before));
   const action = new SwipeOn(
     { name: "fake", platform: "android", deviceId: "unnamed" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
       observeScreen: observe,

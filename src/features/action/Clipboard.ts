@@ -20,7 +20,6 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import type { KeyboardHierarchyProvider } from "./Keyboard";
 import { getFocusedTextField, type FocusedTextField } from "./ClearText";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 type ClipboardCtrlProxy = {
@@ -89,14 +88,12 @@ export class Clipboard {
       getViewHierarchy: (signal, options) => {
         // Every verification sample must bypass the iOS cache, including the pre-paste sample.
         IOSCtrlProxyClient.getInstance(device).invalidateCache();
-        return new ViewHierarchy(device, adbFactory).getViewHierarchy(
-          undefined,
-          new NoOpPerformanceTracker(),
-          false,
-          0,
+        return new ViewHierarchy(device, adbFactory).getViewHierarchy(undefined, {
+          skipWaitForFresh: false,
+          minTimestamp: 0,
           signal,
-          options?.timeoutMs,
-        );
+          timeoutMs: options?.timeoutMs,
+        });
       },
     };
   }

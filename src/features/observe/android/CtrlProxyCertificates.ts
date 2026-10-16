@@ -490,33 +490,23 @@ export class CtrlProxyCertificates {
    * Push a certificate file to the device.
    */
   private async pushCertificateToDevice(sourcePath: string): Promise<string> {
-    await this.context.adb.executeCommand(
-      `shell mkdir -p ${DEVICE_CERT_DIR}`,
-      undefined,
-      undefined,
-      true,
-    );
+    await this.context.adb.executeCommand(`shell mkdir -p ${DEVICE_CERT_DIR}`, { noRetry: true });
 
     const devicePath = this.buildDeviceCertificatePath(sourcePath);
     await this.context.adb.executeCommand(
       `push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`,
-      undefined,
-      undefined,
-      true,
+      { noRetry: true },
     );
 
     return devicePath;
   }
 
   private async removeDeviceCertificate(devicePath: string): Promise<void> {
-    await this.context.adb.executeCommand(
-      `shell rm -f ${shellQuote(devicePath)}`,
-      DEVICE_CERT_CLEANUP_TIMEOUT_MS,
-      undefined,
-      true,
-      // Override ADB's ambient request signal so cancellation still permits bounded cleanup.
-      new AbortController().signal,
-    );
+    await this.context.adb.executeCommand(`shell rm -f ${shellQuote(devicePath)}`, {
+      timeoutMs: DEVICE_CERT_CLEANUP_TIMEOUT_MS,
+      noRetry: true,
+      signal: new AbortController().signal,
+    });
   }
 
   /**

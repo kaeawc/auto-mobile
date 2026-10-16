@@ -3892,12 +3892,12 @@ describe("killDevice handler", () => {
       // fresh boot observation. Binding the session must preserve its tombstone.
       const fakeSessionManager = new FakeDeviceSessionManager();
       fakeSessionManager.setConnectedDevices([device]);
-      (
-        registry as unknown as { deviceSessionManager: FakeDeviceSessionManager }
-      ).deviceSessionManager = fakeSessionManager;
-      (registry as unknown as { toolCallRepository: unknown }).toolCallRepository = {
-        async recordToolCall(): Promise<void> {},
-      };
+      registry.setCollaboratorsForTesting({ deviceSessionManager: fakeSessionManager });
+      registry.setCollaboratorsForTesting({
+        toolCallRepository: {
+          async recordToolCall(): Promise<void> {},
+        },
+      });
       registry.registerDeviceAware(
         "postKillProbe",
         "Post-kill binding probe",

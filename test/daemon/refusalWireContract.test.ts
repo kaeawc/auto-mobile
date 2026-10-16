@@ -21,6 +21,7 @@ import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as managedSlotConfig from "../../src/models/managedSlotConfig";
+import * as sessionConfig from "../../src/devices/sessionConfig";
 import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
@@ -102,6 +103,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
   "models/managedSlotConfig": managedSlotConfig,
+  "devices/sessionConfig": sessionConfig,
   "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,

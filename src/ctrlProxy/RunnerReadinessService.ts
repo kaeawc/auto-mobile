@@ -886,6 +886,16 @@ export class RunnerReadinessService {
       if (this.dependencies.timer.now() >= verificationDeadlineMs) {
         break;
       }
+      // Android can clear accessibility enablement after a successful setup
+      // write. Reconcile the observed disabled state within the same deadline,
+      // then require a fresh read before accepting readiness.
+      await this.runPhase(
+        context,
+        "runner-setup",
+        attempts,
+        () => manager.enable(),
+        verificationDeadlineMs,
+      );
     }
     if (!installed || !enabled) {
       this.fail(

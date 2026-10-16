@@ -19,3 +19,8 @@ export type ExecuteCommandArgs = readonly [
 export function executeCommandOptionsOf(args: ExecuteCommandArgs): AdbExecuteOptions {
   return resolveExecuteCommandOptions(args[1], args[2], args[3], args[4], args[5], args[6]);
 }
+
+/** The `executeCommand` parameters after the command, for overrides that forward to `super`. */
+export type ExecuteCommandRest = ExecuteCommandArgs extends readonly [string, ...infer Rest]
+  ? Rest
+  : never;

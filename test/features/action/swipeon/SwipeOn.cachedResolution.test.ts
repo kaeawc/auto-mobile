@@ -5,7 +5,6 @@ import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecu
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ObserveResult } from "../../../../src/models";
 import { encodeAndroidFlat, encodeIosDollar } from "../../../fixtures/hierarchyArbitraries";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -137,7 +136,7 @@ function harness({
   });
   const action = new SwipeOn(
     { name: "fake", platform, deviceId: "cached-resolution-swipe" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
       observeScreen: observe,

@@ -107,7 +107,7 @@ test("post-bind reconnect retries until the fake WebSocket server is listening",
   const hierarchy = new ViewHierarchy(device, undefined, subject, timer);
   const observed = await settle(
     timer,
-    hierarchy.getViewHierarchy(undefined, undefined, false, 0),
+    hierarchy.getViewHierarchy(undefined, { skipWaitForFresh: false, minTimestamp: 0 }),
     "observe after post-bind reconnect",
   );
 

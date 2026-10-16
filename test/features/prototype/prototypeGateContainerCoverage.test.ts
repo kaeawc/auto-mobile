@@ -26,6 +26,7 @@ const fixtures: Record<string, Node> = {
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
+  prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
   prototype_refresh_v1: {
     type: "scroll",
     refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
@@ -69,7 +70,7 @@ const containers: {
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",

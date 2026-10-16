@@ -23,7 +23,7 @@ internal const val PROTOTYPE_RETAIN_MAX_NODES = 512
 
 private val RETENTION_TRANSITIONS = setOf("fade", "none")
 private val RETENTION_INLINE_ROLES =
-  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager")
+  setOf("box", "row", "column", "flow", "grid", "carousel", "scroll", "card", "pager")
 private val RETENTION_EXCLUDED_ROLES =
   setOf(
     "textField",
@@ -102,7 +102,8 @@ private fun retentionNeutralParent(parent: PrototypeRenderNode?): Boolean {
         node.style.source.arrangement !in RETENTION_SPACED_ARRANGEMENTS
     // A zero-sized retained child can still consume a wrapping line or grid cell.
     "flow",
-    "grid" -> false
+    "grid",
+    "carousel" -> false
     else -> false
   }
 }

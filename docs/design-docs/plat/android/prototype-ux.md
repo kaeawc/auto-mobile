@@ -171,7 +171,6 @@ before uploads or show, with an update/relaunch hint. `status` reports the last 
 data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
 clears it. Events never carry data.
 
-````
 
 
 `repeat.items` accepts a strict `{ "path": pointer }` alongside the unchanged literal list.
@@ -1234,7 +1233,7 @@ list is a `column` with `repeat` whose single child is the row template).
     }
   ]
 }
-````
+```
 
 - `items` is a literal array of 1 to 32 objects declared in the spec. Each object
   maps state-style field names to scalar values (string, finite number, boolean);

@@ -41,7 +41,6 @@ function harness() {
   const timer = new FakeTimer();
   const state = new ProxySessionState();
   const recovery = new FakeRecovery();
-  const managed = new Set<string>();
   const calls: unknown[][] = [];
   const inFlight = new Set<string>();
   const keptInUse = new Set<string>();
@@ -112,7 +111,6 @@ function harness() {
     state,
     tickLateness: new TickLatenessClock(10),
     livenessRecovery: recovery,
-    managedExecutionSessions: managed,
     heartbeatLeashMs: 100,
     heartbeatIntervalMs: 10,
     boundSessionReplayTtlMs: 1_000,
@@ -126,7 +124,6 @@ function harness() {
     timer,
     state,
     recovery,
-    managed,
     calls,
     controls,
     inFlight,

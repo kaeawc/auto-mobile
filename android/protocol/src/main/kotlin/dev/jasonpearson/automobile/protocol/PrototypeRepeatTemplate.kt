@@ -198,6 +198,22 @@ internal enum class PrototypeBindableKind {
 
   /** A data action's `/data/...` path: renders to text, and only a whole `{index}` binds. */
   DATA_PATH,
+
+  /**
+   * A `request`'s `into`: the [DATA_PATH] grammar, kept apart as in TypeScript's `requestInto` so
+   * data-action gating does not claim it.
+   */
+  REQUEST_INTO,
+
+  /**
+   * A `request` `url` or literal header/query string. It binds like [TEXT] (repeat placeholders,
+   * limits) but `{data:/pointer}` and `{key}` are read when the request runs, so the render-time
+   * data resolver leaves it alone.
+   */
+  REQUEST_TEXT;
+
+  /** The kinds holding a `/data/...` path with `{index}` segments. */
+  fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
 }
 
 /**
@@ -207,6 +223,11 @@ internal enum class PrototypeBindableKind {
  */
 internal object PrototypeBindableFields {
   private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
+  /** A member path as the TypeScript validator spells it: `.name`, or `["name"]` if not a name. */
+  fun memberPath(path: String, name: String): String =
+    if (contextNamePattern.matches(name)) "$path.$name"
+    else "$path[" + JsonPrimitive(name).toString() + "]"
 
   fun <T : Any> first(
     node: JsonObject,
@@ -284,8 +305,55 @@ internal object PrototypeBindableFields {
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "request" -> request(action, path)
         else -> null
       }
+
+    /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
+    fun request(action: JsonObject, path: String): T? {
+      field(action, "url", path, PrototypeBindableKind.REQUEST_TEXT)?.let {
+        return it
+      }
+      for (name in listOf("headers", "query")) {
+        entries(action, name, path)?.let {
+          return it
+        }
+      }
+      binding(action["body"], "$path.body")?.let {
+        return it
+      }
+      field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
+        return it
+      }
+      field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      for (name in listOf("onSuccess", "onError")) {
+        for ((entry, entryPath) in objects(action, name, path)) {
+          action(entry, entryPath)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
+
+    /** A header or query entry: a literal string is text, an object is a value binding. */
+    fun entries(action: JsonObject, name: String, path: String): T? {
+      val entries = action[name] as? JsonObject ?: return null
+      for ((key, value) in entries) {
+        val at = memberPath("$path.$name", key)
+        if (value is JsonObject)
+          binding(value, at)?.let {
+            return it
+          }
+        else
+          visit(value, at, PrototypeBindableKind.REQUEST_TEXT)?.let {
+            return it
+          }
+      }
+      return null
+    }
 
     /** An emit-binding value: the binding itself, then the state key it names. */
     fun binding(value: JsonElement?, at: String): T? {
@@ -299,9 +367,7 @@ internal object PrototypeBindableFields {
     fun emitContext(action: JsonObject, path: String): T? {
       val context = action["context"] as? JsonObject ?: return null
       for ((name, value) in context) {
-        val at =
-          if (contextNamePattern.matches(name)) "$path.context.$name"
-          else "$path.context[" + JsonPrimitive(name).toString() + "]"
+        val at = memberPath("$path.context", name)
         binding(value, at)?.let {
           return it
         }
@@ -602,7 +668,7 @@ internal object PrototypeRepeatValidator {
     }
     var dataRecognized = false
     val resolved =
-      if (kind == PrototypeBindableKind.TEXT)
+      if (kind == PrototypeBindableKind.TEXT || kind == PrototypeBindableKind.REQUEST_TEXT)
         state.data.text(text) {
           dataRecognized = true
           chargeText(state, it)
@@ -640,7 +706,7 @@ internal object PrototypeRepeatValidator {
     scope: Scope,
   ): PrototypeSpecError? {
     val text = value.string()
-    if (kind != PrototypeBindableKind.DATA_PATH || text == null) return null
+    if (!kind.isDataPath() || text == null) return null
     return PrototypeRepeatTemplate.dataPathPlaceholderMessage(text, scope.alias)?.let {
       fail(path, it)
     }
@@ -662,18 +728,14 @@ internal object PrototypeRepeatValidator {
       )
         fail(fieldPath, "Emit item/index binding outside a repeat template")
       else if (
-        kind == PrototypeBindableKind.TEXT &&
+        (kind == PrototypeBindableKind.TEXT || kind == PrototypeBindableKind.REQUEST_TEXT) &&
           text != null &&
           state.data.text(text) { chargeText(state, it) } == null
       )
         dataTextError(fieldPath, state)
       else if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
-      else if (
-        kind == PrototypeBindableKind.DATA_PATH &&
-          text != null &&
-          PrototypeRepeatTemplate.dataPathHasIndex(text)
-      )
+      else if (kind.isDataPath() && text != null && PrototypeRepeatTemplate.dataPathHasIndex(text))
         fail(fieldPath, "{index} outside a repeat template")
       else null
     }
@@ -829,7 +891,8 @@ internal object PrototypeRepeatValidator {
     return scopes
   }
 
-  private val checkedKeyFields = listOf("key", "stateKey", "activeKey", "hourKey", "minuteKey")
+  private val checkedKeyFields =
+    listOf("key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
   private fun checkedKeys(value: JsonObject): List<String> {
@@ -869,7 +932,11 @@ internal object PrototypeRepeatValidator {
       replacements[path]
         ?: when (element) {
           is JsonObject ->
-            JsonObject(element.mapValues { (key, child) -> replace(child, "$path.$key") })
+            JsonObject(
+              element.mapValues { (key, child) ->
+                replace(child, PrototypeBindableFields.memberPath(path, key))
+              },
+            )
           is JsonArray -> JsonArray(element.mapIndexed { i, child -> replace(child, "$path[$i]") })
           else -> element
         }

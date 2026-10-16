@@ -1188,6 +1188,36 @@ function gridSpanErrors(context: Context): PrototypeValidationError | undefined 
   return undefined;
 }
 
+/** Tree-shape checks that run after the schema walk, in the order the host reports them. */
+function layoutErrors(
+  value: unknown,
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    gridSpanErrors(context) ??
+    swipeActionsErrors(context) ??
+    repeatErrors(value, repeats) ??
+    prototypeStorageError(value)
+  );
+}
+
+/** Action, container and state checks, after the layout checks pass. */
+function behaviourErrors(
+  value: unknown,
+  context: Context,
+  data: Record<string, unknown>,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
+    prototypeRequestsError(context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context) ??
+    stateTypeErrors(value, context, data, repeats)
+  );
+}
+
 function validateValue(value: unknown): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
@@ -1199,15 +1229,8 @@ function validateValue(value: unknown): PrototypeValidationResult {
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
-    gridSpanErrors(context) ??
-    swipeActionsErrors(context) ??
-    repeatErrors(value, repeats) ??
-    prototypeStorageError(value) ??
-    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
-    prototypeRequestsError(context.actions) ??
-    pagerErrors(context) ??
-    stackErrors(context) ??
-    stateTypeErrors(value, context, data, repeats);
+    layoutErrors(value, context, repeats) ??
+    behaviourErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };
   }

@@ -60,7 +60,7 @@
 1429	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
 1291	src/features/prototype/prototypeSpec.ts
-1250	src/features/prototype/prototypeValidation.ts
+1271	src/features/prototype/prototypeValidation.ts
 2878	src/features/systemTray/systemTrayHelpers.ts
 1684	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts

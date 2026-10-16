@@ -113,7 +113,7 @@ export class DisplayGeometryTracker {
     }
     const tracked = this.timeline.currentRotation;
     if (actual !== tracked) {
-      return `display rotation at stop (${actual}) differs from the rotation tracked during recording (${tracked}); a rotation was not reported, so tapAt and swipeOn steps after it may be recorded at the wrong coordinates or direction`;
+      return `display rotation at stop (${actual}) differs from the rotation tracked during recording (${tracked}); a rotation was not reported, so tapAt, swipeAt and swipeOn steps after it may be recorded at the wrong coordinates or direction`;
     }
     return undefined;
   }

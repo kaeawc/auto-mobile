@@ -213,6 +213,10 @@ function tap(pipeline: Awaited<ReturnType<typeof setupTapPipeline>>, holdMs = 12
 }
 
 describe("DualTrackRecorder geometry timeline (#10174)", () => {
+  test("the unconfirmed-geometry warning names every step type it can affect", () => {
+    expect(GEOMETRY_UNCONFIRMED_WARNING).toContain("tapAt, swipeAt and swipeOn steps");
+  });
+
   test("host-only stop skips geometry confirmation and returns its existing warning", async () => {
     const p = await setupTapPipeline(true);
     try {
@@ -486,6 +490,7 @@ describe("DualTrackRecorder geometry timeline (#10174)", () => {
 
     // Nothing was pushed, so the touch cannot be proven right: it is labelled with the mismatch.
     expect(steps[0].label).toContain("display rotation at stop (1) differs");
+    expect(steps[0].label).toContain("tapAt, swipeAt and swipeOn steps");
     expect(geometryWarnings).toEqual([
       expect.stringContaining("display rotation at stop (1) differs"),
     ]);

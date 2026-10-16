@@ -521,6 +521,8 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
     expect(result.planContent).toContain("OK");
     expect(result.error).toContain("Stopping the recorder did not finish");
     expect(result.error).toContain("timed out after 10000 ms");
+    // Every step type whose coordinates a display change can corrupt is named.
+    expect(result.error).toContain("tapAt, swipeAt and swipeOn steps");
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
@@ -762,6 +764,7 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       "Warning: Display geometry changed or was unreadable during recording:",
     );
     expect(result.error).toContain("display rotation at stop (1) differs");
+    expect(result.error).toContain("tapAt, swipeAt and swipeOn steps");
   });
 
   test("a labelled step survives plan validation and the result warns", async () => {

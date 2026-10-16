@@ -540,7 +540,7 @@ async function stopAndBuildResult(
   if (touchTrackMessage) {
     logger.warn(`[DeviceGestureRecording] ${touchTrackMessage}`);
   }
-  // A rotation or display size change (or an unreadable rotation) can leave tapAt/swipeOn
+  // A rotation or display size change (or an unreadable rotation) can leave tapAt/swipeAt/swipeOn
   // steps at the wrong coordinates or direction (#10174); never report that as a clean plan.
   const geometryMessage = geometryWarnings?.length
     ? `Display geometry changed or was unreadable during recording: ${geometryWarnings.join("; ")}. Steps labelled "Warning:" may be recorded at the wrong coordinates or direction.`
@@ -549,7 +549,7 @@ async function stopAndBuildResult(
     logger.warn(`[DeviceGestureRecording] ${geometryMessage}`);
   }
   const salvageMessage = salvagedAfter
-    ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
+    ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt, swipeAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
     : undefined;
   if (salvageMessage) {
     logger.warn(`[DeviceGestureRecording] ${salvageMessage}`);

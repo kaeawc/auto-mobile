@@ -74,7 +74,7 @@ export const MERGE_WINDOW_MS = 750;
 export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
 
 export const GEOMETRY_UNCONFIRMED_WARNING =
-  "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
+  "rotation/size could not be confirmed at stop; tapAt, swipeAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
 
 /**
  * Merges GestureEvents from getevent with InteractionEvents from the CtrlProxy
@@ -178,7 +178,7 @@ export class DualTrackRecorder {
     steps: PlanStep[];
     stepCount: number;
     touchTrackFailure?: TouchTrackFailure;
-    /** Rotation/size problems that may have mis-recorded tapAt/swipeOn steps (#10174). */
+    /** Rotation/size problems that may have mis-recorded tapAt/swipeAt/swipeOn steps (#10174). */
     geometryWarnings?: string[];
   }> {
     if (options.hostOnly) {
@@ -253,7 +253,7 @@ export class DualTrackRecorder {
   }
 
   /**
-   * Attach a warning label to every tapAt/swipeOn step whose touch overlapped a
+   * Attach a warning label to every tapAt/swipeAt/swipeOn step whose touch overlapped a
    * display change or ran under a geometry that could not be read, and return the
    * distinct warnings for the recording result. Runs at stop so late pushes count.
    * Strictly best-effort: it never rejects and is bounded by

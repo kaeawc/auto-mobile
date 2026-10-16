@@ -62,7 +62,9 @@ for a usage error.
 
 ### Isolation
 
-Each run is isolated so earlier runs and your own setup cannot change the result:
+Each run isolates the local state below so earlier runs and your own Claude Code setup do not
+leak into it. Provider, proxy, and model-routing settings are kept on purpose (see below), so
+they can still affect results:
 
 - `--strict-mcp-config` with a generated config: only the auto-mobile server is available.
 - Claude runs from an empty temp directory outside the repository. Claude Code loads `CLAUDE.md`

@@ -190,6 +190,15 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    // Proxy routing is recorded by host and bypass list, never with its credentials.
+    const proxied = providerIdentity({
+      HTTPS_PROXY: "http://user:pass@proxy.corp:3128",
+      no_proxy: "localhost,127.0.0.1",
+    });
+    expect(proxied).toBe(
+      ["HTTPS_PROXY=proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
+    );
+    expect(proxied).not.toContain("pass");
     expect(providerIdentity({ ANTHROPIC_BASE_URL: "not a url" })).toBe(
       "ANTHROPIC_BASE_URL=(unparseable)",
     );

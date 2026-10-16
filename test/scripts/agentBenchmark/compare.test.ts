@@ -282,6 +282,14 @@ describe("verification text matching", () => {
     expect(containsBounded("EXPECTED_COUNT: 3 - done", "EXPECTED_COUNT: 3")).toBe(true);
     expect(containsBounded("COUNT: 3\u22124", "COUNT: 3")).toBe(false);
     expect(containsBounded("COUNT: 3\u20144", "COUNT: 3")).toBe(false);
+    // Locale grouping marks continue a number only when a full three-digit group follows.
+    for (const mark of [" ", "\u00A0", "\u202F", "\u2009", "'", "\u2019"]) {
+      expect(containsBounded(`COUNT: 3${mark}000`, "COUNT: 3")).toBe(false);
+      expect(containsBounded(`USERS: 1${mark}300 users`, "300 users")).toBe(false);
+    }
+    expect(containsBounded("COUNT: 3 items", "COUNT: 3")).toBe(true);
+    expect(containsBounded("COUNT: 3 4000", "COUNT: 3")).toBe(true);
+    expect(containsBounded("COUNT: 3 of 300 users", "300 users")).toBe(true);
     // Canonically equivalent forms match each other (NFC vs NFD).
     expect(containsBounded("Cafe\u0301", "Caf\u00e9")).toBe(true);
     expect(containsBounded("Caf\u00e9", "Cafe\u0301")).toBe(true);

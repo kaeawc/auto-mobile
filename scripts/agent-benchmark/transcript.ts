@@ -194,6 +194,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("duplicate result event");
     return;
   }
+  if (event.is_error !== undefined && typeof event.is_error !== "boolean") {
+    // A non-boolean terminal flag ("true") cannot be read as success either.
+    state.audit.parseErrors.push("result event has a non-boolean is_error");
+  }
   const usage = event.usage;
   state.audit.result = {
     subtype: asString(event.subtype) ?? "unknown",

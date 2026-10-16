@@ -205,6 +205,13 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
  */
 const NUMBER_JOINERS = "[.,/\u2044\u066B\u066C\\-\u2013\u2014\u2212:]";
 
+/**
+ * Locale digit-grouping separators (space, no-break space U+00A0, narrow no-break space
+ * U+202F, thin space U+2009, apostrophe, and U+2019) that are a different number only when
+ * a three-digit group follows, as in 3 000 or 3'000; 3 items is still 3.
+ */
+const DIGIT_GROUPING = "[ \u00A0\u202F\u2009'\u2019]";
+
 export function containsBounded(haystack: string, needle: string): boolean {
   // Unicode letters, digits, and combining marks bound a match, so 完了 does not match
   // inside 未完了, COUNT: 3 not inside COUNT: 30, and Cafe not inside a decomposed Café.
@@ -213,10 +220,16 @@ export function containsBounded(haystack: string, needle: string): boolean {
   // inside 0.3 items or 1,300 items). A needle that starts with a digit also rejects a leading sign, which
   // would make it the opposite number (-3 items).
   const signed = /^\p{N}/u.test(needle) ? "|[+\\-\u2212]" : "";
+  // A needle that ends in a digit continues into a grouped number when a grouping mark and
+  // a whole three-digit group follow (COUNT: 3 000), so that does not bound it either.
+  const trailingGroup = /\p{N}$/u.test(needle) ? `|${DIGIT_GROUPING}\\p{N}{3}(?!\\p{N})` : "";
+  // A needle that starts with a three-digit group can be the tail of a grouped number
+  // (300 users inside 1 300 users), so a digit and grouping mark before it does not bound it.
+  const grouped = /^\p{N}{3}(?!\p{N})/u.test(needle) ? `|\\p{N}${DIGIT_GROUPING}` : "";
   // Canonically equivalent text (precomposed é vs e + U+0301) must compare equal, so both
   // sides use NFC before matching.
   return new RegExp(
-    `(?<![\\p{L}\\p{N}\\p{M}]|\\p{N}${NUMBER_JOINERS}${signed})${RegExp.escape(needle.normalize("NFC"))}(?![\\p{L}\\p{N}\\p{M}]|${NUMBER_JOINERS}\\p{N})`,
+    `(?<![\\p{L}\\p{N}\\p{M}]|\\p{N}${NUMBER_JOINERS}${signed}${grouped})${RegExp.escape(needle.normalize("NFC"))}(?![\\p{L}\\p{N}\\p{M}]|${NUMBER_JOINERS}\\p{N}${trailingGroup})`,
     "iu",
   ).test(haystack.normalize("NFC"));
 }

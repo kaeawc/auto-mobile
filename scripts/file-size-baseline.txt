@@ -39,7 +39,6 @@
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 4312	src/features/action/TapOnElement.ts
-1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1833	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
@@ -80,7 +79,6 @@
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
 1645	src/server/finalizeToolResponse.ts
-1878	src/server/index.ts
 3152	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2875	src/server/prototypeTools.ts

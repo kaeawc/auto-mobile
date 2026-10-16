@@ -65,7 +65,7 @@ const rows: PredicateRow[] = [
   {
     name: "released with expiryOrigin",
     prepare: async ({ manager, session }) => {
-      await manager.releaseSession(session.sessionId, "explicit-release", false, undefined, {
+      await manager.releaseSession(session.sessionId, "explicit-release", {
         expiryOrigin: "cleanup-expired",
       });
     },

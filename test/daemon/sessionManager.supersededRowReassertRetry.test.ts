@@ -365,7 +365,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -519,11 +521,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       land = resolve;
     });
     let superseded = false;
-    const released = manager.releaseSessionUnlessSuperseded(
-      SESSION,
-      DEVICE_LOSS,
-      () => !superseded,
-    );
+    const released = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks();
     const before = {
       ...(await store.getSession(SESSION))!,
@@ -733,7 +733,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
@@ -1124,7 +1126,9 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);

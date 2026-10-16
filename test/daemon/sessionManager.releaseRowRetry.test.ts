@@ -71,7 +71,9 @@ describe("the row of a released session (#11557)", () => {
       landReleaseWrite = resolve;
     });
     let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+      commitFence: () => !superseded,
+    });
     await settleMicrotasks(100);
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);

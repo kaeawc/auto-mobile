@@ -3064,7 +3064,7 @@ describe("SessionManager", () => {
         const release = manager.releaseSessionUnlessSuperseded(
           "s1",
           "device-disconnected:emulator-5554",
-          () => !superseded,
+          { commitFence: () => !superseded },
         );
 
         await Promise.resolve();
@@ -3090,7 +3090,7 @@ describe("SessionManager", () => {
         const release = manager.releaseSessionUnlessSuperseded(
           "s1",
           "device-disconnected:emulator-5554",
-          () => !superseded,
+          { commitFence: () => !superseded },
         );
         await persistence.releaseStarted.promise;
 
@@ -3110,7 +3110,9 @@ describe("SessionManager", () => {
         await manager.createSession("s1", "emulator-5554", "android");
 
         await expect(
-          manager.releaseSessionUnlessSuperseded("s1", "explicit-release", () => true),
+          manager.releaseSessionUnlessSuperseded("s1", "explicit-release", {
+            commitFence: () => true,
+          }),
         ).resolves.toEqual({ superseded: false, deviceId: "emulator-5554" });
         expect(manager.getSession("s1")).toBeNull();
       } finally {
@@ -3177,7 +3179,7 @@ describe("SessionManager", () => {
       try {
         const session = await manager.createSession("s1", "device-1", "android", 1);
         const setup = manager.trackSessionSetup(session, () => setupFinished);
-        const release = manager.releaseSession("s1", "daemon-shutdown", true);
+        const release = manager.releaseSession("s1", "daemon-shutdown", { allowExpired: true });
 
         fakeTimer.advanceTime(1);
         manager.cleanupExpiredSessions();
@@ -3443,7 +3445,7 @@ describe("SessionManager", () => {
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
 
         const first = manager.releaseSession("s1", "heartbeat");
-        const joined = manager.releaseSession("s1", "daemon-shutdown", true);
+        const joined = manager.releaseSession("s1", "daemon-shutdown", { allowExpired: true });
         rejectRestore(new Error("restore failed"));
 
         await expect(Promise.all([first, joined])).resolves.toEqual(["device-1", "device-1"]);

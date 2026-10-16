@@ -182,11 +182,9 @@ class Run {
     let current = true;
     const release = recreate
       ? this.manager.releaseSession(UUID, "explicit-release")
-      : this.manager.releaseSessionUnlessSuperseded(
-          UUID,
-          `device-disconnected:${DEVICE}`,
-          () => current,
-        );
+      : this.manager.releaseSessionUnlessSuperseded(UUID, `device-disconnected:${DEVICE}`, {
+          commitFence: () => current,
+        });
     // The gate parks the injected statement before its synchronous SQLite-equivalent effect.
     await flush();
     current = false;

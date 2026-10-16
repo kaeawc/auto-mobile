@@ -332,7 +332,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
       const reason = "device-disconnected:emulator-5554";
       const gate = gateReleaseWrite(r);
       const release = commitFenced
-        ? r.manager.releaseSessionUnlessSuperseded(SESSION, reason, () => true)
+        ? r.manager.releaseSessionUnlessSuperseded(SESSION, reason, { commitFence: () => true })
         : r.manager.releaseSession(SESSION, reason);
       await settle();
       expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(reason);
@@ -351,7 +351,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     const release = r.manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => true,
+      { commitFence: () => true },
     );
     await settle();
     await expectNotFoundWires(r, bare);
@@ -372,7 +372,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     const release = r.manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => shouldCommit,
+      { commitFence: () => shouldCommit },
     );
     await settle();
     expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeDefined();

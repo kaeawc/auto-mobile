@@ -272,7 +272,7 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
         }
         break;
       case "force":
-        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", true));
+        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", { allowExpired: true }));
         if (rig.manager.forceStuckRelease(uuid)) {
           observed.add("forced");
         }
@@ -281,16 +281,14 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
       case "supersede":
         issue(
           op,
-          rig.manager.releaseSessionUnlessSuperseded(
-            uuid,
-            "device-disconnected:shadow",
-            () => false,
-            true,
-          ),
+          rig.manager.releaseSessionUnlessSuperseded(uuid, "device-disconnected:shadow", {
+            commitFence: () => false,
+            allowExpired: true,
+          }),
         );
         break;
       case "graceful":
-        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", true));
+        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", { allowExpired: true }));
         break;
       case "expiry":
         rig.timer.advanceTime(1001);
@@ -317,7 +315,7 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
   await settle();
   rig.manager.stopAcceptingSessionCreations();
   for (const uuid of rig.manager.getAllKnownSessionIds()) {
-    issue("shutdown", rig.manager.releaseSession(uuid, "daemon-shutdown", true));
+    issue("shutdown", rig.manager.releaseSession(uuid, "daemon-shutdown", { allowExpired: true }));
   }
   await settle();
   await rig.manager.drainReleasePromises(1000);

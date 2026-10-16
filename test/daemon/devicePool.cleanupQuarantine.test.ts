@@ -73,7 +73,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
           if (phase === "release-in-flight") {
             timer.setCurrentTime(31 * 60 * 1000);
           }
-          release = manager.releaseSession("old-owner", "lazy-expiry", true);
+          release = manager.releaseSession("old-owner", "lazy-expiry", { allowExpired: true });
           await started.promise;
           if (phase === "release-in-flight") {
             expect(manager.getSession("old-owner")).toBeNull();
@@ -174,7 +174,7 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", true);
+    await manager.releaseSession("test-1", "released", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
     timer.advanceTime(2_000);
 
@@ -223,7 +223,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", true);
+    await manager.releaseSession("test-1", "released", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
 
     const original = pool.getDevice(device.deviceId)!;

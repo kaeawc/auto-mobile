@@ -1297,9 +1297,7 @@ export class DevicePool {
         const release = await this.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
           releaseReason,
-          shouldCommit,
-          false,
-          options,
+          { commitFence: shouldCommit, ...options },
         );
         return !release.superseded;
       });

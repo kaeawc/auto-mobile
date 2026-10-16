@@ -601,6 +601,13 @@ describe("agent benchmark harness", () => {
     expect(fs.readFile(artifact("baseline.yml"))).toContain("claudeCodeVersion: 2.1.301");
   });
 
+  test("the version the stream reports wins over a wrapper's own --version", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    runner.on("claude", () => ({ stdout: "1.0.0 (team-wrapper)\n" }));
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.claude.version).toBe("2.1.301");
+  });
+
   test("a pass with no Claude Code version from either source writes no baseline", async () => {
     const noVersion = PASSING.split("\n")
       .map((line) => line.replace(/"claude_code_version":"[^"]*",?/, ""))

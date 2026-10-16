@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
-import { bundleDigest, parseCliArgs, resolveSuitePath } from "../../../scripts/agent-benchmark/run";
+import {
+  bundleDigest,
+  importClosure,
+  parseCliArgs,
+  resolveSuitePath,
+} from "../../../scripts/agent-benchmark/run";
 
 describe("agent benchmark CLI arguments", () => {
   test("runs suites by name with overrides", () => {
@@ -78,5 +83,44 @@ describe("agent benchmark server build digest", () => {
   test("Windows path separators hash the same as POSIX ones", () => {
     const windows = build.map((entry) => ({ ...entry, path: entry.path.replaceAll("/", "\\") }));
     expect(bundleDigest(windows)).toBe(bundleDigest(build));
+  });
+});
+
+describe("agent benchmark harness import closure", () => {
+  const graph: Record<string, string[]> = {
+    "/repo/scripts/agent-benchmark/run.ts": ["./device", "../../src/utils/lock", "node:fs"],
+    "/repo/scripts/agent-benchmark/device.ts": ["../../src/utils/lock", "zod"],
+    "/repo/src/utils/lock.ts": ["./timer"],
+    "/repo/src/utils/timer.ts": ["./lock"],
+  };
+  const resolveIn = (specifier: string, fromDir: string) => {
+    if (specifier === "zod") {
+      return "/repo/node_modules/zod/index.js";
+    }
+    if (!specifier.startsWith(".")) {
+      return undefined;
+    }
+    const parts = `${fromDir}/${specifier}`.split("/");
+    const stack = parts.reduce<string[]>(
+      (path, part) => (part === ".." ? path.slice(0, -1) : part === "." ? path : [...path, part]),
+      [],
+    );
+    return `${stack.join("/")}.ts`;
+  };
+
+  test("follows repository imports transitively, once each, and stops at packages", () => {
+    expect(
+      importClosure(
+        ["/repo/scripts/agent-benchmark/run.ts"],
+        (path) => graph[path] ?? [],
+        resolveIn,
+        (path) => !path.includes("/node_modules/"),
+      ),
+    ).toEqual([
+      "/repo/scripts/agent-benchmark/device.ts",
+      "/repo/scripts/agent-benchmark/run.ts",
+      "/repo/src/utils/lock.ts",
+      "/repo/src/utils/timer.ts",
+    ]);
   });
 });

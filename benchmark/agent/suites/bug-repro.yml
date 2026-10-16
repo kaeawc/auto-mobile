@@ -14,7 +14,7 @@ preflight:
       is_authenticated: true
       user_id: agent-benchmark
       display_name: Agent Benchmark
-  launchUri: automobile:playground/demos/bugs/repro
+  launchUri: automobile://playground/demos/bugs/repro
   # BugReproScreen's top bar; a redirect to onboarding or login stops the run before Claude.
   startScreenIncludes: ["Bug Reproduction Demo"]
 claude:

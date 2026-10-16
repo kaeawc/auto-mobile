@@ -353,6 +353,17 @@ describe("agent benchmark transcript audit", () => {
     ).toEqual([]);
   });
 
+  test("a non-string final answer fails the transcript", () => {
+    const result = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: { text: "COUNT: 3" },
+    });
+    const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["result event has a non-string result"]);
+  });
+
   test("a non-array permission_denials fails the transcript", () => {
     const result = JSON.stringify({
       type: "result",

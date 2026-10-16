@@ -1,11 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
+import { loadSuite } from "../../../scripts/agent-benchmark/config";
 import {
   bundleDigest,
+  dryRunReport,
   importClosure,
   parseCliArgs,
   resolveSuitePath,
 } from "../../../scripts/agent-benchmark/run";
+
+describe("agent benchmark dry run", () => {
+  test("the MCP config carries the inherited adb routing the real run will use", () => {
+    const root = resolve(import.meta.dir, "../../..");
+    const suite = loadSuite(join(root, "benchmark/agent/suites/bug-repro.yml"), root);
+    const report = dryRunReport(suite, parseCliArgs(["--suite", "bug-repro", "--dry-run"]), {
+      ADB_SERVER_SOCKET: "tcp:10.0.0.5:5037",
+    });
+    expect(report).toContain('"ADB_SERVER_SOCKET":"tcp:10.0.0.5:5037"');
+  });
+});
 
 describe("agent benchmark CLI arguments", () => {
   test("runs suites by name with overrides", () => {

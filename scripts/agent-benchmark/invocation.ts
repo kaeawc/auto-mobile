@@ -121,6 +121,8 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
   "CLAUDE_CODE_MCP_STARTUP_WAIT_MS",
   "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",
+  // Request bodies (JSON merged into every API request)
+  "CLAUDE_CODE_EXTRA_BODY",
   // Background tasks (force-enabling them backgrounds long MCP calls)
   "CLAUDE_AUTO_BACKGROUND_TASKS",
   // Retries and API request timeouts

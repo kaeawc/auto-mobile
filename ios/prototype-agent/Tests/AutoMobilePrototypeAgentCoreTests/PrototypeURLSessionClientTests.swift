@@ -40,9 +40,9 @@ final class StubProtocol: URLProtocol {
             stream.open()
             var buffer = [UInt8](repeating: 0, count: 1024)
             while stream.hasBytesAvailable {
-                let count = stream.read(&buffer, maxLength: buffer.count)
-                if count <= 0 { break }
-                body.append(buffer, count: count)
+                let bytesRead = stream.read(&buffer, maxLength: buffer.count)
+                if bytesRead <= 0 { break }
+                body.append(buffer, count: bytesRead)
             }
             stream.close()
         }
@@ -53,12 +53,17 @@ final class StubProtocol: URLProtocol {
         }
         switch reply {
         case let .respond(status, headers, chunks)?:
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: status,
-                httpVersion: "HTTP/1.1",
-                headerFields: headers
-            )!
+            guard let url = request.url,
+                  let response = HTTPURLResponse(
+                      url: url,
+                      statusCode: status,
+                      httpVersion: "HTTP/1.1",
+                      headerFields: headers
+                  )
+            else {
+                client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+                return
+            }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             for chunk in chunks {
                 client?.urlProtocol(self, didLoad: chunk)

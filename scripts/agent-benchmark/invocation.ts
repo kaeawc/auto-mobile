@@ -22,6 +22,7 @@
  * - The prompt is passed on stdin, never as a positional argument, because the
  *   variadic `--allowedTools`/`--disallowedTools` flags would swallow it.
  */
+import { createHash } from "node:crypto";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
 /** The one AutoMobile setting shared with any resident daemon: device claims. */
@@ -310,14 +311,21 @@ const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
- * host (never credentials or paths) of any base URL or proxy, the proxy bypass list, the
+ * host and a digest of the path (never credentials, the path itself, or the query) of any
+ * base URL or proxy, the proxy bypass list, the
  * region, and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
 export function providerIdentity(env: Record<string, string | undefined>): string {
   const host = (value: string) => {
     try {
-      return new URL(value).host;
+      const url = new URL(value);
+      // A gateway can route different paths on one host to different backends, so the path
+      // counts too. It is digested, never echoed, in case it carries a key.
+      const path = url.pathname.replace(/\/+$/, "");
+      return path === ""
+        ? url.host
+        : `${url.host}/sha256:${createHash("sha256").update(path).digest("hex").slice(0, 12)}`;
     } catch {
       // Not a URL: record that it was set, without echoing the value.
       return "(unparseable)";

@@ -8,6 +8,9 @@ import {
   providerIdentity,
   systemPromptFor,
 } from "../../../scripts/agent-benchmark/invocation";
+import { createHash } from "node:crypto";
+
+const pathDigest = (path: string) => createHash("sha256").update(path).digest("hex").slice(0, 12);
 
 const PATHS = {
   runtime: "/usr/bin/bun",
@@ -182,7 +185,7 @@ describe("agent benchmark provider identity", () => {
     });
     expect(identity).toBe(
       [
-        "ANTHROPIC_BASE_URL=proxy.example.com",
+        `ANTHROPIC_BASE_URL=proxy.example.com/sha256:${pathDigest("/v1")}`,
         "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
         "AWS_REGION=us-west-2",
         "CLAUDE_CODE_USE_BEDROCK=1",
@@ -190,6 +193,13 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    // Gateway routes on one host differ by path; a trailing slash is the same route.
+    const route = (url: string) => providerIdentity({ ANTHROPIC_BASE_URL: url });
+    expect(route("https://gw:4000")).toBe("ANTHROPIC_BASE_URL=gw:4000");
+    expect(route("https://gw:4000/")).toBe("ANTHROPIC_BASE_URL=gw:4000");
+    expect(route("https://gw:4000/anthropic")).not.toBe(route("https://gw:4000"));
+    expect(route("https://gw:4000/anthropic/")).toBe(route("https://gw:4000/anthropic"));
+    expect(route("https://gw:4000/anthropic")).not.toContain("anthropic");
     expect(
       providerIdentity({ CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" }),
     ).toBe(["CLAUDE_CODE_USE_ANTHROPIC_AWS=1", "CLAUDE_CODE_USE_MANTLE=1"].join("\n"));

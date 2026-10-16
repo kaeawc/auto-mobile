@@ -8,7 +8,7 @@ const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
 const BASELINE_FILE = path.join(import.meta.dir, "expensive-hook-work-baseline.txt");
 // Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 167;
+const BASELINE_CEILING = 169;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 
@@ -54,6 +54,14 @@ describe("scanExpensiveHookWork", () => {
       beforeEach(setUp);
     `;
     expect(kindsIn(source).sort()).toEqual(["beforeEach:heavy-harness", "beforeEach:temp-dir"]);
+  });
+
+  test("flags the shared suite helpers that build a DevicePool per test", () => {
+    const source = `
+      beforeEach(() => { pool = makePool({ sessionManager }); });
+      afterEach(() => { other = createDevicePoolFor(deps); });
+    `;
+    expect(kindsIn(source)).toEqual(["beforeEach:heavy-harness", "afterEach:heavy-harness"]);
   });
 
   test("flags image and zip fixtures built per test", () => {

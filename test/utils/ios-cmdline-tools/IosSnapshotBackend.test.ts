@@ -11,7 +11,6 @@ import {
   type BootedDevice,
   type DeviceSnapshotManifest,
 } from "../../../src/models";
-import type { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../../src/utils/logger";
@@ -37,7 +36,7 @@ function actions(options: { deviceId: string; simctl: FakeSimCtlClient }) {
   const adb = new FakeAdbClient();
   const factory = { create: () => adb as unknown as AdbExecutor };
   const store = {} as DeviceSnapshotStore;
-  const simctl = options.simctl as unknown as SimCtlClient;
+  const simctl = options.simctl;
   const timer = new FakeTimer();
   return {
     capture: new CaptureSnapshot(device, factory, undefined, timer, store, simctl),

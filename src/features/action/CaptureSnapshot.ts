@@ -3,6 +3,7 @@ export type { CaptureSnapshotArgs, CaptureSnapshotResult } from "../../models/De
 import {
   resolveIosSnapshotBackend,
   type IosSnapshotBackend,
+  type IosSnapshotBackendDeps,
   type IosSimulatorSnapshotBackend,
 } from "../../utils/ios-cmdline-tools/IosSnapshotBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -68,7 +69,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     emulator?: AndroidEmulatorClient,
     _timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: SimCtlClient,
+    simctl?: IosSnapshotBackendDeps["simctl"],
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {
     this.device = device;

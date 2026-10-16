@@ -4,7 +4,9 @@ import {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { ChildProcess, SpawnOptions } from "child_process";
 import { BootedDevice, ExecResult, DeviceInfo, ScreenSize } from "../../src/models";
+import type { SimulatorDisplay } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 
 /**
  * Fake implementation of SimCtl for testing
@@ -351,5 +353,70 @@ export class FakeSimctl implements SimCtl {
   async getScreenSize(deviceId?: string): Promise<ScreenSize> {
     this.recordCall("getScreenSize", { deviceId });
     return this.screenSize;
+  }
+
+  // Operations no test configures yet: recorded, then refused like the methods this fake lacked.
+  private unconfigured(name: string, args: Record<string, unknown>): never {
+    this.recordCall(name, args);
+    throw new TypeError(`FakeSimctl.${name} is not configured`);
+  }
+
+  async executeCommandArgs(
+    args: string[],
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    return this.unconfigured("executeCommandArgs", { args, timeoutMs, signal });
+  }
+
+  async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
+    return this.unconfigured("startCommandArgs", { args, options });
+  }
+
+  async eraseSimulator(udid: string): Promise<void> {
+    return this.unconfigured("eraseSimulator", { udid });
+  }
+
+  async getRuntimesChecked(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<AppleDeviceRuntime[]> {
+    return this.unconfigured("getRuntimesChecked", { timeoutMs, signal });
+  }
+
+  async enumerateDisplays(
+    deviceId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<SimulatorDisplay[]> {
+    return this.unconfigured("enumerateDisplays", { deviceId, timeoutMs, signal });
+  }
+
+  async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+    return this.unconfigured("screenshot", { deviceId, display, signal });
+  }
+
+  async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
+    return this.unconfigured("setAppearance", { mode, deviceId });
+  }
+
+  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean> {
+    return this.unconfigured("openSimulatorApp", { udid, signal });
+  }
+
+  async presentSimulatorAfterStart(
+    udid: string,
+    bootGeneration: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.unconfigured("presentSimulatorAfterStart", { udid, bootGeneration, signal });
+  }
+
+  async pushNotification(
+    deviceId: string,
+    bundleId: string,
+    payloadJson: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.unconfigured("pushNotification", { deviceId, bundleId, payloadJson });
   }
 }

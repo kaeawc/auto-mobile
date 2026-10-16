@@ -117,7 +117,12 @@ function contentBlocks(event: JsonRecord, line: number, state: AuditState): Json
  * would be dropped and could hide failure evidence.
  */
 function isContentBlock(block: unknown): boolean {
-  return isRecord(block) && (block.text === undefined || typeof block.text === "string");
+  return (
+    isRecord(block) &&
+    typeof block.type === "string" &&
+    block.type.trim() !== "" &&
+    (block.text === undefined || typeof block.text === "string")
+  );
 }
 
 /** tool_result content is either a string or an array of `{type:"text", text}` blocks. */
@@ -137,6 +142,32 @@ export function toolResultText(content: unknown): string {
 
 function truncate(text: string): string {
   return text.length > RESULT_TEXT_LIMIT ? `${text.slice(0, RESULT_TEXT_LIMIT)}…` : text;
+}
+
+const USAGE_KEYS = [
+  "input_tokens",
+  "cache_creation_input_tokens",
+  "cache_read_input_tokens",
+  "output_tokens",
+];
+
+/** Usage components must be non-negative finite counts whose sums stay finite. */
+function usageErrors(usage: unknown): string[] {
+  if (usage === undefined) {
+    return [];
+  }
+  if (!isRecord(usage)) {
+    return ["result event has a malformed usage"];
+  }
+  const invalid = USAGE_KEYS.filter((key) => {
+    const value = usage[key];
+    return value !== undefined && !(asNumber(value) !== undefined && (value as number) >= 0);
+  }).map((key) => `result event has an invalid usage.${key}`);
+  const input = sumTokens(usage, USAGE_KEYS.slice(0, 3)) ?? 0;
+  const output = sumTokens(usage, ["output_tokens"]) ?? 0;
+  return invalid.length === 0 && !(Number.isFinite(input) && Number.isFinite(output))
+    ? ["result event usage overflows"]
+    : invalid;
 }
 
 function sumTokens(usage: unknown, keys: string[]): number | undefined {
@@ -285,6 +316,7 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("result event has an invalid total_cost_usd");
   }
   const usage = event.usage;
+  state.audit.parseErrors.push(...usageErrors(usage));
   state.audit.result = {
     subtype: asString(event.subtype) ?? "unknown",
     isError: event.is_error === true,

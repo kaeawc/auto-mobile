@@ -310,10 +310,11 @@ async function prepareReserved(
       return path;
     },
   });
-  // Fingerprint before the settle: its adb probes can be slow, and nothing may run between
-  // the verified start screen and the measured launch.
-  const device = await deviceFingerprint(deps, serial);
   await deps.timer.sleep(definition.preflight.settleSeconds * 1000);
+  // Fingerprint after the settle, so a deep link that changes orientation is recorded as the
+  // state Claude measures, and before verification, so nothing runs between the verified start
+  // screen and the measured launch.
+  const device = await deviceFingerprint(deps, serial);
   const durationSeconds = (elapsedNow(deps.timer) - preflightStart) / 1000;
   deps.fs.writeFile(join(runDirectory, "preflight.log"), `${log.join("\n")}\n`);
   await verifyStartScreen(suite, deps, serial, runDirectory);

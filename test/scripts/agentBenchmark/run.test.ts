@@ -21,7 +21,20 @@ describe("agent benchmark adb client identity", () => {
       "Android Debug Bridge version 1.0.41\nVersion 35.0.2",
     );
     expect(seen[0]).toEndWith("/platform-tools/adb");
-    expect(adbClientIdentity({}, () => undefined)).toBe("unavailable:adb");
+    // An unusable SDK adb falls back to the adb on PATH, as AdbClient does.
+    const fallback = adbClientIdentity(
+      { ANDROID_HOME: "/stale" },
+      (adb) => (adb === "/usr/bin/adb" ? "Version 36.0.0" : undefined),
+      () => "/usr/bin/adb",
+    );
+    expect(fallback).toBe("Version 36.0.0");
+    expect(
+      adbClientIdentity(
+        {},
+        () => undefined,
+        () => null,
+      ),
+    ).toBe("unavailable:adb");
   });
 });
 

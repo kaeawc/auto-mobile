@@ -22,7 +22,9 @@
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
     "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096,
-    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144
+    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144,
+    "MAX_PROTOTYPE_STORAGE_BYTES": 262144,
+    "MAX_PROTOTYPE_STORAGE_KEYS": 64
   },
   "definitions": {
     "offset": {
@@ -7023,6 +7025,40 @@
             "kind": "data"
           },
           "optional": true
+        },
+        "storage": {
+          "rule": {
+            "kind": "ref",
+            "name": "storage"
+          },
+          "optional": true
+        }
+      }
+    },
+    "storage": {
+      "kind": "object",
+      "fields": {
+        "version": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 2147483647
+          },
+          "optional": false
+        },
+        "keys": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "string",
+              "max": 261
+            },
+            "min": 1,
+            "unique": true,
+            "max": 64
+          },
+          "optional": false
         }
       }
     },

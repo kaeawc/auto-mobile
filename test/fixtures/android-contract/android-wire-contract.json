@@ -47,6 +47,23 @@
       ]
     },
     {
+      "serialName": "clear_prototype_storage",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "delete_saved_prototype",
       "fields": [
         {

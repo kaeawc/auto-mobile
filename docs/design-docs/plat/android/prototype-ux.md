@@ -37,14 +37,15 @@ blanket focusability proposal).
 
 ## Envelope and limits
 
-| Property | Type / meaning                                                     |
-| -------- | ------------------------------------------------------------------ |
-| `id`     | Required nonempty prototype identifier string.                     |
-| `window` | Required window configuration below.                               |
-| `data`   | Optional agent-owned read-only nested JSON object; see Data model. |
-| `state`  | Optional flat object of string, finite number, or boolean values.  |
-| `motion` | Optional `none` or `standard` (default). See Motion below.         |
-| `root`   | Required single node.                                              |
+| Property  | Type / meaning                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`      | Required nonempty prototype identifier string.                                                                         |
+| `window`  | Required window configuration below.                                                                                   |
+| `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
+| `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
+| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
+| `root`    | Required single node.                                                                                                  |
 
 All numeric values are finite. State keys (including action/binding/condition
 keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
@@ -994,6 +995,99 @@ change event; a stale `baseRevision` gets the existing conflict. Host-side bookk
 `PrototypeShownSpecs` (`recordDeviceDataWrite`, `dataPatchGuard`), called from
 `InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
 
+### Storage (#12522)
+
+A show resets `state` and `data` to the spec's values, saved prototypes keep the spec and assets but
+no user data, and the offline event buffer is lost if the process dies. A root-level `storage` block
+names the values the device keeps for the prototype:
+
+```jsonc
+"storage": { "version": 1, "keys": ["state:darkMode", "data:/cart"] }
+```
+
+The capability is `prototype_storage_v1` (`PROTOTYPE_STORAGE_CAPABILITY`). A show, or a patch whose
+resulting spec contains `storage`, is refused on a device without it through the same gate registry
+as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, field `storage`).
+
+**Shape and validation.** The block is strict: `version` is an integer from 1, `keys` holds 1 to
+`MAX_PROTOTYPE_STORAGE_KEYS` (64) unique strings. The contract (`schemas/prototype-spec-contract.json`,
+definition `storage`) checks the shape; `prototypeStorageError` (`src/features/prototype/prototypeStorage.ts`)
+checks the rest, with the path of the first problem:
+
+- `state:<key>`: the key matches the state-key pattern and is declared in the spec's `state`.
+- `data:<pointer>`: an RFC 6901 pointer to a member of `data`, validated with `prototypeDataPathPointer`
+  (which wraps `isPrototypeDataPointer`) on `/data` + pointer, so `data:/cart` is the path `/data/cart`
+  that data actions and patch ops use. The whole document (`data:` alone), a pointer without a leading
+  `/`, or an over-long pointer is refused. Two data pointers where one is the other's ancestor or equal
+  (`/cart` and `/cart/items`) are refused, so each stored value has one owner.
+- Duplicate keys are refused.
+- The values the spec itself holds for the listed keys, counted per entry as the UTF-8 bytes of the
+  storage key plus the compact JSON of the value, must fit `MAX_PROTOTYPE_STORAGE_BYTES` (262144).
+
+| Constant                     | Value  | Counting rule                                                                          |
+| ---------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_STORAGE_BYTES` | 262144 | Stored bytes per prototype id: sum over stored entries of key bytes + compact JSON bytes. |
+| `MAX_PROTOTYPE_STORAGE_KEYS`  | 64     | Entries in `storage.keys`.                                                             |
+
+**What is stored.** After every write the device saves the listed keys under the spec `id`: a user
+write (a tap, a text edit), a device data action (`setData`, `appendData`, `removeData`) or a `request`
+response (#12523) that writes state or data. A write that would take the stored total over
+`MAX_PROTOTYPE_STORAGE_BYTES` still applies on screen, is not stored (the previous stored value of
+that key stays) and the key is listed in `skippedKeys` of the inspect report. Stored values are part
+of the device's per-id state: they survive a dismiss, a process restart and a saved prototype's relaunch.
+
+**Precedence (ADOPTED DECISION).** #12522 was labelled needs-decision; its proposal is adopted as
+the decision, and the rules below are the contract. They are implemented once as the pure function
+`restorePrototypeStorage` (`src/features/prototype/prototypeStorageRestore.ts`), the reference the
+device runtimes follow, as `applyPrototypeDataWrite` is for data actions.
+
+1. On the next show of the same `id`, stored values replace the spec's values for the keys the spec
+   lists. This applies to a same-id replacement, to a show after a dismiss and to a saved prototype's
+   launch. The rest of the spec's `state` stays authoritative (see Re-showing). `reset: true` only
+   restarts pager pages and display; it does not clear storage (use `clearStorage` first).
+2. If `storage.version` differs from the version the values were stored under, every stored value
+   of that id is discarded and the spec's values stand. Authors bump `version` when a key's meaning or
+   shape changes.
+3. A stored key that `storage.keys` no longer lists is dropped, and a show with no `storage` block
+   drops every stored value of that id (as if `keys` were empty).
+4. A stored value that no longer fits the spec is dropped and the spec's value stands: a `state`
+   value whose type (string, finite number, boolean) differs from the spec's value, a `state` key the
+   spec no longer declares, a `data` value of a different JSON kind than the spec's own value at that
+   pointer (object, array, string, number, boolean), or a value `applyPrototypeDataWrite` refuses as
+   a `set` (a missing parent, a data limit). Dropped entries are deleted from storage.
+5. Restoring happens before the first draw and sends no `change` event; the show result and the
+   host's cached state and data still describe the spec's values. Call `inspect` to read the live
+   values.
+6. **Host `patch` against a stored key.** The patch wins. It applies under the existing
+   `baseRevision` conflict rules (a stored restore is not a device write and does not bump the
+   revision or enter the write log), and the device then stores the new value like any other write.
+
+**Host tool support.**
+
+- `inspect` reports what the device stores. The device reports, per prototype in its
+  `inspect_prototypes` reply (and flat in the iOS agent's status), a `storage` object:
+  `{version, keys: [{key, bytes}], totalBytes, skippedKeys?}` (`PrototypeStorageReport`). `keys` lists only
+  keys that currently hold a stored value, in storage-key form (`state:darkMode`, `data:/cart`).
+  The host passes it through as `storage` on the prototype entry, and reports it absent when the
+  device sends none (no `prototype_storage_v1`, or no `storage` block) or sends a malformed one.
+  `status` shows the last inspected value and drops it after a successful `clearStorage`.
+- `{action: "clearStorage", id}` wipes the stored values of `id`. The host sends
+  `{type: "clear_prototype_storage", requestId, id}` (Android CtrlProxy; the iOS agent receives the
+  same request type) and the device answers one `prototype_result` with `success` and `cleared`, the
+  number of keys removed (0 for an id with nothing stored). The prototype on screen is not changed;
+  the next show of the id starts from the spec's values. It is refused before anything is sent, with
+  a message naming `prototype_storage_v1`, when the device does not advertise it.
+- `deleteSaved` also clears the id's storage. This is device-side behavior and part of the contract:
+  deleting a saved prototype removes its spec, assets, shortcut and stored values, so a later save of
+  the same id starts clean. `delete_saved_prototype` needs no new flag. On iOS the saved prototype is
+  its own app, so deleting the app removes its storage with it.
+
+**Native lanes need.** The Kotlin and Swift runtimes must: add `storage` to the spec model
+(the contract and its validator already accept it), the two limits to their constants (`MAX_PROTOTYPE_STORAGE_BYTES`,
+`MAX_PROTOTYPE_STORAGE_KEYS`), advertise `prototype_storage_v1`, persist and restore per the rules
+above, report `storage` in the inspect entry, handle `clear_prototype_storage` (a `ClearPrototypeStorage`
+serializer with `requestId` and `id`; replies carry `cleared`), and clear storage on `delete_saved_prototype`.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
@@ -1264,7 +1358,8 @@ the device replaces it in place: it keeps the display the prototype is on (the
 request's `displayId` is ignored), and each pager keeps its settled page,
 matched by pager id and clamped to the new page count. The new spec's `state`
 is authoritative; values the user changed by tapping or typing are not carried
-over unless the spec includes them. The window content is rebuilt from the new
+over unless the spec includes them, except the keys its `storage` block lists, whose
+stored values replace the spec's (see [Storage](#storage-12522)). The window content is rebuilt from the new
 runtime, so a text field shows the spec's value and edits still in flight from
 the previous showing are dropped. Event sequences continue per id, as for any
 re-show. `reset: true`, a different id, or nothing on screen is a fresh show:

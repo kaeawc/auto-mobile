@@ -25,6 +25,7 @@ import {
   type PrototypeAssetUpload,
 } from "../../prototype/prototypeAssets";
 import { validatePrototypeSpec } from "../../prototype/prototypeValidation";
+import { requirePrototypeStorageSupport } from "../../prototype/prototypeStorage";
 import {
   isPrototypeDataWriteName,
   prototypeDataWriteOf,
@@ -44,6 +45,7 @@ import {
   type SavePrototypeMessage,
   type PinSavedPrototypeMessage,
   type ListSavedPrototypesMessage,
+  type ClearPrototypeStorageMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -404,6 +406,25 @@ export class CtrlProxyPrototypes {
   ): Promise<PrototypeResult> {
     return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
   }
+  /**
+   * Wipes the values the device stored for prototype `id` (#12522). Refused before anything is
+   * sent when the device does not advertise `prototype_storage_v1`.
+   */
+  async requestClearPrototypeStorage(
+    id: string,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new ActionableError("Invalid prototype id: expected a non-empty string");
+    }
+    return this.request(
+      ctrlProxyRequests.clearPrototypeStorage({ requestId: "", id }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   async requestDeleteSavedPrototype(
     id: string,
     timeoutMs = 5000,
@@ -734,7 +755,8 @@ export class CtrlProxyPrototypes {
       | PinSavedPrototypeMessage
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage,
+      | DeleteSavedPrototypeMessage
+      | ClearPrototypeStorageMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -771,7 +793,8 @@ export class CtrlProxyPrototypes {
       | PinSavedPrototypeMessage
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage,
+      | DeleteSavedPrototypeMessage
+      | ClearPrototypeStorageMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
@@ -785,6 +808,7 @@ export class CtrlProxyPrototypes {
       throw new ActionableError(prototypeStackUnsupportedMessage("android"));
     }
     this.requireMultiSurfaceSupport(message, supports);
+    requirePrototypeStorageSupport(message.type, supports);
     const type = message.type;
     if (
       [

@@ -183,6 +183,7 @@ import {
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
@@ -578,6 +579,11 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
   requestDeleteSavedPrototype(
+    id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+  requestClearPrototypeStorage(
     id: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
@@ -3207,6 +3213,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
   }
+  requestClearPrototypeStorage(
+    id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestClearPrototypeStorage(id, timeoutMs, perf);
+  }
 
   requestInspectPrototypes(
     timeoutMs?: number,
@@ -5442,6 +5455,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
         PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
         PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+        PROTOTYPE_STORAGE_CAPABILITY,
       ].includes(messageType)
     ) {
       return this.supportedCommands?.has(messageType) === true;

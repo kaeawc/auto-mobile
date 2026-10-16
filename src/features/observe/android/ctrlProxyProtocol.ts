@@ -37,6 +37,16 @@ import type {
  */
 
 import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../prototype/prototypeSpec";
+import {
+  clearPrototypeStorageMessage,
+  type ClearPrototypeStorageMessage,
+  type PrototypeStorageReport,
+} from "../../prototype/prototypeStorageWire";
+export {
+  PROTOTYPE_STORAGE_CAPABILITY,
+  type ClearPrototypeStorageMessage,
+  type PrototypeStorageReport,
+} from "../../prototype/prototypeStorageWire";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -641,6 +651,8 @@ export interface PrototypeResult {
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
+  cleared?: number;
 }
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
@@ -660,6 +672,8 @@ export interface PrototypeStatusEntry {
   hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** What the device stores for this prototype's `storage` block (prototype_storage_v1, #12522). */
+  storage?: PrototypeStorageReport;
 }
 
 /**
@@ -1028,6 +1042,7 @@ export type CtrlProxyRequest =
   | PinSavedPrototypeMessage
   | ListSavedPrototypesMessage
   | DeleteSavedPrototypeMessage
+  | ClearPrototypeStorageMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
@@ -1389,6 +1404,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   pin_saved_prototype: true,
   list_saved_prototypes: true,
   delete_saved_prototype: true,
+  clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,
   list_preference_files: true,
@@ -1713,6 +1729,7 @@ export const ctrlProxyRequests = {
   deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
     return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
   },
+  clearPrototypeStorage: clearPrototypeStorageMessage,
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {
       type: "patch_prototype",

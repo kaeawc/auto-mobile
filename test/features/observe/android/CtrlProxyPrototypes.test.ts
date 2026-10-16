@@ -4,7 +4,10 @@ import {
   prototypeSavedReplyFields,
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
-import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_SAVED_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
@@ -1579,5 +1582,70 @@ describe("saved shortcut reply validation", () => {
     expect(await fake.requestPinSavedPrototype("panel", "hero")).toEqual(result);
     expect(await fake.requestPinSavedPrototype("panel")).toEqual(result);
     expect(fake.pinRequests).toEqual([{ id: "panel", icon: "hero" }, { id: "panel" }]);
+  });
+});
+
+describe("CtrlProxy clear_prototype_storage (#12522)", () => {
+  const storageCommands = ["full_command_set_v1", "request_id_echo_v1", "clear_prototype_storage"];
+
+  test("sends the frame and decodes cleared from a device advertising prototype_storage_v1", async () => {
+    const { client, socket, receive } = await harness([
+      ...storageCommands,
+      PROTOTYPE_STORAGE_CAPABILITY,
+    ]);
+    const frames: Record<string, unknown>[] = [];
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const frame = JSON.parse(String(data));
+      frames.push(frame);
+      void receive({
+        type: "prototype_result",
+        requestId: frame.requestId,
+        success: true,
+        cleared: 2,
+      });
+    });
+    try {
+      expect(await client.requestClearPrototypeStorage("panel")).toMatchObject({
+        success: true,
+        cleared: 2,
+      });
+      expect(frames).toEqual([
+        { type: "clear_prototype_storage", requestId: frames[0]?.requestId, id: "panel" },
+      ]);
+    } finally {
+      send.mockRestore();
+    }
+  });
+
+  for (const [name, commands] of [
+    ["missing", storageCommands],
+    ["unknown", null],
+  ] as const) {
+    test(`refuses before send with ${name} capability`, async () => {
+      const { client, socket } = await harness(commands === null ? null : [...commands]);
+      const send = spyOn(socket, "send");
+      try {
+        await expect(client.requestClearPrototypeStorage("panel")).rejects.toBeInstanceOf(
+          ActionableError,
+        );
+        await expect(client.requestClearPrototypeStorage("panel")).rejects.toThrow(
+          "prototype_storage_v1",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    });
+  }
+
+  test("rejects an empty id before connecting", async () => {
+    const { client, socket } = await harness([...storageCommands, PROTOTYPE_STORAGE_CAPABILITY]);
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestClearPrototypeStorage("")).rejects.toBeInstanceOf(ActionableError);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+    }
   });
 });

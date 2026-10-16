@@ -2,9 +2,9 @@ package dev.jasonpearson.automobile.junit
 
 /** Collaborators owned by one execution; constructing defaults never connects to a device. */
 internal data class PlanExecutorCollaborators(
-  val agent: () -> AutoMobileAgent = { LazyInitializer.getAgent() },
-  val deviceChecker: DeviceChecker = LazyDeviceChecker,
   val daemon: DaemonToolClient = DaemonSocketClientManager,
+  val agent: () -> AutoMobileAgent = { LazyInitializer.getAgent(daemon) },
+  val deviceChecker: DeviceChecker = LazyDeviceChecker,
   val heartbeat: DaemonHeartbeatController = DaemonHeartbeat,
   val timings: PlanExecutorTimings = PlanExecutorTimings(),
 )

@@ -1,6 +1,5 @@
 import { SwipeAtCoordinate } from "../../src/features/action/SwipeAtCoordinate";
 import type { ExecuteGesture } from "../../src/features/action/ExecuteGesture";
-import type { Window } from "../../src/features/observe/Window";
 import type { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
 import type { BootedDevice, SwipeResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -49,7 +48,7 @@ export function createSwipeAt(
     executeGesture: gesture,
   });
   // Coordinate dispatch tests must not read the persistent per-device window cache.
-  swipeAt.window = new FakeWindow() as unknown as Window;
+  swipeAt.window = new FakeWindow();
   swipeAt.observeScreen = observeScreen;
   return { swipeAt, observeScreen, gesture, swipes: gesture.swipes, timer };
 }

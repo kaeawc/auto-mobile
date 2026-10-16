@@ -32984,6 +32984,10 @@
           "minimum": 1,
           "maximum": 3000
         },
+        "display": {
+          "description": "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
+          "type": "string"
+        },
         "layer": {
           "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",

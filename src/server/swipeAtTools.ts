@@ -119,6 +119,12 @@ export const swipeAtSchema = withJsonSchemaOverride(
           .describe(
             `Exact stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed. Velocity = swipe distance / duration; the result reports the dispatched duration and velocityPxPerSecond. Android may quantize very short strokes.`,
           ),
+        display: z
+          .string()
+          .optional()
+          .describe(
+            "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
+          ),
         layer: hierarchyLayerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
@@ -185,6 +191,7 @@ export function createSwipeAtHandler({
         speed: args.speed,
         durationMs: args.durationMs,
         layer: args.layer,
+        display: args.display,
       } as SwipeAtOptions,
       { progress, signal },
     );

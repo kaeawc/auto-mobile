@@ -1,6 +1,7 @@
 # iOS Photos full access: establishing and verifying `PHAccessLevelReadWrite`
 
-Status: design note, partially implemented (issue #12317). Nothing here is device-verified.
+Status: host structured failure and injectable verification implemented (issue #12317);
+simulator verification with the Playground probe is still owed. Nothing here is device-verified.
 Related: #12316 (readback classification), #12368 (merged: Photos grants return
 `verified:false` and readback `unknown`).
 
@@ -10,9 +11,15 @@ Related: #12316 (readback classification), #12368 (merged: Photos grants return
 (`src/utils/ios-cmdline-tools/IosPermissionsBackend.ts`) and stores a `kTCCServicePhotos` row. The issue's controlled
 matrix (iOS 26.5, Xcode 26.6) shows the app's own
 `PHPhotoLibrary.authorizationStatus(for: .readWrite)` still reads `notDetermined` after that grant, and `.addOnly` only
-becomes `authorized` after `photos-add`. Today the host classifies a Photos grant as `applied: true, verified: false`
+becomes `authorized` after `photos-add`. The host now reports a dispatched Photos grant as a structured failure with
+`success: false, applied: true, verified: false` and `code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` by default
 (`src/features/action/IosSimulatorPermissions.ts`, `classifyIosSimulatorPermission` and `verifyPhotosGrant`), and
-`verifyPhotosGrant` has a deliberately unreachable verified branch marked as "the seam" for instrumentation.
+`PhotosAuthorizationVerifier` is an injectable seam for target-app instrumentation. Only an `authorized` read/write
+status yields verified success; `limited`, `denied`, and `notDetermined` return `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`.
+An unobservable or throwing verifier returns `PHOTOS_FULL_ACCESS_UNVERIFIED`. Stored TCC grants remain evidence only.
+
+No simulator/runtime combination is currently verified to give effective full access through `simctl privacy grant`.
+Physical iOS device permission limits are unchanged.
 
 ## What the host can and cannot observe
 
@@ -55,7 +62,7 @@ sequence does on a given simulator/runtime/Xcode combination (the issue's accept
 and for cold-restart persistence) and can anchor a support matrix. It cannot make `setAppPermissions` report `verified:
 true` for an app that did not ship the probe.
 
-Implemented in this change: `ios/Playground/Sources/PhotosAuthorizationProbe.swift` writes
+The existing `ios/Playground/Sources/PhotosAuthorizationProbe.swift` writes
 `Documents/photos-authorization.json` at launch with fields `readWrite` and `addOnly` (each `{ rawValue, name }`) plus
 `observedAt`; the Playground Info.plist gains the two Photos usage-description keys. It never calls
 `requestAuthorization`.
@@ -85,11 +92,16 @@ not a supported interface and may break between runtimes.
 
 ## Recommended path
 
-1. Ship option B's probe (this change) so the experiments in D and the cold-restart check have an independent reader.
-2. Keep `setAppPermissions` and `getAppPermissions` reporting `applied: true, verified: false` for Photos (no code
-   change) until step 3 demonstrates a sequence that yields `readWrite == authorized` natively.
-3. If a sequence exists, encode it in `IosSimulatorPermissions` per runtime range, still `verified:false` for apps
-   without instrumentation; if none exists, return a structured `unsupported` for full access instead of a warning.
+1. Use option B's existing probe so the experiments in D and the cold-restart check have an independent reader.
+2. `setAppPermissions` now returns a structured `PHOTOS_FULL_ACCESS_UNVERIFIED` failure after dispatch by default,
+   with `applied: true`, `verified: false`, and instructions to launch the app and check
+   `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only is insufficient and `photos-add` remains
+   a separate dispatch success. `getAppPermissions` still classifies a stored Photos grant as `unknown`,
+   `verified: false`, with `evidence: "storedTccGrant"`.
+3. Verify a sequence with the Playground probe before claiming support for any simulator/runtime range. No such
+   combination is currently verified. The host keeps returning a structured failure without target-app instrumentation;
+   its injectable verifier can report `verified: true` only for an `authorized` read/write status. A `limited`,
+   `denied`, or `notDetermined` status returns `PHOTOS_FULL_ACCESS_NOT_ESTABLISHED` instead of a warning.
 4. Option C for SDK-integrated apps to allow a real `verified: true`.
 
 ## Device checks owed

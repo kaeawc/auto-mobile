@@ -7,6 +7,7 @@ import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakePhotosAuthorizationVerifier } from "../../fakes/FakePhotosAuthorizationVerifier";
 import {
   CAPTURED_APP_ID,
   dumpsysNotificationFromCapture,
@@ -625,21 +626,57 @@ describe("AppPermissions", () => {
       action: "grant",
       permissions: ["photos"],
     });
-    expect(setResult).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(setResult).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
     expect(setResult.operations[0]).toMatchObject({
+      success: false,
+      changedCount: 0,
+      failedCount: 1,
+      code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+      result: {
+        permission: "photos",
+        success: false,
+        applied: true,
+        verified: false,
+        code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+        accessLevel: "readWrite",
+        evidence: "storedTccGrant",
+      },
+    });
+    expect(setResult.error).toBe(setResult.operations[0].error);
+    expect(setResult.error).toContain("Photos grant was dispatched via simctl");
+    expect(setResult.operations[0].result).toHaveProperty("error", setResult.error);
+    expect(setResult).not.toHaveProperty("warnings");
+    expect(setResult.operations[0]).not.toHaveProperty("warning");
+    expect(setResult.operations[0].result).not.toHaveProperty("warning");
+  });
+
+  test("an authorized Photos verifier yields a successful facade operation", async () => {
+    const photosVerifier = new FakePhotosAuthorizationVerifier("authorized");
+    const permissions = new AppPermissions(iosSimulator, {
+      simctl: new FakeSimCtlClient(),
+      tccReader: new FixtureTccReader("full"),
+      photosVerifier,
+    });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(result.operations[0]).toMatchObject({
       success: true,
       changedCount: 1,
       failedCount: 0,
-      warning: expect.stringContaining("Photos grant was dispatched via simctl"),
-      result: { permission: "photos", success: true, applied: true, verified: false },
+      result: { permission: "photos", success: true, applied: true, verified: true },
     });
-    expect(setResult.warnings).toEqual([setResult.operations[0].warning]);
-    expect(setResult).not.toHaveProperty("error");
-    expect(setResult.operations[0]).not.toHaveProperty("error");
-    expect(setResult.operations[0].result).not.toHaveProperty("error");
+    expect(result.operations[0]).not.toHaveProperty("code");
+    expect(result.operations[0].result).not.toHaveProperty("code");
+    expect(result).not.toHaveProperty("error");
+    expect(photosVerifier.calls).toEqual([
+      { deviceId: iosSimulator.deviceId, appId: "com.example.app" },
+    ]);
   });
 
-  test("surfaces Photos readback failure as facade warnings after a successful grant", async () => {
+  test("surfaces Photos readback failure as a typed facade failure after dispatch", async () => {
     const permissions = new AppPermissions(iosSimulator, {
       simctl: new FakeSimCtlClient(),
       tccReader: {
@@ -652,18 +689,27 @@ describe("AppPermissions", () => {
       action: "grant",
       permissions: ["photos"],
     });
-    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(result).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
     expect(result.operations[0]).toMatchObject({
-      success: true,
-      changedCount: 1,
-      failedCount: 0,
-      warning: expect.stringContaining("Photos grant was dispatched via simctl"),
-      result: { success: true, applied: true, verified: false },
+      success: false,
+      changedCount: 0,
+      failedCount: 1,
+      code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+      result: {
+        success: false,
+        applied: true,
+        verified: false,
+        code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
+        accessLevel: "readWrite",
+      },
     });
-    expect(result.warnings).toEqual([result.operations[0].warning]);
-    expect(result).not.toHaveProperty("error");
-    expect(result.operations[0]).not.toHaveProperty("error");
-    expect(result.operations[0].result).not.toHaveProperty("error");
+    expect(result.error).toBe(result.operations[0].error);
+    expect(result.error).toContain("Photos grant was dispatched via simctl");
+    expect(result.operations[0].result).toHaveProperty("error", result.error);
+    expect(result.operations[0].result).not.toHaveProperty("evidence");
+    expect(result).not.toHaveProperty("warnings");
+    expect(result.operations[0]).not.toHaveProperty("warning");
+    expect(result.operations[0].result).not.toHaveProperty("warning");
   });
 
   test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {

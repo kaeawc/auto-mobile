@@ -1,7 +1,5 @@
 package dev.jasonpearson.automobile.junit
 
-import ai.koog.agents.core.agent.AIAgent
-import io.mockk.*
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -14,32 +12,32 @@ import org.junit.jupiter.api.io.TempDir
 
 class AutoMobileAgentTest {
 
-  private lateinit var mockConfigProvider: AutoMobileAgent.ConfigProvider
-  private lateinit var mockFileSystemOperations: AutoMobileAgent.FileSystemOperations
-  private lateinit var mockAiAgentFactory: AutoMobileAgent.AIAgentFactory
-  private lateinit var mockTimeProvider: AutoMobileAgent.TimeProvider
-  private lateinit var mockMcpClient: AutoMobileAgent.MCPClient
-  private lateinit var mockAIAgent: AIAgent<String, String>
+  private lateinit var fakeConfigProvider: FakeAgentConfigProvider
+  private lateinit var fakeFileSystemOperations: FakeAgentFileSystemOperations
+  private lateinit var fakeAiAgentFactory: FakeAgentAIAgentFactory
+  private lateinit var fakeTimeProvider: FakeAgentTimeProvider
+  private lateinit var fakeMcpClient: FakeAgentMCPClient
+  private lateinit var fakeAIAgent: FakeAIAgent
   private lateinit var autoMobileAgent: AutoMobileAgent
 
   @TempDir lateinit var tempDir: File
 
   @BeforeEach
   fun setUp() {
-    mockConfigProvider = mockk()
-    mockFileSystemOperations = mockk()
-    mockAiAgentFactory = mockk()
-    mockTimeProvider = mockk()
-    mockMcpClient = mockk()
-    mockAIAgent = mockk(relaxed = true)
+    fakeConfigProvider = FakeAgentConfigProvider()
+    fakeFileSystemOperations = FakeAgentFileSystemOperations()
+    fakeAIAgent = FakeAIAgent()
+    fakeAiAgentFactory = FakeAgentAIAgentFactory(fakeAIAgent)
+    fakeTimeProvider = FakeAgentTimeProvider()
+    fakeMcpClient = FakeAgentMCPClient()
 
     autoMobileAgent =
       AutoMobileAgent(
-        configProvider = mockConfigProvider,
-        fileSystemOperations = mockFileSystemOperations,
-        aiAgentFactory = mockAiAgentFactory,
-        timeProvider = mockTimeProvider,
-        mcpClient = mockMcpClient,
+        configProvider = fakeConfigProvider,
+        fileSystemOperations = fakeFileSystemOperations,
+        aiAgentFactory = fakeAiAgentFactory,
+        timeProvider = fakeTimeProvider,
+        mcpClient = fakeMcpClient,
         recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = 5),
       )
   }
@@ -66,14 +64,11 @@ class AutoMobileAgentTest {
       """
         .trimIndent()
 
-    every { mockFileSystemOperations.createDirectories(generatedPlansDir) } just runs
-    every { mockFileSystemOperations.fileExists(planFile) } returns false
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgent(modelConfig) } returns mockAIAgent
-    every { mockConfigProvider.isDebugMode() } returns false
-    every { mockFileSystemOperations.writeTextToFile(planFile, any()) } just runs
+    fakeFileSystemOperations.fileExistence[planFile] = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeConfigProvider.debugMode = false
 
-    coEvery { mockAIAgent.run(any()) } returns
+    fakeAIAgent.response =
       """
             ```yaml
             $expectedYamlContent
@@ -86,10 +81,10 @@ class AutoMobileAgentTest {
 
     // Assert
     assertEquals(expectedPlanPath, result)
-    verify { mockFileSystemOperations.createDirectories(generatedPlansDir) }
-    verify { mockFileSystemOperations.fileExists(planFile) }
-    verify { mockFileSystemOperations.writeTextToFile(planFile, any()) }
-    coVerify { mockAIAgent.run(any()) }
+    assertTrue(generatedPlansDir in fakeFileSystemOperations.createdDirectories)
+    assertTrue(planFile in fakeFileSystemOperations.existenceChecks)
+    assertTrue(fakeFileSystemOperations.writes.any { (file, _) -> file == planFile })
+    assertTrue(fakeAIAgent.prompts.isNotEmpty())
   }
 
   @Test
@@ -105,21 +100,21 @@ class AutoMobileAgentTest {
     val fileTime = 500L
     val maxAge = 3600000L // 1 hour
 
-    every { mockFileSystemOperations.createDirectories(generatedPlansDir) } just runs
-    every { mockFileSystemOperations.fileExists(planFile) } returns true
-    every { mockTimeProvider.currentTimeMillis() } returns currentTime
-    every { mockFileSystemOperations.getLastModified(planFile) } returns fileTime
-    every { mockConfigProvider.getPlanMaxAgeMs() } returns maxAge
+    fakeFileSystemOperations.fileExistence[planFile] = true
+    fakeTimeProvider.times = ArrayDeque(listOf(currentTime))
+    fakeFileSystemOperations.lastModified[planFile] = fileTime
+    fakeConfigProvider.maxPlanAgeMs = maxAge
 
     // Act
     val result = autoMobileAgent.generatePlanFromPrompt(prompt, className, methodName, tempDir)
 
     // Assert
     assertEquals(expectedPlanPath, result)
-    verify { mockFileSystemOperations.createDirectories(generatedPlansDir) }
-    verify { mockFileSystemOperations.fileExists(planFile) }
-    verify(exactly = 0) { mockFileSystemOperations.writeTextToFile(any(), any()) }
-    coVerify(exactly = 0) { mockAIAgent.run(any()) }
+    assertTrue(generatedPlansDir in fakeFileSystemOperations.createdDirectories)
+    assertTrue(planFile in fakeFileSystemOperations.existenceChecks)
+    assertTrue(fakeFileSystemOperations.writes.isEmpty())
+    assertTrue(fakeAiAgentFactory.planCalls.isEmpty())
+    assertEquals(0, fakeAIAgent.prompts.size)
   }
 
   @Test
@@ -136,24 +131,21 @@ class AutoMobileAgentTest {
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
     val yamlContent = "---\nname: test\nsteps: []"
 
-    every { mockFileSystemOperations.createDirectories(generatedPlansDir) } just runs
-    every { mockFileSystemOperations.fileExists(planFile) } returns true
-    every { mockTimeProvider.currentTimeMillis() } returns currentTime andThen fileTime
-    every { mockFileSystemOperations.getLastModified(planFile) } returns fileTime
-    every { mockConfigProvider.getPlanMaxAgeMs() } returns maxAge
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgent(modelConfig) } returns mockAIAgent
-    every { mockConfigProvider.isDebugMode() } returns false
-    every { mockFileSystemOperations.writeTextToFile(planFile, any()) } just runs
+    fakeFileSystemOperations.fileExistence[planFile] = true
+    fakeTimeProvider.times = ArrayDeque(listOf(currentTime, fileTime))
+    fakeFileSystemOperations.lastModified[planFile] = fileTime
+    fakeConfigProvider.maxPlanAgeMs = maxAge
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeConfigProvider.debugMode = false
 
-    coEvery { mockAIAgent.run(any()) } returns "```yaml\n$yamlContent\n```"
+    fakeAIAgent.response = "```yaml\n$yamlContent\n```"
 
     // Act
     autoMobileAgent.generatePlanFromPrompt(prompt, className, methodName, tempDir)
 
     // Assert
-    verify { mockFileSystemOperations.writeTextToFile(planFile, yamlContent) }
-    coVerify { mockAIAgent.run(any()) }
+    assertTrue((planFile to yamlContent) in fakeFileSystemOperations.writes)
+    assertTrue(fakeAIAgent.prompts.isNotEmpty())
   }
 
   @Test
@@ -166,12 +158,10 @@ class AutoMobileAgentTest {
     val planFile = File(generatedPlansDir, "LoginTest_testLogin.yaml")
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
-    every { mockFileSystemOperations.createDirectories(generatedPlansDir) } just runs
-    every { mockFileSystemOperations.fileExists(planFile) } returns false
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgent(modelConfig) } returns mockAIAgent
+    fakeFileSystemOperations.fileExistence[planFile] = false
+    fakeConfigProvider.configuredModel = modelConfig
 
-    coEvery { mockAIAgent.run(any()) } throws RuntimeException("AI agent failed")
+    fakeAIAgent.failure = RuntimeException("AI agent failed")
 
     // Act & Assert
     val exception =
@@ -201,25 +191,13 @@ class AutoMobileAgentTest {
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
-    every { mockTimeProvider.currentTimeMillis() } returns startTime andThen endTime
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect("http://localhost:3000") } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    val toolClient = slot<AutoMobileAgent.MCPClient>()
-    val rawClient = slot<AutoMobileAgent.MCPClient>()
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(
-        modelConfig,
-        capture(toolClient),
-        5,
-        capture(rawClient),
-      )
-    } returns mockAIAgent
-    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
+    fakeTimeProvider.times = ArrayDeque(listOf(startTime, endTime))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeMcpClient.toolResults["observe"] = """{"elements": []}"""
 
-    coEvery { mockAIAgent.run(any()) } returns "Recovery actions taken"
+    fakeAIAgent.response = "Recovery actions taken"
 
     // Act
     val result = autoMobileAgent.attemptAiRecovery(context)
@@ -228,12 +206,19 @@ class AutoMobileAgentTest {
     assertTrue(result.success)
     assertEquals(1000L, result.recoveryTimeMs)
     assertTrue(result.observeResultAfterRecovery != null)
-    coVerify(exactly = 1) { mockAIAgent.run(any()) }
+    assertEquals(1, fakeAIAgent.prompts.size)
+    assertEquals(listOf("http://localhost:3000"), fakeMcpClient.connectionUrls)
+    assertEquals(5, fakeAiAgentFactory.recoveryCalls.single().maxToolCalls)
     // The agent's tools, WaitForTool and the liveness observe all target the failed device
     // (#10089): with two devices attached an unpinned call is rejected or hits the wrong one.
-    assertTrue(toolClient.captured is DevicePinningMCPClient)
-    assertTrue(rawClient.captured is DevicePinningMCPClient)
-    verify(exactly = 1) { mockMcpClient.callTool("observe", mapOf("deviceId" to "emulator-5554")) }
+    assertTrue(fakeAiAgentFactory.recoveryCalls.single().mcpClient is DevicePinningMCPClient)
+    assertTrue(fakeAiAgentFactory.recoveryCalls.single().rawMcpClient is DevicePinningMCPClient)
+    assertEquals(
+      1,
+      fakeMcpClient.toolCalls.count {
+        it == ("observe" to mapOf("deviceId" to "emulator-5554"))
+      },
+    )
   }
 
   private val recoveryContext =
@@ -249,18 +234,13 @@ class AutoMobileAgentTest {
   @Test
   fun `a liveness observe that returns an isError result is not a live device`() {
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
-    } returns mockAIAgent
-    every { mockMcpClient.callTool("observe", any()) } returns
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeMcpClient.toolResults["observe"] =
       """{"isError":true,"content":[{"type":"text","text":"Unrecognized key(s) in object"}]}"""
-    coEvery { mockAIAgent.run(any()) } returns "done"
+    fakeAIAgent.response = "done"
 
     val result = autoMobileAgent.attemptAiRecovery(recoveryContext)
 
@@ -276,11 +256,10 @@ class AutoMobileAgentTest {
 
   @Test
   fun `an unreachable daemon fails recovery loudly with an actionable stderr message`() {
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } throws RuntimeException("daemon is not reachable")
-    every { mockMcpClient.disconnect() } just runs
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeMcpClient.connectFailure = RuntimeException("daemon is not reachable")
 
     val originalErr = System.err
     val captured = java.io.ByteArrayOutputStream()
@@ -296,7 +275,7 @@ class AutoMobileAgentTest {
     val message = captured.toString()
     assertTrue(message.contains("AI-assisted recovery could not start"), message)
     assertTrue(message.contains("daemon is not reachable"), message)
-    verify(exactly = 0) { mockAiAgentFactory.createAIAgentWithMCPTools(any(), any(), any(), any()) }
+    assertEquals(0, fakeAiAgentFactory.recoveryCalls.size)
   }
 
   @Test
@@ -321,36 +300,22 @@ class AutoMobileAgentTest {
         deviceId = "emulator-5554",
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val agentClientSlot = slot<AutoMobileAgent.MCPClient>()
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
     // The live tool/observe results carry the on-screen secret plus non-secret context.
-    every { mockMcpClient.callTool("observe", any()) } returns
+    fakeMcpClient.toolResults["observe"] =
       """{"elements":{"field":"token $secret"},"env":"$visible"}"""
-    every { mockMcpClient.callTool("tapOn", any()) } returns """{"status":"typed $secret"}"""
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(
-        modelConfig,
-        capture(agentClientSlot),
-        5,
-        // #6145 follow-up: with secrets present the raw client handed to WaitForTool is wrapped in
-        // FailureRedactingMCPClient (still delegates unredacted successes to mockMcpClient), not
-        // mockMcpClient itself — match any() rather than the exact pre-wrap reference.
-        any(),
-      )
-    } returns mockAIAgent
-    coEvery { mockAIAgent.run(any()) } returns "done"
+    fakeMcpClient.toolResults["tapOn"] = """{"status":"typed $secret"}"""
+    fakeAIAgent.response = "done"
 
     autoMobileAgent.attemptAiRecovery(context, secretValues = listOf(secret))
 
     // Drive the exact tools Koog builds from the captured client. observe first (the view-hierarchy
     // feed) then tapOn — both results are what the agent hands the LLM.
-    val agentClient = agentClientSlot.captured
+    val agentClient = fakeAiAgentFactory.recoveryCalls.single().mcpClient
     val observeResult = runBlocking {
       AutoMobileAgent.ObserveTool(agentClient).execute(AutoMobileAgent.ObserveTool.Args())
     }
@@ -375,7 +340,7 @@ class AutoMobileAgentTest {
     // The tool still EXECUTED against the device with the real value: the underlying client returns
     // the raw secret, so only the model-facing wrapper scrubs it (daemon/tool execution
     // unaffected).
-    val rawObserve = mockMcpClient.callTool("observe", emptyMap())
+    val rawObserve = fakeMcpClient.callTool("observe", emptyMap())
     assertTrue(
       rawObserve.contains(secret),
       "the underlying client (device execution) still receives real values",
@@ -402,28 +367,21 @@ class AutoMobileAgentTest {
         deviceId = "emulator-5554",
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val rawClientSlot = slot<AutoMobileAgent.MCPClient>()
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, capture(rawClientSlot))
-    } returns mockAIAgent
-    coEvery { mockAIAgent.run(any()) } returns "done"
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeMcpClient.toolResults["observe"] = """{"elements": []}"""
+    fakeAIAgent.response = "done"
 
     autoMobileAgent.attemptAiRecovery(context, secretValues = listOf(secret))
 
-    val rawClient = rawClientSlot.captured
+    val rawClient = fakeAiAgentFactory.recoveryCalls.single().rawMcpClient
 
     // A successful call must return the RAW, unredacted result unchanged — WaitForTool's local
     // match relies on this.
-    every { mockMcpClient.callTool("waitForCheck", any()) } returns
-      """{"elements":[{"text":"$secret"}]}"""
+    fakeMcpClient.toolResults["waitForCheck"] = """{"elements":[{"text":"$secret"}]}"""
     assertEquals(
       """{"elements":[{"text":"$secret"}]}""",
       rawClient.callTool("waitForCheck", emptyMap()),
@@ -432,7 +390,7 @@ class AutoMobileAgentTest {
 
     // A FAILED call's thrown message must be redacted — this is what WaitForTool logs on every
     // failed poll attempt.
-    every { mockMcpClient.callTool("waitForFailure", any()) } throws
+    fakeMcpClient.toolFailures["waitForFailure"] =
       RuntimeException("MCP server error: token $secret leaked in the error body")
     val error = assertThrows<RuntimeException> { rawClient.callTool("waitForFailure", emptyMap()) }
     assertFalse(
@@ -462,22 +420,17 @@ class AutoMobileAgentTest {
         deviceId = "emulator-5554",
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val promptSlot = slot<String>()
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, any()) } returns
-      mockAIAgent
-    coEvery { mockAIAgent.run(capture(promptSlot)) } returns "done"
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeMcpClient.toolResults["observe"] = """{"elements": []}"""
+    fakeAIAgent.response = "done"
 
     autoMobileAgent.attemptAiRecovery(context, secretValues = listOf(secret))
 
-    val prompt = promptSlot.captured
+    val prompt = fakeAIAgent.prompts.single()
     assertFalse(
       prompt.contains(secret),
       "raw context fields must be redacted from the initial recovery prompt",
@@ -505,34 +458,20 @@ class AutoMobileAgentTest {
         deviceId = "emulator-5554",
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val agentClientSlot = slot<AutoMobileAgent.MCPClient>()
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect(any()) } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
     // The JSON observe result carries the secret in its escaped form (a `"` becomes `\"`).
-    every { mockMcpClient.callTool("observe", any()) } returns """{"field":"token pa\"ss-TOKEN"}"""
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(
-        modelConfig,
-        capture(agentClientSlot),
-        5,
-        // #6145 follow-up: with secrets present the raw client handed to WaitForTool is wrapped in
-        // FailureRedactingMCPClient (still delegates unredacted successes to mockMcpClient), not
-        // mockMcpClient itself — match any() rather than the exact pre-wrap reference.
-        any(),
-      )
-    } returns mockAIAgent
-    coEvery { mockAIAgent.run(any()) } returns "done"
+    fakeMcpClient.toolResults["observe"] = """{"field":"token pa\"ss-TOKEN"}"""
+    fakeAIAgent.response = "done"
 
     // Pass the RAW concrete secret, not a pre-expanded list.
     autoMobileAgent.attemptAiRecovery(context, secretValues = listOf(secret))
 
     val observeResult = runBlocking {
-      AutoMobileAgent.ObserveTool(agentClientSlot.captured)
+      AutoMobileAgent.ObserveTool(fakeAiAgentFactory.recoveryCalls.single().mcpClient)
         .execute(AutoMobileAgent.ObserveTool.Args())
     }
     assertFalse(
@@ -594,26 +533,21 @@ class AutoMobileAgentTest {
         deviceId = "emulator-5554",
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val promptSlot = slot<String>()
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect("http://localhost:3000") } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    // A known deviceId pins the clients handed to the agent (#10089), so match any client.
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, any()) } returns
-      mockAIAgent
-    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
-    coEvery { mockAIAgent.run(capture(promptSlot)) } returns "Dismissed the dialog"
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    // A known deviceId pins the clients handed to the agent (#10089).
+    fakeMcpClient.toolResults["observe"] = """{"elements": []}"""
+    fakeAIAgent.response = "Dismissed the dialog"
 
     // Act
     autoMobileAgent.attemptAiRecovery(context)
 
     // Assert - the prompt must steer the agent toward clearing the blocker and away from
     // performing the failed step itself (the runner re-runs that step deterministically).
-    val prompt = promptSlot.captured
+    val prompt = fakeAIAgent.prompts.single()
     assertTrue(
       prompt.contains("RE-RUN", ignoreCase = true),
       "Prompt should say the runner re-runs the failed step",
@@ -661,17 +595,12 @@ class AutoMobileAgentTest {
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
-    every { mockTimeProvider.currentTimeMillis() } returns startTime andThen endTime
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect("http://localhost:3000") } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
-    } returns mockAIAgent
+    fakeTimeProvider.times = ArrayDeque(listOf(startTime, endTime))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
 
-    coEvery { mockAIAgent.run(any()) } throws RuntimeException("AI failed")
+    fakeAIAgent.failure = RuntimeException("AI failed")
 
     // Act
     val result = autoMobileAgent.attemptAiRecovery(context)
@@ -696,8 +625,8 @@ class AutoMobileAgentTest {
     val startTime = 1000L
     val endTime = 2000L
 
-    every { mockTimeProvider.currentTimeMillis() } returns startTime andThen endTime
-    every { mockConfigProvider.getMcpServerUrl() } throws RuntimeException("Config error")
+    fakeTimeProvider.times = ArrayDeque(listOf(startTime, endTime))
+    fakeConfigProvider.serverUrlFailure = RuntimeException("Config error")
 
     // Act
     val result = autoMobileAgent.attemptAiRecovery(context)
@@ -713,11 +642,11 @@ class AutoMobileAgentTest {
     val customMaxToolCalls = 10
     val customAgent =
       AutoMobileAgent(
-        configProvider = mockConfigProvider,
-        fileSystemOperations = mockFileSystemOperations,
-        aiAgentFactory = mockAiAgentFactory,
-        timeProvider = mockTimeProvider,
-        mcpClient = mockMcpClient,
+        configProvider = fakeConfigProvider,
+        fileSystemOperations = fakeFileSystemOperations,
+        aiAgentFactory = fakeAiAgentFactory,
+        timeProvider = fakeTimeProvider,
+        mcpClient = fakeMcpClient,
         recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
       )
     val context =
@@ -731,36 +660,26 @@ class AutoMobileAgentTest {
       )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
-    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
-    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
-    every { mockMcpClient.isConnected() } returns false
-    every { mockMcpClient.connect("http://localhost:3000") } just runs
-    every { mockMcpClient.disconnect() } just runs
-    every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(
-        modelConfig,
-        mockMcpClient,
-        customMaxToolCalls,
-        mockMcpClient,
-      )
-    } returns mockAIAgent
-    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
+    fakeTimeProvider.times = ArrayDeque(listOf(1000L, 2000L))
+    fakeConfigProvider.serverUrl = "http://localhost:3000"
+    fakeMcpClient.connected = false
+    fakeConfigProvider.configuredModel = modelConfig
+    fakeMcpClient.toolResults["observe"] = """{"elements": []}"""
 
-    coEvery { mockAIAgent.run(any()) } returns "Done"
+    fakeAIAgent.response = "Done"
 
     // Act
     customAgent.attemptAiRecovery(context)
 
     // Assert - verify factory was called with the custom max tool calls
-    verify {
-      mockAiAgentFactory.createAIAgentWithMCPTools(
+    assertTrue(
+      FakeAgentAIAgentFactory.RecoveryCall(
         modelConfig,
-        mockMcpClient,
+        fakeMcpClient,
         customMaxToolCalls,
-        mockMcpClient,
-      )
-    }
+        fakeMcpClient,
+      ) in fakeAiAgentFactory.recoveryCalls,
+    )
   }
 
   @Test

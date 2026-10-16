@@ -247,6 +247,19 @@ describe("agent benchmark harness", () => {
     expect(fs.removed).toEqual(["/tmp/amb-test", "/tmp/amb-cwd-test"]);
   });
 
+  test("a failed setup removes the temp directories it already created", async () => {
+    const { fs, launches, deps, options } = setup(PASSING);
+    fs.makeTempDir = (prefix: string) => {
+      if (prefix === "amb-cwd-") {
+        throw new Error("ENOSPC");
+      }
+      return `/tmp/${prefix}test`;
+    };
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(/ENOSPC/);
+    expect(fs.removed).toEqual(["/tmp/amb-test"]);
+    expect(launches).toHaveLength(0);
+  });
+
   test("a missing transcript makes the run incomplete rather than throwing", async () => {
     const { deps, options, fs } = setup(PASSING);
     deps.launcher = { launch: async () => ({ exitCode: 1, timedOut: false }) };

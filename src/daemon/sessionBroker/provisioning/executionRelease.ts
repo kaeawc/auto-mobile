@@ -1068,8 +1068,8 @@ export class BrokerExecutionRelease {
    * The record is the released session's own (see {@link clearLeftoverOwner}); when this daemon
    * holds that session id again it reads live, and the binding can only return to `ready` after that
    * session ends. A one-shot check would leave it `settling` for the daemon's lifetime, so the
-   * check repeats at the fast cadence. It is bounded by the same cap as the release itself: past
-   * it the binding stays `settling`, where a forced scope reset applies once the owner is gone.
+   * check repeats at the fast cadence, bounded by the release cap; past it the binding stays
+   * `settling` until, once the owner is gone, the next daemon start's recovery readies it.
    * Each binding is re-checked on its own, so one whose registry step keeps failing (and is retried
    * past the cap) never holds up another's re-check (#11616).
    */
@@ -1092,7 +1092,7 @@ export class BrokerExecutionRelease {
     this.warn(
       `[BrokerExecutionRelease] A live execution still holds the owner record of settled ` +
         `binding(s) ${bindings} past the ${this.settlementCapMs}ms settlement cap; they stay ` +
-        "settling. Once that execution ends, a forced scope reset or a daemon restart " +
+        "settling. Once that execution ends, a daemon restart (its settled-binding recovery) " +
         "returns them to ready (#11545)",
     );
   }
@@ -1206,7 +1206,7 @@ export class BrokerExecutionRelease {
             `[BrokerExecutionRelease] ${what} has kept failing past the ` +
               `${this.settlementCapMs}ms settlement cap; it is retried every ` +
               `${this.settlementSlowPollMs}ms until the registry recovers. ` +
-              "a forced scope reset or a daemon restart also recovers the binding: " +
+              "a daemon restart (its settled-binding recovery) also recovers the binding: " +
               error.message,
             error,
           );

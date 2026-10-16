@@ -143,6 +143,50 @@ export const ENV = {
     min: 1,
     doc: "Work-profile polling interval in ms.",
   },
+  DISABLE_PERF_AUDIT: {
+    name: "AUTOMOBILE_DISABLE_PERF_AUDIT",
+    kind: "bool",
+    default: "off",
+    doc: "Disable the UI performance audit.",
+  },
+  TOUCH_LATENCY_SAMPLING: {
+    name: "AUTOMOBILE_TOUCH_LATENCY_SAMPLING",
+    kind: "bool",
+    default: "off",
+    doc: "Opt into synthetic tap latency sampling.",
+  },
+  MAX_OBSERVATION_AGE_MS: {
+    name: "AUTOMOBILE_MAX_OBSERVATION_AGE_MS",
+    kind: "int",
+    default: "see docs",
+    min: 1,
+    doc: "Hierarchy freshness budget in ms.",
+  },
+  IOS_SCREEN_CAPTURE_HELPER: {
+    name: "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER",
+    legacyName: "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER",
+    kind: "path",
+    default: "unset",
+    doc: "Absolute path to a locally built screen-capture-helper.",
+  },
+  ACTION_OBSERVATION_SKIP_SCREENSHOT: {
+    name: "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT",
+    kind: "string",
+    default: "skip",
+    doc: "Skip automatic screenshots after actions unless set to false or 0.",
+  },
+  OBSERVE_WAIT_FOR_SKIP_SCREENSHOT: {
+    name: "AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT",
+    kind: "string",
+    default: "skip",
+    doc: "Skip automatic screenshots for waitFor observations unless set to false or 0.",
+  },
+  OBSERVE_SETTLED_SCREENSHOT: {
+    name: "AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT",
+    kind: "string",
+    default: "unset",
+    doc: "Select settled screenshot mode with true or 1.",
+  },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);

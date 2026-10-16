@@ -28,6 +28,18 @@ describe("collectSourceFacts (mutations the guards rely on)", () => {
     ).toEqual([]);
   });
 
+  test("string literals expose a specifier that is only reachable through a variable", () => {
+    const source = `const name = "@jimp/wasm-webp"; await import(name); const t = \`@jimp/wasm-\${"webp"}\`;`;
+    const parsed = facts(source);
+    // The specifier list cannot see an indirect import, the literal list can.
+    expect(parsed.moduleSpecifiers).toEqual([]);
+    expect(parsed.stringLiterals).toContain("@jimp/wasm-webp");
+  });
+
+  test("a string literal in a comment is not recorded", () => {
+    expect(facts(`// "@jimp/wasm-webp"\nconst x = 1;`).stringLiterals).toEqual([]);
+  });
+
   test("imported value names are resolved, type imports excluded", () => {
     const { importedNames } = facts(
       `import { A, type B, C as D } from "m"; import type { E } from "m"; import * as N from "n";`,

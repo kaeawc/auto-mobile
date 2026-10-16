@@ -23,8 +23,13 @@ import {
 } from "./recorderTeardownRecovery";
 import {
   DeviceStateRestoreQueue,
+  type AbandonedRestoreSpec,
+  type BoundedRetrySpec,
   type PendingRestore,
+  type RestoreAttemptOutcome,
+  type RestoreKindSpec,
   type RestoreQueuePolicy,
+  type RestoreRun,
 } from "./deviceStateRestoreQueue";
 import {
   DeviceCleanupQuarantine,
@@ -1844,6 +1849,104 @@ export class SessionManager {
   /** Last owner generation handed out; see {@link allocateIosOwnerGeneration}. */
   private lastIosOwnerGeneration = 0;
   private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
+  private readonly clockKind: RestoreKindSpec<ClockSessionState> = {
+    queue: this.clockRestores,
+    name: "Clock",
+    timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
+    mapStartError: (error) => error,
+    prepare: (deviceId, target) => this.prepareClockRestore(deviceId, target),
+  };
+  private readonly rotationKind: RestoreKindSpec<RotationSessionState> = {
+    queue: this.rotationRestores,
+    name: "Rotation",
+    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+    mapStartError: (error) => toActionableError(error, "Rotation restoration failed"),
+    prepare: (deviceId, target) => this.prepareRotationRestore(deviceId, target),
+  };
+  private readonly screenReaderKind: RestoreKindSpec<ScreenReaderSessionState> = {
+    queue: this.screenReaderRestores,
+    name: "Screen reader",
+    timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
+    mapStartError: (error) => toActionableError(error, "Screen reader restoration failed"),
+    prepare: (deviceId, target) => this.prepareScreenReaderRestore(deviceId, target),
+  };
+  private readonly rotationRetry: BoundedRetrySpec<RotationSessionState> = {
+    attempts: ROTATION_RESTORE_RETRY_ATTEMPTS,
+    delayForAttempt: (attempt) => this.rotationRestoreBackoff.delayForAttempt(attempt),
+    isNonRetryable: isNonRetryableRotationRestoreError,
+    logFirstFailure: (deviceId, error) =>
+      logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(error)}`),
+    logRetryFailure: (deviceId, attempt, error) =>
+      logger.warn(
+        `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
+          `device remains quarantined: ${errorMessage(error)}`,
+      ),
+    abandon: (deviceId, target, lastError, when) =>
+      this.abandonRotationRestore(deviceId, target, lastError, when),
+  };
+  private readonly screenReaderRetry: BoundedRetrySpec<ScreenReaderSessionState> = {
+    attempts: SCREEN_READER_RESTORE_RETRY_ATTEMPTS,
+    delayForAttempt: (attempt) => this.screenReaderRestoreBackoff.delayForAttempt(attempt),
+    isNonRetryable: () => false,
+    logFirstFailure: (deviceId, error) =>
+      logger.warn(`Failed to restore screen reader on ${deviceId}`, error),
+    logRetryFailure: (deviceId, attempt, error) =>
+      logger.warn(
+        `Screen reader restore retry ${attempt}/${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}`,
+        error,
+      ),
+    abandon: (deviceId, target) => this.abandonScreenReaderRestore(deviceId, target),
+  };
+  private readonly abandonedRotationRestore: AbandonedRestoreSpec<RotationSessionState> = {
+    memory: this.abandonedRotations,
+    inFlight: this.abandonedRotationRetries,
+    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+    label: "Abandoned rotation restoration",
+    restore: (deviceId, state, signal) =>
+      this.rotationRestorerFactory({ name: deviceId, deviceId, platform: "android" }).restore(
+        state,
+        signal,
+      ),
+    restored: (deviceId, state) => {
+      this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+      logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
+    },
+    failed: (deviceId, state, error) => {
+      if (isNonRetryableRotationRestoreError(error)) {
+        this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+        logger.warn(
+          `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
+            `dropping the abandoned restore: ${errorMessage(error)}`,
+        );
+        return;
+      }
+      logger.warn(
+        `Rotation settings on ${deviceId} are still not restored; ` +
+          `will try again at the next session start or release: ${errorMessage(error)}`,
+      );
+    },
+  };
+  private readonly abandonedScreenReaderRestore: AbandonedRestoreSpec<ScreenReaderSessionState> = {
+    memory: this.abandonedScreenReaders,
+    inFlight: this.abandonedScreenReaderRetries,
+    timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
+    label: "Screen reader restoration",
+    restore: (deviceId, state, signal) =>
+      this.screenReaderRestorerFactory({
+        name: deviceId,
+        deviceId,
+        platform: state.platform,
+      }).restore(state, signal),
+    restored: (deviceId, state) => {
+      this.forgetAbandonedRestore(this.abandonedScreenReaders, deviceId, state);
+      logger.info(`Restored the screen reader on ${deviceId} on its next natural attempt`);
+    },
+    failed: (deviceId, state, error) =>
+      logger.warn(
+        `Screen reader on ${deviceId} is still not restored to ${state.previousEnabled ? "enabled" : "disabled"}`,
+        error,
+      ),
+  };
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
     Partial<Pick<ObserverSessionStore, "list">> &
@@ -9653,10 +9756,14 @@ export class SessionManager {
     );
   }
 
-  private async startClockRestoration(
+  private startClockRestoration(
     deviceId: string,
     target: PendingClockRestore,
   ): Promise<{ pending: Promise<void> | null }> {
+    return this.startRestoration(this.clockKind, deviceId, target);
+  }
+
+  private prepareClockRestore(deviceId: string, target: PendingClockRestore): RestoreRun {
     const healthTarget = { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) };
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
     const signal = defaultDeviceClockRestoreRegistry.signal(deviceId);
@@ -9679,13 +9786,7 @@ export class SessionManager {
               target.controller.signal.throwIfAborted();
               defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
               target.clear();
-              const targets = this.clockRestores.targets.get(deviceId);
-              if (targets?.get(target.state) === target) {
-                targets.delete(target.state);
-                if (targets.size === 0) {
-                  this.clockRestores.targets.delete(deviceId);
-                }
-              }
+              this.forgetFencedRestore(this.clockRestores.targets, deviceId, target);
               if (!this.clockRestores.targets.has(deviceId)) {
                 this.clearRestoreHealth(healthTarget, "clock");
               }
@@ -9696,59 +9797,175 @@ export class SessionManager {
         generation,
         4,
       );
-    const restoration = restore().then(
+    return {
+      restore,
+      quarantined: (outcome) => {
+        logger.warn(`Clock restore ${outcome}; quarantining ${device.deviceId}`);
+        if (healthTarget.incarnation === undefined) {
+          logger.warn(
+            `Failed to restore state on ${deviceId} (clock); no health marker could be keyed because the device has no pool incarnation`,
+          );
+        }
+        if (
+          healthTarget.incarnation !== undefined &&
+          this.restoreIncarnationIsCurrent(healthTarget) &&
+          !target.removed &&
+          this.clockRestores.targets.get(deviceId)?.has(target.state)
+        ) {
+          this.deviceHealth?.markers.mark(deviceId, healthTarget.incarnation, "clock");
+        }
+      },
+      retry: (restoration) => this.retryClockRestore(device.deviceId, target, restoration, restore),
+    };
+  }
+
+  /**
+   * The shared start of a restoration: one dispatch bounded by the kind's timeout, then, if it did
+   * not restore, quarantine and the kind's retry loop (#11794). Not wrapped further, so the turn
+   * counts the release shield suites pin are the ones each kind's copy had.
+   */
+  private async startRestoration<S extends object>(
+    spec: RestoreKindSpec<S>,
+    deviceId: string,
+    target: PendingRestore<S>,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const run = spec.prepare(deviceId, target);
+    const restoration = run.restore().then(
       () => ({ outcome: "restored" as const }),
       (error: unknown) => ({ outcome: "failed" as const, error }),
     );
-    const timeout = new Error("Clock restoration timed out");
+    const timeout = new Error(`${spec.name} restoration timed out`);
     const result = await raceWithDeadline(restoration, {
       timer: this.timer,
-      timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
-      label: "Clock restoration",
+      timeoutMs: spec.timeoutMs,
+      label: `${spec.name} restoration`,
       timeoutError: () => timeout,
     }).catch((error: unknown) => {
       if (error === timeout) {
         return { outcome: "timed-out" as const };
       }
-      throw error;
+      throw spec.mapStartError(error);
     });
     if (result.outcome === "restored") {
       return { pending: null };
     }
     if (this.identityReplacementFences.has(deviceId)) {
       // An upgraded release starts no retries; supersede leaves the baseline for a later release.
-      this.forgetFencedRestore(this.clockRestores.targets, deviceId, target);
+      this.forgetFencedRestore(spec.queue.targets, deviceId, target);
       return { pending: null };
     }
-    logger.warn(`Clock restore ${result.outcome}; quarantining ${device.deviceId}`);
-    if (healthTarget.incarnation === undefined) {
-      logger.warn(
-        `Failed to restore state on ${deviceId} (clock); no health marker could be keyed because the device has no pool incarnation`,
-      );
-    }
-    if (
-      healthTarget.incarnation !== undefined &&
-      this.restoreIncarnationIsCurrent(healthTarget) &&
-      !target.removed &&
-      this.clockRestores.targets.get(deviceId)?.has(target.state)
-    ) {
-      this.deviceHealth?.markers.mark(deviceId, healthTarget.incarnation, "clock");
-    }
-    const pending = raceWithDeadline(
-      this.retryClockRestore(device.deviceId, target, restoration, restore),
-      {
-        timer: this.timer,
-        signal: target.controller.signal,
-        label: "Pending clock restoration",
-      },
-    ).catch((error: unknown) => {
+    run.quarantined(result.outcome, result.outcome === "failed" ? result.error : timeout);
+    const noun = spec.name.toLowerCase();
+    const pending = raceWithDeadline(run.retry(restoration), {
+      timer: this.timer,
+      signal: target.controller.signal,
+      label: `Pending ${noun} restoration`,
+    }).catch((error: unknown) => {
       if (!target.removed) {
-        throw toActionableError(error, "Clock restoration failed");
+        throw toActionableError(error, `${spec.name} restoration failed`);
       }
       // Proven removal retires ownership; no restoration may reach a replacement.
-      logger.debug(`Retired clock restoration on removed device ${device.deviceId}`);
+      logger.debug(`Retired ${noun} restoration on removed device ${deviceId}`);
     });
     return { pending };
+  }
+
+  /** Retry a failed restore with bounded backoff, then abandon it (rotation, screen reader). */
+  private async retryRestoreBounded<S extends object>(
+    spec: BoundedRetrySpec<S>,
+    deviceId: string,
+    target: PendingRestore<S>,
+    restoration: Promise<RestoreAttemptOutcome>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    spec.logFirstFailure(deviceId, result.error);
+    if (spec.isNonRetryable(result.error)) {
+      spec.abandon(deviceId, target, result.error, "without retrying");
+      return;
+    }
+    let lastError: unknown = result.error;
+    for (let attempt = 1; attempt <= spec.attempts; attempt++) {
+      await this.timer.sleep(spec.delayForAttempt(attempt));
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        if (spec.isNonRetryable(error)) {
+          spec.abandon(deviceId, target, error, `after ${attempt} retries`);
+          return;
+        }
+        lastError = error;
+        spec.logRetryFailure(deviceId, attempt, error);
+      }
+    }
+    spec.abandon(deviceId, target, lastError, `after ${spec.attempts} retries`);
+  }
+
+  private forgetAbandonedRestore<S>(memory: Map<string, S>, deviceId: string, state: S): void {
+    if (memory.get(deviceId) === state) {
+      memory.delete(deviceId);
+    }
+  }
+
+  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
+  private async retryAbandonedAfter(
+    own: Promise<void> | null,
+    retry: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await own;
+    } finally {
+      await retry();
+    }
+  }
+
+  /**
+   * One bounded attempt at a baseline an earlier release gave up on, awaited before the device is
+   * handed to a new session; never on a timer. Either way the device proceeds.
+   */
+  private retryAbandonedRestore<S extends object>(
+    spec: AbandonedRestoreSpec<S>,
+    deviceId: string,
+  ): Promise<void> {
+    const state = spec.memory.get(deviceId);
+    if (!state) {
+      return Promise.resolve();
+    }
+    const inFlight = spec.inFlight.get(deviceId);
+    if (inFlight) {
+      return inFlight;
+    }
+    const controller = new AbortController();
+    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
+    const attempt = (async () => {
+      try {
+        await raceWithDeadline(
+          this.dispatchDeviceRestore(
+            deviceId,
+            (signal) => spec.restore(deviceId, state, AbortSignal.any([signal, controller.signal])),
+            generation,
+          ),
+          { timer: this.timer, timeoutMs: spec.timeoutMs, label: spec.label },
+        );
+        spec.restored(deviceId, state);
+      } catch (error) {
+        controller.abort();
+        spec.failed(deviceId, state, error);
+      }
+    })().finally(() => {
+      if (spec.inFlight.get(deviceId) === attempt) {
+        spec.inFlight.delete(deviceId);
+      }
+    });
+    spec.inFlight.set(deviceId, attempt);
+    return attempt;
   }
 
   /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
@@ -9836,10 +10053,14 @@ export class SessionManager {
     );
   }
 
-  private async startRotationRestoration(
+  private startRotationRestoration(
     deviceId: string,
     target: PendingRotationRestore,
   ): Promise<{ pending: Promise<void> | null }> {
+    return this.startRestoration(this.rotationKind, deviceId, target);
+  }
+
+  private prepareRotationRestore(deviceId: string, target: PendingRotationRestore): RestoreRun {
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
     const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
     const restore = () =>
@@ -9853,109 +10074,20 @@ export class SessionManager {
           acknowledge();
           target.controller.signal.throwIfAborted();
           target.clear();
-          const targets = this.rotationRestores.targets.get(deviceId);
-          if (targets?.get(target.state) === target) {
-            targets.delete(target.state);
-            if (targets.size === 0) {
-              this.rotationRestores.targets.delete(deviceId);
-            }
-          }
+          this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
         },
         generation,
         5,
       );
-    const restoration = restore().then(
-      () => ({ outcome: "restored" as const }),
-      (error: unknown) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error("Rotation restoration timed out");
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-      label: "Rotation restoration",
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw toActionableError(error, "Rotation restoration failed");
-    });
-    if (result.outcome === "restored") {
-      return { pending: null };
-    }
-    if (this.identityReplacementFences.has(deviceId)) {
-      // An upgraded release starts no retries; supersede leaves the baseline for a later release.
-      this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
-      return { pending: null };
-    }
-    logger.warn(
-      `Rotation restore ${result.outcome}; quarantining ${device.deviceId}: ${errorMessage(
-        result.outcome === "failed" ? result.error : timeout,
-      )}`,
-    );
-    const pending = raceWithDeadline(
-      this.retryRotationRestore(device.deviceId, target, restoration, restore),
-      {
-        timer: this.timer,
-        signal: target.controller.signal,
-        label: "Pending rotation restoration",
-      },
-    ).catch((error: unknown) => {
-      if (!target.removed) {
-        throw toActionableError(error, "Rotation restoration failed");
-      }
-      // Proven removal retires ownership; no restoration may reach a replacement.
-      logger.debug(`Retired rotation restoration on removed device ${device.deviceId}`);
-    });
-    return { pending };
-  }
-
-  /** Same setup drain, deadline and pool quarantine as network restoration.
-   * Retries are bounded with the injected `Backoff`; after the cap the device
-   * leaves quarantine instead of retrying forever.
-   */
-  private async retryRotationRestore(
-    deviceId: string,
-    target: PendingRotationRestore,
-    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
-    restore: () => Promise<void>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(result.error)}`);
-    if (isNonRetryableRotationRestoreError(result.error)) {
-      this.abandonRotationRestore(deviceId, target, result.error, "without retrying");
-      return;
-    }
-    let lastError: unknown = result.error;
-    for (let attempt = 1; attempt <= ROTATION_RESTORE_RETRY_ATTEMPTS; attempt++) {
-      await this.timer.sleep(this.rotationRestoreBackoff.delayForAttempt(attempt));
-      if (target.removed) {
-        return;
-      }
-      try {
-        await restore();
-        return;
-      } catch (error) {
-        if (isNonRetryableRotationRestoreError(error)) {
-          this.abandonRotationRestore(deviceId, target, error, `after ${attempt} retries`);
-          return;
-        }
-        lastError = error;
+    return {
+      restore,
+      quarantined: (outcome, error) =>
         logger.warn(
-          `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
-            `device remains quarantined: ${errorMessage(error)}`,
-        );
-      }
-    }
-    this.abandonRotationRestore(
-      deviceId,
-      target,
-      lastError,
-      `after ${ROTATION_RESTORE_RETRY_ATTEMPTS} retries`,
-    );
+          `Rotation restore ${outcome}; quarantining ${device.deviceId}: ${errorMessage(error)}`,
+        ),
+      retry: (restoration) =>
+        this.retryRestoreBounded(this.rotationRetry, device.deviceId, target, restoration, restore),
+    };
   }
 
   /** Release the device from quarantine once the bounded rotation retries are spent. */
@@ -9985,92 +10117,19 @@ export class SessionManager {
       this.abandonedRotations.set(deviceId, target.state);
     }
     target.clear();
-    const targets = this.rotationRestores.targets.get(deviceId);
-    if (targets?.get(target.state) === target) {
-      targets.delete(target.state);
-      if (targets.size === 0) {
-        this.rotationRestores.targets.delete(deviceId);
-      }
-    }
+    this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
   }
 
-  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
-  private async retryAbandonedRotationAfter(
-    deviceId: string,
-    own: Promise<void> | null,
-  ): Promise<void> {
-    try {
-      await own;
-    } finally {
-      await this.retryAbandonedRotationRestore(deviceId);
-    }
+  private retryAbandonedRotationAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
+    return this.retryAbandonedAfter(own, () => this.retryAbandonedRotationRestore(deviceId));
   }
 
   /**
-   * One bounded attempt at rotation settings an earlier release gave up on, awaited
-   * before the device is handed to a new session; never on a timer. A transient failure
-   * keeps the record for the next start or release. A window-manager-managed outcome is
-   * definitively unrecoverable, so the record is dropped. Either way the device proceeds.
+   * A transient failure keeps the record for the next start or release. A window-manager-managed
+   * outcome is definitively unrecoverable, so the record is dropped.
    */
   private retryAbandonedRotationRestore(deviceId: string): Promise<void> {
-    const state = this.abandonedRotations.get(deviceId);
-    if (!state) {
-      return Promise.resolve();
-    }
-    const inFlight = this.abandonedRotationRetries.get(deviceId);
-    if (inFlight) {
-      return inFlight;
-    }
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const controller = new AbortController();
-    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
-    const forget = () => {
-      if (this.abandonedRotations.get(deviceId) === state) {
-        this.abandonedRotations.delete(deviceId);
-      }
-    };
-    const attempt = (async () => {
-      try {
-        await raceWithDeadline(
-          this.dispatchDeviceRestore(
-            deviceId,
-            (signal) =>
-              this.rotationRestorerFactory(device).restore(
-                state,
-                AbortSignal.any([signal, controller.signal]),
-              ),
-            generation,
-          ),
-          {
-            timer: this.timer,
-            timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-            label: "Abandoned rotation restoration",
-          },
-        );
-        forget();
-        logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
-      } catch (error) {
-        controller.abort();
-        if (isNonRetryableRotationRestoreError(error)) {
-          forget();
-          logger.warn(
-            `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
-              `dropping the abandoned restore: ${errorMessage(error)}`,
-          );
-          return;
-        }
-        logger.warn(
-          `Rotation settings on ${deviceId} are still not restored; ` +
-            `will try again at the next session start or release: ${errorMessage(error)}`,
-        );
-      }
-    })().finally(() => {
-      if (this.abandonedRotationRetries.get(deviceId) === attempt) {
-        this.abandonedRotationRetries.delete(deviceId);
-      }
-    });
-    this.abandonedRotationRetries.set(deviceId, attempt);
-    return attempt;
+    return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
   }
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
@@ -10094,10 +10153,17 @@ export class SessionManager {
     );
   }
 
-  private async startScreenReaderRestoration(
+  private startScreenReaderRestoration(
     deviceId: string,
     target: PendingScreenReaderRestore,
   ): Promise<{ pending: Promise<void> | null }> {
+    return this.startRestoration(this.screenReaderKind, deviceId, target);
+  }
+
+  private prepareScreenReaderRestore(
+    deviceId: string,
+    target: PendingScreenReaderRestore,
+  ): RestoreRun {
     const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
     const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
     const restore = () =>
@@ -10111,94 +10177,24 @@ export class SessionManager {
           acknowledge();
           target.controller.signal.throwIfAborted();
           target.clear();
-          const targets = this.screenReaderRestores.targets.get(deviceId);
-          if (targets?.get(target.state) === target) {
-            targets.delete(target.state);
-            if (targets.size === 0) {
-              this.screenReaderRestores.targets.delete(deviceId);
-            }
-          }
+          this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
         },
         generation,
         6,
       );
-    const restoration = restore().then(
-      () => ({ outcome: "restored" as const }),
-      (error: unknown) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error("Screen reader restoration timed out");
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
-      label: "Screen reader restoration",
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw toActionableError(error, "Screen reader restoration failed");
-    });
-    if (result.outcome === "restored") {
-      return { pending: null };
-    }
-    if (this.identityReplacementFences.has(deviceId)) {
-      // An upgraded release starts no retries; supersede leaves the baseline for a later release.
-      this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
-      return { pending: null };
-    }
-    logger.warn(
-      `Screen reader restore ${result.outcome}; quarantining ${device.deviceId}`,
-      result.outcome === "failed" ? result.error : timeout,
-    );
-    const pending = raceWithDeadline(
-      this.retryScreenReaderRestore(device.deviceId, target, restoration, restore),
-      {
-        timer: this.timer,
-        signal: target.controller.signal,
-        label: "Pending screen reader restoration",
-      },
-    ).catch((error: unknown) => {
-      if (!target.removed) {
-        throw toActionableError(error, "Screen reader restoration failed");
-      }
-      // Proven removal retires ownership; no restoration may reach a replacement.
-      logger.debug(`Retired screen reader restoration on removed device ${device.deviceId}`);
-    });
-    return { pending };
-  }
-
-  /**
-   * Bounded retries with the injected `Backoff`. Each attempt is a full screen-reader
-   * toggle, so after the cap the device is released from quarantine and the state it
-   * still holds is remembered for one more attempt at its next natural point.
-   */
-  private async retryScreenReaderRestore(
-    deviceId: string,
-    target: PendingScreenReaderRestore,
-    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
-    restore: () => Promise<void>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    logger.warn(`Failed to restore screen reader on ${deviceId}`, result.error);
-    for (let attempt = 1; attempt <= SCREEN_READER_RESTORE_RETRY_ATTEMPTS; attempt++) {
-      await this.timer.sleep(this.screenReaderRestoreBackoff.delayForAttempt(attempt));
-      if (target.removed) {
-        return;
-      }
-      try {
-        await restore();
-        return;
-      } catch (error) {
-        logger.warn(
-          `Screen reader restore retry ${attempt}/${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}`,
-          error,
-        );
-      }
-    }
-    this.abandonScreenReaderRestore(deviceId, target);
+    return {
+      restore,
+      quarantined: (outcome, error) =>
+        logger.warn(`Screen reader restore ${outcome}; quarantining ${device.deviceId}`, error),
+      retry: (restoration) =>
+        this.retryRestoreBounded(
+          this.screenReaderRetry,
+          device.deviceId,
+          target,
+          restoration,
+          restore,
+        ),
+    };
   }
 
   private abandonScreenReaderRestore(deviceId: string, target: PendingScreenReaderRestore): void {
@@ -10214,76 +10210,19 @@ export class SessionManager {
     );
     this.abandonedScreenReaders.set(deviceId, target.state);
     target.clear();
-    const targets = this.screenReaderRestores.targets.get(deviceId);
-    if (targets?.get(target.state) === target) {
-      targets.delete(target.state);
-      if (targets.size === 0) {
-        this.screenReaderRestores.targets.delete(deviceId);
-      }
-    }
+    this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
   }
 
-  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
-  private async retryAbandonedScreenReaderAfter(
+  private retryAbandonedScreenReaderAfter(
     deviceId: string,
     own: Promise<void> | null,
   ): Promise<void> {
-    try {
-      await own;
-    } finally {
-      await this.retryAbandonedScreenReaderRestore(deviceId);
-    }
+    return this.retryAbandonedAfter(own, () => this.retryAbandonedScreenReaderRestore(deviceId));
   }
 
   /** One bounded attempt at a state an earlier release gave up on; never on a timer. */
   private retryAbandonedScreenReaderRestore(deviceId: string): Promise<void> {
-    const state = this.abandonedScreenReaders.get(deviceId);
-    if (!state) {
-      return Promise.resolve();
-    }
-    const inFlight = this.abandonedScreenReaderRetries.get(deviceId);
-    if (inFlight) {
-      return inFlight;
-    }
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const controller = new AbortController();
-    const device: BootedDevice = { name: deviceId, deviceId, platform: state.platform };
-    const attempt = (async () => {
-      try {
-        await raceWithDeadline(
-          this.dispatchDeviceRestore(
-            deviceId,
-            (signal) =>
-              this.screenReaderRestorerFactory(device).restore(
-                state,
-                AbortSignal.any([signal, controller.signal]),
-              ),
-            generation,
-          ),
-          {
-            timer: this.timer,
-            timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
-            label: "Screen reader restoration",
-          },
-        );
-        if (this.abandonedScreenReaders.get(deviceId) === state) {
-          this.abandonedScreenReaders.delete(deviceId);
-        }
-        logger.info(`Restored the screen reader on ${deviceId} on its next natural attempt`);
-      } catch (error) {
-        controller.abort();
-        logger.warn(
-          `Screen reader on ${deviceId} is still not restored to ${state.previousEnabled ? "enabled" : "disabled"}`,
-          error,
-        );
-      }
-    })().finally(() => {
-      if (this.abandonedScreenReaderRetries.get(deviceId) === attempt) {
-        this.abandonedScreenReaderRetries.delete(deviceId);
-      }
-    });
-    this.abandonedScreenReaderRetries.set(deviceId, attempt);
-    return attempt;
+    return this.retryAbandonedRestore(this.abandonedScreenReaderRestore, deviceId);
   }
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */

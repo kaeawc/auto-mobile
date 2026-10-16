@@ -111,6 +111,25 @@ describe("agent benchmark suite config", () => {
     }
   });
 
+  test("preference keys and strings must be valid XML text", () => {
+    const prefs = (entries: Record<string, unknown>) => ({
+      ...MINIMAL,
+      preflight: { sharedPreferences: { p: entries } },
+    });
+    for (const entries of [
+      { name: "a\u0000b" },
+      { name: "\u001F" },
+      { ["bad\u0007key"]: true },
+      { name: "\uD800" },
+    ]) {
+      expect(() => parseSuiteDefinition(prefs(entries), "x.yml")).toThrow(/valid XML text/);
+    }
+    expect(
+      parseSuiteDefinition(prefs({ name: "tab\tnew\nline 😀 & <ok>" }), "x.yml").preflight
+        .sharedPreferences,
+    ).toEqual({ p: { name: "tab\tnew\nline 😀 & <ok>" } });
+  });
+
   test("a suite with no verification check is rejected", () => {
     const withoutVerify = { ...MINIMAL, verify: undefined };
     expect(() => parseSuiteDefinition(withoutVerify, "x.yml")).toThrow(

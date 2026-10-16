@@ -116,7 +116,7 @@ function stumbleSection(result: BenchmarkResult): string[] {
 }
 
 function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
-  const { appBuild, suiteDigest, observedModel } = comparison;
+  const { appBuild, suiteDigest, observedModel, claudeCodeVersion } = comparison;
   return [
     ...(appBuild && !appBuild.matches
       ? [`  ! baseline was recorded on ${appBuild.baseline}; deltas compare different app builds`]
@@ -124,6 +124,11 @@ function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
     ...(suiteDigest && !suiteDigest.matches
       ? [
           "  ! baseline was recorded with a different prompt or suite settings; deltas may not be comparable",
+        ]
+      : []),
+    ...(claudeCodeVersion && !claudeCodeVersion.matches
+      ? [
+          `  ! baseline was recorded with Claude Code ${claudeCodeVersion.baseline}; this run used ${claudeCodeVersion.current}`,
         ]
       : []),
     ...(observedModel && !observedModel.matches
@@ -202,10 +207,16 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
     baseline.costUsd = Math.round(audit.result.costUsd * 10_000) / 10_000;
   }
   baseline.tools = audit.toolCounts;
-  baseline.appBuild = result.preflight.appBuild;
+  // An unreadable build fingerprint would make every later "unknown" look like a match.
+  if (result.preflight.appBuild !== "unknown") {
+    baseline.appBuild = result.preflight.appBuild;
+  }
   baseline.suiteDigest = result.suiteDigest;
   if (audit.observedModel) {
     baseline.observedModel = audit.observedModel;
+  }
+  if (result.claude.version) {
+    baseline.claudeCodeVersion = result.claude.version;
   }
   return dump(
     {

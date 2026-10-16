@@ -55,6 +55,8 @@ export interface Comparison {
   suiteDigest?: FingerprintCheck;
   /** Set when the baseline records the model Claude reported running. */
   observedModel?: FingerprintCheck;
+  /** Set when the baseline records the Claude Code version. */
+  claudeCodeVersion?: FingerprintCheck;
 }
 
 export interface FingerprintCheck {
@@ -67,14 +69,20 @@ export interface FingerprintCheck {
 export interface RunFingerprints {
   appBuild?: string;
   suiteDigest?: string;
+  claudeCodeVersion?: string;
 }
 
 function fingerprintCheck(
   baseline: string | undefined,
   current: string | undefined,
 ): FingerprintCheck | undefined {
+  // An unreadable fingerprint ("unknown") proves nothing, so it never counts as a match.
   return baseline
-    ? { baseline, current: current ?? "unknown", matches: baseline === current }
+    ? {
+        baseline,
+        current: current ?? "unknown",
+        matches: baseline === current && baseline !== "unknown",
+      }
     : undefined;
 }
 
@@ -251,5 +259,9 @@ export function compareRun(
     appBuild: fingerprintCheck(baseline?.appBuild, fingerprints.appBuild),
     suiteDigest: fingerprintCheck(baseline?.suiteDigest, fingerprints.suiteDigest),
     observedModel: fingerprintCheck(baseline?.observedModel, audit.observedModel),
+    claudeCodeVersion: fingerprintCheck(
+      baseline?.claudeCodeVersion,
+      fingerprints.claudeCodeVersion,
+    ),
   };
 }

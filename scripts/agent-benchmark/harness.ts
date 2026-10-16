@@ -63,20 +63,18 @@ export interface HarnessFs {
   sha256(path: string): string;
 }
 
-/** A device allocation claim this process holds. */
+/** A device this benchmark holds: its daemon allocation claim plus a benchmark-only lock. */
 export interface DeviceReservation {
+  /** Drop the daemon allocation claim so the run's private daemon can take it. */
+  handOff(): void;
+  /** Drop everything, including the benchmark lock that keeps other benchmarks off. */
   release(): void;
 }
 
 /** Device allocation claims, under the same ownership rules every AutoMobile daemon applies. */
 export interface DeviceClaims {
-  /**
-   * Claim `serial` for this process, or report who holds it: a PID, or `unreadable` when a
-   * claim exists that names nobody readable.
-   */
-  reserve(
-    serial: string,
-  ): Promise<DeviceReservation | { refusedBy: { pid?: number; unreadable: boolean } }>;
+  /** Reserve `serial` for this benchmark, or explain who holds it. */
+  reserve(serial: string): Promise<DeviceReservation | { refused: string }>;
 }
 
 export interface HarnessDeps {
@@ -120,6 +118,11 @@ export function suiteDigest(suite: LoadedSuite, modelOverride?: string): string 
     model: modelOverride ?? suite.definition.claude.model ?? null,
   });
   return createHash("sha256").update(subject).digest("hex").slice(0, 16);
+}
+
+/** Elapsed-time reading: monotonic when the timer has one, so a clock step cannot skew it. */
+function elapsedNow(timer: Timer): number {
+  return timer.monotonicNow?.() ?? timer.now();
 }
 
 /** `2026-10-16T01:02:03.456Z` → `20261016T010203Z`. */
@@ -179,8 +182,8 @@ interface PreparedRun {
   paths: ServerPaths;
   serial: string;
   preflight: BenchmarkResult["preflight"];
-  /** Release the device claim held through preflight (idempotent). */
-  releaseDevice(): void;
+  /** The reservation held through preflight; both calls are idempotent. */
+  device: { handOff: () => void; release: () => void };
 }
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
@@ -189,16 +192,13 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   // AutoMobile session (or a concurrent benchmark) is refused instead of racing it.
   // launchClaude releases it just before the run's own private daemon needs to claim it.
   const reservation = await deps.deviceClaims.reserve(serial);
-  if ("refusedBy" in reservation) {
-    const { pid } = reservation.refusedBy;
-    const holder = pid === undefined ? "an unreadable claim" : `pid ${pid}`;
-    throw new Error(
-      `${serial} is claimed by another AutoMobile session (${holder}); stop it before benchmarking.`,
-    );
+  if ("refused" in reservation) {
+    throw new Error(`${serial} ${reservation.refused}; stop it before benchmarking.`);
   }
   const release = once(() => reservation.release());
+  const handOff = once(() => reservation.handOff());
   try {
-    return await prepareReserved(suite, options, deps, serial, release);
+    return await prepareReserved(suite, options, deps, serial, { handOff, release });
   } catch (error) {
     release();
     throw error;
@@ -220,14 +220,14 @@ async function prepareReserved(
   options: RunOptions,
   deps: HarnessDeps,
   serial: string,
-  releaseDevice: () => void,
+  device: { handOff: () => void; release: () => void },
 ) {
   const { definition } = suite;
   const startedAt = runTimestamp(deps.timer.now());
   const runId = deps.idGenerator.next().slice(0, 8);
   const runDirectory = join(options.outputRoot, definition.name, `${startedAt}-${runId}`);
   deps.fs.mkdir(runDirectory);
-  const preflightStart = deps.timer.now();
+  const preflightStart = elapsedNow(deps.timer);
   deps.log(`[${definition.name}] preflight on ${serial}`);
   const { log, appBuild } = await runPreflight(deps.runner, {
     serial,
@@ -245,7 +245,7 @@ async function prepareReserved(
     },
   });
   await deps.timer.sleep(definition.preflight.settleSeconds * 1000);
-  const durationSeconds = (deps.timer.now() - preflightStart) / 1000;
+  const durationSeconds = (elapsedNow(deps.timer) - preflightStart) / 1000;
   deps.fs.writeFile(join(runDirectory, "preflight.log"), `${log.join("\n")}\n`);
   const { paths, claudeCwd } = allocateRunDirectories(options, deps, runDirectory);
   const prepared: PreparedRun = {
@@ -254,7 +254,7 @@ async function prepareReserved(
     paths,
     serial,
     preflight: { log, durationSeconds, appBuild },
-    releaseDevice,
+    device,
   };
   return { startedAt, prepared };
 }
@@ -313,10 +313,11 @@ async function launchClaude(
     join(run.runDirectory, "claude-command.json"),
     `${JSON.stringify({ command: options.claudeCommand, args, cwd: run.claudeCwd }, null, 2)}\n`,
   );
-  // The private daemon claims the device on Claude's first tool call; hand it over now.
-  run.releaseDevice();
+  // The private daemon claims the device on Claude's first tool call, so hand the daemon
+  // claim over now; the benchmark lock stays held until the run ends.
+  run.device.handOff();
   deps.log(`[${definition.name}] running claude (timeout ${definition.claude.timeoutSeconds}s)`);
-  const start = deps.timer.now();
+  const start = elapsedNow(deps.timer);
   const exit = await deps.launcher.launch({
     command: options.claudeCommand,
     args,
@@ -333,7 +334,7 @@ async function launchClaude(
     stderrPath: join(run.runDirectory, "claude.stderr"),
     timeoutMs: definition.claude.timeoutSeconds * 1000,
   });
-  return { ...exit, wallClockSeconds: (deps.timer.now() - start) / 1000 };
+  return { ...exit, wallClockSeconds: (elapsedNow(deps.timer) - start) / 1000 };
 }
 
 export async function runSuite(
@@ -353,7 +354,7 @@ export async function runSuite(
       screen = await screenAfterRun(deps, prepared, definition.app.packageName);
     }
   } finally {
-    prepared.releaseDevice();
+    prepared.device.release();
     await stopPrivateDaemon(deps, options, prepared.paths);
     deps.fs.remove(prepared.paths.auxSocketDir);
     deps.fs.remove(prepared.claudeCwd);
@@ -390,7 +391,7 @@ export async function runSuite(
       definition.verify,
       definition.baseline,
       definition.baselineToolSequence,
-      { appBuild: prepared.preflight.appBuild, suiteDigest: digest },
+      { appBuild: prepared.preflight.appBuild, suiteDigest: digest, claudeCodeVersion: version },
     ),
   };
   deps.fs.writeFile(

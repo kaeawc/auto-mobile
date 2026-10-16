@@ -26,6 +26,8 @@ function result(
     baselineAppBuild?: string;
     baselineSuiteDigest?: string;
     baselineModel?: string;
+    baselineClaudeVersion?: string;
+    appBuild?: string;
   } = {},
 ): BenchmarkResult {
   const audit = auditTranscript(builder.build(), {
@@ -59,9 +61,14 @@ function result(
         appBuild: options.baselineAppBuild,
         suiteDigest: options.baselineSuiteDigest,
         observedModel: options.baselineModel,
+        claudeCodeVersion: options.baselineClaudeVersion,
       },
       options.sequence,
-      { appBuild: "versionName=1.0 versionCode=7", suiteDigest: "suite0123456789a" },
+      {
+        appBuild: options.appBuild ?? "versionName=1.0 versionCode=7",
+        suiteDigest: "suite0123456789a",
+        claudeCodeVersion: "2.1.301",
+      },
     ),
   };
 }
@@ -150,6 +157,7 @@ describe("agent benchmark rendering", () => {
       appBuild: "versionName=1.0 versionCode=7",
       suiteDigest: "suite0123456789a",
       observedModel: "claude-test-model",
+      claudeCodeVersion: "2.1.301",
     });
     expect(suite.baselineToolSequence).toEqual(["observe", "tapOn"]);
   });
@@ -182,6 +190,23 @@ describe("agent benchmark rendering", () => {
     );
     const same = result(passing(), { baselineSuiteDigest: "suite0123456789a" });
     expect(renderReport(same)).not.toContain("different prompt or suite settings");
+  });
+
+  test("a baseline from another Claude Code version is flagged", () => {
+    const other = result(passing(), { baselineClaudeVersion: "2.0.1" });
+    expect(renderReport(other)).toContain(
+      "! baseline was recorded with Claude Code 2.0.1; this run used 2.1.301",
+    );
+    const same = result(passing(), { baselineClaudeVersion: "2.1.301" });
+    expect(renderReport(same)).not.toContain("recorded with Claude Code");
+  });
+
+  test("an unknown app build never matches, and is not written into a baseline", () => {
+    const unknown = result(passing(), { baselineAppBuild: "unknown", appBuild: "unknown" });
+    expect(unknown.comparison.appBuild?.matches).toBe(false);
+    const unknownRun = result(passing());
+    unknownRun.preflight.appBuild = "unknown";
+    expect(load(renderBaselineSnippet(unknownRun))).not.toHaveProperty("baseline.appBuild");
   });
 
   test("a baseline from another observed model is flagged; the same model is not", () => {

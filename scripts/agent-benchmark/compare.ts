@@ -53,6 +53,8 @@ export interface Comparison {
   appBuild?: FingerprintCheck;
   /** Set when the baseline records the suite definition it was measured with. */
   suiteDigest?: FingerprintCheck;
+  /** Set when the baseline records the model Claude reported running. */
+  observedModel?: FingerprintCheck;
 }
 
 export interface FingerprintCheck {
@@ -248,5 +250,6 @@ export function compareRun(
     stumbles: audit.toolErrors + audit.patternMatches.length + audit.permissionDenials.length,
     appBuild: fingerprintCheck(baseline?.appBuild, fingerprints.appBuild),
     suiteDigest: fingerprintCheck(baseline?.suiteDigest, fingerprints.suiteDigest),
+    observedModel: fingerprintCheck(baseline?.observedModel, audit.observedModel),
   };
 }

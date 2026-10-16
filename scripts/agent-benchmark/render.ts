@@ -116,7 +116,7 @@ function stumbleSection(result: BenchmarkResult): string[] {
 }
 
 function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
-  const { appBuild, suiteDigest } = comparison;
+  const { appBuild, suiteDigest, observedModel } = comparison;
   return [
     ...(appBuild && !appBuild.matches
       ? [`  ! baseline was recorded on ${appBuild.baseline}; deltas compare different app builds`]
@@ -124,6 +124,11 @@ function baselineWarnings(comparison: BenchmarkResult["comparison"]): string[] {
     ...(suiteDigest && !suiteDigest.matches
       ? [
           "  ! baseline was recorded with a different prompt or suite settings; deltas may not be comparable",
+        ]
+      : []),
+    ...(observedModel && !observedModel.matches
+      ? [
+          `  ! baseline was recorded on model ${observedModel.baseline}; this run used ${observedModel.current}`,
         ]
       : []),
   ];
@@ -199,6 +204,9 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
   baseline.tools = audit.toolCounts;
   baseline.appBuild = result.preflight.appBuild;
   baseline.suiteDigest = result.suiteDigest;
+  if (audit.observedModel) {
+    baseline.observedModel = audit.observedModel;
+  }
   return dump(
     {
       baseline,

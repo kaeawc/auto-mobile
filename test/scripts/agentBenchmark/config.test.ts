@@ -26,22 +26,26 @@ describe("agent benchmark suite config", () => {
       allowedTools: ["mcp__auto-mobile"],
       disallowedTools: ["Bash"],
       timeoutSeconds: 900,
-      extraArgs: [],
     });
     expect(suite.verify).toEqual({ answerIncludes: ["DONE"], screenIncludes: [] });
     expect(suite.failurePatterns).toEqual([]);
   });
 
-  test("unknown keys, bad names, and --model in extraArgs fail fast with every issue", () => {
+  test("unknown keys and bad names fail fast with every issue", () => {
     expect(() => parseSuiteDefinition({ ...MINIMAL, baselin: {} }, "x.yml")).toThrow(
       /Unrecognized key\(s\) in object: 'baselin'/,
     );
     expect(() => parseSuiteDefinition({ ...MINIMAL, name: "Bad Name" }, "x.yml")).toThrow(
       /name: use lowercase/,
     );
+    // No free-form Claude flags: --settings, --resume, --plugin-dir and the like would undo
+    // run isolation, so extraArgs is not a suite key at all.
     expect(() =>
-      parseSuiteDefinition({ ...MINIMAL, claude: { extraArgs: ["--model=opus"] } }, "x.yml"),
-    ).toThrow(/claude.extraArgs: set claude.model/);
+      parseSuiteDefinition(
+        { ...MINIMAL, claude: { extraArgs: ["--settings", "x.json"] } },
+        "x.yml",
+      ),
+    ).toThrow(/Unrecognized key\(s\) in object: 'extraArgs'/);
     expect(() =>
       parseSuiteDefinition(
         { ...MINIMAL, preflight: { sharedPreferences: { "../escape": { a: true } } } },
@@ -105,25 +109,6 @@ describe("agent benchmark suite config", () => {
         p: { value },
       });
     }
-  });
-
-  test("extraArgs cannot resume or continue an earlier conversation", () => {
-    for (const extraArgs of [
-      ["--resume", "abc"],
-      ["--resume=abc"],
-      ["-r"],
-      ["--continue"],
-      ["-c"],
-      ["--fork-session"],
-    ]) {
-      expect(() => parseSuiteDefinition({ ...MINIMAL, claude: { extraArgs } }, "x.yml")).toThrow(
-        /must not resume or continue a session/,
-      );
-    }
-    expect(
-      parseSuiteDefinition({ ...MINIMAL, claude: { extraArgs: ["--effort", "high"] } }, "x.yml")
-        .claude.extraArgs,
-    ).toEqual(["--effort", "high"]);
   });
 
   test("a suite with no verification check is rejected", () => {

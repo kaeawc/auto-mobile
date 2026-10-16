@@ -160,17 +160,27 @@ export function isolatedServerEnv(
 }
 
 /**
- * The MCP server's explicit `env`. It repeats the shared claim root: with
+ * Inherited variables the MCP server's explicit `env` repeats. With
  * `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`, Claude gives stdio servers only a safe default
- * environment plus this block, and the private daemon must claim devices under the same
- * root the harness checked.
+ * environment plus that block, and the private daemon must reach the same adb server and
+ * claim devices under the same root that preflight and the ownership check used.
  */
+const MCP_PASSTHROUGH_VARIABLES = [
+  ...SHARED_AUTOMOBILE_VARIABLES,
+  "ADB_SERVER_SOCKET",
+  "ANDROID_ADB_SERVER_ADDRESS",
+  "ANDROID_ADB_SERVER_PORT",
+  "ANDROID_HOME",
+  "ANDROID_SDK_ROOT",
+];
+
+/** The MCP server's explicit `env`: the passthrough variables plus the private daemon's. */
 export function mcpServerEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
 ): Record<string, string> {
   const shared = Object.fromEntries(
-    [...SHARED_AUTOMOBILE_VARIABLES].flatMap((key) => {
+    MCP_PASSTHROUGH_VARIABLES.flatMap((key) => {
       const value = inherited[key];
       return value === undefined ? [] : [[key, value]];
     }),
@@ -254,5 +264,5 @@ export function buildClaudeArgs(
   if (claude.disallowedTools.length > 0) {
     args.push("--disallowedTools", ...claude.disallowedTools);
   }
-  return [...args, ...claude.extraArgs];
+  return args;
 }

@@ -200,8 +200,14 @@ async function verifyInstalledApk(
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^package:/, ""))
     .find((path) => path.endsWith("/base.apk"));
+  // Fail closed: an unverified install could be a stale app recorded under this APK's digest.
+  const unverifiable = (reason: string) =>
+    new Error(
+      `Cannot verify that ${spec.packageName} on ${spec.serial} is the APK at ${spec.apkPath} ` +
+        `(${reason}). Install it yourself and remove app.apkPath to run without the check.`,
+    );
   if (!basePath) {
-    return "could not verify the installed APK: no base.apk in pm path output";
+    throw unverifiable("pm path listed no base.apk");
   }
   const result = await runner.run(
     "adb",
@@ -209,8 +215,9 @@ async function verifyInstalledApk(
     ADB_TIMEOUT_MS,
   );
   const deviceDigest = result.exitCode === 0 ? result.stdout.trim().split(/\s+/)[0] : undefined;
-  if (!deviceDigest) {
-    return `could not verify the installed APK: sha256sum exited ${result.exitCode}`;
+  if (!deviceDigest || !/^[0-9a-f]{64}$/.test(deviceDigest)) {
+    const output = `${result.stderr}${result.stdout}`.trim().slice(0, 200);
+    throw unverifiable(`sha256sum exited ${result.exitCode}: ${output}`);
   }
   if (deviceDigest !== spec.apkDigest) {
     throw new Error(

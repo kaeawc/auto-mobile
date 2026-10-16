@@ -15216,7 +15216,7 @@
           "type": "string"
         },
         "direction": {
-          "description": "Pinch direction",
+          "description": "Pinch direction; ignored when the finger distance does not change (rotation only)",
           "type": "string",
           "enum": ["in", "out"]
         },
@@ -15242,7 +15242,7 @@
           "maximum": 10000
         },
         "rotationDegrees": {
-          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
           "type": "number"
         },
         "includeSystemInsets": {

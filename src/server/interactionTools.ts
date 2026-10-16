@@ -995,7 +995,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
     z
       .object({
         display: z.string().optional().describe("Target panel key, role, or active"),
-        direction: z.enum(["in", "out"]).describe("Pinch direction"),
+        direction: z
+          .enum(["in", "out"])
+          .describe(
+            "Pinch direction; ignored when the finger distance does not change (rotation only)",
+          ),
         distanceStart: z
           .number()
           .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
@@ -1028,7 +1032,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .number()
           .optional()
           .describe(
-            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
           ),
         includeSystemInsets: z
           .boolean()

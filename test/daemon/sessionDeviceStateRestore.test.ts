@@ -90,6 +90,21 @@ class FakeHost implements SessionDeviceStateRestoreHost {
     this.healthEvents.push(`clear:${deviceId}:${reason}`);
   }
   abandoned: string[] = [];
+  setups: Promise<void>[] = [];
+  teardownBounds: number[] = [];
+  sessionSetupsOf(): Promise<void>[] {
+    return this.setups;
+  }
+  async waitForSessionSetup(
+    _sessionId: string,
+    setups: readonly Promise<void>[],
+  ): Promise<{ pending: Promise<void> | null }> {
+    await Promise.allSettled(setups);
+    return { pending: null };
+  }
+  noteTeardownBound(_bounded: Promise<void>, settlesBy: number): void {
+    this.teardownBounds.push(settlesBy);
+  }
   async waitForIdentityReplacement(): Promise<boolean> {
     return true;
   }
@@ -812,5 +827,77 @@ describe("network-condition family", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("release teardown orchestration", () => {
+  async function createTeardown(
+    restoreKeepAwake: () => Promise<{ status: "restored" }>,
+    sessionOptions: { applied?: boolean } = { applied: true },
+  ) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    const restore = makeRestore(host, undefined, undefined, undefined, () => ({
+      restore: restoreKeepAwake,
+    }));
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s6", "emulator-5562", "android");
+    if (sessionOptions.applied) {
+      factory.setKeepScreenAwake("s6", { applied: true, method: "settings" });
+    }
+    return { timer, host, restore, session };
+  }
+
+  test("a release with nothing to restore skips the shield and the cap timer entirely", async () => {
+    const h = await createTeardown(async () => ({ status: "restored" }), {});
+    const timeouts = h.timer.getPendingTimeouts().length;
+    expect(await h.restore.drainReleaseTeardown("s6", h.session)).toEqual([]);
+    expect(h.timer.getPendingTimeouts().length).toBe(timeouts);
+  });
+
+  test("a fast restore settles inside the shield and its cap timer is cleared", async () => {
+    const h = await createTeardown(async () => ({ status: "restored" }));
+    const cleanups = await h.restore.drainReleaseTeardown("s6", h.session);
+    await Promise.all(cleanups);
+    await flush();
+    expect(h.host.abandoned).toEqual([]);
+    expect(h.host.healthEvents).toContain("clear:emulator-5562:keep-screen-awake");
+  });
+
+  test("a stage that outlives the teardown cap is abandoned and its bound recorded", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createTeardown(() => new Promise(() => {}));
+      const started = h.timer.now();
+      const draining = h.restore.drainReleaseTeardown("s6", h.session);
+      await flush();
+      h.timer.advanceTime(1_000);
+      const cleanups = await draining;
+      expect(cleanups).toHaveLength(1);
+      expect(h.host.teardownBounds).toEqual([started + 10_000]);
+      h.timer.advanceTime(10_000);
+      await Promise.all(cleanups);
+      expect(h.host.abandoned).toContain("emulator-5562:keep-screen-awake");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a replaced device waits only for tracked setup and restores nothing", async () => {
+    const h = await createTeardown(async () => ({ status: "restored" }));
+    const setup = Promise.withResolvers<void>();
+    h.host.setups = [setup.promise];
+    const draining = h.restore.drainReleaseTeardown("s6", h.session, undefined, {
+      deviceIdentityReplaced: true,
+    });
+    await flush();
+    setup.resolve();
+    const cleanups = await draining;
+    expect(cleanups).toEqual([]);
+    expect(h.host.healthEvents).toEqual([]);
   });
 });

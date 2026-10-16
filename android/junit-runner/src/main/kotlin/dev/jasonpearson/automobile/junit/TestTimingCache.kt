@@ -44,19 +44,54 @@ internal data class TestTimingSummary(
 
 internal data class TestTimingKey(val testClass: String, val testMethod: String)
 
-internal object TestTimingCache {
-  private const val TEST_TIMING_RESOURCE_URI = "automobile:test-timings"
-  private const val DEFAULT_LOOKBACK_DAYS = 90
-  private const val DEFAULT_LIMIT = 1000
-  private const val DEFAULT_MIN_SAMPLES = 1
-  private const val DEFAULT_TIMEOUT_MS = 5000L
+internal interface TestTimingSource {
+  fun hasTimings(): Boolean
+
+  fun getTiming(
+    testClass: String,
+    testMethod: String,
+    legacySimpleName: String? = null,
+  ): TestTimingEntry?
+}
+
+internal object TestTimingCache : TestTimingSource {
+  private val store = TestTimingStore()
+
+  fun prefetchIfEnabled() = store.prefetchIfEnabled()
+
+  override fun getTiming(
+    testClass: String,
+    testMethod: String,
+    legacySimpleName: String?,
+  ): TestTimingEntry? = store.getTiming(testClass, testMethod, legacySimpleName)
+
+  override fun hasTimings(): Boolean = store.hasTimings()
+
+  fun getSummary(): TestTimingSummary? = store.getSummary()
+
+  fun clear() = store.clear()
+}
+
+internal class TestTimingStore(private val ciMode: () -> Boolean = ::isCiMode) : TestTimingSource {
+  private companion object {
+    private const val TEST_TIMING_RESOURCE_URI = "automobile:test-timings"
+    private const val DEFAULT_LOOKBACK_DAYS = 90
+    private const val DEFAULT_LIMIT = 1000
+    private const val DEFAULT_MIN_SAMPLES = 1
+    private const val DEFAULT_TIMEOUT_MS = 5000L
+
+    fun isCiMode(): Boolean {
+      if (SystemPropertyCache.getBoolean("automobile.ci.mode", false)) {
+        return true
+      }
+      val envValue = System.getenv("CI") ?: return false
+      return envValue.equals("true", ignoreCase = true) || envValue == "1"
+    }
+  }
 
   private val json = Json { ignoreUnknownKeys = true }
   private val loaded = AtomicBoolean(false)
   private val loadLock = Any()
-
-  /** Test seam: the process environment's `CI` cannot be changed from a unit test. */
-  @Volatile internal var testCiModeOverride: Boolean? = null
 
   @Volatile private var timingMap: Map<TestTimingKey, TestTimingEntry> = emptyMap()
   @Volatile private var summary: TestTimingSummary? = null
@@ -84,10 +119,10 @@ internal object TestTimingCache {
    * change were keyed by simple name, so [legacySimpleName] is consulted only when no
    * fully-qualified row exists, keeping that history until it ages out of the lookback window.
    */
-  fun getTiming(
+  override fun getTiming(
     testClass: String,
     testMethod: String,
-    legacySimpleName: String? = null,
+    legacySimpleName: String?,
   ): TestTimingEntry? {
     prefetchIfEnabled()
     return timingMap[TestTimingKey(testClass, testMethod)]
@@ -96,7 +131,7 @@ internal object TestTimingCache {
         ?.let { timingMap[TestTimingKey(it, testMethod)] }
   }
 
-  fun hasTimings(): Boolean {
+  override fun hasTimings(): Boolean {
     prefetchIfEnabled()
     return timingMap.isNotEmpty()
   }
@@ -113,7 +148,7 @@ internal object TestTimingCache {
   }
 
   private fun isEnabled(): Boolean {
-    if (isCiMode()) {
+    if (ciMode()) {
       return false
     }
     // Skip timing fetch if no devices are available - tests will be skipped anyway
@@ -121,17 +156,6 @@ internal object TestTimingCache {
       return false
     }
     return SystemPropertyCache.getBoolean("automobile.junit.timing.enabled", true)
-  }
-
-  private fun isCiMode(): Boolean {
-    testCiModeOverride?.let {
-      return it
-    }
-    if (SystemPropertyCache.getBoolean("automobile.ci.mode", false)) {
-      return true
-    }
-    val envValue = System.getenv("CI") ?: return false
-    return envValue.equals("true", ignoreCase = true) || envValue == "1"
   }
 
   private fun loadFromDaemon() {

@@ -104,6 +104,12 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "HeldSessionHeartbeatOutcomes.handleHeldSessionHeartbeatError",
     "HeldSessionHeartbeatOutcomes.noteLateHeartbeatAck",
   ],
+  // Likewise reached through `this.boundHeartbeat` from the proxy's named forwarders.
+  "src/daemon/proxy/BoundSessionHeartbeat.ts": [
+    "BoundSessionHeartbeat.sendBoundSessionHeartbeat",
+    "BoundSessionHeartbeat.recordBoundSessionHeartbeatSuccess",
+    "BoundSessionHeartbeat.askSessionHeartbeat",
+  ],
 };
 
 /**

@@ -1,7 +1,6 @@
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type {
   BootedDeviceDiscovery,
@@ -89,7 +88,7 @@ export interface DevicePoolRefreshPort {
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
   getDevices(): Map<string, PooledDevice>;
-  getAssignmentMutex(): Mutex;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getCriteriaMatcher(): DeviceCriteriaMatcher;
   identityEvidenceForBootedDevice(device: BootedDevice): IdentityEvidence;
   identityEvidenceFields(
@@ -271,7 +270,7 @@ export class DevicePoolRefresh {
         };
         const added = assignmentLockHeld
           ? await updatePooledDevice()
-          : await this.pool.getAssignmentMutex().runExclusive(updatePooledDevice);
+          : await this.pool.withAssignmentLock(updatePooledDevice);
         if (added) {
           addedCount++;
         }

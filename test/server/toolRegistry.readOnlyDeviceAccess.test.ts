@@ -13,11 +13,7 @@ import { z } from "zod/v4";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
-import {
-  registerAppTools,
-  resetListAppsToolDependencies,
-  setListAppsToolDependencies,
-} from "../../src/server/appTools";
+import { registerAppTools } from "../../src/server/appTools";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerNetworkTools } from "../../src/server/networkTools";
 import { registerPreferenceTools } from "../../src/server/preferenceTools";
@@ -74,6 +70,9 @@ import type { AppsQueryResourceContent } from "../../src/server/appResources";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { getAbortSignal } from "../../src/utils/AbortContext";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 /**
  * Read-only tools on a device another session holds (#10830). Watching is allowed on any device
@@ -212,7 +211,6 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
     restorePipeline();
-    resetListAppsToolDependencies();
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
     Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
@@ -1050,6 +1048,11 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       registerUtilityTools();
     });
 
+    afterEach(() => {
+      // Drops the listApps override a test configured through the shared harness.
+      appTools.clear();
+    });
+
     const readCalls: Array<[string, Record<string, unknown>]> = [
       ["getNetworkGraph", {}],
       ["listApps", {}],
@@ -1145,7 +1148,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     test("a sessionless listApps on a held device returns the device's apps", async () => {
       const queried: string[] = [];
-      setListAppsToolDependencies({
+      appTools.configure("listApps", {
         queryInstalledApps: async (options) => {
           queried.push(options.deviceId!);
           return {

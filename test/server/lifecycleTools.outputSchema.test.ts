@@ -18,10 +18,6 @@ import {
 import {
   registerAppTools,
   buildLaunchAppResponse,
-  setLaunchAppToolDependencies,
-  resetLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-  resetTerminateAppToolDependencies,
   setInstalledAppResourceRefresh,
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
@@ -29,6 +25,9 @@ import { registerDeviceTools } from "../../src/server/deviceTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 const createObserveResult = (): ObserveResult => ({
   timestamp: 1,
   screenSize: { width: 1080, height: 1920 },
@@ -48,10 +47,8 @@ beforeEach(() => {
 afterEach(() => {
   resetPressButtonFactory();
   resetWakeAndUnlockFactory();
-  resetLaunchAppToolDependencies();
-  resetTerminateAppToolDependencies();
   resetInstalledAppResourceRefresh();
-  ToolRegistry.clearTools();
+  appTools.clear();
 });
 
 async function checkResponse(
@@ -162,7 +159,7 @@ test.each([false, true])(
           }
         : { observation: createObserveResult() }),
     };
-    setLaunchAppToolDependencies({ createLaunchApp: () => ({ execute: async () => result }) });
+    appTools.configure("launchApp", { createLaunchApp: () => ({ execute: async () => result }) });
     await checkResponse(
       "launchApp",
       { appId: "com.example" },
@@ -180,7 +177,9 @@ test("terminateApp preserves attached observation text", async () => {
     wasRunning: true,
     observation: createObserveResult(),
   };
-  setTerminateAppToolDependencies({ createTerminateApp: () => ({ execute: async () => result }) });
+  appTools.configure("terminateApp", {
+    createTerminateApp: () => ({ execute: async () => result }),
+  });
   await checkResponse(
     "terminateApp",
     { appId: "com.example" },
@@ -229,7 +228,7 @@ for (const target of [
         ...(target.platform === "android" ? { userId: 0 } : {}),
         ...fields,
       };
-      setTerminateAppToolDependencies({
+      appTools.configure("terminateApp", {
         createTerminateApp: () => ({ execute: async () => result }),
       });
       const tool = ToolRegistry.getTool("terminateApp")!;
@@ -245,12 +244,12 @@ for (const target of [
 
 for (const name of ["launchApp", "terminateApp"] as const) {
   test(`${name} failures still throw without manufacturing a text payload`, async () => {
-    setLaunchAppToolDependencies({
+    appTools.configure("launchApp", {
       createLaunchApp: () => ({
         execute: async () => ({ success: false, packageName: "com.example", error: "failed" }),
       }),
     });
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({
           success: false,

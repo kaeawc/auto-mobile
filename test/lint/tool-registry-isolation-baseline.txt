@@ -18,11 +18,8 @@ test/server/appFileSharedStorage.test.ts
 test/server/appFileTools.test.ts
 test/server/appLifecycleTools.test.ts
 test/server/appTools.inspectPackageSigning.test.ts
-test/server/appTools.installAppHandler.test.ts
-test/server/appTools.launchAppHandler.test.ts
 test/server/appTools.launchAppPrototype.test.ts
 test/server/appTools.listApps.test.ts
-test/server/appTools.signingGuards.test.ts
 test/server/appToolsReadiness.test.ts
 test/server/appToolsResourceInvalidation.test.ts
 test/server/criticalSectionRegistration.test.ts

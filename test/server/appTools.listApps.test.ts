@@ -11,12 +11,8 @@ import {
   crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
-  resetListAppsToolDependencies,
-  resetTerminateAppToolDependencies,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,
-  setListAppsToolDependencies,
-  setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
 import {
   invalidateInstalledAppResourceCache,
@@ -28,6 +24,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeToolUtils } from "../fakes/FakeToolUtils";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import type { BootedDevice } from "../../src/models";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 function fakeAppsContent(
   overrides: Partial<AppsQueryResourceContent> = {},
@@ -46,16 +45,11 @@ function fakeAppsContent(
 
 describe("listApps tool", () => {
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
-    resetTerminateAppToolDependencies();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
-    resetTerminateAppToolDependencies();
+    appTools.clear();
     resetInstalledAppResourceRefresh();
   });
 
@@ -94,9 +88,6 @@ describe("listApps tool", () => {
   });
 
   test("returns structured app data (not prose) for the resolved device", async () => {
-    const tool = ToolRegistry.getTool("listApps");
-    expect(tool).toBeDefined();
-
     const fakeToolUtils = new FakeToolUtils();
     let capturedOptions: AppsQueryOptions | undefined;
     const fakeContent = fakeAppsContent({
@@ -113,13 +104,15 @@ describe("listApps tool", () => {
         },
       ],
     });
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async (options) => {
         capturedOptions = options;
         return fakeContent;
       },
     });
+    const tool = ToolRegistry.getTool("listApps");
+    expect(tool).toBeDefined();
 
     const result = await tool!.deviceAwareHandler!(device, {});
 
@@ -143,16 +136,16 @@ describe("listApps tool", () => {
   });
 
   test("passes an explicit type filter through to the query", async () => {
-    const tool = ToolRegistry.getTool("listApps");
     const fakeToolUtils = new FakeToolUtils();
     let capturedOptions: AppsQueryOptions | undefined;
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async (options) => {
         capturedOptions = options;
         return fakeAppsContent({ query: options });
       },
     });
+    const tool = ToolRegistry.getTool("listApps");
 
     await tool!.deviceAwareHandler!(device, { type: "all", search: "clock", profile: 0 });
 
@@ -162,15 +155,15 @@ describe("listApps tool", () => {
   });
 
   test("forwards cancellation to the installed-app query", async () => {
-    const tool = ToolRegistry.getTool("listApps");
     const controller = new AbortController();
     let capturedSignal: AbortSignal | undefined;
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       queryInstalledApps: async (_options, signal) => {
         capturedSignal = signal;
         return fakeAppsContent();
       },
     });
+    const tool = ToolRegistry.getTool("listApps");
 
     await tool!.deviceAwareHandler!(device, {}, undefined, controller.signal);
 
@@ -178,12 +171,12 @@ describe("listApps tool", () => {
   });
 
   test("wraps a query failure as an ActionableError", async () => {
-    const tool = ToolRegistry.getTool("listApps");
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       queryInstalledApps: async () => {
         throw new Error("device not found");
       },
     });
+    const tool = ToolRegistry.getTool("listApps");
 
     await expect(tool!.deviceAwareHandler!(device, {})).rejects.toThrow(
       `Failed to list apps for device ${device.deviceId}`,
@@ -191,9 +184,8 @@ describe("listApps tool", () => {
   });
 
   test("the message names the applied filter and what it hid, so a client is not left guessing (#6798)", async () => {
-    const tool = ToolRegistry.getTool("listApps");
     const fakeToolUtils = new FakeToolUtils();
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async () =>
         fakeAppsContent({
@@ -202,6 +194,7 @@ describe("listApps tool", () => {
           installedCount: 180,
         }),
     });
+    const tool = ToolRegistry.getTool("listApps");
 
     await tool!.deviceAwareHandler!(device, {});
 
@@ -213,9 +206,8 @@ describe("listApps tool", () => {
   });
 
   test("says nothing about hidden apps when the filter hid nothing (#6798)", async () => {
-    const tool = ToolRegistry.getTool("listApps");
     const fakeToolUtils = new FakeToolUtils();
-    setListAppsToolDependencies({
+    appTools.configure("listApps", {
       toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async () =>
         fakeAppsContent({
@@ -224,6 +216,7 @@ describe("listApps tool", () => {
           installedCount: 180,
         }),
     });
+    const tool = ToolRegistry.getTool("listApps");
 
     await tool!.deviceAwareHandler!(device, {});
 
@@ -282,16 +275,11 @@ describe("terminateApp tool", () => {
   };
 
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
-    resetTerminateAppToolDependencies();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
-    resetTerminateAppToolDependencies();
+    appTools.clear();
   });
 
   test("forwards the handler signal to TerminateApp.execute", async () => {
@@ -308,7 +296,7 @@ describe("terminateApp tool", () => {
       },
       "execute",
     );
-    setTerminateAppToolDependencies({ createTerminateApp: () => ({ execute }) });
+    appTools.configure("terminateApp", { createTerminateApp: () => ({ execute }) });
     setInstalledAppResourceRefresh(async () => {});
     try {
       await ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(
@@ -339,7 +327,7 @@ describe("terminateApp tool", () => {
       throw new Error("CtrlProxy unavailable");
     });
     setInstalledAppResourceRefresh(async () => {});
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => {
         return { execute: (appId) => app.execute(appId, { skipObservation: true }) };
       },
@@ -359,7 +347,7 @@ describe("terminateApp tool", () => {
   });
 
   test("surfaces a typed TerminateApp failure instead of reporting success", async () => {
-    setTerminateAppToolDependencies({
+    appTools.configure("terminateApp", {
       createTerminateApp: () => ({
         execute: async () => ({
           success: false,
@@ -386,12 +374,11 @@ describe("crashApp tool", () => {
   };
 
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
+    appTools.clear();
   });
 
   test("returns an explicit unsupported result as structured JSON", async () => {
@@ -499,14 +486,11 @@ describe("crashApp tool", () => {
 
 describe("app permission tools", () => {
   beforeEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
-    registerAppTools();
+    appTools.reset();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetListAppsToolDependencies();
+    appTools.clear();
   });
 
   test.each([false, true])(

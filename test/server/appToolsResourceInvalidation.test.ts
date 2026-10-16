@@ -1,19 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
-  resetInstallAppToolDependencies,
   resetInstalledAppResourceRefresh,
-  resetLaunchAppToolDependencies,
-  resetTerminateAppToolDependencies,
-  resetUninstallAppToolDependencies,
-  setInstallAppToolDependencies,
   setInstalledAppResourceRefresh,
-  setLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-  setUninstallAppToolDependencies,
 } from "../../src/server/appTools";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 const device: BootedDevice = { deviceId: "test-device", name: "Test", platform: "android" };
 const appId = "com.example.app";
@@ -57,40 +52,31 @@ const resultFor = (tool: string, success: boolean): Record<string, unknown> => {
 describe("app tool installed-app cache invalidation", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
     resetInstalledAppResourceRefresh();
     registerAppTools();
   });
 
   afterEach(() => {
-    ToolRegistry.clearTools();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
-    resetInstallAppToolDependencies();
-    resetUninstallAppToolDependencies();
+    appTools.clear();
     resetInstalledAppResourceRefresh();
   });
 
   const configure = (tool: string, execute: () => Promise<Record<string, unknown>>): void => {
     const executor = { execute: async (..._args: unknown[]) => await execute() };
     if (tool === "launchApp") {
-      setLaunchAppToolDependencies({ createLaunchApp: () => executor });
+      appTools.configure("launchApp", { createLaunchApp: () => executor });
     }
     if (tool === "terminateApp") {
-      setTerminateAppToolDependencies({ createTerminateApp: () => executor });
+      appTools.configure("terminateApp", { createTerminateApp: () => executor });
     }
     if (tool === "crashApp") {
-      ToolRegistry.clearTools();
-      registerAppTools({ crashApp: { createCrashApp: () => executor } });
+      appTools.configure("crashApp", { createCrashApp: () => executor });
     }
     if (tool === "installApp") {
-      setInstallAppToolDependencies({ createInstallApp: () => executor });
+      appTools.configure("installApp", { createInstallApp: () => executor });
     }
     if (tool === "uninstallApp") {
-      setUninstallAppToolDependencies({ createUninstallApp: () => executor });
+      appTools.configure("uninstallApp", { createUninstallApp: () => executor });
     }
   };
 

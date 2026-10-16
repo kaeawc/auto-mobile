@@ -1,6 +1,5 @@
 import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBinding";
 import { logger } from "../utils/logger";
-import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
@@ -55,9 +54,9 @@ export interface MissingDeviceLivenessPoolPort {
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
   mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getRefreshMissingDeviceMisses(): Map<string, number>;
-  getAssignmentMutex(): Mutex;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getDeviceManager(): PlatformDeviceManager;
   getRefreshGeneration(): number;
   shouldRebootDisconnectedAndroidDevice(device: PooledDevice): boolean;
@@ -211,7 +210,7 @@ export class MissingDeviceLiveness {
     };
     return assignmentLockHeld
       ? await removeMissingDevices()
-      : await this.pool.getAssignmentMutex().runExclusive(removeMissingDevices);
+      : await this.pool.withAssignmentLock(removeMissingDevices);
   }
 
   /**
@@ -287,7 +286,7 @@ export class MissingDeviceLiveness {
       return false;
     }
     if (idleEviction) {
-      const claimed = await this.pool.getAssignmentMutex().runExclusive(() => {
+      const claimed = await this.pool.withAssignmentLock(() => {
         // The discovery ran without the lock. A newer bind or incarnation wins
         // over its absent snapshot; claim before any other bind can select it.
         if (
@@ -403,7 +402,7 @@ export class MissingDeviceLiveness {
     };
     return assignmentLockHeld
       ? await replaceIfStillIdle()
-      : await this.pool.getAssignmentMutex().runExclusive(replaceIfStillIdle);
+      : await this.pool.withAssignmentLock(replaceIfStillIdle);
   }
 
   /**
@@ -563,9 +562,9 @@ export class MissingDeviceLiveness {
     }
     // Incident and recovery I/O completed before assignmentMutex. Only the
     // compare-and-delete runs under the lock, after any lifecycle lease settles.
-    await this.pool
-      .getAssignmentMutex()
-      .runExclusive(() => this.pool.removeDevice(device.id, false, device, LIVENESS_MISS_REMOVAL));
+    await this.pool.withAssignmentLock(() =>
+      this.pool.removeDevice(device.id, false, device, LIVENESS_MISS_REMOVAL),
+    );
   }
 
   private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {

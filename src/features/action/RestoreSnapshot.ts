@@ -11,6 +11,7 @@ export type {
 import {
   resolveIosSnapshotBackend,
   type IosSnapshotBackend,
+  type IosSnapshotBackendDeps,
   type IosSimulatorSnapshotBackend,
 } from "../../utils/ios-cmdline-tools/IosSnapshotBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -132,7 +133,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     emulator?: AndroidEmulatorClient,
     timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: SimCtlClient,
+    simctl?: IosSnapshotBackendDeps["simctl"],
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
     iosRestoreOperations?: IosRestoreOperations,
   ) {

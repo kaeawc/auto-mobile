@@ -1,7 +1,7 @@
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -656,11 +656,41 @@ export class GatedSnapshotDeviceManager extends FakeDeviceManager {
   }
 }
 
-type DevicePoolSuiteContext = () => {
+type DevicePoolOverrides = Partial<
+  Omit<DevicePoolDependencies, "sessionManager" | "daemonSessionId">
+>;
+
+interface DevicePoolSuiteState {
   devicePool: DevicePool;
   sessionManager: SessionManager;
+  fakeTimer: FakeTimer;
+  fakeAppsRepo: FakeInstalledAppsRepository;
   fakeDeviceManager: FakeDeviceManager;
-};
+}
+
+type DevicePoolSuiteContext = () => DevicePoolSuiteState;
+
+/**
+ * Build a pool over the suite's session manager, timer, apps repository and device manager.
+ * `overrides` replace any of those defaults (a different `deviceManager`, `recoveryPolicy`, ...).
+ */
+export function createDevicePoolFor(
+  suite: Pick<
+    DevicePoolSuiteState,
+    "sessionManager" | "fakeTimer" | "fakeAppsRepo" | "fakeDeviceManager"
+  >,
+  overrides: DevicePoolOverrides = {},
+): DevicePool {
+  return new DevicePool(
+    createDevicePoolDependencies(suite.sessionManager, "test-daemon-session-id", {
+      timer: suite.fakeTimer,
+      installedAppsRepository: suite.fakeAppsRepo,
+      deviceManager: suite.fakeDeviceManager,
+      retryExecutor: new DefaultRetryExecutor(suite.fakeTimer),
+      ...overrides,
+    }),
+  );
+}
 
 /** Arrange helpers over the per-test pool, resolved lazily because `beforeEach` replaces it. */
 export function devicePoolSuiteActions(context: DevicePoolSuiteContext) {
@@ -699,7 +729,16 @@ export function devicePoolSuiteActions(context: DevicePoolSuiteContext) {
     configureAfterFirstSession(() => context().fakeDeviceManager.failedPlatforms.add("ios"));
   };
 
-  return { initializeLiveDevices, configureAfterFirstSession, failIosLivenessAfterFirstSession };
+  /** A pool over the current per-test objects, for tests that replace the pool mid-test. */
+  const makePool = (overrides: DevicePoolOverrides = {}): DevicePool =>
+    createDevicePoolFor(context(), overrides);
+
+  return {
+    initializeLiveDevices,
+    configureAfterFirstSession,
+    failIosLivenessAfterFirstSession,
+    makePool,
+  };
 }
 
 /** The pool, session manager, timer and fakes every DevicePool suite starts each test with. */
@@ -708,15 +747,37 @@ export function createDevicePoolSuite() {
   const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   const fakeAppsRepo = new FakeInstalledAppsRepository();
   const fakeDeviceManager = new FakeDeviceManager();
-  // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly
-  const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-  const devicePool = new DevicePool(
-    createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-      timer: fakeTimer,
-      installedAppsRepository: fakeAppsRepo,
-      deviceManager: fakeDeviceManager,
-      retryExecutor,
-    }),
-  );
+  const devicePool = createDevicePoolFor({
+    sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
+    fakeDeviceManager,
+  });
   return { devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager };
+}
+
+/** A shut-down, available iOS simulator image; `extra` overrides or adds fields (iosVersion, state, ...). */
+export function iosSimulatorImage(
+  name: string,
+  deviceId: string,
+  extra: Partial<DeviceInfo> = {},
+): DeviceInfo {
+  return {
+    name,
+    platform: "ios",
+    isRunning: false,
+    deviceId,
+    state: "Shutdown",
+    isAvailable: true,
+    ...extra,
+  };
+}
+
+/** A not-running Android image; `extra` overrides or adds fields. */
+export function androidDeviceImage(
+  name: string,
+  deviceId: string,
+  extra: Partial<DeviceInfo> = {},
+): DeviceInfo {
+  return { name, platform: "android", isRunning: false, deviceId, ...extra };
 }

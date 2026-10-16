@@ -1,5 +1,5 @@
 import { statusOf } from "../../src/daemon/deviceBinding";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import {
@@ -13,7 +13,7 @@ import { displayTransitions } from "../../src/features/observe/DisplayTransition
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+
 import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -30,9 +30,11 @@ describe("DevicePool", () => {
   let fakeTimer: FakeTimer;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeDeviceManager: FakeDeviceManager;
-  const { initializeLiveDevices } = devicePoolSuiteActions(() => ({
+  const { initializeLiveDevices, makePool } = devicePoolSuiteActions(() => ({
     devicePool,
     sessionManager,
+    fakeTimer,
+    fakeAppsRepo,
     fakeDeviceManager,
   }));
 
@@ -692,18 +694,12 @@ describe("DevicePool", () => {
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     test("cancels the bound session's in-flight executions when entering quarantine", async () => {
       const cancellations: { sessionId: string; reason: string }[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          cancelDeviceSessionExecutions: async (sessionId, reason) => {
-            cancellations.push({ sessionId, reason });
-            return 1;
-          },
-        }),
-      );
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+      });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
       await devicePool.bindOrReuseDeviceSession(
@@ -727,18 +723,12 @@ describe("DevicePool", () => {
 
     test("stops a stale aborted observation before it can quarantine a newly bound emulator", async () => {
       const cancellations: { sessionId: string; reason: string }[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          cancelDeviceSessionExecutions: async (sessionId, reason) => {
-            cancellations.push({ sessionId, reason });
-            return 1;
-          },
-        }),
-      );
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+      });
       const first = poolDevice("emulator-5554", "Pixel_8_API_35");
       const second = poolDevice("emulator-5556", "Pixel_7_API_34");
       await initializeLiveDevices([first, second]);
@@ -795,19 +785,13 @@ describe("DevicePool", () => {
     test("keeps a capture live when its failed AVD-name probe recorded the console busy", async () => {
       const cancellations: { sessionId: string; reason: string }[] = [];
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          cancelDeviceSessionExecutions: async (sessionId, reason) => {
-            cancellations.push({ sessionId, reason });
-            return 1;
-          },
-          consoleBusyRegistry: consoleBusy,
-        }),
-      );
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+        consoleBusyRegistry: consoleBusy,
+      });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
       await devicePool.bindOrReuseDeviceSession(
@@ -832,15 +816,7 @@ describe("DevicePool", () => {
 
     test("quarantines a failed AVD-name probe that recorded the console idle", async () => {
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          consoleBusyRegistry: consoleBusy,
-        }),
-      );
+      devicePool = makePool({ consoleBusyRegistry: consoleBusy });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
       // A later operation can be busy, but it did not cause THIS failed probe.
@@ -880,18 +856,12 @@ describe("DevicePool", () => {
     // review).
     test("exempts the discovering execution from the quarantine cancellation", async () => {
       const cancellations: { sessionId: string; excludeExecutionId?: string }[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          cancelDeviceSessionExecutions: async (sessionId, _reason, options) => {
-            cancellations.push({ sessionId, excludeExecutionId: options?.excludeExecutionId });
-            return 1;
-          },
-        }),
-      );
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId, _reason, options) => {
+          cancellations.push({ sessionId, excludeExecutionId: options?.excludeExecutionId });
+          return 1;
+        },
+      });
       await initializeLiveDevices([poolDevice("emulator-5554", "Pixel_8_API_35")]);
       await devicePool.bindOrReuseDeviceSession(
         "owner-session",
@@ -913,18 +883,12 @@ describe("DevicePool", () => {
 
     test("does not treat an intentionally unenriched placeholder as identity evidence", async () => {
       const cancellations: { sessionId: string }[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          cancelDeviceSessionExecutions: async (sessionId) => {
-            cancellations.push({ sessionId });
-            return 1;
-          },
-        }),
-      );
+      devicePool = makePool({
+        cancelDeviceSessionExecutions: async (sessionId) => {
+          cancellations.push({ sessionId });
+          return 1;
+        },
+      });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
       await devicePool.bindOrReuseDeviceSession(
@@ -1269,29 +1233,18 @@ describe("DevicePool", () => {
       const releaseEntered = Promise.withResolvers<void>();
       const commitRelease = Promise.withResolvers<void>();
       const sessionReleases: string[] = [];
-      devicePool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-          timer: fakeTimer,
-          installedAppsRepository: fakeAppsRepo,
-          deviceManager: fakeDeviceManager,
-          retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          releaseSessionForDisconnectedDevice: async (
-            sessionId,
-            _deviceId,
-            reason,
-            shouldCommit,
-          ) => {
-            releaseEntered.resolve();
-            await commitRelease.promise;
-            if (shouldCommit?.() === false) {
-              return false;
-            }
-            sessionReleases.push(sessionId);
-            await sessionManager.releaseSession(sessionId, reason);
-            return true;
-          },
-        }),
-      );
+      devicePool = makePool({
+        releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, shouldCommit) => {
+          releaseEntered.resolve();
+          await commitRelease.promise;
+          if (shouldCommit?.() === false) {
+            return false;
+          }
+          sessionReleases.push(sessionId);
+          await sessionManager.releaseSession(sessionId, reason);
+          return true;
+        },
+      });
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
@@ -1426,14 +1379,7 @@ describe("DevicePool", () => {
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       const installAfterPendingObservation = async (observation: BootedDevice): Promise<void> => {
         const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
-        devicePool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-            timer: fakeTimer,
-            installedAppsRepository: fakeAppsRepo,
-            deviceManager: fakeDeviceManager,
-            retryExecutor: new DefaultRetryExecutor(fakeTimer),
-          }),
-        );
+        devicePool = makePool();
         await initializeLiveDevices([device]);
         await devicePool.reconcileDiscoveryObservation([device], "test:initial");
         const pooled = devicePool.getDevice(device.deviceId);

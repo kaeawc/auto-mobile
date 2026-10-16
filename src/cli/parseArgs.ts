@@ -9,6 +9,12 @@ import {
   ManagedSlotConfigError,
   resolveManagedSlotConfig,
 } from "../models/managedSlotConfig";
+import {
+  SESSION_CONFIG_ENV,
+  SESSION_CONFIG_FLAG,
+  SessionConfigError,
+  resolveSessionConfig,
+} from "../devices/sessionConfig";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {
@@ -193,6 +199,15 @@ export function parseArgs(
     hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
     noProxy,
   });
+  const sessionConfig = resolveSessionConfig({
+    flagValue: scalarOptions.sessionConfigValue,
+    envValue:
+      cliMode || daemonMode || daemonRequested ? undefined : environment[SESSION_CONFIG_ENV],
+    readFile,
+    hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
+    hasManagedSlotConfig: managedSlotConfig !== undefined,
+    noProxy,
+  });
 
   return {
     cliMode,
@@ -203,6 +218,7 @@ export function parseArgs(
     initialSessionUuid: scalarOptions.initialSessionUuid,
     livenessOwnerToken: scalarOptions.livenessOwnerToken,
     managedSlotConfig,
+    sessionConfig,
     debugPerf,
     debug,
     strictPort,
@@ -379,6 +395,7 @@ interface ScalarOptions {
   initialSessionUuid?: string;
   livenessOwnerToken?: string;
   managedSlotConfigValue?: string;
+  sessionConfigValue?: string;
   a11yLevel?: string;
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
@@ -576,6 +593,10 @@ function parseSessionBindingOption(
   if (managed !== undefined) {
     return managed;
   }
+  const session = parseSessionConfigOption(args, i, options);
+  if (session !== undefined) {
+    return session;
+  }
   if (arg === "--liveness-owner-token") {
     if (!hasValue) {
       log.warn("--liveness-owner-token requires a non-empty value");
@@ -583,6 +604,28 @@ function parseSessionBindingOption(
     }
     options.livenessOwnerToken = value;
     return i + 1;
+  }
+  return undefined;
+}
+
+/** `--session-config <json|path>` or `--session-config=<json|path>`. */
+function parseSessionConfigOption(
+  args: string[],
+  i: number,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  if (arg === SESSION_CONFIG_FLAG) {
+    const value = args[i + 1]?.trim();
+    if (!value || (value.startsWith("--") && !value.startsWith("{"))) {
+      throw new SessionConfigError(`${SESSION_CONFIG_FLAG} requires inline JSON or a file path`);
+    }
+    options.sessionConfigValue = value;
+    return i + 1;
+  }
+  if (arg.startsWith(`${SESSION_CONFIG_FLAG}=`)) {
+    options.sessionConfigValue = arg.slice(SESSION_CONFIG_FLAG.length + 1);
+    return i;
   }
   return undefined;
 }

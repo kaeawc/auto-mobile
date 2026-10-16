@@ -16,7 +16,7 @@ import { DeviceState } from "../../../src/features/utility/DeviceState";
 import { setDeviceStateSchema } from "../../../src/server/utilityTools";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../../fakes/FakeEmulatorConsoleClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
 import { DeviceClockRestoreRegistry } from "../../../src/features/utility/DeviceClock";
@@ -54,7 +54,7 @@ describe("setDeviceState location", () => {
   test("marks successful iOS static writes and route starts before their first fix", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     let applied = 0;
     const state = new DeviceState(ios, {
       timer,
@@ -73,7 +73,7 @@ describe("setDeviceState location", () => {
   });
 
   test("failed static set does not mark a location", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsError(
       ["location", ios.deviceId, "set", `${point.latitude},${point.longitude}`],
       new Error("failed"),
@@ -98,7 +98,7 @@ describe("setDeviceState location", () => {
       const routeRegistry = new LocationRouteRegistry(timer);
       const adbFactory = new FakeAdbClientFactory();
       adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       let applied = false;
       const state = new DeviceState(device, {
         timer,
@@ -125,7 +125,7 @@ describe("setDeviceState location", () => {
       const adbFactory = new FakeAdbClientFactory();
       adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
       const consoleClient = new FakeEmulatorConsoleClient();
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       let admitted = true;
       const state = new DeviceState(device, {
         timer,
@@ -182,7 +182,7 @@ describe("setDeviceState location", () => {
     const routeRegistry = new LocationRouteRegistry(timer);
     const finished = Promise.withResolvers<void>();
     let admitted = true;
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     routeRegistry.start(ios.deviceId, route.waypoints, 1000, 500, true, () => finished.promise);
     timer.advanceTime(0);
     await flush();
@@ -211,7 +211,7 @@ describe("setDeviceState location", () => {
     const routeFix = new Promise<void>((resolve) => {
       resolveRoute = resolve;
     });
-    class DelayedSimCtl extends FakeSimCtlClient {
+    class DelayedSimCtl extends FakeSimctl {
       override async executeCommandArgs(args: string[], timeoutMs?: number) {
         commands.push(args[3]);
         if (commands.length === 1) {
@@ -299,7 +299,7 @@ describe("setDeviceState location", () => {
   });
 
   test("uses iOS simctl argv with latitude first", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const args = ["location", ios.deviceId, "set", "37.7749,-122.4194"];
     simctl.setCommandArgsResult(args, "");
     const result = await new DeviceState(ios, { simctl }).setState({ location: point });
@@ -332,7 +332,7 @@ describe("setDeviceState location", () => {
   test("returns actionable unsupported failures for physical devices", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const physicalAndroid = { ...android, deviceId: "R123456" };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const physicalIos = { ...ios, deviceId: "00008110-001234567890801E" };
     const androidResult = await new DeviceState(physicalAndroid, { adbFactory }).setState({
       location: point,
@@ -359,7 +359,7 @@ describe("setDeviceState location", () => {
       expect(androidResult.success).toBe(false);
       expect(androidResult.error).toContain("Command exited with code 1");
 
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setCommandArgsError(
         ["location", ios.deviceId, "set", "37.7749,-122.4194"],
         new ErrorType("Command exited with code 1"),
@@ -389,7 +389,7 @@ describe("setDeviceState location", () => {
   test("route starts without a timer tick, emits iOS simctl argv, and static cancels", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const state = new DeviceState(ios, { timer, routeRegistry, simctl });
     const result = await state.setState({
       location: {
@@ -430,7 +430,7 @@ describe("setDeviceState location", () => {
   test("a second route replaces the first and continues emitting", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const state = new DeviceState(ios, { timer, routeRegistry, simctl });
     await state.setState({ location: route });
     timer.advanceTime(0);
@@ -457,7 +457,7 @@ describe("setDeviceState location", () => {
   test("session release, unbind, and device removal cancel active routes", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const state = new DeviceState(ios, { timer, routeRegistry, simctl });
     let release: Parameters<SessionManager["onSessionRelease"]>[0] | undefined;
     let unbound: Parameters<SessionManager["onSessionDeviceUnbound"]>[0] | undefined;

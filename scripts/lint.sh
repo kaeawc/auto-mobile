@@ -50,5 +50,6 @@ fi
 
 bash scripts/oxlint-baseline.sh
 bash scripts/check-boundaries.sh
+bash scripts/file-size-baseline.sh
 
 bash scripts/check-element-resolution-ratchet.sh

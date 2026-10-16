@@ -2602,13 +2602,7 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     try {
-      const { stdout } = await this.adb.executeCommand(
-        `shell "dumpsys window"`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const { stdout } = await this.adb.executeCommand(`shell "dumpsys window"`, { signal });
       return /mCurrentFocus=Window\{[^}\r\n]*Application (?:Error:|Not Responding)/.test(stdout);
     } catch (error) {
       // This optional confirmation must not fail observe; fall back to the normal mismatch gate.

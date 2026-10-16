@@ -1,6 +1,6 @@
 import { resolveIosDeviceKind } from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
 import { describe, expect, test } from "bun:test";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import {
   resolveIosPermissionsBackend,
   SimulatorIosPermissionsBackend,
@@ -15,7 +15,7 @@ describe("IosPermissionsBackend", () => {
   test.each(["grant", "revoke", "reset"] as const)(
     "simulator forwards exact privacy argv and output for %s",
     async (action) => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const args = ["privacy", simulatorUdid, action, "camera", appId];
       simctl.setCommandArgsResult(args, "privacy output", "privacy stderr");
       const backend = resolveIosPermissionsBackend({ deviceId: simulatorUdid, simctl });
@@ -30,7 +30,7 @@ describe("IosPermissionsBackend", () => {
   );
 
   test("propagates the simulator transport error unchanged", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const error = new Error("privacy unavailable");
     simctl.setCommandArgsError(["privacy", simulatorUdid, "grant", "camera", appId], error);
     const backend = resolveIosPermissionsBackend({ deviceId: simulatorUdid, simctl });
@@ -41,7 +41,7 @@ describe("IosPermissionsBackend", () => {
   });
 
   test("physical privacy rejects with the existing message without simctl", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const backend = resolveIosPermissionsBackend({ deviceId: physicalUdid, simctl });
 
     expect(backend).toBeInstanceOf(PhysicalIosPermissionsBackend);
@@ -64,7 +64,7 @@ describe("IosPermissionsBackend", () => {
     [` ${simulatorUdid}`, "physical"],
     ["G1B2C3D4-E5F6-7890-ABCD-EF1234567890", "physical"],
   ])("preserves historical kind resolution for %s", (deviceId, kind) => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     expect(resolveIosDeviceKind({ deviceId })).toBe(kind);
     expect(resolveIosPermissionsBackend({ deviceId, simctl }).kind).toBe(kind);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);

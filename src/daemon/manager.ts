@@ -836,8 +836,10 @@ export class DaemonManager implements DaemonManagerLike {
    * probe forces strict-port launch because it closes its probe socket before the
    * child binds; the child's own bind is the authoritative guard. Keep that narrowly
    * scoped degradation out of the fail-closed lifecycle scans used elsewhere.
+   *
+   * Public so tests can drive the scan directly.
    */
-  private async findLiveDaemonProcessesForStart(
+  async findLiveDaemonProcessesForStart(
     options: DaemonOptions,
     startDeadline: number,
   ): Promise<number[]> {
@@ -1295,8 +1297,10 @@ export class DaemonManager implements DaemonManagerLike {
 
   /**
    * Internal start implementation (caller must hold lock).
+   *
+   * Public so tests can stub the launch step.
    */
-  private async startUnlocked(
+  async startUnlocked(
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
     inheritExitRecord = true,
@@ -1612,10 +1616,8 @@ export class DaemonManager implements DaemonManagerLike {
     return childEnv;
   }
 
-  private withDaemonOptions(
-    launch: DaemonLaunchCommand,
-    options: DaemonOptions,
-  ): DaemonLaunchCommand {
+  /** Merge the launch options into the daemon command. Public so tests can observe the launch options. */
+  withDaemonOptions(launch: DaemonLaunchCommand, options: DaemonOptions): DaemonLaunchCommand {
     const args = [
       ...launch.args,
       `${DAEMON_SOCKET_PATH_FLAG}=${encodeURIComponent(this.socketPath)}`,
@@ -2449,8 +2451,10 @@ export class DaemonManager implements DaemonManagerLike {
    * Stop the exact generation already observed by the caller. Keeping this
    * snapshot through the signal closes the stale-restart gap where a second
    * status read could target a successor that another client just started.
+   *
+   * Public so tests can stub the stop step.
    */
-  private async stopRunningDaemon(
+  async stopRunningDaemon(
     status: DaemonStatus,
     timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS,
     signalFirst: boolean = true,
@@ -3319,7 +3323,8 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
-  private async prepareDaemonForConditionalRestart(
+  /** Admit or refuse a conditional restart of the running daemon. Public so tests can stub admission. */
+  async prepareDaemonForConditionalRestart(
     expected: DaemonStatus,
   ): Promise<DaemonRestartPreparation> {
     // The generation tuple below authorizes this lifecycle RPC. It must reach
@@ -3460,8 +3465,10 @@ export class DaemonManager implements DaemonManagerLike {
    *    raced the kill) even when the port it holds is unmistakably still bound.
    *    A definitive "the port is still taken" is worth failing on even without a
    *    named PID.
+   *
+   * Public so tests can stub the survivor check.
    */
-  private async assertNoSurvivingDaemonBeforeRestart(
+  async assertNoSurvivingDaemonBeforeRestart(
     options: DaemonOptions,
     recoveryDeadline?: number,
   ): Promise<void> {
@@ -4112,7 +4119,8 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async waitForExistingDaemon(timeout: number): Promise<boolean> {
+  /** Wait for an already-starting daemon to become reachable. Public so tests can observe or stub the wait. */
+  async waitForExistingDaemon(timeout: number): Promise<boolean> {
     const startTime = this.timer.now();
     const deadline = startTime + timeout;
     const pollInterval = 100;
@@ -4257,8 +4265,10 @@ export class DaemonManager implements DaemonManagerLike {
 
   /**
    * Wait for daemon process to stop
+   *
+   * Public so tests can drive the stop wait directly.
    */
-  private async waitForStop(
+  async waitForStop(
     pid: number,
     timeout: number,
     expectedGeneration?: DaemonProcessRecord,

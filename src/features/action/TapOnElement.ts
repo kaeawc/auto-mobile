@@ -632,11 +632,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           readCached: (request) =>
             this.viewHierarchy.getViewHierarchy(
               {},
-              undefined,
-              true,
-              request.minTimestamp,
-              request.signal,
-              request.timeoutMs,
+              {
+                skipWaitForFresh: true,
+                minTimestamp: request.minTimestamp,
+                signal: request.signal,
+                timeoutMs: request.timeoutMs,
+              },
             ),
           readFresh: async (request) => {
             if (request.displayId !== undefined) {

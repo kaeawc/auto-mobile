@@ -3,7 +3,6 @@ import { TerminateApp } from "../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { spyOn } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -336,7 +335,7 @@ describe("terminateApp tool", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const target: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
-    const app = new TerminateApp(target, adb as unknown as AdbClient, { timer });
+    const app = new TerminateApp(target, adb, { timer });
     const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });

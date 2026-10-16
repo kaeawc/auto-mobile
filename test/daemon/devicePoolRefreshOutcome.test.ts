@@ -16,10 +16,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import {
-  type AdbClient,
-  AdbUnavailableError,
-} from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { logger } from "../../src/utils/logger";
 
@@ -358,7 +355,7 @@ describe("Android discovery failure refresh outcome", () => {
       return [iosDevice];
     };
     const deviceManager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeDeviceManagerSimctl({
         isAvailable: async () => true,
         getBootedSimulatorsChecked: iosDiscovery,

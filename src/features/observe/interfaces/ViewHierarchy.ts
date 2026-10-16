@@ -1,12 +1,21 @@
 import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { ViewHierarchyReadRequest } from "../hierarchyReadArgs";
 
 /** Internal hierarchy read policy; numeric budgets remain supported for existing callers. */
 export interface HierarchyReadOptions {
   timeoutMs?: number;
   /** Re-extract an Android cache hit; a positive floor also requires independent freshness evidence. */
   requireFreshExtraction?: boolean;
+}
+
+/** The options-form read seam for consumers that never need the deprecated positional overload. */
+export interface ViewHierarchyRequestReader {
+  getViewHierarchy(
+    queryOptions?: ViewHierarchyQueryOptions,
+    request?: ViewHierarchyReadRequest,
+  ): Promise<ViewHierarchyResult>;
 }
 
 /**
@@ -32,6 +41,11 @@ export interface ViewHierarchy {
    *   wait and the sync fallback so a caller with its own deadline cannot be blocked past it
    * @returns Promise with parsed view hierarchy
    */
+  getViewHierarchy(
+    queryOptions?: ViewHierarchyQueryOptions,
+    request?: ViewHierarchyReadRequest,
+  ): Promise<ViewHierarchyResult>;
+  /** @deprecated Pass a {@link ViewHierarchyReadRequest} instead of positional arguments. */
   getViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
     perf?: PerformanceTracker,

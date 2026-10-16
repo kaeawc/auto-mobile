@@ -10,7 +10,7 @@ import {
 } from "../../fakes/FakeCoreDeviceCapabilityDependencies";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceInfo } from "../../../src/models";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 const deviceId = "sim-1";
 const capturedVersion = readFileSync(
@@ -18,7 +18,7 @@ const capturedVersion = readFileSync(
   "utf8",
 );
 
-function setState(simctl: FakeSimCtlClient, state: string): void {
+function setState(simctl: FakeSimctl, state: string): void {
   simctl.setDeviceInfo(deviceId, {
     udid: deviceId,
     name: "iPhone",
@@ -35,7 +35,7 @@ describe("SimCtlBootStateProvider", () => {
     ["Shutting Down", "unknown"],
     ["", "unknown"],
   ])("maps simctl state %s to %s", async (state, expected) => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     setState(simctl, state);
     const provider = new SimCtlBootStateProvider(simctl);
 
@@ -44,13 +44,13 @@ describe("SimCtlBootStateProvider", () => {
   });
 
   test("maps a missing device to unknown", async () => {
-    const provider = new SimCtlBootStateProvider(new FakeSimCtlClient());
+    const provider = new SimCtlBootStateProvider(new FakeSimctl());
 
     expect(await provider.getBootState(deviceId)).toBe("unknown");
   });
 
   test("propagates a lookup rejection", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const error = new Error("simctl lookup failed");
     simctl.setDeviceInfoError(error);
     const provider = new SimCtlBootStateProvider(simctl);
@@ -59,7 +59,7 @@ describe("SimCtlBootStateProvider", () => {
   });
 
   test("reads state on each call", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const provider = new SimCtlBootStateProvider(simctl);
     setState(simctl, "Shutdown");
     expect(await provider.getBootState(deviceId)).toBe("shutdown");
@@ -70,7 +70,7 @@ describe("SimCtlBootStateProvider", () => {
   });
 
   test("blocks a shut-down simulator in the capability probe before command invocation", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     setState(simctl, "Shutdown");
     const commandInvoker = new FakeDevicectlCommandInvoker();
     const probe = new CoreDeviceCapabilityProbe({

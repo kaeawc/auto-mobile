@@ -764,6 +764,8 @@ export class SqliteSessionBrokerStore {
           state: "failed",
           error: decision.reason,
           error_code: "capacity_exhausted",
+          // Capacity frees up; the stored refusal itself never changes, so the retry needs a new ID.
+          retryable: 1,
         }),
       };
     }

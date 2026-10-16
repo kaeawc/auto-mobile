@@ -51,7 +51,8 @@
     "failure": {
       "code": "capacity_exhausted",
       "message": "session-cap-reached",
-      "retryable": false
+      "retryable": true,
+      "retryRequires": "new_request_id"
     }
   },
   "release": {

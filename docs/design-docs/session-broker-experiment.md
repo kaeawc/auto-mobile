@@ -30,7 +30,8 @@ commit `6fb70c201` on this macOS host with iPhone 17 Pro / iOS 26.5:
 - While the first session was active, a second request received
   `capacity_exhausted` and advertised no tools.
 - Replaying that refused identity after capacity was freed returned the same
-  terminal refusal. A new request identity acquired the next fresh session.
+  terminal refusal (`retryable: true`, `retryRequires: "new_request_id"`: only a
+  fresh request ID can observe the freed capacity). A new request identity acquired the next fresh session.
 - Both releases reached terminal receipts with no pending cleanup. The native
   run completed at `2026-10-12T20:40:54Z`; artifacts are retained locally under
   `session-broker-native/smoke-2026-10-12T20-38-35.228Z`.

@@ -614,14 +614,22 @@ export class SessionBroker {
       sessionUuid: request.sessionId,
       profile: resource ? nativeProfile(resource) : null,
       cleanupPending: this.cleanupIsPending(request, resource),
-      ...(request.error
-        ? {
-            failure: {
-              code: request.errorCode ?? "session_preparation_failed",
-              message: request.error,
-              retryable: request.retryable && !this.cleanupIsPending(request, resource),
-            },
-          }
+      ...(request.error ? { failure: this.storedFailure(request, resource) } : {}),
+    };
+  }
+
+  private storedFailure(
+    request: BrokerRequestRecord,
+    resource: BrokerResourceRecord | undefined,
+  ): SessionBrokerFailure {
+    const retryable = request.retryable && !this.cleanupIsPending(request, resource);
+    return {
+      code: request.errorCode ?? "session_preparation_failed",
+      message: request.error ?? "",
+      retryable,
+      // The refusal is a stored terminal receipt: only a new request ID can observe freed capacity.
+      ...(retryable && request.errorCode === "capacity_exhausted"
+        ? { retryRequires: "new_request_id" as const }
         : {}),
     };
   }

@@ -84,6 +84,12 @@ import {
 
 import type { AndroidSearchDragState } from "./androidSearchDrag";
 import { resolveActionCallWithPerf, type ActionCall } from "../ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "../observedInteractionProfiles";
+import type {
+  ObservedActionResult,
+  ObservedChangeOptions,
+  ObservedEnvelope,
+} from "../observedInteractionTypes";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -104,30 +110,10 @@ interface ScrollUntilVisibleDependencies {
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;
   buildPredictionArgs: (options: SwipeOnOptions) => Record<string, unknown>;
   captureDisplayFence?: () => DisplayFence;
-  observedInteraction: <T>(
-    action: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<T>,
-    options: {
-      changeExpected: boolean;
-      timeoutMs?: number;
-      progress?: ProgressCallback;
-      perf?: PerformanceTracker;
-      signal?: AbortSignal;
-      skipPreviousObserve?: boolean;
-      previousObservation?: ObserveResult;
-      resolvesTargetFromRead?: boolean;
-      queryOptions?: {
-        text?: string;
-        elementId?: string;
-        containerElementId?: string | undefined;
-      };
-      predictionContext?: {
-        toolName: string;
-        toolArgs: Record<string, unknown>;
-      };
-      deferPostActionScreenshot?: boolean;
-      observationTimestampProvider?: () => number | undefined;
-    },
-  ) => Promise<T & { observation?: ObserveResult }>;
+  observedInteraction: <R extends ObservedActionResult>(
+    action: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<R>,
+    options: ObservedChangeOptions,
+  ) => Promise<R & ObservedEnvelope>;
   captureTerminalObservationScreenshot?: (
     observation: ObserveResult | undefined,
     perf: PerformanceTracker,
@@ -1110,15 +1096,14 @@ export class ScrollUntilVisible {
             return result;
           },
           {
-            changeExpected: false,
-            timeoutMs: 500,
+            ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
+            timeoutMs: SETTLE_BUDGET_MS.brief,
             progress,
             perf,
             signal,
             // The gesture coordinates come from this in-call read, so it is the pre-action read
             // the display fence checks; after a fold it passes once it is at the new revision.
             previousObservation: lastObservation,
-            resolvesTargetFromRead: true,
             deferPostActionScreenshot: true,
             observationTimestampProvider: () => iosDispatchTimestamp,
             predictionContext: {

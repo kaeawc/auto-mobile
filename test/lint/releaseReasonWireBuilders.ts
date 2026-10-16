@@ -70,7 +70,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Classifies a typed upstream refusal for the in-memory liveness recovery state machine.",
   ],
   [
-    "src/daemon/daemonMcpProxy.ts#DaemonMcpProxy.noteNotFoundAnswer",
+    "src/daemon/proxy/BoundSessionHeartbeat.ts#BoundSessionHeartbeat.noteNotFoundAnswer",
     "Records an in-memory not-found outcome and recovery window for the proxy binding.",
   ],
   [

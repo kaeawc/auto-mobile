@@ -1214,6 +1214,28 @@ posixTest("broker close waits for released status and records driver close evide
   });
   expect(broker.calls.map((c) => c.method)).toEqual(["status", "status"]);
 });
+posixTest("broker close with a dead driver falls back to the release path", async () => {
+  const f = brokerFixture();
+  await f.up();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.releaseResults = [{ sessionUuid: "own-session", outcome: "released" }];
+  broker.statusResults = [{ ...f.session, outcome: "released" }];
+  f.deps.isPidAlive = (pid) => pid !== 1234;
+  const code = await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  expect(code).toBe(0);
+  expect(broker.calls.map((c) => c.method)).toEqual(["release", "status"]);
+  expect(f.files.get("/batch/evidence/ledger.jsonl")).toContain('"kind":"released"');
+});
+posixTest("broker close with a dead driver and no grant still exits 2", async () => {
+  const f = brokerFixture("failed");
+  await f.up();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  f.deps.isPidAlive = (pid) => pid !== 1234;
+  expect(await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps)).toBe(2);
+  expect(broker.calls).toEqual([]);
+});
 posixTest(
   "broker live status is included per client and connection failure stays diagnostic",
   async () => {
@@ -1393,6 +1415,61 @@ posixTest("broker close joins a terminal refusal without inventing a device rele
   });
   expect(f.files.has("/batch/evidence/ledger.jsonl")).toBe(false);
 });
+
+posixTest.each(["failed", "pending"] as const)(
+  "release and info on a %s client report nothing to release instead of a schema crash",
+  async (outcome) => {
+    const f = brokerFixture(outcome);
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    f.files.set("/batch/sessions/other/owner-token", "other-secret");
+    f.files.set("/batch/sessions/other/attempts.json", '["batch-id-other-1"]');
+    f.files.set(
+      "/batch/sessions/other/request.json",
+      f.files.get(join(brokerDir, "request.json"))!.replace("a-phone-1", "other-1"),
+    );
+    for (const args of [
+      ["release", "--client", "a-phone"],
+      ["release", "--client", "a-phone", "--as-client", "other"],
+      ["info", "--client", "a-phone"],
+    ]) {
+      expect(await runProxySessionCommand(parsed(args), f.deps)).toBe(2);
+      expect(JSON.parse(f.logs.at(-1)!)).toMatchObject({
+        outcome: "nothing_to_release",
+        reason: "not_ready",
+        sessionOutcome: outcome,
+      });
+      expect(f.logs.join(" ")).not.toContain("invalid_type");
+    }
+    expect(broker.calls).toEqual([]);
+  },
+);
+posixTest("release on a client that never wrote init.json reports nothing to release", async () => {
+  const f = brokerFixture();
+  await f.up();
+  f.files.delete(join(brokerDir, "init.json"));
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  expect(await runProxySessionCommand(parsed(["release", "--client", "a-phone"]), f.deps)).toBe(2);
+  expect(JSON.parse(f.logs.at(-1)!)).toMatchObject({ outcome: "nothing_to_release" });
+  expect(broker.calls).toEqual([]);
+});
+posixTest(
+  "up after a resumed failed attempt reports the live driver, not a schema error",
+  async () => {
+    const f = brokerFixture("failed");
+    expect(await f.up()).toBe(1);
+    f.deps.isPidAlive = (pid) => pid !== 1234;
+    expect(await f.up(["--resume"])).toBe(1);
+    // The resumed driver is alive again and no close happened.
+    f.deps.isPidAlive = () => true;
+    expect(await f.up()).toBe(2);
+    expect(f.logs.join(" ")).toContain("driver is alive");
+    expect(f.logs.join(" ")).not.toContain("invalid_type");
+    expect(f.logs.join(" ")).not.toContain("Expected string");
+  },
+);
 
 posixTest.each([false, true])(
   "new disposable child is signalled once on identity capture failure (throw=%s)",

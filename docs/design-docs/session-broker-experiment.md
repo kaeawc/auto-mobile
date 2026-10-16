@@ -199,6 +199,12 @@ CoreSimulator device type and runtime:
 }
 ```
 
+`androidProfileArchetypes` and `iosClassifications` classify installed AVD
+profiles and simulator device types; without them Android acquisition fails
+with `catalog_metadata_invalid`. Android `os` selectors use the release version
+(for example `16`), not the API level (`36`); with equal versions the resolver
+prefers the `google_apis` flavor over `google_apis_playstore`.
+
 Caps are optional, nonnegative integers. Reservations, native creation, active
 sessions, reset, uncertain state, and unfinished destruction count toward the
 total cap. Failed acquisition with unfinished native work retains session

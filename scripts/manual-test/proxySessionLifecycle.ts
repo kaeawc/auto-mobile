@@ -83,6 +83,40 @@ function grantedSession(context: BrokerClientFiles, deps: ProxySessionDeps): str
     .parse(JSON.parse(deps.readFile(join(context.dir, "init.json"))));
   return init.session.sessionUuid;
 }
+/** What a never-granted client (refused, pending, or no init.json yet) can truthfully report. */
+function ungrantedReport(
+  context: BrokerClientFiles,
+  deps: ProxySessionDeps,
+): Record<string, unknown> | undefined {
+  const path = join(context.dir, "init.json");
+  if (!deps.exists(path)) {
+    return { outcome: "nothing_to_release", reason: "not_ready", sessionOutcome: null };
+  }
+  const init = z
+    .object({
+      session: z
+        .object({
+          outcome: z.string().optional(),
+          sessionUuid: z.string().nullable().optional(),
+          failure: z.object({ code: z.string().optional() }).passthrough().nullish(),
+        })
+        .passthrough()
+        .nullable()
+        .optional(),
+    })
+    .passthrough()
+    .parse(JSON.parse(deps.readFile(path)));
+  const session = init.session;
+  if (session?.outcome === "ready" && typeof session.sessionUuid === "string") {
+    return undefined;
+  }
+  return {
+    outcome: "nothing_to_release",
+    reason: "not_ready",
+    sessionOutcome: session?.outcome ?? null,
+    ...(session?.failure?.code ? { failureCode: session.failure.code } : {}),
+  };
+}
 export async function closeBrokerSession(
   context: BrokerClientFiles,
   deps: ProxySessionDeps,
@@ -168,6 +202,15 @@ export async function runBrokerLifecycle(
     });
     await deps.flush(`${JSON.stringify(result)}\n`);
     return 0;
+  }
+  const ungranted = ungrantedReport(context, deps);
+  if (ungranted) {
+    // Exit 2 matches close with nothing to release: a guard, not a broker response.
+    deps.log(
+      `Nothing to ${command.op} for ${context.name}: no ready grant (${String(ungranted.sessionOutcome ?? "no init.json")}).`,
+    );
+    await deps.flush(`${JSON.stringify(ungranted)}\n`);
+    return 2;
   }
   const sessionUuid = grantedSession(context, deps);
   if (command.op === "info") {

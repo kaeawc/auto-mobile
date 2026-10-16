@@ -131,6 +131,7 @@ import {
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 import { deadlineRequest, resolveDeadlineActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 type TapAnyAccessibilityService = Pick<
   AndroidCtrlProxyClient,
@@ -1974,7 +1975,7 @@ export class TapAnyElement extends BaseVisualChange {
           warnings.add(warning);
         }
       };
-      const result = await this.observedInteraction(
+      const result = await this.observedInteraction<TapAnyElementResult>(
         (observeResult, fence) =>
           this.tapObservedElement({
             options,
@@ -1992,11 +1993,10 @@ export class TapAnyElement extends BaseVisualChange {
             requestDeadlineMs: request?.requestDeadlineMs,
           }),
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
           display: targetDisplay?.observation.display.key,
           previousObservation: targetDisplay?.observation,
-          resolvesTargetFromRead: true,
-          timeoutMs: 800,
+          timeoutMs: SETTLE_BUDGET_MS.gesture,
           progress,
           perf,
           signal,

@@ -1,3 +1,4 @@
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   registerVideoRecordingTools,
   type VideoRecordingToolDependencies,
@@ -21,9 +22,10 @@ export function createVideoRecordingToolsHarness() {
       dependencies = { ...dependencies, ...overrides };
       registerVideoRecordingTools(dependencies);
     },
-    /** Forget every override; the next registration uses the defaults. */
+    /** Forget every override and unregister the handler, so none outlives the test. */
     clear(): void {
       dependencies = {};
+      ToolRegistry.removeToolForTesting("videoRecording");
     },
   };
 }

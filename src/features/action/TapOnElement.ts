@@ -223,6 +223,7 @@ import {
   resolveIosOwnedTapPoint,
 } from "./iosTapTargetOwnership";
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -450,6 +451,7 @@ export type TapOnFocusResult = TapOnElementResult & {
   [tapFocusFailure]?: TapFocusFailure;
   [tapResolvedLayer]?: HierarchyLayer;
 };
+type TapOnFocusOutcome = TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean };
 
 /** Keep routing metadata available to internal callers without exposing it in MCP payloads. */
 function withResolvedLayer<T extends TapOnFocusResult>(
@@ -3540,7 +3542,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       onDispatched: () => void;
       talkBack: AndroidDisplayTalkBackState;
     },
-  ): Promise<TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
+  ): Promise<TapOnFocusOutcome> {
     const { target, signal } = context;
     const prepared = await this.prepareAndroidDisplaySelection(options, context);
     if ("result" in prepared) {
@@ -3819,7 +3821,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           return dispatchedResult;
         },
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
           display: target.observation.display.key,
           previousObservation: target.observation,
           signal,
@@ -4057,8 +4059,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     try {
       throwIfAborted(signal);
-      // Tap on the calculated point using observedChange
-      const result = await this.observedInteraction(
+      const result = await this.observedInteraction<TapOnFocusOutcome>(
         async (observeResult: ObserveResult, fence) => {
           previousObserveResult = observeResult;
           preTapHierarchy = observeResult.viewHierarchy;
@@ -4528,15 +4529,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             elementId: options.elementId,
             containerElementId: options.container?.elementId,
           },
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
           display: options.display,
-          timeoutMs: 800, // Reduce timeout for faster execution
+          timeoutMs: SETTLE_BUDGET_MS.gesture, // Reduce timeout for faster execution
           progress,
           perf,
           signal,
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
-          resolvesTargetFromRead: true,
           ...(options.ensureChecked !== undefined
             ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),

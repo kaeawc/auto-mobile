@@ -177,6 +177,7 @@ test/integration/mediamtxWebRtcPublisher.integration.test.ts | unsafe | spawn of
 test/integration/nativeDescendantLifecycle.integration.test.ts | unsafe | spawns and signals real sleep/sh/cat/bun processes
 test/integration/nativeHelperSweep.integration.test.ts | unsafe | spawns sleep and bun owners, signals identity-matched test-started processes
 test/integration/persistentEncoderH264SourceDevice.integration.test.ts | unsafe | execFile adb devices and adb shell on real devices L36/L50
+test/integration/sessionBrokerMultiClient.integration.test.ts | safe | fake native port, real SQLite on useScratchRoot temp files, no host tooling or child processes
 test/integration/webrtcDeviceCapture.integration.test.ts | unsafe | execFile of bun dist daemon start, adb and xcrun simctl L268/L728/L840
 test/integration/webrtcDeviceCaptureLoad.integration.test.ts | unsafe | execFile spawns bun test on another integration test L15
 test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string fixtures L52

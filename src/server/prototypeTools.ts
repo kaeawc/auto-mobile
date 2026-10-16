@@ -46,8 +46,8 @@ import {
 import { PrototypeAdbReverseManager } from "../features/prototype/PrototypeAdbReverseManager";
 import { subscribePrototypeCleanup, type PrototypeEventLifecycle } from "./prototypeLifecycle";
 import {
-  reverseForPatch,
-  reverseForSavedAction,
+  patchReverseStaging,
+  withSavedReverses,
   reverseLifecycle,
   reverseOutputShape,
   withReverseReport,
@@ -1706,6 +1706,7 @@ async function performPrototypeAction(
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
+    const patchReverse = patchReverseStaging(dependencies, device, args.id!);
     return performPrototypePatch(
       {
         store,
@@ -1714,12 +1715,10 @@ async function performPrototypeAction(
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
-        specRefusal: async (spec) => {
-          const refusal = (await specCapabilityRefusal(target, spec, signal))?.error ?? undefined;
-          // A patched node may add or drop a via "device" request to localhost (#12530); the
-          // complete patched spec is the last thing seen before the patch is sent.
-          return refusal ?? (await reverseForPatch(dependencies, device, args.id!, spec));
-        },
+        // A patched node may add or drop a via "device" localhost request (#12530): staged here.
+        specRefusal: async (spec) =>
+          (await specCapabilityRefusal(target, spec, signal))?.error ?? patchReverse.stage(spec),
+        settleSpec: patchReverse.settle,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),
@@ -2926,29 +2925,30 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       lastRenderedObservation: dependencies.lastRenderedObservation,
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
     };
-    const savedReverses = await reverseForSavedAction(handlerDependencies, device, args);
-    const dispatched = await dispatchPrototypeSavedAction(
-      { ...args, action, spec: args.spec as PrototypeSpec | undefined },
-      () => {
-        const savedSignal = combineWithAmbientAbort(signal);
-        return {
-          client: target.android!,
-          adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
-          signal: savedSignal,
-          stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
-        };
-      },
-      (action) =>
-        performPrototypeAction(
-          handlerDependencies,
-          device,
-          { ...args, action },
-          scope,
-          host.patchQueue,
-          combineWithAmbientAbort(signal),
-        ),
+    const dispatched = await withSavedReverses(handlerDependencies, device, args, () =>
+      dispatchPrototypeSavedAction(
+        { ...args, action, spec: args.spec as PrototypeSpec | undefined },
+        () => {
+          const savedSignal = combineWithAmbientAbort(signal);
+          return {
+            client: target.android!,
+            adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+            signal: savedSignal,
+            stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
+          };
+        },
+        (action) =>
+          performPrototypeAction(
+            handlerDependencies,
+            device,
+            { ...args, action },
+            scope,
+            host.patchQueue,
+            combineWithAmbientAbort(signal),
+          ),
+      ),
     );
-    return responseFor(withReverseReport(dispatched, savedReverses));
+    return responseFor(dispatched);
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,

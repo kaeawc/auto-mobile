@@ -288,3 +288,27 @@ describe("TapStrategy", () => {
     });
   });
 });
+
+describe("clipNavigationTapBounds", () => {
+  const hierarchy = { hierarchy: { node: [] } } as ViewHierarchyResult;
+  const bounds = { left: 0, top: 0, right: 100, bottom: 50 };
+
+  test("Android never clips", () => {
+    const strategy: TapStrategy = new AndroidTapStrategy(
+      { name: "pixel", platform: "android", deviceId: "emu" },
+      new FakeAdbClient(),
+    );
+    expect(
+      strategy.clipNavigationTapBounds(bounds, hierarchy, { width: 1080, height: 2400 }, []),
+    ).toEqual({ bounds });
+  });
+
+  test("iOS leaves bounds unchanged without a usable screen size", () => {
+    const strategy: TapStrategy = new IosTapStrategy({
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "sim",
+    });
+    expect(strategy.clipNavigationTapBounds(bounds, hierarchy, undefined, [])).toEqual({ bounds });
+  });
+});

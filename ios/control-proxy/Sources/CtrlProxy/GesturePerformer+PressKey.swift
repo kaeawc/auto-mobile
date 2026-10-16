@@ -31,93 +31,16 @@ import os
             }
             let bundleId = elementLocator.foregroundBundleId
 
-            let keyboardKey: XCUIKeyboardKey
-            switch normalizedKey {
-            case "enter":
-                keyboardKey = .return
-            case "tab":
-                keyboardKey = .tab
-            case "escape":
-                keyboardKey = .escape
-            case "backspace":
-                keyboardKey = .delete
-            case "delete":
-                keyboardKey = .forwardDelete
-            case "arrow_up":
-                keyboardKey = .upArrow
-            case "arrow_down":
-                keyboardKey = .downArrow
-            case "arrow_left":
-                keyboardKey = .leftArrow
-            case "arrow_right":
-                keyboardKey = .rightArrow
-            default:
-                throw GestureError.notSupported("Keyboard key: \(key)")
-            }
+            let keyboardKey = try GesturePerformer.xcuiKeyboardKey(normalizedKey: normalizedKey, key: key)
 
-            var modifierFlags: XCUIElement.KeyModifierFlags = []
-            for modifier in Set(modifiers.map { $0.lowercased() }) {
-                switch modifier {
-                case "shift":
-                    modifierFlags.formUnion(.shift)
-                case "ctrl":
-                    modifierFlags.formUnion(.control)
-                case "alt":
-                    modifierFlags.formUnion(.option)
-                case "meta":
-                    modifierFlags.formUnion(.command)
-                default:
-                    throw GestureError.notSupported("Keyboard modifier: \(modifier)")
-                }
-            }
+            let modifierFlags = try GesturePerformer.xcuiModifierFlags(modifiers)
 
             let isDestructiveKey = normalizedKey == "backspace" || normalizedKey == "delete"
             let isHorizontalArrow = normalizedKey == "arrow_left" || normalizedKey == "arrow_right"
             let isPlainHorizontalArrow = isHorizontalArrow && modifierFlags.isEmpty
             if isPlainHorizontalArrow {
-                return try GesturePerformer.performHorizontalArrow(
-                    clock: keyboardClock, key: normalizedKey,
-                    requireFocus: {
-                        GesturePhaseDiagnostics.current?.begin("focusCheck")
-                        try self.requireKeyboardFocus(
-                            app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
-                        )
-                    },
-                    resolveInput: { checkBudget in
-                        GesturePhaseDiagnostics.current?.begin("elementResolution")
-                        let element = try self.resolveFocusedTextElement(app: app, checkBudget: checkBudget)
-                        try checkBudget()
-                        GesturePhaseDiagnostics.current?.begin("valueRead")
-                        let original = try GesturePerformer.mappingFocusQueryException(phase: "value read") {
-                            try element.map { element in
-                                try catchingObjCException { self.fieldText(element) }
-                            }
-                        }
-                        return (element, original)
-                    },
-                    probeCaret: { element, original in
-                        GesturePhaseDiagnostics.current?.begin("caretProbe")
-                        return try self.probeCaretIndex(app: app, focusedElement: element, original: original)
-                    },
-                    sendKey: {
-                        GesturePhaseDiagnostics.current?.begin("keyDelivery")
-                        try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: []) }
-                    },
-                    retryKey: { element in
-                        GesturePhaseDiagnostics.current?.begin("keyDelivery")
-                        try catchingObjCException { element.typeKey(keyboardKey, modifierFlags: []) }
-                    },
-                    readValue: { element in
-                        GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
-                        return try catchingObjCException { self.fieldText(element) }
-                    },
-                    restoreValue: { element, original in
-                        try self.restoreForwardDeleteProbe(
-                            app: app, focusedElement: element, original: original, marker: ""
-                        )
-                    },
-                    knownCaret: { memo?.caret(bundleId: bundleId, value: $0) },
-                    verifiedCaret: { self.rememberCaret(bundleId: bundleId, value: $0, index: $1) }
+                return try performPlainHorizontalArrow(
+                    app: app, keyboardKey: keyboardKey, normalizedKey: normalizedKey, bundleId: bundleId, memo: memo
                 )
             }
 
@@ -207,6 +130,119 @@ import os
                 return nil
             }
 
+            return try await confirmDestructiveKeyOutcome(
+                app: app, key: key, normalizedKey: normalizedKey, focusedElement: focusedElement,
+                valueBeforeKeyPress: valueBeforeKeyPress, caretBefore: caretBefore,
+                expectedForwardDelete: expectedForwardDelete, focusedKind: focusedKind, warning: &warning
+            )
+        }
+
+        private static func xcuiKeyboardKey(normalizedKey: String, key: String) throws -> XCUIKeyboardKey {
+            let keyboardKey: XCUIKeyboardKey
+            switch normalizedKey {
+            case "enter":
+                keyboardKey = .return
+            case "tab":
+                keyboardKey = .tab
+            case "escape":
+                keyboardKey = .escape
+            case "backspace":
+                keyboardKey = .delete
+            case "delete":
+                keyboardKey = .forwardDelete
+            case "arrow_up":
+                keyboardKey = .upArrow
+            case "arrow_down":
+                keyboardKey = .downArrow
+            case "arrow_left":
+                keyboardKey = .leftArrow
+            case "arrow_right":
+                keyboardKey = .rightArrow
+            default:
+                throw GestureError.notSupported("Keyboard key: \(key)")
+            }
+
+            return keyboardKey
+        }
+
+        private static func xcuiModifierFlags(_ modifiers: [String]) throws -> XCUIElement.KeyModifierFlags {
+            var modifierFlags: XCUIElement.KeyModifierFlags = []
+            for modifier in Set(modifiers.map { $0.lowercased() }) {
+                switch modifier {
+                case "shift":
+                    modifierFlags.formUnion(.shift)
+                case "ctrl":
+                    modifierFlags.formUnion(.control)
+                case "alt":
+                    modifierFlags.formUnion(.option)
+                case "meta":
+                    modifierFlags.formUnion(.command)
+                default:
+                    throw GestureError.notSupported("Keyboard modifier: \(modifier)")
+                }
+            }
+            return modifierFlags
+        }
+
+        private func performPlainHorizontalArrow(
+            app: XCUIApplication, keyboardKey: XCUIKeyboardKey, normalizedKey: String, bundleId: String?,
+            memo: CaretMemo?
+        )
+            throws -> Bool?
+        {
+            return try GesturePerformer.performHorizontalArrow(
+                clock: keyboardClock, key: normalizedKey,
+                requireFocus: {
+                    GesturePhaseDiagnostics.current?.begin("focusCheck")
+                    try self.requireKeyboardFocus(
+                        app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
+                    )
+                },
+                resolveInput: { checkBudget in
+                    GesturePhaseDiagnostics.current?.begin("elementResolution")
+                    let element = try self.resolveFocusedTextElement(app: app, checkBudget: checkBudget)
+                    try checkBudget()
+                    GesturePhaseDiagnostics.current?.begin("valueRead")
+                    let original = try GesturePerformer.mappingFocusQueryException(phase: "value read") {
+                        try element.map { element in
+                            try catchingObjCException { self.fieldText(element) }
+                        }
+                    }
+                    return (element, original)
+                },
+                probeCaret: { element, original in
+                    GesturePhaseDiagnostics.current?.begin("caretProbe")
+                    return try self.probeCaretIndex(app: app, focusedElement: element, original: original)
+                },
+                sendKey: {
+                    GesturePhaseDiagnostics.current?.begin("keyDelivery")
+                    try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: []) }
+                },
+                retryKey: { element in
+                    GesturePhaseDiagnostics.current?.begin("keyDelivery")
+                    try catchingObjCException { element.typeKey(keyboardKey, modifierFlags: []) }
+                },
+                readValue: { element in
+                    GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
+                    return try catchingObjCException { self.fieldText(element) }
+                },
+                restoreValue: { element, original in
+                    try self.restoreForwardDeleteProbe(
+                        app: app, focusedElement: element, original: original, marker: ""
+                    )
+                },
+                knownCaret: { memo?.caret(bundleId: bundleId, value: $0) },
+                verifiedCaret: { self.rememberCaret(bundleId: bundleId, value: $0, index: $1) }
+            )
+        }
+
+        private func confirmDestructiveKeyOutcome(
+            app: XCUIApplication, key: String, normalizedKey: String, focusedElement: XCUIElement,
+            valueBeforeKeyPress: String, caretBefore: Int?, expectedForwardDelete: String?,
+            focusedKind: FocusedElementKind?, warning: inout String?
+        )
+            async throws -> Bool?
+        {
             if normalizedKey == "delete" {
                 GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
                 let valueBeforeFallback = try catchingObjCException { fieldText(focusedElement) }

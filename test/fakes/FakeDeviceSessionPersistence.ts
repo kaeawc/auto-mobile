@@ -1,4 +1,4 @@
-import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,

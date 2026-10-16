@@ -5,7 +5,7 @@ import {
   type HarnessProfile,
 } from "../helpers/poolOwnershipConcurrencyHarness";
 
-// Seeded properties for the managed-slot life and the tool path (#11444, #10655), on the same
+// Seeded properties for the broker-binding life and the tool path (#11444, #10655), on the same
 // pool-level harness as poolOwnershipConcurrency.property.test.ts. The slot steps assign a device
 // to a slot, start and end its execution and release it; the tool steps are a read with and
 // without a session, a control call, an `ide/*` mutation and SQL in read and write forms. After
@@ -22,8 +22,8 @@ const SEEDS_PER_TEST = 3;
 const TESTS_PER_PROFILE = 3;
 
 const PROFILES: Record<string, HarnessProfile> = {
-  /** Generic acquisitions racing slot assignment and the slot's execution lifecycle. */
-  slots: {
+  /** Generic acquisitions racing broker binding assignment and its execution lifecycle. */
+  bindings: {
     steps: STEPS,
     weights: {
       acquireMcp: 7,
@@ -32,7 +32,6 @@ const PROFILES: Record<string, HarnessProfile> = {
       slotAssign: 5,
       slotExecStart: 4,
       slotExecEnd: 3,
-      slotRelease: 2,
       control: 2,
       advance: 3,
       kill: 1,
@@ -71,7 +70,6 @@ const PROFILES: Record<string, HarnessProfile> = {
       slotAssign: 4,
       slotExecStart: 4,
       slotExecEnd: 3,
-      slotRelease: 2,
       toolRead: 3,
       sqlRead: 2,
       toolControl: 5,
@@ -93,19 +91,19 @@ function seedChunks(firstSeed: number): number[][] {
   );
 }
 
-describe("managed slots and the tool path under seeded concurrent interleavings", () => {
+describe("bindings and the tool path under seeded concurrent interleavings", () => {
   beforeAll(async () => {
     if (ownershipSeedOverride()) {
       return;
     }
-    // Warm the harness's cold path here: CI's per-test timing excludes beforeAll.
-    await assertOwnershipInvariants([1], PROFILES.slots, { managedSlots: true });
+    // Warm the harness cold path here: CI per-test timing excludes beforeAll.
+    await assertOwnershipInvariants([1], PROFILES.bindings, { bindings: true });
   });
 
   for (const [name, profile] of Object.entries(PROFILES)) {
     for (const seeds of seedChunks(1)) {
-      test(`${name}: seeds ${seeds[0]}-${seeds.at(-1)} keep every slot and tool-path invariant`, async () => {
-        await assertOwnershipInvariants(seeds, profile, { managedSlots: true });
+      test(`${name}: seeds ${seeds[0]}-${seeds.at(-1)} keep every binding and tool-path invariant`, async () => {
+        await assertOwnershipInvariants(seeds, profile, { bindings: true });
       });
     }
   }

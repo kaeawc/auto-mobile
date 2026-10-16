@@ -161,7 +161,10 @@ posixTest("env file uses POSIX unset lines for the shared inherited names", () =
     "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
     "AUTO_MOBILE_DB_PATH",
     "AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH",
+    "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    "AUTOMOBILE_SESSION_CONFIG",
     "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
   ]);
   const envFile = renderEnvFile(derivePrivateDaemonBatch(options)[0], options);
   expect(envFile).not.toContain("${!");
@@ -260,7 +263,10 @@ posixTest("refuses protected env overrides and quotes shell values", () => {
     "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
     "AUTO_MOBILE_DB_PATH",
     "AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH",
+    "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    "AUTOMOBILE_SESSION_CONFIG",
     "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
   ]) {
     expect(refusal({ extraEnv: { [key]: "/override" } })).toContain("may not override");
   }
@@ -362,6 +368,30 @@ test("client environment strips all inherited legacy spellings and path override
     KEEP: "yes",
     AUTOMOBILE_DATA_DIR: "derived",
   });
+});
+posixTest("broker and session config belong to the harness and never enter client env", () => {
+  const env = derivePrivateDaemonBatch(options)[0].env;
+  for (const key of [
+    "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    "AUTOMOBILE_SESSION_CONFIG",
+    "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+    "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES",
+  ]) {
+    expect(refusal({ extraEnv: { [key]: "/private/config" } })).toContain("may not override");
+    expect(refusal({ daemonEnv: { "1": { [key]: "/private/config" } } })).toContain(
+      "may not override",
+    );
+    expect(privateClientEnvironment({ ...env, [key]: "/inherited/config" }, {})).toEqual(env);
+    expect(
+      privateHarnessEnvRefusal(
+        privateClientEnvironment({ ...env, [key]: "/inherited/config" }, {}),
+        host,
+      ),
+    ).toBeUndefined();
+  }
+  for (const name of ["AUTOMOBILE_SESSION_BROKER_CONFIG", "AUTOMOBILE_SESSION_CONFIG"]) {
+    expect(PRODUCT_PATH_ENV_VARIABLES.find((row) => row.name === name)?.owner).toBe("harness");
+  }
 });
 posixTest(
   "client and batch refuse canonical resident paths and resident basenames anywhere",

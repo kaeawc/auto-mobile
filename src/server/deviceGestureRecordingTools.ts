@@ -16,7 +16,7 @@ import {
 } from "./deviceGestureRecordingManager";
 import {
   assertLifecycleCallerHoldsDevice,
-  assertLifecycleCallerNotOnForeignManagedSlot,
+  assertLifecycleCallerNotOnForeignBinding,
   lifecycleRequester,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
@@ -95,12 +95,12 @@ const exportPlanResultSchema = z.object({
  * recording's device (#11647). It is a plain tool: device-aware ownership never sees it and the
  * ingress only judges a session the call names. The handler therefore asks the question the
  * device-gesture-recording socket's `stop` asks, in the shape killDevice uses: a device a live session holds
- * is exported only by its holder, and a managed slot's device only by that slot's execution.
+ * is exported only by its holder, and a broker binding's device only by that binding's execution.
  * An unheld device's recording (owned or not) stays exportable by anyone, as on the socket.
  *
  * Returns the recording to stop. The holder check runs after this function's last await, against
  * the recording it returns; the caller stops that recording by id. Throws the typed
- * `device_owned_by_other_session` / `device_assigned_to_managed_slot` refusal, which the caller
+ * `device_owned_by_other_session` / `device_assigned_to_binding` refusal, which the caller
  * must not swallow.
  */
 async function activeRecordingForExport(
@@ -111,7 +111,7 @@ async function activeRecordingForExport(
     return null;
   }
   const requester = exportRequester(params, seen.deviceId);
-  await assertLifecycleCallerNotOnForeignManagedSlot({
+  await assertLifecycleCallerNotOnForeignBinding({
     toolName: "exportPlan",
     device: seen,
     requester,

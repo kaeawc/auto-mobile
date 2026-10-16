@@ -207,21 +207,17 @@ describe("HeartbeatKeeper", () => {
     expect(h.calls).toContainEqual(["error", "held", true, error]);
   });
 
-  test("a late tick recovers live holds, including stopped managed holds, from live state", async () => {
+  test("a late tick recovers live holds, excluding stopped holds, from live state", async () => {
     const h = harness();
     await h.keeper.tick();
     h.hold("held");
     h.hold("stopped");
-    h.hold("managed");
     h.state.notFoundStopped.add("stopped");
-    h.state.notFoundStopped.add("managed");
-    h.managed.add("managed");
     h.timer.advanceTime(111);
     await h.keeper.tick();
     expect(h.recovery.begins).toEqual([
       ["latest", PROXY_STALLED_CODE],
       ["held", PROXY_STALLED_CODE],
-      ["managed", PROXY_STALLED_CODE],
     ]);
     expect(h.recovery.checks).toContain("held");
   });

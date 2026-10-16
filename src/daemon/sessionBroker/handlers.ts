@@ -176,7 +176,7 @@ function bind(
   sessions: string[],
 ): void {
   if (socketId) {
-    state.getManagedConnectionScopes?.().bind(socketId, { scopeKey, sessionUuids: sessions });
+    state.getBrokerConnectionScopes?.().bind(socketId, { scopeKey, sessionUuids: sessions });
   }
 }
 

@@ -9,8 +9,8 @@ const paths = [
   "app-db-session-upsert",
   "app-db-session-release",
   "app-db-transaction",
-  "slot-registry-ensure-scope",
-  "slot-registry-journal",
+  "binding-registry-ensure-scope",
+  "binding-registry-journal",
 ] as const;
 const { values } = parseArgs({
   options: {
@@ -51,8 +51,8 @@ try {
     process.exitCode = 2;
   } else {
     const { DeviceSessionRepository } = await import("../../src/db/deviceSessionRepository");
-    const { openSqliteSlotRegistry } =
-      await import("../../src/daemon/managedSlots/sqliteSlotRegistry");
+    const { openSqliteBindingRegistry } =
+      await import("../../src/daemon/sessionBroker/registry/sqliteBindingRegistry");
     const windows = await import("../../src/daemon/sessionLivenessWindows");
     const { raceWithDeadline } = await import("../../src/utils/raceWithDeadline");
     const { defaultTimer } = await import("../../src/utils/SystemTimer");
@@ -71,12 +71,12 @@ try {
       }),
     );
     const db = database.getDatabase();
-    let registry: Awaited<ReturnType<typeof openSqliteSlotRegistry>> | undefined;
+    let registry: Awaited<ReturnType<typeof openSqliteBindingRegistry>> | undefined;
     try {
       await database.ensureMigrations();
       await sql`CREATE TABLE IF NOT EXISTS peer_probe (value INTEGER)`.execute(db);
-      const registryPath = join(directory, "slot-registry.db");
-      registry = await openSqliteSlotRegistry({ dbPath: registryPath });
+      const registryPath = join(directory, "binding-registry.db");
+      registry = await openSqliteBindingRegistry({ dbPath: registryPath });
       const repository = new DeviceSessionRepository();
       let caseIndex = 0;
       for (const path of selectedPaths) {
@@ -105,7 +105,7 @@ try {
               db
                 .transaction()
                 .execute((trx) => sql`INSERT INTO peer_probe VALUES (2)`.execute(trx));
-          } else if (path === "slot-registry-ensure-scope") {
+          } else if (path === "binding-registry-ensure-scope") {
             operation = () =>
               registry!.ensureScope({
                 managedHostScope: "probe",
@@ -121,17 +121,17 @@ try {
             if (scope.kind !== "ready") {
               throw new Error(`Scope setup failed: ${scope.kind}`);
             }
-            const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
-            const initialized = await registry.initSlot(key, {
+            const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+            const initialized = await registry.initBinding(key, {
               role: "primary",
               platform: "android",
               requestedSpec: {},
             });
             if (initialized.kind !== "ready") {
-              throw new Error(`Slot setup failed: ${initialized.kind}`);
+              throw new Error(`Binding setup failed: ${initialized.kind}`);
             }
             operation = () =>
-              registry!.openSlotJournal(key, {
+              registry!.openBindingJournal(key, {
                 kind: "create",
                 phase: "intent",
                 target: {

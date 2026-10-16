@@ -79,7 +79,7 @@ async function runCommand(client: FakeCapabilitiesClient) {
 
 describe("daemon capabilities query", () => {
   test.each([
-    { capabilities: ["input/gestureStream", "managed-slots/v1"] },
+    { capabilities: ["input/gestureStream", "session-broker/v1"] },
     {
       capabilities: ["input/gestureStream", "session-broker/v1"],
       pid: 4321,

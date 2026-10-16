@@ -68,7 +68,6 @@ export interface HeartbeatKeeperDependencies {
   state: ProxySessionState;
   tickLateness: TickLatenessClock;
   livenessRecovery: Pick<LivenessRecovery, "begin" | "isRecovering">;
-  managedExecutionSessions: Set<string>;
   heartbeatLeashMs: number;
   heartbeatIntervalMs: number;
   boundSessionReplayTtlMs: number;
@@ -109,10 +108,7 @@ export class HeartbeatKeeper {
       `[DaemonMcpProxy] Heartbeat tick fired more than ${this.deps.heartbeatLeashMs}ms late; re-heartbeating held sessions`,
     );
     for (const sessionUuid of this.deps.port.heldSessionUuids()) {
-      if (
-        this.deps.state.notFoundStopped.has(sessionUuid) &&
-        !this.deps.managedExecutionSessions.has(sessionUuid)
-      ) {
+      if (this.deps.state.notFoundStopped.has(sessionUuid)) {
         continue;
       }
       this.deps.livenessRecovery.begin(sessionUuid, PROXY_STALLED_CODE);

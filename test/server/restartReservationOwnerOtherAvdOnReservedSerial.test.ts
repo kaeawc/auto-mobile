@@ -74,7 +74,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     resetDbWriteBarrier();
   });
 
-  async function fixture(managedSlotExclusion?: DevicePoolDependencies["managedSlotExclusion"]) {
+  async function fixture(bindingExclusion?: DevicePoolDependencies["bindingExclusion"]) {
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);
@@ -100,7 +100,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "restart-start-daemon", {
         env,
-        managedSlotExclusion,
+        bindingExclusion,
         timer,
         deviceManager: manager,
         emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer),
@@ -262,7 +262,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     expect(restartResumeSessionForDevice({ __mcpSessionId: CONNECTION }, f.device)).toBe(HOLDER);
   });
 
-  test("a managed slot taking the device keeps priority over the fallback hold", async () => {
+  test("a binding taking the device keeps priority over the fallback hold", async () => {
     let managed = false;
     const f = await fixture({
       refresh: async () => {},
@@ -274,7 +274,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
               stableDeviceId: "restart-phone",
               holder: "free",
               scopeKey: "managed-scope",
-              slotIndex: null,
+              bindingIndex: null,
               scopeState: null,
               execSessionUuid: null,
             }

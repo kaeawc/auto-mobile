@@ -31,13 +31,6 @@ import { nodeBounds } from "../../models/ViewHierarchyResult";
 import type { Timer } from "../../utils/interfaces/Timer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DefaultElementParser } from "./ElementParser";
-import {
-  capturedLabelFields,
-  isButtonLikeWithText,
-  searchableNativeId,
-  textOrDescription,
-  toSearchable,
-} from "./SearchableNode";
 import { DefaultElementGeometry } from "./ElementGeometry";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import {
@@ -175,9 +168,6 @@ const POST_TAP_VERIFY_BUDGET_MS = 200;
 const POST_TAP_VERIFY_INTERVAL_MS = 50;
 const CHOOSER_SCAN_PAGES = 4;
 const CHOOSER_ANCHOR_DELTA_TOLERANCE_PX = 2;
-/** The chooser's app list: `resolver_list`, `chooser_list` or a bare `list`. */
-const CHOOSER_LIST_ID = /(?:^|\/)(?:resolver_list|chooser_list|list)$/;
-
 // Bare content-derived IDs denote rows unique within a capture. Ordinal IDs
 // and resource-backed IDs can be reassigned when a list scrolls or recycles.
 const UNIQUE_CHOOSER_VIEW_ID = new RegExp(
@@ -851,9 +841,8 @@ export class DeepLinkManager implements DeepLinkManager {
 
           const nodeProperties = this.parser.extractNodeProperties(node);
           const nodeClass = nodeProperties.class || "";
-          const searchable = toSearchable(nodeProperties);
-          const nodeText = textOrDescription(searchable);
-          const nodeResourceId = searchable.nativeId ?? "";
+          const nodeText = nodeProperties.text || nodeProperties["content-desc"] || "";
+          const nodeResourceId = nodeProperties["resource-id"] || "";
 
           // Check for class indicators
           for (const className of classIndicators) {
@@ -1177,14 +1166,15 @@ export class DeepLinkManager implements DeepLinkManager {
         return;
       } // Already found
 
-      // Only the Android `class` field names the widget here, so drop `className`.
-      const searchable = toSearchable({
-        ...this.parser.extractNodeProperties(currentNode),
-        className: undefined,
-      });
+      const properties = this.parser.extractNodeProperties(currentNode);
+      const text = properties.text || properties["content-desc"] || "";
+      const className = properties.class || "";
 
       // Check if this is a button-like element with matching text
-      if (isButtonLikeWithText(searchable, textOptions)) {
+      if (
+        (className.includes("Button") || className.includes("TextView")) &&
+        textOptions.some((option) => text.toLowerCase().includes(option.toLowerCase()))
+      ) {
         foundElement = currentNode;
       }
     });
@@ -1224,12 +1214,13 @@ export class DeepLinkManager implements DeepLinkManager {
         if (!row) {
           return;
         }
-        const resourceId = searchableNativeId(properties) ?? "";
+        const resourceId = properties["resource-id"] ?? "";
         const separator = resourceId.indexOf(":id/");
         const namespace = separator > 0 ? resourceId.slice(0, separator) : undefined;
-        const inAppList = ancestors.some((ancestor) =>
-          this.isChooserListNode(this.parser.extractNodeProperties(ancestor)),
-        );
+        const inAppList = ancestors.some((ancestor) => {
+          const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
+          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id);
+        });
         // Framework-owned chooser widgets are not metadata for the represented app.
         const packages = [properties.package, properties.packageName, namespace].filter(
           (value): value is string =>
@@ -1247,8 +1238,7 @@ export class DeepLinkManager implements DeepLinkManager {
           packageRows.add(row);
         }
         const labels = labelRows.get(row) ?? new Set<string>();
-        const captured = capturedLabelFields(properties);
-        for (const value of [captured.text, captured.contentDescription]) {
+        for (const value of [properties.text, properties["content-desc"]]) {
           if (typeof value === "string" && value.length > 0) {
             labels.add(value);
           }
@@ -1426,9 +1416,13 @@ export class DeepLinkManager implements DeepLinkManager {
         ancestors[depth] = node;
         const properties = this.parser.extractNodeProperties(node);
         const id = properties["view-id"];
-        const listIndex = ancestors.findIndex((ancestor) =>
-          this.isChooserListNode(this.parser.extractNodeProperties(ancestor)),
-        );
+        const listIndex = ancestors.findIndex((ancestor) => {
+          const resourceId = this.parser.extractNodeProperties(ancestor)["resource-id"];
+          return (
+            typeof resourceId === "string" &&
+            /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(resourceId)
+          );
+        });
         const outermostClickable = ancestors.slice(listIndex + 1).find((ancestor) => {
           const clickable = this.parser.extractNodeProperties(ancestor).clickable;
           return clickable === true || clickable === "true";
@@ -1448,14 +1442,13 @@ export class DeepLinkManager implements DeepLinkManager {
         const contents: string[] = [];
         this.parser.traverseNode(node, (child: any) => {
           const parts = this.parser.extractNodeProperties(child);
-          const captured = capturedLabelFields(parts);
           contents.push(
             JSON.stringify([
-              captured.text,
-              captured.contentDescription,
+              parts.text,
+              parts["content-desc"],
               parts.package,
               parts.packageName,
-              captured.resourceId,
+              parts["resource-id"],
               parts.class,
             ]),
           );
@@ -1614,17 +1607,12 @@ export class DeepLinkManager implements DeepLinkManager {
     }
   }
 
-  /** Whether the node is the chooser's app list (`resolver_list`, `chooser_list` or `list`). */
-  private isChooserListNode(properties: Parameters<typeof searchableNativeId>[0]): boolean {
-    const id = searchableNativeId(properties);
-    return id !== undefined && CHOOSER_LIST_ID.test(id);
-  }
-
   private findChooserList(roots: any[]): Element | undefined {
     const lists: Element[] = [];
     for (const root of roots) {
       this.parser.traverseNode(root, (node: any) => {
-        if (this.isChooserListNode(this.parser.extractNodeProperties(node))) {
+        const id = this.parser.extractNodeProperties(node)["resource-id"];
+        if (typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id)) {
           const parsed = this.parser.parseNodeBounds(node);
           if (parsed) {
             lists.push(parsed);

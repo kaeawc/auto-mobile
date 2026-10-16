@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { TerminalReleaseIntent } from "../../src/daemon/terminalReleaseJournal";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -65,10 +65,10 @@ describe("device restart reserves the entire recovery window", () => {
   let fixtureInitialized: boolean;
   let keepAwakeGate: PromiseWithResolvers<void>;
   let keepAwakeStarted: boolean;
-  const slots: ManagedSlotExclusion = {
+  const bindings: BindingExclusion = {
     refresh: async () => {
       if (refreshFails) {
-        throw new Error("slot snapshot unavailable");
+        throw new Error("binding snapshot unavailable");
       }
     },
     holderOf: ({ stableIds }) =>
@@ -76,9 +76,9 @@ describe("device restart reserves the entire recovery window", () => {
         ? {
             platform: "ios",
             stableDeviceId: SIM.deviceId,
-            holder: "slot",
+            holder: "session_broker",
             scopeKey: "scope",
-            slotIndex: 0,
+            bindingIndex: 0,
             scopeState: null,
             execSessionUuid: "slot-exec",
           }
@@ -147,7 +147,7 @@ describe("device restart reserves the entire recovery window", () => {
         installedAppsRepository: new FakeInstalledAppsRepository(),
         retryExecutor: new DefaultRetryExecutor(timer),
         recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        ...(withSlots ? { managedSlotExclusion: slots } : {}),
+        ...(withSlots ? { bindingExclusion: bindings } : {}),
       }),
     );
     internals = pool as unknown as ReservationInternals;
@@ -237,12 +237,12 @@ describe("device restart reserves the entire recovery window", () => {
     expect(pool.getDevice(SIM.deviceId)?.id).toBe(SIM.deviceId);
     expect(pool.getDevicesByPlatform("ios")).toHaveLength(1);
   });
-  test("managed slots win at reserve time and afterwards", async () => {
+  test("bindings win at reserve time and afterwards", async () => {
     await setup([SIM], true);
     managed = true;
     await handoff();
     expect(internals.rehydrationReservations.size).toBe(0);
-    expect(pool.genericAvailability(SIM.deviceId)).toBe("managed_slot");
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("session_broker");
     managed = false;
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
     await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
@@ -252,7 +252,7 @@ describe("device restart reserves the entire recovery window", () => {
       pool.bindOrReuseDeviceSession("slot-exec", SIM.deviceId, "ios", undefined, undefined, SIM),
     ).resolves.toBe("slot-exec");
   });
-  test("slot refresh failure reserves nothing", async () => {
+  test("binding refresh failure reserves nothing", async () => {
     await setup([SIM], true);
     refreshFails = true;
     await handoff();
@@ -1137,7 +1137,7 @@ describe("device restart reserves the entire recovery window", () => {
     expect(pool.isReservedForReadiness(SIM.deviceId)).toBe(false);
     expect(internals.rehydrationReservations.get(HOLDER)).toBe(held);
   });
-  test("managed slot priority applies to start admission even after a hold was made", async () => {
+  test("binding priority applies to start admission even after a hold was made", async () => {
     await setup([SIM], true);
     await handoff();
     managed = true;

@@ -13,8 +13,8 @@ field or device-side ground truth, never the tool's self-reported `success`.
 
 Several roles may each drive their OWN device in parallel, with one actor per
 device; never let two actors drive the same device. Every role takes
-`boot-gate` before starting or provisioning a device so boots are staggered and
-wait for host load to settle; wrap the boot command to hold the slot through
+`boot-gate` before acquiring a broker session so boots are staggered and
+wait for host load to settle; wrap broker proxy `up` to hold the permit through
 bring-up. Run `preflight` before the batch: keep AC power attached, the lid open
 (or an external display connected), and idle sleep held using the printed
 caffeinate line. Caffeinate cannot prevent clamshell sleep on battery. Treat
@@ -24,29 +24,86 @@ timings measured across a host sleep or a load spike as invalid.
 
 Use [the manual-test harness](../../docs/using/manual-test-harness.md) for private
 batches: `private-daemon.ts init|start|status|stop|env|wrappers|devices|shutdown-devices|preflight|boot-gate`, `in-daemon-env.sh`,
-`proxy-session.ts up|call|read|tools|resources|subscribe|status|close`,
+`proxy-session.ts up|serve|call|read|tools|resources|subscribe|status|close|release|abandon|info|owner-kill`,
+`broker-batch.ts up|status|down|report`, `broker-scenario.ts list|run`,
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
 environment, MCP stdio loop or socket client. For Python/anyio close and typing
 reproduction, use the [Python MCP SDK stdio clients](../../docs/using/manual-test-harness.md#python-mcp-sdk-stdio-clients).
 
+Initialize with `private-daemon.ts init --broker-batch /absolute/broker-batch.json
+--count 1` and use one broker daemon per batch. `--max-devices` defaults to 2,
+hard cap 4. Use `idlePoolCap: 0` and `reuseCleanDevices: false`; reserve
+`--allow-reuse` for a deliberate clean-reuse scenario (none is currently named
+in the runner; device scenarios/acceptance require zero pooling).
+`broker/host-config.json` holds rendered operator defaults/limits;
+`broker/clients.json` resolves clients to `sessions/<client>/` request/token and
+evidence files; `evidence/ledger.jsonl` binds grants to native devices and cleanup.
+The harness owns `AUTOMOBILE_SESSION_BROKER_CONFIG`/`AUTOMOBILE_SESSION_CONFIG`:
+inherited values are scrubbed, `--env`/`--daemon-env` overrides refuse, and only
+daemon 1 start receives the operator config. Client requests use `--client`.
+See the [broker contract](../../docs/design-docs/session-broker-experiment.md)
+and [requirements](../../docs/design-docs/session-requirements.md).
+
+Use `broker1 up` to run strict preflight, probe `session-broker/v1`, and gate
+acquisitions by host load and boot permits; it finishes planned ready clients
+before capacity-refusal clients. `--clients a,b` or `--all`, `--stagger-ms N`
+(default 0), and `--max-devices N` are `up` options. `status` reports all clients;
+`down` closes them in reverse start order and verifies released receipts plus
+native absence (240 s); info-less grants with settled release receipts instead
+record `released` with `absence: not-verifiable`, allowing subsequent runs without
+claiming absence. `up` captures info best-effort with a 5-second bound. `report`
+writes `evidence/broker-report.json`.
+
+Use `proxy1 up --client NAME` for a fresh attempt, `--resume` for identical
+request/token replay, and `--expect ready` or `--expect failed:<code>` for an
+expected outcome (exit 0; mismatch 2). Gate individual `up` commands too.
+`--profile` takes an archetype or inline device requirement; `--request` takes
+SessionConfig JSON/path; both are `up`/`serve` options and mutually exclusive.
+`--owner disposable` records an owned sleep PID/start identity; `owner-kill
+--client NAME` signals only that identity-confirmed owner. Use `info`, `release`,
+`abandon`, `close` and `status --client NAME` for lifecycle evidence;
+`status --all` lists the batch. Release polls cleanup; abandonment returns a
+bounded receipt that may still be cleanup-pending, so verify status/absence. `release`/`abandon --as-client OTHER` deliberately
+use another batch client's stored token for isolation tests.
+`call --allow-foreign-session OTHER` permits explicit selectors for that ready batch
+client for product-refusal testing. Neither option authorizes device takeover.
+
+Run `broker-scenario.ts list` for fake/device classes and
+`run NAME --batch-dir B [--device] [--max-devices N] [--dry-run]` for a selected
+scenario. Fake entries use an in-memory broker/native fake without devices or
+daemons. Device entries require an already-running private single-daemon batch,
+zero pooling, strict preflight, no live client drivers, and verified prior cleanup.
+Only `daemon-restart-with-live-sessions --device` accepts `--crash`.
+The [scenario/evidence table](../../docs/using/manual-test-harness.md#broker-scenarios-and-acceptance)
+lists expected assertions. Summaries at `evidence/<scenario>/summary.json`
+include redacted requests, timings and ledger deltas. Destruction/handoff
+resource samples are `not-verifiable` until a product read-only diagnostic exists;
+inventory/receipt checks do not prove internal resource transitions.
+`live-device-acceptance.ts --scenario broker --broker-batch B` reuses those device
+scenarios; live execution also requires `AUTOMOBILE_ACCEPTANCE_LIVE=1`,
+`--confirm-live` and `--test-owned-devices`. It accepts `--clients`, `--only`,
+`--max-devices`, `--allow-crash` and `--dry-run`; no `--platform` in this lane.
+
 - Never touch the resident daemon, its default socket, port 3000 or
   `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.
 - Never `pkill`/`killall`; stop only your own daemon with `private-daemon.ts stop`.
-- `shutdown-devices` stops by default only emulators carrying this batch's environment
-  marker; name simulators and other `batch-inferred` devices by exact device ID (serial/UDID)
-  with `--device` after checking them. An ambiguous selector stops nothing (`ambiguous`).
 - Protect non-batch devices at `init --protect NAME_OR_ID` (repeatable).
-- Tear down with `shutdown-devices` before `stop` each daemon, then stop the
-  batch's caffeinate by its recorded PID file. Save `devices`/`shutdown-devices`
-  evidence before `stop` for the dead-daemon fallback.
-- Use PIDs/the daemon, never `adb emu` console commands, to stop devices under
-  load; check the AVD name against the protected list before using a reported PID.
-- Never delete an AVD, simulator or directory.
-- For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial).
-  `name` is a matcher and is refused. The guard refuses
-  selector-only starts because one booted a protected AVD in batch 20261012a;
-  `--allow-selector` is only for a deliberate selection test.
+- Broker teardown: `broker1 down`, `broker1 report`, then stop the private daemon
+  and the batch's caffeinate by its recorded PID. Save device evidence first.
+  No device process signals, `force`, `adb emu kill`, or manual AVD/simulator deletion.
+  Zero-pooling release destroys the device through product cleanup; verify it.
+- Broker batches never make sessionless device calls or generic lifecycle calls
+  (`startDevice`, `provisionDevice`, `getAndroid`, `getApple`, `killDevice`).
+  Calls require a ready grant and live driver; inventory resources and
+  `--allow-selector` are refused. Pending/failed acquisition cannot fall back.
+- For separate plain batches, `shutdown-devices` only stops proven unprotected
+  batch devices. Check inferred devices, then select exact serial/UDID with
+  `--device`; ambiguity refuses. Plain acquisition requires `avdName` or
+  `deviceId`; `--allow-selector` is only for deliberate selection tests.
+- Device lock: one actor per granted device; private coordination/registry and
+  the broker host lock remain batch-owned. Report unaccounted inventory/startup
+  refusals rather than removing other devices to make the broker start.
 - Run `private-daemon.ts start` before proxy `up`/`serve`; both require a
   private PID file naming a live daemon AND a responding control socket
   (`daemon/capabilities`); a recycled PID is not enough. Proxy `status` reports
@@ -62,7 +119,7 @@ The harness path registry (`scripts/manual-test/productPathEnv.ts`) uses this po
 | `state`  | Data, logs, DB directory, coordination, shared ADB registry, aux/control sockets, PID/lock/launch log, iOS cache and derived data         | Required isolated defaults. Defaults relocate state without enabling a feature.                                                         |
 | `opt-in` | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`, `AUTOMOBILE_PLAN_HEALTH_DIR`, `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT` | Unset by default; both inherited spellings stripped. Explicit private absolute paths through `--env`/`--daemon-env` enable the feature. |
 | `unset`  | `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`                                                                              | Strip competing overrides in both spellings.                                                                                            |
-| `input`  | APK/IPA/bundle, codec/encoder/helper, project/migration/signing inputs, test markers and config sources                                   | Caller-selected inputs, no harness defaults; inherited managed-slot config is stripped.                                                 |
+| `input`  | APK/IPA/bundle, codec/encoder/helper, project/migration/signing inputs, test markers and config sources                                   | Caller-selected inputs, no harness defaults; broker/session config is harness-owned and stripped from inherited env.                    |
 
 The linked harness guide lists every variable. `env.sh` unsets absent opt-ins;
 client gates validate them only when present. Before product imports, entry
@@ -79,7 +136,7 @@ libwebp download would write there; set `AUTOMOBILE_CWEBP_PATH` and
 one daemon. Record argv tokens with `--daemon-arg`, for example
 `--daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg
 --tool-call-recording`; `N:token` selects a daemon. Restarts reuse these env/args.
-`start -- …` adds one-off argv. Use generated `<batch>/bin/amN|proxyN|frameN|auxN`
+`start -- …` adds one-off argv. Use generated `<batch>/bin/amN|proxyN|frameN|auxN|brokerN`
 wrappers; `amN cli …` runs the one-shot CLI with `--cli`. It finds the private
 daemon through the socket and PID path env sourced from `env.sh`.
 `in-daemon-env.sh --cd` is an explicit cwd change; its `cli` shorthand matches `amN cli`.
@@ -102,14 +159,22 @@ rejects a heartbeat for a proxy-owned session and changes nothing. Destroy modes
 same-connection cancel frame, prints late answers and an answered/unanswered
 summary, then ends gracefully. Repeatable `--then '<method> <json|@file>'` sends
 sequentially after the first answers in send mode. Params string placeholders
-`{{ownSessionId}}`, `{{ownSessionId:<slotIndex>}}` and
-`{{ownLivenessOwnerToken}}` require `--managed-binding`; unresolved values refuse
-before user frames. Every frame uses the device-start and host-mutation guards.
-A released own session is accepted as done during automatic cleanup.
+`{{ownSessionId}}`, `{{clientSessionId:<name>}}` and
+`{{ownLivenessOwnerToken}}` use `--broker-binding <client-or-request.json>`;
+unresolved values refuse before connecting. Client bindings keep existing ready
+grants on exit; standalone request bindings acquire/heartbeat/release on this
+connection and can boot a device. Standalone request paths are refused inside
+broker batches; use `--broker-binding <client>`. Gate any standalone acquisition.
+`--token-of OTHER` changes only status/release isolation frames to that batch
+client's stored token. `--expect-refused` (send only) requires errors with product
+refusal codes/messages. Lifecycle probes permit only `{}` or only the client's
+own `sessionUuid`; any device name or selector refuses before sending. Inventory
+resources and `--allow-selector` remain refused. Every frame uses host-mutation
+guards; owner tokens are redacted.
 
 Recording requires a **device session**, never an observer: owner for start/stop,
 any live device session for status; a retained stop result permits the former
-owner's UUID. Obtain `sessionUuid` from proxy up/status managed slots or the tool
+owner's UUID. Obtain `sessionUuid` from `init.json.session` printed by proxy up/status or the tool
 response, or `amN daemon active-sessions --json`. Correct example:
 `<batch>/bin/aux1 recording status --session-uuid SESSION < /dev/null`.
 `--observer` remains available for video/WebRTC only. Current recording names
@@ -150,18 +215,20 @@ Foreign, preexisting, unknown and physical devices are refused even when named.
 Protection matches `deviceId`, `name`, `identity.stableId` and `processAvdName`.
 Empty/`Unknown (<serial>)` Android names without a process AVD name are refused
 when the protected list is nonempty. Another daemon's hold blocks frames;
-`managed_slot` rows go through the product refusal. The harness never signals
-device processes or passes `force`. Baseline recording failure warns once with
+any other `heldBy` string is tolerated as held and refused locally as
+`broker-held`. Use broker release, never shutdown, for a held grant. The harness
+never signals device processes or passes `force`. Baseline recording failure warns once with
 `BASELINE WARNING:`; it never changes `start`'s launch result.
 
 | Outcome                | Meaning                                                                                 |
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `stopped`              | Shutdown succeeded or `device_already_stopped`; retain the daemon's message.            |
-| `refused`              | Product refusal with code/message, including managed slots.                             |
+| `refused`              | Product refusal with code/message.                                                      |
 | `failed` / `timeout`   | Request failure/deadline; no mutation retry.                                            |
 | `protected`            | Protection matches or name evidence is insufficient.                                    |
 | `not-batch-booted`     | Physical, foreign, preexisting, or unknown; never sent.                                 |
 | `inferred-not-stopped` | Check the inferred device and name it by exact device ID (serial/UDID) with `--device`. |
+| `broker-held`          | Held device refused locally; use broker release.                                        |
 | `held-by-other-daemon` | Another daemon holds it; never sent.                                                    |
 | `ambiguous`            | Multiple matches; this selector stops nothing. Name targets by device ID (serial/UDID). |
 | `not-found`            | Explicit selector missing from the view.                                                |
@@ -178,11 +245,21 @@ selectors including ambiguity, retains explicit refusal rows, and sends nothing.
 Otherwise shutdown exits 0 only if all results are stopped/dry-run and there are
 no inventory errors.
 
-`stop --wait-ms 0` signals and reports `still-alive` unless the daemon is already
-gone. `boot-gate --min-interval-ms` is best-effort when `--max-concurrent` is above
+Broker views also classify `allowed`/`foreign`/`protected` using the ready grant
+and native descriptor in `evidence/ledger.jsonl`; protected wins. `devices --ledger`
+reads evidence without probes. `amslot-*` is recognized through the product
+`isSessionBrokerDeviceName` predicate, never hardcoded in the harness. A name
+alone never permits access; the matching batch ledger binding is required.
 
-1. A `boot-gate` killed by a signal leaves its slot lock to be reclaimed once its
-   PID is gone.
+`stop --crash` is only for explicit private crash recovery: SIGKILL the recorded
+daemon PID after socket/PID-file and recorded process start identity checks,
+never children/groups or a guessed PID. It refuses missing/mismatched identity
+and never delegates to the product stop CLI. Ordinary stop remains bounded SIGTERM.
+
+`stop --wait-ms 0` signals and reports `still-alive` unless the daemon is already
+gone. `boot-gate --min-interval-ms` is best-effort with more than one concurrent
+permit. A killed gate leaves its `permit-N.lock` until its PID is gone. Grant
+JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 
 ## Phase 0 — Scope from the start point
 
@@ -235,7 +312,8 @@ gone. `boot-gate --min-interval-ms` is best-effort when `--max-concurrent` is ab
 ## Phase 2 — Restart the daemon with the right flags
 
 1. Initialize a new private batch with `private-daemon.ts init --batch-dir B
-   --count 1 --base-port <unused-port> --server <absolute-dist-entry>`.
+   --count 1 --base-port <unused-port> --server <absolute-dist-entry>
+   --broker-batch <absolute-broker-batch.json> --max-devices 2`.
    If replacing a daemon you started, use `private-daemon.ts stop --batch-dir B
    --daemon 1`, then `start`. Never stop another batch's or the resident daemon.
 2. Start ONE private daemon using `private-daemon.ts start --batch-dir B --
@@ -267,8 +345,7 @@ gone. `boot-gate --min-interval-ms` is best-effort when `--max-concurrent` is ab
 
      So: if iOS setup fails with `bundle override is not a file`, unset the override;
      if it appears to work, a runner was already live — confirm which runner actually
-     served the call (ref
-     [#4221](https://github.com/kaeawc/auto-mobile/issues/4221)). The build script
+     served the call (#4221). The build script
      writes to the **default** derived-data path (`/tmp/automobile-ctrl-proxy`), so
      no path env var is needed; only for a non-default location set
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
@@ -334,15 +411,18 @@ gone. `boot-gate --min-interval-ms` is best-effort when `--max-concurrent` is ab
    `in-daemon-env.sh --batch-dir B --daemon 1 daemon status` for readiness.
    Confirm the manifest port/socket and your private launch log before testing.
 
-After a private daemon restart, close the old proxy session and use
-`in-daemon-env.sh --batch-dir B --daemon 1 proxy up --dir <new-session-dir>`.
-Drive calls through the same wrapper's `proxy call` command. Never pass daemon
-flags to the proxy; a build/option mismatch must be resolved in your private
+During the restart-handoff scenario, keep the original proxy alive and verify
+its same-session reconnect. Outside that scenario, close the prior execution,
+verify cleanup, then use `proxy1 up --client NAME` through the boot gate for a
+fresh attempt. Use `--resume` only for deliberate identical-request replay;
+retain unchanged request/token bytes. Drive calls through
+`proxy1 call --client NAME`; never set an active device or acquire generically.
+Never pass daemon flags to the proxy; a build/option mismatch must be resolved in your private
 batch before continuing. Do not replace the resident daemon to fix a mismatch.
 
 ## Phase 3 — Exercise tool calls (Android, then iOS)
 
-Make the target device active and leave the other alone. For **each** checklist item:
+Use the target client's granted session and leave other clients alone. For **each** checklist item:
 
 - **Bug-fix items:** reproduce the **original failure condition** first, then
   confirm it no longer reproduces. Capture the concrete observable AND device-side
@@ -360,14 +440,17 @@ Make the target device active and leave the other alone. For **each** checklist 
 **Prototype acceptance:** when the range touches the prototype host, tool or
 `layer` scoping, run the recipe in [prototype-acceptance.md](prototype-acceptance.md).
 
-**Managed execution oracle (#11340):** a managed execution remains held past 2 minutes
-(and past its declared idleTimeoutMs) while its owner and proxy heartbeat remain alive.
-Its idleReleaseAt is null; heartbeat and reads do not move activity clocks. It ends on
-owner exit, heartbeat loss or explicit release, with the existing non-idle owner reason.
-A hung-but-alive owner with a healthy proxy heartbeat holds indefinitely. Plain sessions
-keep the idle oracle below.
+**Broker execution oracle (historical owner-liveness check #11340):** an
+execution remains held past its declared idle timeout while the execution owner
+and proxy heartbeat remain alive; reads/heartbeats do not count as tool activity.
+Test explicit release, owner loss and abandonment through the broker scenarios.
+Require the stored terminal request receipt with cleanup complete and native
+absence under zero pooling. A fresh attempt gets a fresh execution UUID;
+terminal identity replay cannot acquire again. Restart handoff and PID fencing
+have separate scenarios; retain their `not-verifiable` resource-state limits.
+The plain-session idle oracle below belongs in a separate non-broker batch.
 
-**Device-session idle release:** when the range touches session liveness, run
+**Plain device-session idle release:** when the range touches session liveness, run
 `bash scripts/live-idle-release-check.sh --confirm-live --serial <emulator> --port <unused-port>`
 against an emulator no other daemon holds. It starts its own private daemon with a
 20 s idle window and checks, per scenario: `active` (held while the proxy
@@ -387,20 +470,20 @@ from the `Live Idle Release` workflow
 (`.github/workflows/live-idle-release.yml`, dispatch plus an advisory nightly run); it never runs
 on pull requests.
 
-**Device-ownership read oracle (owner decision 2026-10-12, #11964):**
+**Plain-mode device-ownership read oracle (owner decision 2026-10-12, #11964):**
 
 A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
 A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
 install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
-simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+simulator it may install and launch the runner. The exception never applies to a device held, broker-assigned or
 reserved by another session: those reads use what is already installed and never run readiness.
 
 A sessionless read installing/enabling CtrlProxy or launching the iOS runner on an
 unheld running device is expected. Any readiness manager operation or ADB write
-on a held, slot-assigned or reserved device is a defect. See
+on a held, broker-assigned or reserved device is a defect. See
 [the per-tool readiness table](../../docs/using/device-ownership.md#which-read-tools-ready-an-unheld-device).
 
-**Desktop / IDE idle-release checklist (manual; run with the desktop app against a
+**Plain-mode Desktop / IDE idle-release checklist (manual; run with the desktop app against a
 private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
 
 1. Watching a device (mirror open, no input) never allocates it: `--daemon

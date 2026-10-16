@@ -2,7 +2,7 @@
 export interface DeviceHoldFacts {
   readonly status: "idle" | "busy" | "error";
   readonly sessionId?: string | null;
-  readonly managedSlot?: boolean;
+  readonly brokerBinding?: boolean;
   readonly foreignDaemon?: boolean;
   readonly readinessById?: boolean;
   readonly readinessByName?: boolean;
@@ -42,7 +42,7 @@ type RecoverySource =
 
 type HoldReason =
   | { readonly kind: "free" }
-  | { readonly kind: "managed-slot" }
+  | { readonly kind: "broker-binding" }
   | { readonly kind: "foreign-daemon" }
   | { readonly kind: "readiness"; readonly by: "id" | "name" }
   | { readonly kind: "recovery"; readonly source: RecoverySource }
@@ -71,13 +71,13 @@ export type DeviceHold = HoldReason & {
   readonly reasons: readonly HoldReason[];
 };
 
-export type GenericAvailability = "free" | "managed_slot" | "foreign_daemon" | "reserved";
+export type GenericAvailability = "free" | "session_broker" | "foreign_daemon" | "reserved";
 export type PoolStatusBucket = "idle" | "assigned" | "error";
 
 const HOLD_REASONS: readonly ((
   facts: DeviceHoldFacts,
 ) => HoldReason | false | null | undefined | "")[] = [
-  (facts) => facts.managedSlot && { kind: "managed-slot" },
+  (facts) => facts.brokerBinding && { kind: "broker-binding" },
   (facts) => facts.foreignDaemon && { kind: "foreign-daemon" },
   (facts) => facts.readinessById && { kind: "readiness", by: "id" },
   (facts) => facts.readinessByName && { kind: "readiness", by: "name" },
@@ -124,7 +124,7 @@ const HOLD_REASONS: readonly ((
 ];
 
 /**
- * Precedence: managed-slot, foreign-daemon, readiness (id then name), recovery handoff, shutdown,
+ * Precedence: broker-binding, foreign-daemon, readiness (id then name), recovery handoff, shutdown,
  * rehydration, error, busy, bound, health, transport-alias, identity, adb-reset, cleanup, assignment,
  * then observation-only recovery fences. Free is the fallback. Policies inspect all reasons:
  * primary-kind precedence describes the holder, not a new common admission rule (#11803).
@@ -141,7 +141,7 @@ export function holdAllowsObservationServiceStart(hold: DeviceHold): boolean {
   return hold.reasons.every((reason) => {
     switch (reason.kind) {
       case "free":
-      case "managed-slot":
+      case "broker-binding":
       case "foreign-daemon":
       case "transport-alias":
         return true;
@@ -189,8 +189,8 @@ export function genericAvailabilityOf(hold: DeviceHold): GenericAvailability {
       default:
         return (() => {
           switch (reason.kind) {
-            case "managed-slot":
-              return "managed_slot";
+            case "broker-binding":
+              return "session_broker";
             case "foreign-daemon":
               return "foreign_daemon";
             case "readiness":
@@ -224,7 +224,7 @@ export function classifyPoolStatus(
 export function poolBucketOf(hold: DeviceHold): PoolStatusBucket {
   const unlendable = hold.reasons.some((reason) => {
     switch (reason.kind) {
-      case "managed-slot":
+      case "broker-binding":
       case "foreign-daemon":
       case "readiness":
       case "shutdown":
@@ -272,7 +272,7 @@ export function holdAllowsHealthRecovery(hold: DeviceHold): boolean {
       default:
         return (() => {
           switch (reason.kind) {
-            case "managed-slot":
+            case "broker-binding":
             case "foreign-daemon":
             case "readiness":
             case "recovery":
@@ -308,7 +308,7 @@ export function holdBlocksAssignment(hold: DeviceHold): boolean {
       default:
         return (() => {
           switch (reason.kind) {
-            case "managed-slot":
+            case "broker-binding":
             case "foreign-daemon":
             case "error":
             case "busy":

@@ -2,7 +2,6 @@ import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/S
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import {} from "../../../src/features/observe/screenshotCacheEviction";
 import { BoundedScreenshotPathProtection } from "../../../src/features/observe/ScreenshotPathProtection";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";

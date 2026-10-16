@@ -209,8 +209,7 @@ compatible device and evicts the least recently returned idle device.
 ## Consumer contract
 
 Start the normal MCP proxy with `--session-config <json-or-path>` or
-`AUTOMOBILE_SESSION_CONFIG`. It is mutually exclusive with managed-slot
-configuration, a preselected session UUID, and direct/no-proxy mode.
+`AUTOMOBILE_SESSION_CONFIG`. It is mutually exclusive with a preselected session UUID and direct/no-proxy mode.
 
 ```json
 {
@@ -291,6 +290,17 @@ Session info supplies the currently bound native device as descriptive metadata;
 it is not a device-selection operation. These are harness lifecycle commands,
 not model tools.
 
+## Native device identity
+
+New native devices use `ambroker-<scope>-<idx>-g<gen>-<nonce>` names. Product
+ownership also recognizes the legacy `amslot-` prefix for upgrade compatibility.
+Both remain charged to the native resource budget and excluded from the normal
+pool, including interrupted creations without registry rows. Scoped interrupted
+creations remain adoptable by their original binding; persisted assignments use
+the same release, cache eviction and journaled destruction paths across upgrades.
+A product name alone never authorizes deletion. Inventory reports
+`runtime.heldBy: "session_broker"` for broker devices.
+
 ## Ownership and recovery
 
 There is one host registry and one native journal authority. The broker adds
@@ -318,3 +328,24 @@ Application installation and initial configuration are deterministic operations
 on the granted session, before the model starts. They do not require a Slack
 application SDK. Combining them into the acquisition request remains a later
 ergonomic change; the lifecycle boundary already encloses the entire execution.
+
+## Upgrading from the retired device-slot system
+
+The declarative launch configuration, reset command, MCP capability and resource,
+and slot-only acquisition/refusal protocol have been removed. Use the consumer
+session request and provider host configuration described above.
+
+On the first daemon start after upgrade, migration 008 retires legacy slot
+assignments, journals and free-pool records before normal device discovery and
+session recovery. It uses the ordinary platform shutdown path to stop legacy
+product devices, confirms their native state, then removes the legacy records.
+AVD and simulator images remain on disk. Live owners, broker overlap, incomplete
+inventory or an unconfirmed stop leave retirement pending for a later startup;
+a broker provider fails startup, while an ordinary daemon warns and continues.
+The verification pass is bounded to 30 seconds.
+
+Broker records and their private scope survive. Existing registry locations,
+SQL storage names and migration keys remain compatible. New device names use
+`ambroker-`; inventory also recognizes legacy `amslot-` names. Ownership results
+now report `heldBy: "session_broker"`. The retained native-resource budget
+variable is documented under [environment variables](../using/environment-variables.md).

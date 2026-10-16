@@ -87,26 +87,26 @@ function lastGrant(path: string, deps: PrivateDaemonCliDeps): number | undefined
     return undefined;
   }
 }
-function acquireSlot(
+function acquirePermit(
   root: string,
   command: BootGateCommand,
   deps: PrivateDaemonCliDeps,
 ): number | undefined {
-  for (let slot = 0; slot < command.maxConcurrent; slot++) {
-    if (deps.bootLock.tryAcquire(join(root, `slot-${slot}.lock`), command.role)) {
-      return slot;
+  for (let permit = 0; permit < command.maxConcurrent; permit++) {
+    if (deps.bootLock.tryAcquire(join(root, `permit-${permit}.lock`), command.role)) {
+      return permit;
     }
   }
   return undefined;
 }
 function waitingFor(
-  slot: number | undefined,
+  permit: number | undefined,
   load: number,
   maxLoad: number,
   intervalReady: boolean,
-): "slot" | "load" | "interval" | undefined {
-  if (slot === undefined) {
-    return "slot";
+): "permit" | "load" | "interval" | undefined {
+  if (permit === undefined) {
+    return "permit";
   }
   if (!(load < maxLoad)) {
     return "load";
@@ -114,7 +114,7 @@ function waitingFor(
   return intervalReady ? undefined : "interval";
 }
 interface GrantState {
-  slot: number;
+  permit: number;
   waitedMs: number;
   loadAverage1m: number;
   maxLoad: number;
@@ -136,7 +136,7 @@ async function runGrantedCommand(
       ...(command.command.length
         ? {}
         : {
-            note: "The slot is not held past exit; only load and the minimum interval stagger boots. Wrap the boot command to hold the slot for the whole boot.",
+            note: "The permit is not held past exit; only load and the minimum interval stagger boots. Wrap the boot command to hold the permit for the whole boot.",
           }),
     }),
   );
@@ -162,16 +162,16 @@ export async function bootGate(
   const maxLoad = command.maxLoad ?? 2 * deps.hostStats().cpuCount;
   const clock = () => deps.timer.monotonicNow?.() ?? deps.timer.now();
   const startedAt = clock();
-  let slot: number | undefined;
-  let lastWaiting: "slot" | "load" | "interval" = "slot";
+  let permit: number | undefined;
+  let lastWaiting: "permit" | "load" | "interval" = "permit";
   try {
     while (true) {
-      slot ??= acquireSlot(root, command, deps);
+      permit ??= acquirePermit(root, command, deps);
       const loadAverage1m = deps.hostStats().loadAverage[0];
       const at = lastGrant(grantPath, deps);
       const waitedMs = Math.max(0, clock() - startedAt);
       const waiting = waitingFor(
-        slot,
+        permit,
         loadAverage1m,
         maxLoad,
         at === undefined || deps.timer.now() - at >= command.minIntervalMs,
@@ -190,14 +190,14 @@ export async function bootGate(
         );
         return 2;
       }
-      if (waiting === undefined && slot !== undefined) {
-        return await runGrantedCommand(command, { slot, waitedMs, loadAverage1m, maxLoad }, deps);
+      if (waiting === undefined && permit !== undefined) {
+        return await runGrantedCommand(command, { permit, waitedMs, loadAverage1m, maxLoad }, deps);
       }
       await deps.timer.sleep(Math.min(command.pollMs, command.timeoutMs - waitedMs));
     }
   } finally {
-    if (slot !== undefined) {
-      deps.bootLock.release(join(root, `slot-${slot}.lock`));
+    if (permit !== undefined) {
+      deps.bootLock.release(join(root, `permit-${permit}.lock`));
     }
   }
 }

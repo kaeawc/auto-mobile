@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -516,14 +516,14 @@ function startRequester(args: StartDeviceArgs) {
   };
 }
 
-/** Selectors skip recovery targets and managed slots before discovery can boot them. */
+/** Selectors skip recovery targets and broker bindings before discovery can boot them. */
 async function startMatchExclusions(args: StartDeviceArgs): Promise<{
   excludeDeviceNames: ReadonlySet<string> | undefined;
   excludeDeviceIds: ReadonlySet<string> | undefined;
 }> {
   const platform = args.platform;
   const managed =
-    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
+    (await bindingPoolGate(initializedDevicePool()).bindingStableIds?.(platform)) ??
     new Set<string>();
   if (platform === "ios") {
     const exclusions = unionSets(undefined, managed);

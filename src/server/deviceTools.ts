@@ -4,7 +4,7 @@ import {
   type EmulatorProcessStopper,
 } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
   DefaultDeviceResourceObserver,
@@ -1147,12 +1147,12 @@ export function initializedDevicePool(): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
-/** Generic provisionDevice never adopts a device a managed slot holds (#11174). */
-async function assertNotManagedSlotDeviceForAdoption(device: {
+/** Generic provisionDevice never adopts a device a broker binding holds (#11174). */
+async function assertNotBindingDeviceForAdoption(device: {
   platform: "android" | "ios";
   stableId: string;
 }): Promise<void> {
-  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+  await bindingPoolGate(initializedDevicePool()).assertNotAssignedToBinding?.({
     action: "provisionDevice",
     deviceId: device.stableId,
     platform: device.platform,
@@ -2142,7 +2142,7 @@ export function createTeardownFailureResponse(
   code: string,
   message: string,
   resolved?: DeviceInfo,
-  /** Typed refusal evidence carried beside the code (e.g. the managed slot holding the device). */
+  /** Typed refusal evidence carried beside the code (e.g. the broker binding holding the device). */
   details?: Record<string, unknown>,
 ) {
   return {
@@ -3535,7 +3535,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
           deviceManager,
           deviceCreationGate,
           undefined,
-          assertNotManagedSlotDeviceForAdoption,
+          assertNotBindingDeviceForAdoption,
         ),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
@@ -5013,8 +5013,8 @@ export function registerDeviceTools() {
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
-  // The daemon's own deletions (abandoned managed slots, #11174) run the same verified workflow with
-  // no caller: the managed-slot and session-holder refusals guard callers, not the daemon itself.
+  // The daemon's own deletions (abandoned broker bindings, #11174) run the same verified workflow with
+  // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
   daemonDeviceDeletion = (args, signal) => {
     const deps = getDeviceToolsDependencies();
     return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));

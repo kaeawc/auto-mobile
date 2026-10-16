@@ -64,7 +64,7 @@ export const PROXY_HEARTBEAT_INTERVAL_MS = 2_000;
 export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /**
- * Floor for an idle window a configuration source (a managed-slot config, the CLI idle env)
+ * Floor for an idle window a configuration source (a broker binding config, the CLI idle env)
  * sets: it may lengthen the 2-minute window but never shorten it, so a typo cannot release a
  * device early. The `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` knob stays below it on purpose: tests
  * and live idle checks shorten that one.

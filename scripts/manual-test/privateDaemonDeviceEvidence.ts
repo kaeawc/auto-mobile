@@ -1,4 +1,5 @@
 // Pure harness evidence rules; importing deviceTools would register product tools and its logger.
+import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 export interface DeviceIdentity {
   deviceId: string;
   name: string;
@@ -12,6 +13,7 @@ export interface ProcessEvidence {
   processAvdName?: string;
 }
 export type DeviceProvenance =
+  | "broker-owned"
   | "batch-booted"
   | "foreign"
   | "preexisting"
@@ -67,15 +69,18 @@ export function classifyDevice(
   evidence?: ProcessEvidence,
 ): { provenance: DeviceProvenance; protected: boolean; bootedBy?: string } {
   const inventory = baseline?.[device.platform];
-  const provenance = evidence
-    ? evidence.batchMarker
-      ? "batch-booted"
-      : "foreign"
-    : Array.isArray(inventory)
-      ? inventory.includes(device.deviceId)
-        ? "preexisting"
-        : "batch-inferred"
-      : "unknown";
+  // Naming is display evidence only; broker-owned devices never gain shutdown authorization.
+  const provenance = isSessionBrokerDeviceName(device.name)
+    ? "broker-owned"
+    : evidence
+      ? evidence.batchMarker
+        ? "batch-booted"
+        : "foreign"
+      : Array.isArray(inventory)
+        ? inventory.includes(device.deviceId)
+          ? "preexisting"
+          : "batch-inferred"
+        : "unknown";
   return {
     provenance,
     protected: matchesProtection(device, protectedDevices),

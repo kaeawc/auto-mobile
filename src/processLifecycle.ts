@@ -4,7 +4,7 @@ import { raceWithDeadline } from "./utils/raceWithDeadline";
 
 /**
  * What started a shutdown. `stdin` means the client input closed; `stdout` means a transport
- * write failed (#11710). `execution-owner-lost` is a managed slot proxy whose execution owner
+ * write failed (#11710). `execution-owner-lost` is a broker binding proxy whose execution owner
  * exited or which was re-parented (#11176).
  */
 export type ShutdownSignal =

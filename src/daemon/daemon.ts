@@ -1870,10 +1870,10 @@ export class Daemon {
         });
       }
 
+      this.sessionManager.assertDaemonCollaboratorsAttached();
       await this.startHost.startHttpIngress();
 
-      // Initialize device pool BEFORE starting socket server
-      // This ensures clients connecting via socket will see initialized device pool
+      // Initialize the device pool BEFORE the socket server so connecting clients see it.
       // Wait up to 5 seconds - emulators should already be running
       logger.info("Initializing device pool...");
       startupBenchmark.startPhase("deviceDiscovery");

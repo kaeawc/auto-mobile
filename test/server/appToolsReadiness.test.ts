@@ -3,7 +3,7 @@ import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 test("installApp requires only a booted device, not CtrlProxy automation", () => {
-  const registry = ToolRegistry as any;
+  const registry = ToolRegistry;
   const originalRegister = registry.registerDeviceAware;
   let installReadiness: string | undefined;
 

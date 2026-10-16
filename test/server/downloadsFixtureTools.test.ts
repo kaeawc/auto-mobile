@@ -9,8 +9,10 @@ import type {
 } from "../../src/server/downloadsFixtureService";
 
 describe("stageSessionDownloads tool (#7007)", () => {
-  let originalTimer: unknown;
-  let originalToolCallRepository: unknown;
+  let originalTimer: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>["timer"];
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeAll(() => {
     compileAjv2020({
@@ -24,14 +26,16 @@ describe("stageSessionDownloads tool (#7007)", () => {
     // via the ToolRegistry's repository/timer. Stub both so the fast unit test
     // never resolves the real file-backed getDatabase() (issue #3067) and stays
     // deterministic.
-    originalTimer = (ToolRegistry as any).timer;
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
-    (ToolRegistry as any).timer = new FakeTimer();
-    (ToolRegistry as any).toolCallRepository = { async recordToolCall(): Promise<void> {} };
+    originalTimer = ToolRegistry.getCollaboratorsForTesting().timer;
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ timer: new FakeTimer() });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
   });
   afterEach(() => {
-    (ToolRegistry as any).timer = originalTimer;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ timer: originalTimer });
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     ToolRegistry.clearToolsForTesting();
   });
 

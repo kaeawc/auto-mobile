@@ -250,7 +250,7 @@ test("listApps only requires booted-device readiness, not full CtrlProxy automat
   // the options object passed to registerDeviceAware without driving the real
   // resolveExecutionTarget/DeviceSessionManager pipeline.
   ToolRegistry.clearTools();
-  const registry = ToolRegistry as any;
+  const registry = ToolRegistry;
   const originalRegister = registry.registerDeviceAware;
   let capturedReadiness: unknown;
 

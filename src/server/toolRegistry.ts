@@ -765,6 +765,15 @@ interface PlanLifecycleManager {
   afterExecution(input: PlanLifecycleInput): Promise<void>;
 }
 
+/** The collaborators a test may read and swap on the ToolRegistry singleton. */
+export interface ToolRegistryCollaborators {
+  deviceSessionManager: DeviceSessionManager;
+  toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
+  timer: Timer;
+  navigationToolCallRecorder: NavigationToolCallRecorder;
+  afterToolCall: AfterToolCallHandler;
+}
+
 interface ToolRegistryPipelineOverrides {
   env?: Environment;
   executionTargetResolver?: ExecutionTargetResolver;
@@ -3537,6 +3546,42 @@ export class ToolRegistryClass {
 
   setToolCallRepositoryForTesting(repository: Pick<ToolCallRepository, "recordToolCall">): void {
     this.toolCallRepository = repository;
+  }
+
+  /**
+   * Test seam: the collaborators suites swap on the singleton, so a test can save the
+   * originals and restore them with {@link setCollaboratorsForTesting}.
+   */
+  getCollaboratorsForTesting(): ToolRegistryCollaborators {
+    return {
+      deviceSessionManager: this.deviceSessionManager,
+      toolCallRepository: this.toolCallRepository,
+      timer: this.timer,
+      navigationToolCallRecorder: this.navigationToolCallRecorder,
+      afterToolCall: this.afterToolCall,
+    };
+  }
+
+  /**
+   * Test seam: replace the named collaborators; omitted ones are left alone. Test doubles
+   * usually implement only the members under test, so they are accepted as `Partial` and
+   * narrowed here, in the one place. The after-tool-call handler is replaced through
+   * `setPipelineOverridesForTesting`.
+   */
+  setCollaboratorsForTesting(overrides: {
+    deviceSessionManager?: Partial<DeviceSessionManager>;
+    toolCallRepository?: Pick<ToolCallRepository, "recordToolCall">;
+    timer?: Timer;
+    navigationToolCallRecorder?: Partial<NavigationToolCallRecorder>;
+  }): void {
+    this.deviceSessionManager =
+      (overrides.deviceSessionManager as DeviceSessionManager | undefined) ??
+      this.deviceSessionManager;
+    this.toolCallRepository = overrides.toolCallRepository ?? this.toolCallRepository;
+    this.timer = overrides.timer ?? this.timer;
+    this.navigationToolCallRecorder =
+      (overrides.navigationToolCallRecorder as NavigationToolCallRecorder | undefined) ??
+      this.navigationToolCallRecorder;
   }
 
   /** Shared availability evidence for discovery, call rejection, and selection validation. */

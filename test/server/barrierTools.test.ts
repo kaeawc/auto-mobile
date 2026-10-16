@@ -412,9 +412,10 @@ describe("barrier tool", () => {
     // ToolCallRepository, which would resolve the real file-backed DB (#3067).
     // Swap in a no-op repository for the duration of this test, as
     // toolRegistry.pipeline.test.ts does.
-    const registryInternals = ToolRegistry as unknown as { toolCallRepository: unknown };
-    const originalToolCallRepository = registryInternals.toolCallRepository;
-    registryInternals.toolCallRepository = { recordToolCall: async () => {} };
+    const originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => {
@@ -467,7 +468,7 @@ describe("barrier tool", () => {
       expect(new Set(resolvedDeviceIds)).toEqual(new Set(["device-a", "device-b"]));
     } finally {
       restore();
-      registryInternals.toolCallRepository = originalToolCallRepository;
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     }
   });
 });

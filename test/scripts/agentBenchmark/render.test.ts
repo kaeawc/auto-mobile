@@ -149,7 +149,7 @@ describe("agent benchmark rendering", () => {
         platform: "android",
         prompt: "p.md",
         app: { packageName: "dev.example" },
-        verify: { answerIncludes: ["DONE"] },
+        verify: { answerIncludes: ["DONE"], screenIncludes: ["Done"] },
         ...(load(snippet) as object),
       },
       "demo.yml",

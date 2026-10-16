@@ -228,6 +228,12 @@ describe("agent benchmark preflight", () => {
     );
   });
 
+  test("tab, newline, and CR survive XML parsing as character references", () => {
+    expect(sharedPreferencesXml({ "a\tb": "line1\r\nline2" })).toContain(
+      '<string name="a&#9;b">line1&#13;&#10;line2</string>',
+    );
+  });
+
   test("integers outside 32 bits use <long>, at both boundaries", () => {
     const xml = sharedPreferencesXml({
       max: 2147483647,

@@ -239,6 +239,7 @@ test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/admission.test.ts
+test/daemon/sessionBroker/deviceNaming.test.ts
 test/daemon/sessionBroker/handlers.test.ts
 test/daemon/sessionBroker/hostConfig.test.ts
 test/daemon/sessionBroker/iosBaselineReset.test.ts
@@ -974,6 +975,14 @@ test/scripts/junitTestcaseTimings.test.ts
 test/scripts/managedSlotQualificationDoc.test.ts
 test/scripts/manualTestAdbHostQuery.test.ts
 test/scripts/manualTestBootGate.test.ts
+test/scripts/manualTestBrokerBatch.test.ts
+test/scripts/manualTestBrokerBatchOrchestrator.test.ts
+test/scripts/manualTestBrokerClientFiles.test.ts
+test/scripts/manualTestBrokerDaemonClient.test.ts
+test/scripts/manualTestBrokerDeviceLedger.test.ts
+test/scripts/manualTestBrokerDeviceScenarios.test.ts
+test/scripts/manualTestBrokerLiveAdapter.test.ts
+test/scripts/manualTestBrokerScenarios.test.ts
 test/scripts/manualTestControlSocketProbe.test.ts
 test/scripts/manualTestDeviceStartGuard.test.ts
 test/scripts/manualTestFrameWire.test.ts

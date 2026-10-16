@@ -5364,7 +5364,7 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
 
         expect(fakeIngestor.sdkEvents.length).toBe(1);
         expect(fakeIngestor.sdkEvents[0].applicationId).toBe("com.example.ios");
@@ -5810,18 +5810,18 @@ describe("IOSCtrlProxyClient", function () {
       }) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "OldProcess",
         );
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "NewProcess",
         );
@@ -5923,16 +5923,16 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Old",
         );
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "New",
         );
@@ -6017,9 +6017,9 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
+        await testClient.pollSdkEvents();
+        await testClient.pollSdkEvents();
 
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Current",
@@ -6105,9 +6105,9 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
+        await testClient.pollSdkEvents();
+        await testClient.pollSdkEvents();
 
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Current",
@@ -6175,7 +6175,7 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
 
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Discover",
@@ -6205,9 +6205,7 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        const result = await (
-          testClient as unknown as { pollSdkEvents(): Promise<{ receivedEvents: boolean }> }
-        ).pollSdkEvents();
+        const result = await testClient.pollSdkEvents();
 
         expect(result.receivedEvents).toBe(false);
       } finally {
@@ -6381,15 +6379,15 @@ describe("IOSCtrlProxyClient", function () {
       })) as unknown as typeof fetch;
 
       try {
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Settings",
         );
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
 
-        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await testClient.pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe(
           "Discover",
         );
@@ -6458,7 +6456,7 @@ describe("IOSCtrlProxyClient", function () {
         })) as unknown as typeof fetch;
 
       try {
-        const poll = (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        const poll = testClient.pollSdkEvents();
         await flushPromises();
         testClient.clearSdkScreenIdentity("com.example.ios");
         releaseFetch?.({
@@ -6553,7 +6551,7 @@ describe("IOSCtrlProxyClient", function () {
         })) as unknown as typeof fetch;
 
       try {
-        const poll = (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        const poll = testClient.pollSdkEvents();
         await flushPromises();
         (testClient as unknown as { onConnectionClosed(): void }).onConnectionClosed();
         releaseFetch?.({

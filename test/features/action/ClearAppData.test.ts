@@ -7,7 +7,7 @@ import { ActionableError, AppNotInstalledError } from "../../../src/models/Actio
 import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeRecordingPerformanceTracker } from "../../fakes/FakeRecordingPerformanceTracker";
 
@@ -276,7 +276,7 @@ describe("ClearAppData", () => {
     describe("simulator", () => {
       test("terminates the app and wipes the data container folders", async () => {
         const container = await makeContainer();
-        const fakeSimctl = new FakeSimCtlClient();
+        const fakeSimctl = new FakeSimctl();
         fakeSimctl.setContainerPath(bundleId, container);
 
         const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
@@ -296,7 +296,7 @@ describe("ClearAppData", () => {
       });
 
       test("returns failure when the data container cannot be resolved for an installed app", async () => {
-        const fakeSimctl = new FakeSimCtlClient();
+        const fakeSimctl = new FakeSimctl();
         fakeSimctl.setInstalledApps([{ bundleId }]);
         const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
           bundleId,
@@ -306,7 +306,7 @@ describe("ClearAppData", () => {
       });
 
       test("throws AppNotInstalledError when the app is not installed", async () => {
-        const fakeSimctl = new FakeSimCtlClient();
+        const fakeSimctl = new FakeSimctl();
         await expect(
           new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(bundleId),
         ).rejects.toBeInstanceOf(AppNotInstalledError);
@@ -315,7 +315,7 @@ describe("ClearAppData", () => {
 
     describe("physical device", () => {
       test("clears data via devicectl uninstall+reinstall", async () => {
-        const fakeSimctl = new FakeSimCtlClient();
+        const fakeSimctl = new FakeSimctl();
         const calls: Array<[string, string]> = [];
         const reinstaller: IosAppReinstaller = {
           clearAppDataViaReinstall: async (deviceUdid, id) => {
@@ -335,7 +335,7 @@ describe("ClearAppData", () => {
       });
 
       test("returns failure when reinstall throws", async () => {
-        const fakeSimctl = new FakeSimCtlClient();
+        const fakeSimctl = new FakeSimctl();
         const failureMessage = `${bundleId} is now UNINSTALLED: device offline`;
         const reinstaller: IosAppReinstaller = {
           clearAppDataViaReinstall: async () => {

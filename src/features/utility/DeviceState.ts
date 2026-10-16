@@ -53,25 +53,20 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   ExecNetworkFilterBridge,
   type NetworkFilterBridge,
-} from "../network-filter/NetworkFilterBridge";
-import type { IosAppNetworkRuleCommandContext } from "../network-filter/IosAppNetworkRuleClient";
+} from "../networkFilter/NetworkFilterBridge";
+import type { IosAppNetworkRuleCommandContext } from "../networkFilter/IosAppNetworkRuleClient";
 import {
   defaultEmulatorConsoleClientFactory,
   type EmulatorConsoleClientFactory,
 } from "../action/Telephony";
 
 export { doNotDisturbModeSchema } from "./device-state/DoNotDisturbState";
-export type {
-  DoNotDisturbMode,
-  DoNotDisturbCapability,
-  DoNotDisturbState,
-} from "./device-state/DoNotDisturbState";
+export type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 export { biometricEnrollmentSchema } from "./device-state/BiometricState";
 export type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 export {
   DEVICE_STATE_READABLE_FIELDS,
   DEVICE_STATE_WRITABLE_FIELDS,
-  DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
 } from "./device-state/DeviceStateTypes";
 export type {
@@ -84,14 +79,8 @@ export type {
   DeviceLocationState,
   SetDeviceLocationInput,
 } from "./device-state/LocationOperations";
-export type {
-  DeviceConnectivityField,
-  DeviceConnectivityState,
-} from "./device-state/ConnectivityState";
-export {
-  ANDROID_CONNECTIVITY_READ_COMMAND,
-  parseAndroidConnectivityOutput,
-} from "./device-state/ConnectivityState";
+export type { DeviceConnectivityState } from "./device-state/ConnectivityState";
+export { ANDROID_CONNECTIVITY_READ_COMMAND } from "./device-state/ConnectivityState";
 
 export {
   networkConditionProfileSchema,
@@ -107,17 +96,11 @@ export {
 } from "./device-state/NetworkConditionState";
 export type {
   NetworkConditionProfile,
-  NetworkConditionCapability,
-  NetworkConditionValues,
-  NetworkConditionBackendState,
-  IosAppNetworkRuleState,
   NetworkConditionState,
   SetNetworkConditionInput,
-  NetworkConditionRequestKind,
 } from "./device-state/NetworkConditionState";
 
 export type { DeviceClockState, SetDeviceClockInput } from "./DeviceClock";
-export type { DeviceCameraPosterState, SetDeviceCameraPosterInput } from "./DeviceCameraPoster";
 
 export {
   emulatorConsoleReportsFailure,

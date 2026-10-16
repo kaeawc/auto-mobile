@@ -10,7 +10,6 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { VoiceOverSwipeExecutor } from "../../../../src/features/action/swipeon/VoiceOverSwipeExecutor";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { DisplayTransitionReader } from "../../../../src/features/observe/DisplayTransition";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice, ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
@@ -76,7 +75,7 @@ function harness({
     sameIdentitySince: (_deviceId, stamp) => stamp === revision,
     currentObservedPanel: () => ({ key: revision ? "internal" : "external", role: "external" }),
   };
-  const action = new SwipeOn({ ...device, platform }, adb as unknown as AdbClient, {
+  const action = new SwipeOn({ ...device, platform }, adb, {
     timer,
     observeScreen: observe,
     executeGesture: gesture,

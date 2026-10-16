@@ -50,6 +50,18 @@ export const ENV = {
     default: "~/.auto-mobile",
     doc: "Absolute root of cross-process coordination state shared by cooperating agents.",
   },
+  SESSION_BROKER_CONFIG: {
+    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
+    kind: "path",
+    default: "unset (broker disabled)",
+    doc: "Operator session-broker host configuration file; never a session requester input.",
+  },
+  SESSION_CONFIG: {
+    name: "AUTOMOBILE_SESSION_CONFIG",
+    kind: "path",
+    default: "unset",
+    doc: "Session configuration file read by the CLI, equivalent to --session-config.",
+  },
   ADB_SERVER_COORDINATION_DIR: {
     name: "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
     legacyName: "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",

@@ -31,6 +31,10 @@ import type {
   CtrlProxyPerfTiming,
   CachedHierarchy,
 } from "./types";
+import {
+  resolveAccessibilityHierarchyArgs,
+  type AccessibilityHierarchyRequest,
+} from "../hierarchyReadArgs";
 
 /** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
 interface ConvertedNode {
@@ -139,13 +143,26 @@ export class CtrlProxyHierarchy {
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
+    skipWaitForFreshArg?: boolean,
+    minTimestampArg?: number,
+    disableAllFilteringArg?: boolean,
+    signalArg?: AbortSignal,
+    timeoutMsArg?: number,
   ): Promise<ViewHierarchyResult | null> {
+    const resolved = resolveAccessibilityHierarchyArgs(
+      perfOrRequest,
+      skipWaitForFreshArg,
+      minTimestampArg,
+      disableAllFilteringArg,
+      signalArg,
+      timeoutMsArg,
+    );
+    const { perf, skipWaitForFresh, minTimestamp, signal } = resolved;
+    const timeoutMs =
+      typeof resolved.readOptions === "number"
+        ? resolved.readOptions
+        : resolved.readOptions?.timeoutMs;
     const response = await this.getLatestHierarchy(
       !skipWaitForFresh,
       timeoutMs ?? IOS_HIERARCHY_REQUEST_TIMEOUT_MS,

@@ -136,11 +136,12 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     try {
       const result = await device.viewHierarchy.getViewHierarchy(
         {},
-        undefined,
-        true,
-        DEVICE_CAPTURE_TIME,
-        undefined,
-        { timeoutMs: 500, requireFreshExtraction: true },
+        {
+          skipWaitForFresh: true,
+          minTimestamp: DEVICE_CAPTURE_TIME,
+          timeoutMs: 500,
+          requireFreshExtraction: true,
+        },
       );
       expect(device.extractions()).toBe(1);
       expect(device.reads).toHaveLength(1);

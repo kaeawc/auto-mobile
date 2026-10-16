@@ -5,10 +5,7 @@ import java.util.concurrent.TimeUnit
 /** Shared utilities for AutoMobile tests. */
 object AutoMobileSharedUtils {
   // Phase 5: Lazy device checker initialization
-  @JvmStatic internal var testDeviceChecker: DeviceChecker? = null
-  private val defaultDeviceChecker: DeviceChecker by lazy { DeviceAvailabilityChecker() }
-  val deviceChecker: DeviceChecker
-    get() = testDeviceChecker ?: defaultDeviceChecker
+  val deviceChecker: DeviceChecker by lazy { DeviceAvailabilityChecker() }
 
   fun executeCommand(
     command: List<String>,

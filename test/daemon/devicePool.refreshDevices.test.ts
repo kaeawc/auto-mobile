@@ -14,7 +14,6 @@ import { DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { logger } from "../../src/utils/logger";
@@ -352,7 +351,7 @@ describe("DevicePool", () => {
           getBootedDevicesChecked: async () => [androidDevice],
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           fakeEmulator,
         );
@@ -383,7 +382,7 @@ describe("DevicePool", () => {
           getBootedDevicesChecked: async () => [androidDevice],
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient() as unknown as AdbClient,
+          new FakeAdbClient(),
           fakeSimctl,
           fakeEmulator,
         );

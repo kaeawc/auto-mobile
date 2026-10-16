@@ -1616,13 +1616,7 @@ describe("LaunchApp", () => {
           .getExecutedCommands()
           .filter((command) => command.includes("pm dump") || command.includes("query-activities")),
       ).toEqual([firstCommand]);
-      expect(executeSpy).toHaveBeenCalledWith(
-        firstCommand,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      expect(executeSpy).toHaveBeenCalledWith(firstCommand, { signal: controller.signal });
       const discoveryLabels = trackSpy.mock.calls
         .map(([label]) => label)
         .filter((label) => label.startsWith("activity") || label === "a11yLaunchIntent");

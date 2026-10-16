@@ -134,7 +134,7 @@ describe("DefaultUIStateSetup", () => {
   // throw `adbFactory.create is not a function` inside the constructor, get
   // swallowed by getCurrentUIState's catch, and silently skip required UI setup.
   test("default observe provider builds a RealObserveScreen bound to the injected device and adb", () => {
-    const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
+    const fakeAdb = new FakeAdbClient();
     const timer = new FakeTimer();
     const setup = new DefaultUIStateSetup(device, fakeAdb, undefined, timer);
     const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike })

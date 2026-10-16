@@ -993,7 +993,12 @@ class AndroidAppFileProvider
         restores.length === 0
           ? `${prefix} rm -f ${created.join(" ")}`
           : `${prefix} sh -c ${shellQuote(androidRollbackScript(created, restores))}`;
-      return adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
+      return adb.executeCommand(command, {
+        timeoutMs,
+        noRetry: true,
+        signal,
+        waitForProcessSettlementAfterAbort: true,
+      });
     });
   }
 
@@ -1115,14 +1120,12 @@ class AndroidAppFileProvider
         await runWithAbortSignal(undefined, () =>
           raceWithDeadline(
             () =>
-              adb.executeCommand(
-                command,
-                APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
-                undefined,
-                true,
-                cleanup.signal,
-                true,
-              ),
+              adb.executeCommand(command, {
+                timeoutMs: APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
+                noRetry: true,
+                signal: cleanup.signal,
+                waitForProcessSettlementAfterAbort: true,
+              }),
             {
               timer: this.timer,
               timeoutMs: APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
@@ -2453,13 +2456,12 @@ export async function executeAndroidAppFileCommand(
   options: AndroidAppFileExecOptions = {},
 ): Promise<ExecResult> {
   try {
-    return await adb.executeCommand(
-      command,
-      options.timeoutMs,
-      options.maxBuffer,
-      options.noRetry,
-      options.signal,
-    );
+    return await adb.executeCommand(command, {
+      timeoutMs: options.timeoutMs,
+      maxBuffer: options.maxBuffer,
+      noRetry: options.noRetry,
+      signal: options.signal,
+    });
   } catch (error) {
     throw mapAndroidAppFileError(error, context, command);
   }

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { SimctlIosSimulatorMediaClient } from "../../src/server/iosSimulatorMediaClient";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 
 describe("SimctlIosSimulatorMediaClient", () => {
   test("imports media with exact simctl argv boundaries", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const client = new SimctlIosSimulatorMediaClient(() => simctl);
     const device = {
       deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",

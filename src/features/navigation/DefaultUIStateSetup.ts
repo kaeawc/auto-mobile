@@ -255,11 +255,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
   /**
    * Get the current UI state by performing an observation.
+   *
+   * Public so tests can stub the observation step.
    */
-  private async getCurrentUIState(
-    _platform: string,
-    signal?: AbortSignal,
-  ): Promise<UIState | undefined> {
+  async getCurrentUIState(_platform: string, signal?: AbortSignal): Promise<UIState | undefined> {
     try {
       throwIfAborted(signal);
       const observeScreen = this.observeScreenProvider();
@@ -315,7 +314,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     return missing;
   }
 
-  private async setupMissingSelections(
+  /** Select the required elements that are not yet selected. Public so tests can stub or drive this step on its own. */
+  async setupMissingSelections(
     required: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
     current: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
     platform: string,
@@ -510,8 +510,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Align the current modal stack with the required modal stack.
    * Dismisses extra modals and opens missing ones.
+   *
+   * Public so tests can stub or drive this step on its own.
    */
-  private async setupModalStack(
+  async setupModalStack(
     currentStack: ModalState[],
     requiredStack: ModalState[],
     platform: string,
@@ -554,8 +556,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Dismiss the top modal using context-aware dismissal methods.
    * Tries different strategies based on modal type.
+   *
+   * Public so tests can drive one dismissal without a full setup.
    */
-  private async dismissTopModal(
+  async dismissTopModal(
     modal: ModalState,
     platform: string,
     signal?: AbortSignal,
@@ -641,7 +645,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     return false;
   }
 
-  private async dismissBottomSheet(
+  /** Dismiss a bottom sheet (swipe, then back) and confirm it is gone. Public so tests can drive this path directly. */
+  async dismissBottomSheet(
     modal: ModalState,
     platform: string,
     signal?: AbortSignal,
@@ -714,7 +719,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     return false;
   }
 
-  private async dismissByTappingOutside(
+  /** Dismiss a modal by tapping outside it and confirm it is gone. Public so tests can drive this path directly. */
+  async dismissByTappingOutside(
     modal: ModalState,
     platform: string,
     signal?: AbortSignal,
@@ -778,8 +784,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * label elsewhere on screen) would otherwise be mistaken for success. A
    * failed or ineffective candidate falls through to the next text instead of
    * short-circuiting the loop.
+   *
+   * Public so tests can drive this path directly.
    */
-  private async tapCloseButton(
+  async tapCloseButton(
     modal: ModalState,
     platform: string,
     signal?: AbortSignal,

@@ -127,7 +127,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     expect(refusalReads()).toBe(1);
     expect(released).toBe(false);
     expect(journal.loadUnconfirmed()).toHaveLength(1);
-    const snapshot = manager["terminalReleaseSnapshots"].get(SESSION)!;
+    const snapshot = manager["sessionSlots"].getTerminalSnapshot(SESSION)!;
 
     // Replace rather than mutate the fake's row: the classifier already holds the old read.
     const peerRow = {
@@ -165,7 +165,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       () => !superseded,
     );
     await settleMicrotasks();
-    const snapshot = manager["terminalReleaseSnapshots"].get(SESSION)!;
+    const snapshot = manager["sessionSlots"].getTerminalSnapshot(SESSION)!;
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS, settleMicrotasks);
     await expect(release).resolves.toEqual({ superseded: true });

@@ -1,3 +1,4 @@
+import { ENV, readEnvNumber } from "../config/env";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { parseStrictPositiveInteger } from "../utils/envNumbers";
@@ -32,16 +33,15 @@ export interface PrivateDaemonOrphanPort {
 }
 
 export const DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS = 15 * 60_000;
-export const PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV = "AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS";
+export const PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV = ENV.PRIVATE_DAEMON_ORPHAN_IDLE_MS.name;
 const CHECK_INTERVAL_MS = 30_000;
 const INIT_PID = 1;
 
 /** Idle timeout for an orphaned private daemon; 0 disables the watchdog. */
 export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env[PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV];
-  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- 0 is meaningful here (it disables the watchdog), so the positive-integer helper does not fit.
-  const parsed = raw === undefined ? Number.NaN : Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
+  return (
+    readEnvNumber(ENV.PRIVATE_DAEMON_ORPHAN_IDLE_MS, env) ?? DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS
+  );
 }
 
 /** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */

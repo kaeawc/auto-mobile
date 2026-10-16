@@ -8,11 +8,11 @@ import { innerBounds, nestedClickableHierarchy } from "../fixtures/nestedClickab
 
 describe("Highlight Tools Registration", () => {
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   afterEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   test.each(["failure", "throw", "success"])(

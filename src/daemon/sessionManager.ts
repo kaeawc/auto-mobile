@@ -1674,18 +1674,6 @@ export class SessionManager {
    */
   private daemonSessionId: string | undefined;
   private liveDaemonSessionIds: (() => ReadonlySet<string>) | undefined;
-  /**
-   * Terminal releases a previous daemon recorded but never persisted. Until its row write lands, a
-   * listed UUID reads as terminally released, so nothing can revive it.
-   */
-  private readonly recoveredTerminalReleaseIntents: Map<string, TerminalReleaseIntent> = new Map();
-  /** Dead peer daemons whose journals were read after startup (#11355); never read again. */
-  private readonly adoptedDeadDaemonJournals: Set<string> = new Set();
-  /**
-   * The dead daemon each post-startup adopted intent came from (#11355). Such an intent applies
-   * only while its row is still that daemon's: a row another daemon took since is left alone.
-   */
-  private readonly adoptedTerminalReleaseOwners: Map<string, string> = new Map();
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1717,20 +1705,6 @@ export class SessionManager {
   >();
   /** A refused release wrote nothing, so superseding it owes no live-row rewrite. */
   private readonly refusedReleaseWrites = new WeakSet<SessionReleaseSnapshot>();
-  /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
-  private readonly latestFinalizedSessionIdentities: Map<string, WeakRef<Session>> = new Map();
-  private readonly finalizedSessionIdentityRegistry = new FinalizationRegistry<{
-    sessionId: string;
-    identity: WeakRef<Session>;
-  }>(({ sessionId, identity }) => {
-    if (this.latestFinalizedSessionIdentities.get(sessionId) === identity) {
-      this.latestFinalizedSessionIdentities.delete(sessionId);
-    }
-  });
-  /** Finalized terminal state used to coalesce UUID-only recovery retries. */
-  private readonly terminalReleaseReasonStates: Map<string, ReleaseReasonState> = new Map();
-  /** UUID admission fences held while a device shutdown decides its terminal outcome. */
-  private readonly terminalReleaseReservations: Map<string, TerminalReleaseReservation> = new Map();
   /** Setup work that can modify device state after a session has been assigned. */
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
     new Set();
@@ -1798,7 +1772,11 @@ export class SessionManager {
     DeferredRebindCleanup,
     SessionReleaseOperation,
     SessionReleaseSnapshot,
-    Session
+    Session,
+    SessionReleaseSnapshot,
+    ReleaseReasonState,
+    TerminalReleaseReservation,
+    TerminalReleaseIntent
   >();
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
@@ -1841,7 +1819,6 @@ export class SessionManager {
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
-  private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
     new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
@@ -1930,7 +1907,7 @@ export class SessionManager {
     this.terminalReleaseJournal = journal;
     for (const intent of journal.loadUnconfirmed()) {
       // The journal holds wall ms, like the rows it backs (#11162).
-      this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
+      this.sessionSlots.setRecoveredTerminalIntent(intent.sessionId, {
         ...intent,
         at: this.wallToSessionClock(intent.at),
       });
@@ -1944,7 +1921,7 @@ export class SessionManager {
    */
   async applyRecoveredTerminalReleaseIntents(deadlineAt?: number): Promise<string[]> {
     const applied: string[] = [];
-    for (const intent of Array.from(this.recoveredTerminalReleaseIntents.values())) {
+    for (const intent of Array.from(this.sessionSlots.recoveredTerminalIntents.values())) {
       if (deadlineAt !== undefined && this.sessionNow() >= deadlineAt) {
         // The rest stay fenced in memory and are applied by the next startup.
         break;
@@ -1987,8 +1964,8 @@ export class SessionManager {
         );
         continue;
       }
-      this.recoveredTerminalReleaseIntents.delete(intent.sessionId);
-      this.adoptedTerminalReleaseOwners.delete(intent.sessionId);
+      this.sessionSlots.deleteRecoveredTerminalIntent(intent.sessionId);
+      this.sessionSlots.deleteAdoptedTerminalOwner(intent.sessionId);
       this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
     }
     if (applied.length > 0) {
@@ -2002,7 +1979,7 @@ export class SessionManager {
 
   /** A row a previous daemon terminally released without persisting it reads as released. */
   private withRecoveredTerminalRelease(persisted: DeviceSession): DeviceSession {
-    const intent = this.recoveredTerminalReleaseIntents.get(persisted.session_uuid);
+    const intent = this.sessionSlots.getRecoveredTerminalIntent(persisted.session_uuid);
     if (
       !intent ||
       (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason)) ||
@@ -2023,7 +2000,7 @@ export class SessionManager {
    * that died after this daemon started (#11355) applies only while the row is still that peer's.
    */
   private adoptedTerminalReleaseApplies(persisted: DeviceSession): boolean {
-    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(persisted.session_uuid);
+    const adoptedFrom = this.sessionSlots.getAdoptedTerminalOwner(persisted.session_uuid);
     return adoptedFrom === undefined || (persisted.daemon_session_id ?? null) === adoptedFrom;
   }
 
@@ -2033,7 +2010,7 @@ export class SessionManager {
    * survivor recovered meanwhile, or one this write reaches only after parking, is left alone.
    */
   private adoptedTerminalReleaseFence(sessionId: string): [] | [MarkReleasedOptions] {
-    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(sessionId);
+    const adoptedFrom = this.sessionSlots.getAdoptedTerminalOwner(sessionId);
     return adoptedFrom === undefined ? [] : [{ onlyIfOwnedByDaemon: adoptedFrom }];
   }
 
@@ -2053,7 +2030,7 @@ export class SessionManager {
     if (owner === undefined) {
       return false;
     }
-    const firstRead = !this.adoptedDeadDaemonJournals.has(owner);
+    const firstRead = !this.sessionSlots.hasAdoptedDeadJournal(owner);
     if (firstRead && !this.fenceDeadDaemonIntents(owner)) {
       // Unreadable for now; the next read of one of this daemon's rows retries.
       return false;
@@ -2078,14 +2055,14 @@ export class SessionManager {
     if (intents === undefined) {
       return false;
     }
-    this.adoptedDeadDaemonJournals.add(owner);
+    this.sessionSlots.addAdoptedDeadJournal(owner);
     for (const intent of intents) {
       // The journal holds wall ms, like the rows it backs (#11162).
-      this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
+      this.sessionSlots.setRecoveredTerminalIntent(intent.sessionId, {
         ...intent,
         at: this.wallToSessionClock(intent.at),
       });
-      this.adoptedTerminalReleaseOwners.set(intent.sessionId, owner);
+      this.sessionSlots.setAdoptedTerminalOwner(intent.sessionId, owner);
     }
     if (intents.length > 0) {
       logger.warn(
@@ -2097,7 +2074,7 @@ export class SessionManager {
   }
 
   private hasUnsettledAdoptedIntent(owner: string): boolean {
-    for (const adoptedFrom of this.adoptedTerminalReleaseOwners.values()) {
+    for (const adoptedFrom of this.sessionSlots.adoptedTerminalOwners.values()) {
       if (adoptedFrom === owner) {
         return true;
       }
@@ -3363,7 +3340,7 @@ export class SessionManager {
     session: Session,
     releaseReason: string,
   ): SessionReleaseSnapshot {
-    const held = this.terminalReleaseSnapshots.get(sessionId);
+    const held = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (held) {
       return held;
     }
@@ -3382,7 +3359,7 @@ export class SessionManager {
       },
     };
     if (snapshot.terminal) {
-      this.terminalReleaseSnapshots.set(sessionId, snapshot);
+      this.sessionSlots.setTerminalSnapshot(sessionId, snapshot);
     } else {
       // Applies only to the incarnation it released, like any non-terminal release (#11129).
       this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
@@ -3399,7 +3376,7 @@ export class SessionManager {
    */
   private inFlightReleaseStillOwning(sessionId: string): SessionReleaseOperation | undefined {
     const operation = this.sessionSlots.getReleaseOp(sessionId);
-    return operation?.forced && !this.terminalReleaseSnapshots.has(sessionId)
+    return operation?.forced && !this.sessionSlots.hasTerminalSnapshot(sessionId)
       ? undefined
       : operation;
   }
@@ -3560,7 +3537,7 @@ export class SessionManager {
     }
     this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
     this.liftPlanLabelFenceForMint(sessionId);
-    let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+    let terminalRelease = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
@@ -3577,7 +3554,7 @@ export class SessionManager {
       this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
       // The release just awaited ended the label's previous run, not this one.
       this.liftPlanLabelFenceForMint(sessionId);
-      terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+      terminalRelease = this.sessionSlots.getTerminalSnapshot(sessionId);
       if (terminalRelease) {
         throw new TerminalSessionError(sessionId, terminalRelease);
       }
@@ -3772,7 +3749,7 @@ export class SessionManager {
         current && this.terminalReleaseFromPersisted(session.sessionId, current),
       );
       if (terminalRelease) {
-        this.terminalReleaseSnapshots.set(session.sessionId, terminalRelease);
+        this.sessionSlots.setTerminalSnapshot(session.sessionId, terminalRelease);
         throw new TerminalSessionError(session.sessionId, terminalRelease);
       }
       const owner = current?.daemon_session_id ?? null;
@@ -3810,7 +3787,7 @@ export class SessionManager {
       ? undefined
       : this.unlessBeingReplaced(await this.getPersistedTerminalRelease(session.sessionId));
     if (persistedTerminalRelease) {
-      this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
+      this.sessionSlots.setTerminalSnapshot(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     this.assertCreationNotAbandoned(session, creation);
@@ -3819,7 +3796,7 @@ export class SessionManager {
     await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session, true, claimedRow);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
-    const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
+    const terminalRelease = this.sessionSlots.getTerminalSnapshot(session.sessionId);
     if (terminalRelease) {
       await this.persistSessionRelease(terminalRelease);
       throw new TerminalSessionError(session.sessionId, terminalRelease);
@@ -3859,7 +3836,7 @@ export class SessionManager {
       generation === undefined ||
       this.sessions.get(session.sessionId) === session ||
       this.retiredCreationRows.has(session) ||
-      this.terminalReleaseSnapshots.has(session.sessionId)
+      this.sessionSlots.hasTerminalSnapshot(session.sessionId)
     ) {
       return;
     }
@@ -4006,7 +3983,7 @@ export class SessionManager {
     claimedRow?: ClaimedCreationRow,
   ): Promise<void> {
     this.retiredCreationRows.add(session);
-    this.terminalReleaseSnapshots.set(session.sessionId, fence);
+    this.sessionSlots.setTerminalSnapshot(session.sessionId, fence);
     this.restartRecoveryActivityAt.delete(session.sessionId);
     if (!rowWritten) {
       this.terminalReleaseJournal.record({
@@ -4131,13 +4108,13 @@ export class SessionManager {
 
   /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */
   async isReleasedSessionInRestartRecoveryWindow(sessionId: string): Promise<boolean> {
-    if (this.terminalReleaseSnapshots.has(sessionId)) {
+    if (this.sessionSlots.hasTerminalSnapshot(sessionId)) {
       return false;
     }
     const persisted = await this.readPersistedSession(sessionId);
     if (
       !persisted ||
-      this.terminalReleaseSnapshots.has(sessionId) ||
+      this.sessionSlots.hasTerminalSnapshot(sessionId) ||
       !this.isReissuablePersistedSession(persisted)
     ) {
       return false;
@@ -4385,7 +4362,7 @@ export class SessionManager {
     reason: "expired" | "restart-recovery-timeout" | "device-killed",
   ): void {
     if (
-      this.terminalReleaseSnapshots.has(persisted.session_uuid) ||
+      this.sessionSlots.hasTerminalSnapshot(persisted.session_uuid) ||
       current?.release_reason !== reason ||
       current.stable_identity_generation !== persisted.stable_identity_generation
     ) {
@@ -4396,7 +4373,7 @@ export class SessionManager {
         ? this.expiredReleaseFromPersisted(persisted.session_uuid, current)
         : this.terminalReleaseFromPersisted(persisted.session_uuid, current);
     if (snapshot) {
-      this.terminalReleaseSnapshots.set(persisted.session_uuid, snapshot);
+      this.sessionSlots.setTerminalSnapshot(persisted.session_uuid, snapshot);
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
       this.notifySessionRelease(snapshot, { upgradeOnly: true });
     }
@@ -4535,7 +4512,7 @@ export class SessionManager {
     releaseExpired = true,
   ): Session | null {
     this.stallProbe?.();
-    if (this.terminalReleaseSnapshots.has(sessionId)) {
+    if (this.sessionSlots.hasTerminalSnapshot(sessionId)) {
       return null;
     }
     const session = this.sessions.get(sessionId);
@@ -4594,7 +4571,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (
       session &&
-      !this.terminalReleaseSnapshots.has(sessionId) &&
+      !this.sessionSlots.hasTerminalSnapshot(sessionId) &&
       this.isSessionExpired(session)
     ) {
       this.releaseExpiredSessionLazily(session, callerExecutionId);
@@ -4630,7 +4607,7 @@ export class SessionManager {
     execution: SessionExecutionMetadata | undefined,
   ): string | undefined {
     const session = this.sessions.get(sessionId);
-    if (!session || this.terminalReleaseSnapshots.has(sessionId)) {
+    if (!session || this.sessionSlots.hasTerminalSnapshot(sessionId)) {
       return undefined;
     }
     const started = execution && this.executionOnSessionClock(execution);
@@ -4782,7 +4759,7 @@ export class SessionManager {
     this.refuseLabelOfEndedBase(sessionId, access, execution, callerExecutionId);
     this.assertTerminalReleaseAdmission(sessionId);
 
-    const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+    const terminalRelease = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
@@ -5079,7 +5056,7 @@ export class SessionManager {
       persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
     );
     if (persistedTerminalRelease) {
-      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      this.sessionSlots.setTerminalSnapshot(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
     if (persisted && this.isReissuablePersistedSession(persisted)) {
@@ -5106,7 +5083,7 @@ export class SessionManager {
       persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
     );
     if (terminalRelease) {
-      this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+      this.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
     if (!this.isReissuablePersistedSession(persisted)) {
@@ -5135,7 +5112,7 @@ export class SessionManager {
       persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined,
     );
     if (persistedTerminalRelease) {
-      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      this.sessionSlots.setTerminalSnapshot(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
 
@@ -5318,7 +5295,7 @@ export class SessionManager {
       current && this.terminalReleaseFromPersisted(sessionId, current),
     );
     if (terminalRelease) {
-      this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+      this.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
     if (current && this.isReissuablePersistedSession(current)) {
@@ -5404,7 +5381,7 @@ export class SessionManager {
     const release = this.deviceSessionRepository.releaseRecoverableSessionClaim.bind(
       this.deviceSessionRepository,
     );
-    if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+    if (this.sessions.has(sessionId) || this.sessionSlots.hasTerminalSnapshot(sessionId)) {
       return;
     }
     try {
@@ -5985,7 +5962,7 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
   ): Promise<Session> {
-    const reservation = this.terminalReleaseReservations.get(session.sessionId);
+    const reservation = this.sessionSlots.getTerminalReservation(session.sessionId);
     if (reservation?.session !== session) {
       throw new Error(`Session ${session.sessionId} has no matching terminal release reservation.`);
     }
@@ -6369,7 +6346,7 @@ export class SessionManager {
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
     const published = this.sessions.get(sessionId);
-    const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
+    const inMemory = this.sessionSlots.getTerminalSnapshot(sessionId)?.releaseReason;
     if (published) {
       const inFlightReason = (): string | undefined => {
         const operation = this.sessionSlots.getReleaseOp(sessionId);
@@ -6447,7 +6424,7 @@ export class SessionManager {
    * it is.
    */
   async getExpiredReleaseSnapshot(sessionId: string): Promise<SessionReleaseSnapshot | undefined> {
-    if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+    if (this.sessions.has(sessionId) || this.sessionSlots.hasTerminalSnapshot(sessionId)) {
       return undefined;
     }
     const persisted = await this.readPersistedSession(sessionId);
@@ -6455,7 +6432,7 @@ export class SessionManager {
   }
 
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {
-    const snapshot = this.terminalReleaseSnapshots.get(sessionId);
+    const snapshot = this.sessionSlots.getTerminalSnapshot(sessionId);
     return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;
   }
 
@@ -6467,7 +6444,7 @@ export class SessionManager {
     if (this.sessionSlots.hasRebind(session.sessionId)) {
       throw new SessionRebindingError(session.sessionId);
     }
-    const existing = this.terminalReleaseReservations.get(session.sessionId);
+    const existing = this.sessionSlots.getTerminalReservation(session.sessionId);
     if (existing) {
       throw new SessionTerminalReleaseInProgressError(
         session.sessionId,
@@ -6480,16 +6457,18 @@ export class SessionManager {
       deviceId: expectedDeviceId,
       owner: Symbol(session.sessionId),
     };
-    this.terminalReleaseReservations.set(session.sessionId, reservation);
+    this.sessionSlots.setTerminalReservation(session.sessionId, reservation);
     return () => {
-      if (this.terminalReleaseReservations.get(session.sessionId)?.owner === reservation.owner) {
-        this.terminalReleaseReservations.delete(session.sessionId);
+      if (
+        this.sessionSlots.getTerminalReservation(session.sessionId)?.owner === reservation.owner
+      ) {
+        this.sessionSlots.deleteTerminalReservation(session.sessionId);
       }
     };
   }
 
   private assertTerminalReleaseAdmission(sessionId: string, allowedSession?: Session): void {
-    const reservation = this.terminalReleaseReservations.get(sessionId);
+    const reservation = this.sessionSlots.getTerminalReservation(sessionId);
     if (reservation && reservation.session !== allowedSession) {
       throw new SessionTerminalReleaseInProgressError(
         sessionId,
@@ -6503,7 +6482,7 @@ export class SessionManager {
     sessionId: string,
     reservationOwner: symbol | undefined,
   ): void {
-    const reservation = this.terminalReleaseReservations.get(sessionId);
+    const reservation = this.sessionSlots.getTerminalReservation(sessionId);
     if (reservation && reservation.owner !== reservationOwner) {
       throw new SessionTerminalReleaseInProgressError(
         sessionId,
@@ -6569,9 +6548,9 @@ export class SessionManager {
         pendingReleases: this.sessionSlots.releaseRequests,
         pendingRebinds: this.sessionSlots.rebinds,
         releaseOps: this.sessionSlots.releaseOps,
-        terminalSnapshots: this.terminalReleaseSnapshots,
-        recoveredTerminalIntents: this.recoveredTerminalReleaseIntents,
-        latestFinalizedIdentities: this.latestFinalizedSessionIdentities,
+        terminalSnapshots: this.sessionSlots.terminalSnapshots,
+        recoveredTerminalIntents: this.sessionSlots.recoveredTerminalIntents,
+        latestFinalizedIdentities: this.sessionSlots.latestFinalizedIdentities,
       },
       { has: (session) => this.sessionSlots.isReleasing(session) },
     );
@@ -6601,7 +6580,7 @@ export class SessionManager {
   isCurrentSession(session: Session): boolean {
     return (
       this.sessions.get(session.sessionId) === session &&
-      !this.terminalReleaseSnapshots.has(session.sessionId)
+      !this.sessionSlots.hasTerminalSnapshot(session.sessionId)
     );
   }
 
@@ -6639,7 +6618,7 @@ export class SessionManager {
     if (inFlightRelease) {
       return inFlightRelease.session === session;
     }
-    return this.latestFinalizedSessionIdentities.get(session.sessionId)?.deref() === session;
+    return this.sessionSlots.getFinalizedIdentity(session.sessionId)?.deref() === session;
   }
 
   /**
@@ -6714,7 +6693,7 @@ export class SessionManager {
     options: SessionReleaseOptions = {},
   ): Promise<string | null> {
     const session =
-      allowExpired || this.terminalReleaseSnapshots.has(sessionId)
+      allowExpired || this.sessionSlots.hasTerminalSnapshot(sessionId)
         ? (this.sessions.get(sessionId) ?? null)
         : // Not `getSession`: a label whose base has ended is still there to release (#11640).
           this.getSessionInternal(sessionId, false);
@@ -6931,9 +6910,9 @@ export class SessionManager {
       this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
       return await inFlightRelease.promise;
     }
-    const terminalSnapshot = this.terminalReleaseSnapshots.get(sessionId);
+    const terminalSnapshot = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (terminalSnapshot && isTerminalReleaseReason(releaseReason)) {
-      const terminalReason = this.terminalReleaseReasonStates.get(sessionId);
+      const terminalReason = this.sessionSlots.getTerminalReasonState(sessionId);
       if (terminalReason) {
         return await this.releaseFinalizedSession(terminalReason, releaseReason);
       }
@@ -7079,7 +7058,7 @@ export class SessionManager {
       );
       return undefined;
     }
-    this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    this.sessionSlots.setTerminalSnapshot(sessionId, snapshot);
     this.restartRecoveryActivityAt.delete(sessionId);
     // The handoff release already ran this session's device cleanup, and the row's device may
     // belong to another session by now: announce only the terminal reason (#11206).
@@ -7310,7 +7289,7 @@ export class SessionManager {
       const releasedAtMs = this.sessionNow();
       this.judgeOwnerLeaseForRelease(session, reason, "commit", operation);
       const releaseReason = reason.value;
-      const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
+      const terminalFenceHeldBefore = this.sessionSlots.hasTerminalSnapshot(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
         sessionId,
         deviceId,
@@ -7370,8 +7349,8 @@ export class SessionManager {
       }
       this.commitReplacedDeviceTeardown(sessionId, session, options, operation);
       if (!releaseSnapshot.terminal) {
-        this.terminalReleaseSnapshots.delete(sessionId);
-        this.terminalReleaseReasonStates.delete(sessionId);
+        this.sessionSlots.deleteTerminalSnapshot(sessionId);
+        this.sessionSlots.deleteTerminalReasonState(sessionId);
         // The removal dropped the rewrite owed over a superseded release's terminal row, and
         // this release's own write does not replace a terminal row.
         this.restoreNonTerminalRowOverSupersededReleaseLater(session, owedReasons);
@@ -7848,7 +7827,7 @@ export class SessionManager {
       if (!(error instanceof SessionReleasePersistTimeoutError)) {
         throw error;
       }
-      const fenced = this.terminalReleaseSnapshots.get(snapshot.sessionId) ?? snapshot;
+      const fenced = this.sessionSlots.getTerminalSnapshot(snapshot.sessionId) ?? snapshot;
       if (this.volatileTerminalReleaseIntents.get(fenced.sessionId) === fenced.releaseReason) {
         logger.warn(
           `Terminal release of session ${fenced.sessionId} has no crash-safe intent (volatile); ` +
@@ -7873,7 +7852,7 @@ export class SessionManager {
     liftTerminalFence: boolean = false,
   ): null {
     if (liftTerminalFence) {
-      this.terminalReleaseSnapshots.delete(sessionId);
+      this.sessionSlots.deleteTerminalSnapshot(sessionId);
       // The session lives on; a restart must not terminalize it from this release's intent.
       this.volatileTerminalReleaseIntents.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
@@ -8153,7 +8132,7 @@ export class SessionManager {
    */
   private async restoreReleasedRowAfterReassert(session: Session): Promise<void> {
     const sessionId = session.sessionId;
-    const fence = this.terminalReleaseSnapshots.get(sessionId);
+    const fence = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (!fence) {
       if (this.sessions.get(sessionId) !== session) {
         // Not awaited: a release that awaits this rewrite must not wait on its own end.
@@ -8184,7 +8163,7 @@ export class SessionManager {
    */
   private async retryTerminalRowAfterRelease(sessionId: string): Promise<void> {
     await this.waitOutReleaseOf(sessionId);
-    const fence = this.terminalReleaseSnapshots.get(sessionId);
+    const fence = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (!fence) {
       // That release was superseded: it lifted its fence and rewrites the live row itself.
       return;
@@ -8294,7 +8273,7 @@ export class SessionManager {
       await this.waitOutRecreationOf(sessionId);
       // The name may have been issued and released again since: the row is then written as its
       // last incarnation held it.
-      session = this.latestFinalizedSessionIdentities.get(sessionId)?.deref() ?? superseded;
+      session = this.sessionSlots.getFinalizedIdentity(sessionId)?.deref() ?? superseded;
       supersededReasons = [
         ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
       ];
@@ -8302,7 +8281,7 @@ export class SessionManager {
       if (
         !ended ||
         ended.terminal ||
-        this.terminalReleaseSnapshots.has(sessionId) ||
+        this.sessionSlots.hasTerminalSnapshot(sessionId) ||
         this.sessions.has(sessionId)
       ) {
         // A terminal release ended the UUID after all, or the name was issued again: that
@@ -8686,7 +8665,7 @@ export class SessionManager {
 
   private createReleaseReasonState(sessionId: string, releaseReason: string): ReleaseReasonState {
     const reason: ReleaseReasonState = { value: releaseReason };
-    const terminalReleaseReason = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
+    const terminalReleaseReason = this.sessionSlots.getTerminalSnapshot(sessionId)?.releaseReason;
     if (terminalReleaseReason) {
       this.upgradeReleaseReason(reason, terminalReleaseReason);
     }
@@ -8825,7 +8804,7 @@ export class SessionManager {
       reason.finalizedSnapshot = snapshot;
       // A timed-out terminal write leaves the row for the next terminal release to persist.
       reason.terminalPersisted = terminalPersisted;
-      this.terminalReleaseReasonStates.set(snapshot.sessionId, reason);
+      this.sessionSlots.setTerminalReasonState(snapshot.sessionId, reason);
       return snapshot;
     }
     await this.persistSessionRelease(snapshot);
@@ -8842,7 +8821,7 @@ export class SessionManager {
     }
     this.dropReleaseRetry(snapshot);
     if (upgradedSnapshot.terminal) {
-      this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+      this.sessionSlots.setTerminalReasonState(upgradedSnapshot.sessionId, reason);
       await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
       reason.terminalPersisted = true;
     } else {
@@ -8863,7 +8842,7 @@ export class SessionManager {
     if (!snapshot) {
       return null;
     }
-    const indexedTerminalReason = this.terminalReleaseReasonStates.get(snapshot.sessionId);
+    const indexedTerminalReason = this.sessionSlots.getTerminalReasonState(snapshot.sessionId);
     if (indexedTerminalReason && indexedTerminalReason !== reason) {
       return null;
     }
@@ -8873,13 +8852,13 @@ export class SessionManager {
     let upgradedSnapshot = this.withReleaseReason(snapshot, reason.value);
     reason.finalizedSnapshot = upgradedSnapshot;
     reason.terminalPersisted = false;
-    this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+    this.sessionSlots.setTerminalReasonState(upgradedSnapshot.sessionId, reason);
     const release = (async () => {
       await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
       if (reason.value !== upgradedSnapshot.releaseReason) {
         upgradedSnapshot = this.withReleaseReason(upgradedSnapshot, reason.value);
         reason.finalizedSnapshot = upgradedSnapshot;
-        this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+        this.sessionSlots.setTerminalReasonState(upgradedSnapshot.sessionId, reason);
         await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
       }
       reason.terminalPersisted = true;
@@ -8898,20 +8877,11 @@ export class SessionManager {
 
   private recordFinalizedSessionRelease(session: Session, reason: ReleaseReasonState): void {
     this.finalizedSessionReleases.set(session, reason);
-    const existingIdentity = this.latestFinalizedSessionIdentities.get(session.sessionId);
-    if (existingIdentity?.deref() === session) {
-      return;
-    }
-    const identity = new WeakRef(session);
-    this.latestFinalizedSessionIdentities.set(session.sessionId, identity);
-    this.finalizedSessionIdentityRegistry.register(session, {
-      sessionId: session.sessionId,
-      identity,
-    });
+    this.sessionSlots.recordFinalizedIdentity(session);
   }
 
   private invalidateFinalizedSessionIdentity(sessionId: string): void {
-    const identity = this.latestFinalizedSessionIdentities.get(sessionId);
+    const identity = this.sessionSlots.getFinalizedIdentity(sessionId);
     if (!identity) {
       return;
     }
@@ -8919,7 +8889,7 @@ export class SessionManager {
     if (session) {
       this.finalizedSessionReleases.delete(session);
     }
-    this.latestFinalizedSessionIdentities.delete(sessionId);
+    this.sessionSlots.deleteFinalizedIdentity(sessionId);
   }
 
   private notifySessionRelease(
@@ -9252,7 +9222,7 @@ export class SessionManager {
     if (!snapshot.terminal) {
       return this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot;
     }
-    const fence = this.terminalReleaseSnapshots.get(snapshot.sessionId);
+    const fence = this.sessionSlots.getTerminalSnapshot(snapshot.sessionId);
     return (
       fence !== undefined &&
       fence.releaseReason === snapshot.releaseReason &&
@@ -9560,7 +9530,7 @@ export class SessionManager {
     // Fence the UUID before durable persistence. If the write fails, callers
     // must still stop routing tools to a device that is already confirmed
     // lost; a later release retry can persist and complete removal.
-    this.terminalReleaseSnapshots.set(snapshot.sessionId, snapshot);
+    this.sessionSlots.setTerminalSnapshot(snapshot.sessionId, snapshot);
     this.restartRecoveryActivityAt.delete(snapshot.sessionId);
     await this.persistSessionRelease(snapshot);
   }
@@ -11871,8 +11841,8 @@ export class SessionManager {
       return;
     }
     this.endedLabelBases.delete(sessionId);
-    if (this.terminalReleaseSnapshots.delete(sessionId)) {
-      this.terminalReleaseReasonStates.delete(sessionId);
+    if (this.sessionSlots.deleteTerminalSnapshot(sessionId)) {
+      this.sessionSlots.deleteTerminalReasonState(sessionId);
       this.volatileTerminalReleaseIntents.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
     }
@@ -12257,7 +12227,7 @@ export class SessionManager {
 
   /** The terminal reason `sessionId` ended with, or would be released with by a lookup now. */
   private sessionEndReason(sessionId: string): string | undefined {
-    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    const fenced = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (fenced) {
       return fenced.releaseReason;
     }
@@ -12352,7 +12322,7 @@ export class SessionManager {
     if (releaseReason === undefined) {
       return undefined;
     }
-    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    const fenced = this.sessionSlots.getTerminalSnapshot(sessionId);
     if (fenced || !session) {
       return fenced && new TerminalSessionError(sessionId, fenced);
     }
@@ -12709,7 +12679,7 @@ export class SessionManager {
       expiryOrigin: "lazy-expiry",
     });
     const terminalRelease =
-      this.terminalReleaseSnapshots.get(session.sessionId) ??
+      this.sessionSlots.getTerminalSnapshot(session.sessionId) ??
       (await this.getPersistedTerminalRelease(session.sessionId));
     if (terminalRelease) {
       throw new TerminalSessionError(session.sessionId, terminalRelease);
@@ -13935,7 +13905,7 @@ export class SessionManager {
         this.oweSupersededRowReassert(session, []);
       } else if (
         this.sessions.get(session.sessionId) !== session &&
-        !this.terminalReleaseSnapshots.has(session.sessionId)
+        !this.sessionSlots.hasTerminalSnapshot(session.sessionId)
       ) {
         // A non-terminal release removed the session while the write was in flight, as it can
         // under a rewrite: the row it left active is released again.
@@ -13957,7 +13927,7 @@ export class SessionManager {
     error: DeviceSessionRowNotRewritableError | DeviceSessionTerminallyReleasedError,
   ): Promise<void> {
     if (!this.isCurrentSession(session)) {
-      const terminal = this.terminalReleaseSnapshots.get(session.sessionId);
+      const terminal = this.sessionSlots.getTerminalSnapshot(session.sessionId);
       if (terminal) {
         throw new TerminalSessionError(session.sessionId, terminal);
       }
@@ -14013,7 +13983,7 @@ export class SessionManager {
     }
     return new TerminalSessionError(
       sessionId,
-      this.terminalReleaseSnapshots.get(sessionId) ?? persistedRelease,
+      this.sessionSlots.getTerminalSnapshot(sessionId) ?? persistedRelease,
     );
   }
 

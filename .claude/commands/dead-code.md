@@ -8,7 +8,7 @@ The user may specify a target scope as arguments: `$ARGUMENTS`
 
 Supported scopes:
 
-- **ts** / **typescript** — TypeScript dead code (ts-prune + knip)
+- **ts** / **typescript** — TypeScript dead code (knip)
 - **bash** / **shell** — Unused variables, functions, and files in shell scripts
 - **kotlin** / **android** — Unused Kotlin code in android/ (plus a specific module like `android/control-proxy`)
 - **swift** / **ios** — Unused Swift code in ios/ (plus a specific package like `ios/control-proxy`)
@@ -29,7 +29,6 @@ Parse `$ARGUMENTS` to determine which language(s) and optional subdirectory to s
 
 1. Run the existing detection scripts:
    ```bash
-   bun run dead-code:ts:prune
    bun run dead-code:ts:knip
    ```
 2. Cross-reference results against `dead-code-allowlist.json` — items already allowlisted with valid reasons are false positives.

@@ -21,12 +21,9 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
+import { sendCommand } from "../DeviceServiceUtils";
 import { createTimestampedId } from "../../../utils/IdGenerator";
-import {
-  ctrlProxyRequests,
-  SDK_CAPABILITIES_USER_ID_CAPABILITY,
-  serializeCtrlProxyRequest,
-} from "./ctrlProxyProtocol";
+import { SDK_CAPABILITIES_USER_ID_CAPABILITY } from "./ctrlProxyProtocol";
 import { normalizeStorageWriteOptions } from "../../storage/storageTypes";
 import type {
   StorageWriteOptions,
@@ -87,49 +84,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn(
-          "[CTRL_PROXY] Failed to establish WebSocket connection for listPreferenceFiles",
-        );
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<ListPreferenceFilesResult>(
         "list_preference_files",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `List preference files timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<ListPreferenceFilesResult>(
-        requestId,
-        "list_preference_files",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `List preference files timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.listPreferenceFiles({ requestId, packageName }),
-      );
-      logger.info(
-        `[CTRL_PROXY] Sending list_preference_files request (requestId: ${requestId}, packageName: ${packageName}, wsReadyState: ${ws.readyState})`,
-      );
-      ws.send(message);
-      logger.info(`[CTRL_PROXY] Sent list_preference_files request successfully`);
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw this.preferenceError(result.error || "Failed to list preference files");
@@ -159,48 +126,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn(
-          "[CTRL_PROXY] Failed to establish WebSocket connection for getPreferenceEntries",
-        );
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<GetPreferencesResult>(
         "get_preferences",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Get preferences timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<GetPreferencesResult>(
-        requestId,
-        "get_preferences",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Get preferences timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.getPreferences({ requestId, packageName, fileName }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent get_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw this.preferenceError(result.error || "Failed to get preference entries");
@@ -239,27 +177,28 @@ export class CtrlProxyStorage {
           scopes: [],
         };
       }
-      const requestId = this.context.requestManager.generateId("discover_keystore");
-      const pending = this.context.requestManager.register<{ state: unknown }>(
-        requestId,
+      const pending = this.sendStorageCommand<{ state: unknown }>(
         "discover_keystore",
-        timeoutMs,
-        () => ({
-          state: {
-            schemaVersion: 1,
-            capability: "storage.keystore",
-            outcome: "unavailable",
-            reason: "BRIDGE_UNAVAILABLE",
-            bridgeAvailable: false,
-            metadata: "supported",
-            mutation: "declared_unsupported",
-            deviceLocked: "unknown",
-            scopes: [],
-          },
-        }),
-      );
-      ws.send(
-        serializeCtrlProxyRequest(ctrlProxyRequests.discoverKeystore({ requestId, packageName })),
+        { packageName },
+        {
+          timeoutMs,
+          connected: true,
+          managerId: true,
+          unsupportedCommandError: () => ({ state: undefined }),
+          timeoutError: () => ({
+            state: {
+              schemaVersion: 1,
+              capability: "storage.keystore",
+              outcome: "unavailable",
+              reason: "BRIDGE_UNAVAILABLE",
+              bridgeAvailable: false,
+              metadata: "supported",
+              mutation: "declared_unsupported",
+              deviceLocked: "unknown",
+              scopes: [],
+            },
+          }),
+        },
       );
       return keystoreDiscoverySchema.parse((await pending).state);
     } catch (error) {
@@ -291,23 +230,18 @@ export class CtrlProxyStorage {
       if (commands?.includes("get_sdk_capabilities") !== true) {
         return sdkCapabilitiesUnavailable("CTRLPROXY_UNSUPPORTED");
       }
-      const requestId = this.context.requestManager.generateId("get_sdk_capabilities");
-      const pending = this.context.requestManager.register<{ state: unknown }>(
-        requestId,
-        "get_sdk_capabilities",
-        timeoutMs,
-        () => ({ state: { outcome: "unavailable", reason: "REQUEST_TIMEOUT" } }),
-      );
       const forwardUser =
         userId !== undefined && commands?.includes(SDK_CAPABILITIES_USER_ID_CAPABILITY) === true;
-      ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.getSdkCapabilities({
-            requestId,
-            packageName,
-            ...(forwardUser ? { userId } : {}),
-          }),
-        ),
+      const pending = this.sendStorageCommand<{ state: unknown }>(
+        "get_sdk_capabilities",
+        { packageName, ...(forwardUser ? { userId } : {}) },
+        {
+          timeoutMs,
+          connected: true,
+          managerId: true,
+          timeoutError: () => ({ state: { outcome: "unavailable", reason: "REQUEST_TIMEOUT" } }),
+          unsupportedCommandError: () => ({ state: undefined }),
+        },
       );
       return parseSdkCapabilitiesState((await pending).state);
     } catch (error) {
@@ -336,42 +270,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for listDataStores");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<ListPreferenceFilesResult>(
         "list_data_stores",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, adapterName },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `List data stores timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      const resultPromise = this.context.requestManager.register<ListPreferenceFilesResult>(
-        requestId,
-        "list_data_stores",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `List data stores timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.listDataStores({ requestId, packageName, adapterName }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent list_data_stores request (requestId: ${requestId}, packageName: ${packageName}, adapterName: ${adapterName})`,
-      );
-
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to list data stores");
@@ -406,42 +317,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for getDataStore");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<GetPreferencesResult>(
         "get_data_store",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, adapterName, storeName },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Get data store timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      const resultPromise = this.context.requestManager.register<GetPreferencesResult>(
-        requestId,
-        "get_data_store",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Get data store timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.getDataStore({ requestId, packageName, adapterName, storeName }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent get_data_store request (requestId: ${requestId}, packageName: ${packageName}, adapterName: ${adapterName}, storeName: ${storeName})`,
-      );
-
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to get data store entries");
@@ -472,46 +360,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for subscribeStorage");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<SubscribeStorageResult>(
         "subscribe_storage",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Subscribe storage timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<SubscribeStorageResult>(
-        requestId,
-        "subscribe_storage",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Subscribe storage timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.subscribeStorage({ requestId, packageName, fileName }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent subscribe_storage request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success || !result.subscription) {
         throw new Error(result.error || "Failed to subscribe to storage");
@@ -538,46 +399,19 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for unsubscribeStorage");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<UnsubscribeStorageResult>(
         "unsubscribe_storage",
-        this.context.timer,
-        this.context.idGenerator,
+        { subscriptionId },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Unsubscribe storage timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<UnsubscribeStorageResult>(
-        requestId,
-        "unsubscribe_storage",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Unsubscribe storage timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.unsubscribeStorage({ requestId, subscriptionId }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent unsubscribe_storage request (requestId: ${requestId}, subscriptionId: ${subscriptionId})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to unsubscribe from storage");
@@ -591,6 +425,66 @@ export class CtrlProxyStorage {
       logger.warn(`[CTRL_PROXY] unsubscribeStorage failed after ${duration}ms: ${error}`);
       throw error;
     }
+  }
+
+  private sendStorageCommand<T>(
+    operation: string,
+    params: Record<string, unknown>,
+    options: {
+      timeoutMs: number;
+      timeoutError: (timeoutMs: number) => T;
+      unsupportedCommandError: (messageType: string, error: string) => T;
+      onDispatch?: () => void;
+      /** Optional capability reads have already connected before querying the handshake. */
+      connected?: true;
+      managerId?: boolean;
+      checkAmbientAbort?: boolean;
+    },
+  ): Promise<T> {
+    const ensureConnected = options.connected
+      ? async () => true
+      : () => this.context.ensureConnected();
+    // The old writes checked ambient cancellation immediately after connecting, even
+    // when connecting returned false. Keep that fence without adding in-flight abort.
+    const checkAbort = options.checkAmbientAbort
+      ? () => getAbortSignal()?.throwIfAborted()
+      : undefined;
+    return sendCommand<T>(
+      {
+        ...this.context,
+        ensureConnected,
+        // Storage historically bypassed the generic command gate. Optional reads retain
+        // their advertised-command prechecks above; no new wire deadline fields are added.
+        isCommandSupported: undefined,
+        wireDeadlineParams: undefined,
+      },
+      {
+        ...options,
+        idPrefix: operation,
+        responseType: operation,
+        messageType: operation,
+        createRequestId: options.managerId
+          ? undefined
+          : () => {
+              checkAbort?.();
+              return createTimestampedId(operation, this.context.timer, this.context.idGenerator);
+            },
+        // These storage types are not normalized by the Android serializer. createMessage
+        // preserves their builders' type, requestId, params ordering and undefined omission.
+        params,
+        cancelScreenshotBackoff: false,
+        notConnectedError: () => {
+          checkAbort?.();
+          throw new Error("Failed to connect to accessibility service");
+        },
+        timeoutError: options.timeoutError,
+        onDispatch: (requestId) => {
+          options.onDispatch?.();
+          logger.debug(`[CTRL_PROXY] Sent ${operation} request (requestId: ${requestId})`);
+        },
+        unsupportedCommandError: options.unsupportedCommandError,
+      },
+    );
   }
 
   /**
@@ -639,47 +533,25 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for getPreference");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<GetPreferenceResult>(
         "get_preference",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName, key },
+        {
+          timeoutMs,
+          unsupportedCommandError: (_type, error) => ({
+            success: false,
+            found: false,
+            totalTimeMs: 0,
+            error,
+          }),
+          timeoutError: () => ({
+            success: false,
+            found: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Get preference timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<GetPreferenceResult>(
-        requestId,
-        "get_preference",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          found: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Get preference timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.getPreference({ requestId, packageName, fileName, key }),
-      );
-      ws.send(message);
-      logger.debug(
-        `[CTRL_PROXY] Sent get_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to get preference");
@@ -715,55 +587,21 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      getAbortSignal()?.throwIfAborted();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for setPreference");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<SetPreferenceResult>(
         "set_preference",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName, key, value, valueType: type },
+        {
+          timeoutMs,
+          checkAmbientAbort: true,
+          onDispatch,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Set preference timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<SetPreferenceResult>(
-        requestId,
-        "set_preference",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Set preference timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.setPreference({
-          requestId,
-          packageName,
-          fileName,
-          key,
-          value,
-          valueType: type,
-        }),
-      );
-      ws.send(message);
-      onDispatch?.();
-      logger.debug(
-        `[CTRL_PROXY] Sent set_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to set preference");
@@ -795,48 +633,21 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      getAbortSignal()?.throwIfAborted();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for removePreference");
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<RemovePreferenceResult>(
         "remove_preference",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName, key },
+        {
+          timeoutMs,
+          checkAmbientAbort: true,
+          onDispatch,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Remove preference timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<RemovePreferenceResult>(
-        requestId,
-        "remove_preference",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Remove preference timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.removePreference({ requestId, packageName, fileName, key }),
-      );
-      ws.send(message);
-      onDispatch?.();
-      logger.debug(
-        `[CTRL_PROXY] Sent remove_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to remove preference");
@@ -866,50 +677,21 @@ export class CtrlProxyStorage {
     const startTime = this.context.timer.now();
 
     try {
-      // Ensure WebSocket connection is established
-      const connected = await this.context.ensureConnected();
-      getAbortSignal()?.throwIfAborted();
-      if (!connected) {
-        logger.warn(
-          "[CTRL_PROXY] Failed to establish WebSocket connection for clearPreferenceStore",
-        );
-        throw new Error("Failed to connect to accessibility service");
-      }
-
-      const requestId = createTimestampedId(
+      const result = await this.sendStorageCommand<ClearPreferencesResult>(
         "clear_preferences",
-        this.context.timer,
-        this.context.idGenerator,
+        { packageName, fileName },
+        {
+          timeoutMs,
+          checkAmbientAbort: true,
+          onDispatch,
+          unsupportedCommandError: (_type, error) => ({ success: false, totalTimeMs: 0, error }),
+          timeoutError: () => ({
+            success: false,
+            totalTimeMs: this.context.timer.now() - startTime,
+            error: `Clear preferences timeout after ${timeoutMs}ms`,
+          }),
+        },
       );
-
-      // Create promise that will be resolved when we receive the result
-      const resultPromise = this.context.requestManager.register<ClearPreferencesResult>(
-        requestId,
-        "clear_preferences",
-        timeoutMs,
-        (_id, _type, _timeout) => ({
-          success: false,
-          totalTimeMs: this.context.timer.now() - startTime,
-          error: `Clear preferences timeout after ${timeoutMs}ms`,
-        }),
-      );
-
-      // Send the request
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.clearPreferences({ requestId, packageName, fileName }),
-      );
-      ws.send(message);
-      onDispatch?.();
-      logger.debug(
-        `[CTRL_PROXY] Sent clear_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`,
-      );
-
-      // Wait for response
-      const result = await resultPromise;
 
       if (!result.success) {
         throw new Error(result.error || "Failed to clear preferences");

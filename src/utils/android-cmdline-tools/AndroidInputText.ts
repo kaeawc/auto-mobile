@@ -1,7 +1,9 @@
 import type { ExecResult } from "../../models";
+import { runOutsideRequestContext } from "../AbortContext";
 import type { Timer } from "../interfaces/Timer";
 import { logger } from "../logger";
 import { raceWithDeadline } from "../raceWithDeadline";
+import { AdbCommandTimeoutError } from "./AdbClient";
 import type { AdbExecuteOptions, AdbExecutor } from "./interfaces/AdbExecutor";
 
 /** Only the argv execution seam is needed, including for cancellation cleanup. */
@@ -10,6 +12,9 @@ export interface AndroidInputTextExecutor extends Pick<AdbExecutor, "execute"> {
 export const INPUT_TEXT_SETTLEMENT_BASE_MS = 3_000;
 export const INPUT_TEXT_SETTLEMENT_PER_CHAR_MS = 4;
 export const INPUT_TEXT_SETTLEMENT_MAX_MS = 30_000;
+/** API 31+ host wait: measured ~15-18 ms per char on an API 36 emulator (#12566). */
+export const INPUT_TEXT_HOST_WAIT_PER_CHAR_MS = 20;
+export const INPUT_TEXT_HOST_WAIT_MAX_MS = 60_000;
 const INPUT_TEXT_POLL_MS = 75;
 const INPUT_TEXT_PROBE_MS = 500;
 const MAX_PID_LINE_LENGTH = 32;
@@ -27,6 +32,17 @@ export async function executeAndroidInputText(
   command: string,
   { apiLevel, textLength, ...options }: AndroidInputTextOptions,
 ): Promise<ExecResult> {
+  const input = command.slice("shell ".length);
+  const binderClient = apiLevel === null || apiLevel >= 31;
+  if (binderClient) {
+    return executeUntilHostExit(
+      adb,
+      timer,
+      `echo $$; exec ${apiLevel === null ? "" : "cmd "}${input}`,
+      textLength,
+      options,
+    );
+  }
   let pid: number | undefined;
   let firstLine = "";
   let readFirstLine = false;
@@ -50,10 +66,8 @@ export async function executeAndroidInputText(
     }
   };
   try {
-    // API 31+ cmd is a binder client: system_server keeps typing if it dies.
-    // Its natural exit is the completion signal. Pre-31 input execs app_process.
-    const input = command.slice("shell ".length);
-    const script = `echo $$; exec ${apiLevel !== null && apiLevel >= 31 ? "cmd " : ""}${input}`;
+    // Pre-31 input execs app_process, so the guest PID is the typing process itself.
+    const script = `echo $$; exec ${input}`;
     return await adb.execute(["shell", script], {
       ...options,
       // noRetry is forced: replay could launch an untracked, partially duplicated guest.
@@ -71,11 +85,102 @@ export async function executeAndroidInputText(
         INPUT_TEXT_SETTLEMENT_MAX_MS,
         INPUT_TEXT_SETTLEMENT_BASE_MS + INPUT_TEXT_SETTLEMENT_PER_CHAR_MS * textLength,
       );
-      // An unknown API must not risk killing a binder client and releasing early.
-      await settleGuestInput(adb, timer, pid, apiLevel !== null && apiLevel < 31, settlementMs);
+      await settleGuestInput(adb, timer, pid, true, settlementMs);
     }
     // The caller's cancellation/timeout contract must survive best-effort cleanup.
     throw error;
+  }
+}
+
+/**
+ * API 31+ (and unknown API): `cmd input text` is only a binder client and system_server types.
+ * Killing the host adb client closes the shell stream and kills `cmd`, yet typing continues
+ * with nothing left to observe (#12566). So the host client is never given the request's abort
+ * signal or timeout (nor the ambient request signal): cancel or timeout only stops waiting for
+ * a result, then holds until the host exits on its own, which is when typing is complete.
+ */
+async function executeUntilHostExit(
+  adb: AndroidInputTextExecutor,
+  timer: Timer,
+  script: string,
+  textLength: number,
+  { signal, timeoutMs, ...options }: AdbExecuteOptions,
+): Promise<ExecResult> {
+  signal?.throwIfAborted();
+  const holdMs = hostWaitMs(textLength);
+  const hostController = new AbortController();
+  let typingStarted = false;
+  const host = runOutsideRequestContext(() =>
+    adb.execute(["shell", script], {
+      ...options,
+      // noRetry is forced: replay could launch an untracked, partially duplicated guest.
+      noRetry: true,
+      // The adb client would otherwise apply its own 15 s default and kill `cmd` mid-typing:
+      // the caller's budget plus the hold is the backstop for a host that never exits.
+      timeoutMs: (timeoutMs ?? 0) + holdMs,
+      signal: hostController.signal,
+      // The `echo $$` line proves the guest shell is running, so typing may have begun.
+      onStdout: (chunk) => {
+        typingStarted ||= chunk.length > 0;
+      },
+    }),
+  );
+  let hostExited = false;
+  const markExited = () => {
+    hostExited = true;
+  };
+  host.then(markExited, markExited);
+  try {
+    return await raceWithDeadline(host, {
+      timer,
+      timeoutMs,
+      signal,
+      label: "Android input text",
+      timeoutError: () =>
+        new AdbCommandTimeoutError(`Android input text timed out after ${timeoutMs}ms`),
+    });
+  } catch (error) {
+    if (!hostExited) {
+      if (!typingStarted) {
+        // Nothing reached system_server yet: killing the host cannot strand typing, and it
+        // stops a stalled dispatch from typing after the caller has moved on.
+        hostController.abort(error);
+      }
+      await waitForHostExit(timer, host, holdMs);
+      // Past the hold the caller moves on; do not let a stuck host type late.
+      hostController.abort(error);
+    }
+    // The caller's cancellation/timeout contract must survive the wait.
+    throw error;
+  }
+}
+
+function hostWaitMs(textLength: number): number {
+  return Math.min(
+    INPUT_TEXT_HOST_WAIT_MAX_MS,
+    INPUT_TEXT_SETTLEMENT_BASE_MS + INPUT_TEXT_HOST_WAIT_PER_CHAR_MS * textLength,
+  );
+}
+
+async function waitForHostExit(
+  timer: Timer,
+  host: Promise<ExecResult>,
+  settlementMs: number,
+): Promise<void> {
+  logger.warn(`[ADB input text] Cancelled; holding for the host client up to ${settlementMs}ms`);
+  try {
+    await raceWithDeadline(
+      host.then(
+        () => undefined,
+        () => undefined,
+      ),
+      { timer, timeoutMs: settlementMs, label: "Android input text host settlement" },
+    );
+  } catch (error) {
+    logger.warn(
+      `[ADB input text] Host client settlement deadline expired after ${settlementMs}ms`,
+      error,
+    );
   }
 }
 

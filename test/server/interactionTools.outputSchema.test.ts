@@ -297,7 +297,10 @@ function indexSource(
       }
       if (ts.isObjectBindingPattern(node.name)) {
         for (const element of node.name.elements) {
-          if (ts.isIdentifier(element.name)) {
+          // A name already bound to its own initializer (e.g. a handler built inside
+          // the factory being destructured) must not be rebound to the whole factory
+          // call, or the audit walks every sibling handler it returns.
+          if (ts.isIdentifier(element.name) && !index.bindings.has(element.name.text)) {
             index.bindings.set(element.name.text, node.initializer);
           }
         }

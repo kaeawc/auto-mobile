@@ -606,10 +606,7 @@ async function checkDeviceWorkProfileAccessibility(
     const profileProbe = remainingDoctorProbe(currentProbe);
     const result = await deviceAdb.executeCommand(
       `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
-      profileProbe.timeoutMs,
-      undefined,
-      true,
-      profileProbe.signal,
+      { timeoutMs: profileProbe.timeoutMs, noRetry: true, signal: profileProbe.signal },
     );
     remainingDoctorProbe(currentProbe);
     const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);

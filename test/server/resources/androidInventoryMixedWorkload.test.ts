@@ -100,20 +100,20 @@ test("five busy emulators retain inventory with retryable responses within the 2
   const sessions = load.devices.map((device, index) =>
     load
       .adb(device)
-      .executeCommand(
-        index % 2 ? "shell screenrecord /fake/capture" : "exec-out screencap -p",
-        60_000,
-        undefined,
-        true,
-      ),
+      .executeCommand(index % 2 ? "shell screenrecord /fake/capture" : "exec-out screencap -p", {
+        timeoutMs: 60_000,
+        noRetry: true,
+      }),
   );
   await new Promise<void>((resolve) => setImmediate(resolve));
   setDeviceLockProbe(async (device) => {
-    await load.adb(device).executeCommand("shell fake-lock", 30_000, undefined, true);
+    await load.adb(device).executeCommand("shell fake-lock", { timeoutMs: 30_000, noRetry: true });
     return false;
   });
   setServiceStatusProbe(async (device) => {
-    await load.adb(device).executeCommand("shell fake-service", 30_000, undefined, true);
+    await load
+      .adb(device)
+      .executeCommand("shell fake-service", { timeoutMs: 30_000, noRetry: true });
     return undefined;
   });
   const start = timer.now();

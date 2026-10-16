@@ -56,3 +56,51 @@ describe("collectSourceFacts (mutations the guards rely on)", () => {
     expect(typeofComparisons).toEqual(["result.stdout===string", "result.stderr===string"]);
   });
 });
+
+describe("collectSourceFacts scoping and call facts", () => {
+  const source = `class A {
+    one() { this.daemonManager.restart(); }
+    two() { serverConfig.isFooEnabled(); isDebugModeEnabled(); }
+    three() { other.kill(); }
+  }`;
+  const scoped = (options: Parameters<typeof collectSourceFacts>[1]) =>
+    collectSourceFacts(parseGuardSource("a.ts", source), options);
+
+  test("method scope sees only that method's calls and identifiers", () => {
+    const two = scoped({ method: "two" });
+    expect(two.calledMembers).toEqual(["serverConfig.isFooEnabled"]);
+    expect(two.calledNames).toContain("isDebugModeEnabled");
+    expect(two.calledMethodNames).toEqual(["isFooEnabled"]);
+    expect(two.identifierNames).not.toContain("daemonManager");
+  });
+
+  test("between scope spans from one method start to the next, exclusive", () => {
+    const span = scoped({ between: ["one", "three"] });
+    expect(span.identifierNames).toContain("daemonManager");
+    expect(span.calledMethodNames).toEqual(["restart", "isFooEnabled"]);
+  });
+
+  test("unscoped facts include property-name identifiers and any-receiver method calls", () => {
+    const all = scoped(undefined);
+    expect(all.identifierNames).toContain("daemonManager");
+    expect(all.calledMethodNames).toContain("kill");
+  });
+
+  test("an unknown method fails loudly", () => {
+    expect(() => scoped({ method: "missing" })).toThrow("method missing not found");
+  });
+});
+
+describe("collectSourceFacts receivers and private names", () => {
+  test("member-call receivers use the last property segment; private names are identifiers", () => {
+    const f = collectSourceFacts(
+      parseGuardSource(
+        "a.ts",
+        `class A { #daemonManager = 1; m() { this.serverConfig.isXEnabled(); cfg.isYEnabled(); Bun.spawnSync(); } }`,
+      ),
+    );
+    expect(f.calledMembers).toEqual(["serverConfig.isXEnabled", "cfg.isYEnabled", "Bun.spawnSync"]);
+    expect(f.identifierNames).toContain("daemonManager");
+    expect(f.calledMethodNames).toContain("spawnSync");
+  });
+});

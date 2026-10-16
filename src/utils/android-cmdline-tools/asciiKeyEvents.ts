@@ -18,7 +18,7 @@ import { shellQuote } from "../shellQuote";
 /** A sequence of `adb shell input ...` commands that types a single character. */
 export interface KeyEventPlan {
   commands: string[];
-  /** Original input-text run length; omitted for single-character key-event plans. */
+  /** Longest input-text command length; omitted for single-character key-event plans. */
   textLength?: number;
 }
 
@@ -156,4 +156,23 @@ export function buildAndroidInputTextCommand(text: string): string {
     throw new Error("input text cannot carry an empty value or a literal %s");
   }
   return `shell input text ${shellQuote(text.replaceAll(" ", "%s"))}`;
+}
+
+/** Longest `input text` command, so a cancel stops between commands (#12599). */
+export const ANDROID_INPUT_TEXT_CHUNK_CHARS = 32;
+
+/**
+ * Plan for a run of printable ASCII: one `input text` command per
+ * {@link ANDROID_INPUT_TEXT_CHUNK_CHARS} characters. On API 31+ the host `cmd` client exits once
+ * the events are handed to the system, long before the app consumes them, so only a short
+ * command bounds how much typing a cancel can leave behind.
+ */
+export function buildAndroidInputTextPlan(text: string): KeyEventPlan {
+  const commands: string[] = [];
+  for (let start = 0; start < text.length; start += ANDROID_INPUT_TEXT_CHUNK_CHARS) {
+    commands.push(
+      buildAndroidInputTextCommand(text.slice(start, start + ANDROID_INPUT_TEXT_CHUNK_CHARS)),
+    );
+  }
+  return { commands, textLength: Math.min(text.length, ANDROID_INPUT_TEXT_CHUNK_CHARS) };
 }

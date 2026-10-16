@@ -246,13 +246,11 @@ export class Window implements WindowInterface {
 
     try {
       const { stdout } = await perf.track("adbDumpsysWindowWindows", () =>
-        this.adb.executeCommand(
-          `shell "dumpsys window windows"`,
-          remainingMs(),
-          undefined,
-          true,
+        this.adb.executeCommand(`shell "dumpsys window windows"`, {
+          timeoutMs: remainingMs(),
+          noRetry: true,
           signal,
-        ),
+        }),
       );
 
       // Detect API level for parsing strategy. An abort during this sub-read
@@ -366,13 +364,11 @@ export class Window implements WindowInterface {
     activityName: string;
   } | null> {
     try {
-      const { stdout } = await this.adb.executeCommand(
-        `shell "dumpsys window"`,
+      const { stdout } = await this.adb.executeCommand(`shell "dumpsys window"`, {
         timeoutMs,
-        undefined,
-        true,
+        noRetry: true,
         signal,
-      );
+      });
       return parseDumpsysWindowFocus(stdout);
     } catch (err) {
       if (signal?.aborted) {

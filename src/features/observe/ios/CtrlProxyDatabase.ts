@@ -5,7 +5,7 @@
  * so SQLite access happens inside the app process.
  */
 
-import { sendCommand } from "../DeviceServiceUtils";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import type {
   DatabaseInfo,
@@ -222,7 +222,7 @@ export class CtrlProxyDatabase {
       requireExistingConnection: true,
       cancelScreenshotBackoff: false,
       notConnectedError: () => {
-        throw new Error("WebSocket not connected");
+        throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
       },
       unsupportedCommandError: (_type, error) => {
         throw new Error(error);

@@ -172,10 +172,7 @@ export class ExecuteGesture extends BaseVisualChange {
         options.displayFence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
+          { signal },
         );
       });
       throwIfAborted(signal);
@@ -289,10 +286,7 @@ export class ExecuteGesture extends BaseVisualChange {
         fence.assertCurrent();
         await this.adb.executeCommand(
           `shell input swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
+          { signal },
         );
       });
       throwIfAborted(signal);
@@ -499,10 +493,7 @@ export class ExecuteGesture extends BaseVisualChange {
           fence?.assertCurrent();
           await this.adb.executeCommand(
             `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${inputDurationArgument(duration)}`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
+            { signal },
           );
           throwIfAborted(signal);
         }

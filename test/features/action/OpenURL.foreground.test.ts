@@ -2,7 +2,6 @@ import { expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { OpenURL, waitForIosForegroundChange } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
-import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -35,13 +34,7 @@ const openWithForeground = async (url: string, before: string, after: string[]) 
     BaseVisualChange.prototype,
     "observedInteraction",
   ).mockImplementation(async (block) => block(observation(before)));
-  const action = new OpenURL(
-    simulator,
-    new FakeAdbExecutor(),
-    simctl as unknown as SimCtlClient,
-    null,
-    timer,
-  );
+  const action = new OpenURL(simulator, new FakeAdbExecutor(), simctl, null, timer);
   action.observeScreen = observe;
   try {
     const result = await action.execute(url);

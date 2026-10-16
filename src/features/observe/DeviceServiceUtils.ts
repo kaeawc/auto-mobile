@@ -22,6 +22,8 @@ import type {
 // Connection Utilities
 // =============================================================================
 
+export const WEBSOCKET_NOT_CONNECTED_MESSAGE = "WebSocket not connected";
+
 /**
  * Options for WebSocket connection management.
  */
@@ -401,7 +403,7 @@ function dispatchCommand<T>(
     if (!options.abortSignal?.aborted) {
       const ws = context.getWebSocket();
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
+        throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
       }
       if (
         options.requiredCapability &&

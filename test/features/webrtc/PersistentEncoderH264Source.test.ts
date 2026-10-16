@@ -157,9 +157,9 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     create() {
       return {
         getAdbPathOnly: async () => "adb",
-        executeCommand: (command: string, timeoutMs?: number) => {
+        executeCommand: (command: string, options?: { timeoutMs?: number }) => {
           commands.push(command);
-          commandCalls.push({ command, timeoutMs });
+          commandCalls.push({ command, timeoutMs: options?.timeoutMs });
           if (hangCommands.some((sub) => command.includes(sub))) {
             return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
           }

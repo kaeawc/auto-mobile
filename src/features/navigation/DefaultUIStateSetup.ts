@@ -733,13 +733,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Android supports coordinate taps, which preserve the established
       // scrim-dismissal behavior. iOS has no equivalent public interaction
       // tool, so it proceeds to the single platform-aware back fallback.
-      await this.adb.executeCommand(
-        "shell input tap 50 50",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      await this.adb.executeCommand("shell input tap 50 50", { signal });
       throwIfAborted(signal);
       await this.sleep(SCRIM_TAP_DISMISS_SETTLE_MS, signal);
       if (await this.isModalConfirmedDismissed(modal, platform, signal)) {

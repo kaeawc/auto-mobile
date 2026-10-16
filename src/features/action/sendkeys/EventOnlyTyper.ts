@@ -1,3 +1,4 @@
+import type { TypingSession } from "./TypingSession";
 import type { AndroidModeTyper, AndroidModeTypeRequest } from "./AndroidModeTyper";
 import type { SendKeysObserver, SendKeysOperation, TextActionResult } from "../SendKeys";
 import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
@@ -9,6 +10,7 @@ import { logger } from "../../../utils/logger";
 
 type InputHierarchy = NonNullable<ObserveResult["viewHierarchy"]>;
 export interface EventOnlyTyperHost {
+  session: TypingSession;
   adb: AdbExecutor;
   observer: Pick<SendKeysObserver, "execute">;
   getKeyEventPlan(char: string, signal?: AbortSignal): Promise<KeyEventPlan | null>;
@@ -29,7 +31,6 @@ export interface EventOnlyTyperHost {
     before?: string,
   ): Promise<TextActionResult>;
   supportsAndroidKeyCombination(signal?: AbortSignal): Promise<boolean>;
-  isCaretUnsafe(): boolean;
   preExistingFieldText(hierarchy: InputHierarchy, operation: SendKeysOperation): string;
   markPartialAfterMutation(result: TextActionResult): TextActionResult;
 }
@@ -80,7 +81,7 @@ export class EventOnlyTyper implements AndroidModeTyper {
     // Pre-existing text must not satisfy the case read-back for the newly inserted region.
     const beforeText = this.host.preExistingFieldText(focusResult.hierarchy, operation);
     let mutated = operation === "replace";
-    if (this.host.isCaretUnsafe()) {
+    if (this.host.session.androidCaretUnsafe) {
       return {
         success: false,
         error: "eventOnly requires a known caret; use eventAll insertion or move the caret first",

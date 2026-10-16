@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import type { Program } from "oxc-parser";
+import { parseGuardSource } from "../../lint/astGuard";
+import { collectSourceFacts } from "../../lint/sourceFacts";
 import { TOOL_DEFINITION_AFFECTING_FLAGS } from "../../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagKey } from "../../../src/features/featureFlags/FeatureFlagDefinitions";
 
-// Source-scan drift guard (issue #2963): TOOL_DEFINITION_AFFECTING_FLAGS is a
+// AST drift guard (issue #2963): TOOL_DEFINITION_AFFECTING_FLAGS is a
 // hand-maintained set that must stay in sync with the config the tool-list output
 // actually depends on. `getToolDefinitions` decides the advertised outputSchema and
 // `getToolAvailabilityGateReasons` decides tool availability — both in toolRegistry.ts.
-// This test extracts every config getter those two methods call and asserts each maps
+// This test parses the module (oxc) and extracts every config getter those two methods call and asserts each maps
 // to a flag that is (or is deliberately excluded from) the set. If a new getter is
 // added without updating this mapping, the test fails loudly pointing the author here.
 
@@ -29,61 +32,35 @@ const CONFIG_GETTER_TO_FLAG: Record<string, FeatureFlagKey | null> = {
   isEmbeddedSdkEnabled: null,
 };
 
-/** Brace-match the body of a method given its name, so we scan only that method. */
-function extractMethodBody(source: string, methodName: string): string {
-  const signatureIndex = source.indexOf(`${methodName}(`);
-  if (signatureIndex === -1) {
-    throw new Error(`Method ${methodName} not found in toolRegistry.ts`);
-  }
-  // Skip the parameter list first — a default like `= {}` would otherwise be
-  // mistaken for the body's opening brace.
-  let cursor = source.indexOf("(", signatureIndex);
-  let parenDepth = 0;
-  for (; cursor < source.length; cursor++) {
-    if (source[cursor] === "(") {
-      parenDepth++;
-    } else if (source[cursor] === ")") {
-      parenDepth--;
-      if (parenDepth === 0) {
-        cursor++;
-        break;
-      }
-    }
-  }
-  const openBrace = source.indexOf("{", cursor);
-  let depth = 0;
-  for (let i = openBrace; i < source.length; i++) {
-    if (source[i] === "{") {
-      depth++;
-    } else if (source[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        return source.slice(openBrace, i + 1);
-      }
-    }
-  }
-  throw new Error(`Unbalanced braces scanning ${methodName}`);
-}
-
-/** Config getters that select tool-list shape or availability, referenced in a body. */
-function findConfigGetters(body: string): string[] {
+/**
+ * Config getters that select tool-list shape or availability, referenced in one method:
+ * `serverConfig.isXxxEnabled()` calls plus the bare imported `isDebugModeEnabled()`.
+ */
+function findConfigGetters(program: Program, method: string): string[] {
+  const facts = collectSourceFacts(program, { method });
   const getters = new Set<string>();
-  // serverConfig.isXxxEnabled()
-  for (const match of body.matchAll(/serverConfig\.(is\w+Enabled)\(\)/g)) {
-    getters.add(match[1]);
+  // `serverConfig.isXEnabled()` and `this.serverConfig.isXEnabled()`
+  for (const member of facts.calledMembers) {
+    const match = /^serverConfig\.(is\w+Enabled)$/.exec(member);
+    if (match) {
+      getters.add(match[1]);
+    }
   }
-  // bare isDebugModeEnabled() (imported free function, not on serverConfig)
-  for (const match of body.matchAll(/\b(isDebugModeEnabled)\(\)/g)) {
-    getters.add(match[1]);
+  // The imported free function, bare or reached through a namespace/receiver.
+  if (
+    facts.calledNames.includes("isDebugModeEnabled") ||
+    facts.calledMethodNames.includes("isDebugModeEnabled")
+  ) {
+    getters.add("isDebugModeEnabled");
   }
   return [...getters];
 }
 
 describe("TOOL_DEFINITION_AFFECTING_FLAGS drift guard", () => {
-  const source = fs.readFileSync(TOOL_REGISTRY_PATH, "utf8");
+  const program = parseGuardSource(TOOL_REGISTRY_PATH, fs.readFileSync(TOOL_REGISTRY_PATH, "utf8"));
   const gettersUsed = [
-    ...findConfigGetters(extractMethodBody(source, "getToolDefinitions")),
-    ...findConfigGetters(extractMethodBody(source, "getToolAvailabilityGateReasons")),
+    ...findConfigGetters(program, "getToolDefinitions"),
+    ...findConfigGetters(program, "getToolAvailabilityGateReasons"),
   ];
 
   test("the tool-list methods actually reference some config getters (scan is live)", () => {

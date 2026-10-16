@@ -950,7 +950,7 @@ export class DisplayConfig {
    */
   private async run(adb: AdbExecutor, command: string, setting: string): Promise<string> {
     try {
-      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const result = await adb.executeCommand(command, { noRetry: true });
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
@@ -974,7 +974,7 @@ export class DisplayConfig {
    */
   private async runChecked(adb: AdbExecutor, command: string, setting: string): Promise<string[]> {
     try {
-      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const result = await adb.executeCommand(command, { noRetry: true });
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {

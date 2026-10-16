@@ -219,7 +219,7 @@ const SEARCH_BUDGET_MS = 20_000;
  * successfully still hits the transport's fixed deadline and gets its
  * accumulated `fields` results discarded by a bare `-32001` timeout.
  *
- * `setUIStateHandler` (`src/server/formTools.ts`) now recovers the ACTUAL
+ * the `createSetUIStateHandler` handler (`src/server/formTools.ts`) now recovers the ACTUAL
  * transport deadline when the call was daemon-forwarded (issue #6222 P1) and
  * passes it into `execute()` as `transportDeadlineMs`, in which case it --
  * minus `PER_FIELD_ADMISSION_HEADROOM_MS` -- takes over as the bound (see
@@ -304,7 +304,7 @@ export class SetUIState extends BaseVisualChange {
    * @param signal - Optional abort signal
    * @param transportDeadlineMs - Absolute wall-clock deadline (same clock as
    *   `this.timer.now()`) of the CURRENT MCP request, when known. This is the
-   *   real transport deadline the caller (`setUIStateHandler`) recovered from
+   *   real transport deadline the caller (`createSetUIStateHandler`'s handler) recovered from
    *   the daemon-forwarded request's own budget -- accounting for time
    *   already spent queued -- NOT a fresh clock started here. When provided,
    *   field admission is bounded by this deadline (minus

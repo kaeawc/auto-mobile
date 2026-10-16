@@ -19,6 +19,7 @@ import {
 } from "./IosSdkTrigger";
 import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // The biometric prompt needs a brief settle before verification.
 export const BIOMETRIC_PROMPT_SETTLE_MS = 100;
@@ -191,9 +192,8 @@ export class BiometricAuth extends BaseVisualChange {
         return result;
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false,
-        timeoutMs: 5000,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
+        timeoutMs: SETTLE_BUDGET_MS.lifecycle,
         progress,
         perf,
       },

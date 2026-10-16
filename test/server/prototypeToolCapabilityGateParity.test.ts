@@ -33,6 +33,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     stateKey: "name",
     label: "Liked",
   }),
+  prototype_text_field_actions_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    trailingIcon: { icon: "close", label: "Clear" },
+  }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
   prototype_pager_options_v1: {
     ...fixture({

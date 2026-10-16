@@ -20,7 +20,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
-`mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
@@ -51,7 +51,7 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `multiTouch`, `observe`, `openLink`,
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
@@ -229,6 +229,38 @@ quantize very short strokes, so treat durations below roughly 50 ms as a "very f
 fling" request rather than exact timing; the effective minimum on each platform is not
 yet measured. Verify the resulting velocity on
 a device when a test depends on a pager or dismiss threshold.
+
+### Multi-finger gestures
+
+`multiTouch` performs a simultaneous 2 to 5 finger `tap`, `longPress`, or `swipe`.
+It is a dedicated tool (default-off, like `pinchOn`) rather than a `fingers` option on
+`tapAt`/`swipeOn`: it keeps the multi-pointer wire request, finger layout and capability
+gate in one place, and leaves the single-finger tools unchanged. `tapOn`/`tapAny`
+element targeting, `swipeAt` coordinate-to-coordinate travel, and multi-finger
+`doubleTap` are not covered.
+
+- **Layout.** `x`/`y` (with `coordinateSpace`) is the center of a horizontal row of
+  fingers, `fingerSpacing` px apart (default 10% of the width, kept within 40 to 160;
+  allowed 10 to 400). The row is shifted to stay on screen; a row wider than the
+  screen is refused. Fingers share one stroke, so a left or right swipe leaves the
+  fingers trailing each other along the travel axis; swipe up or down for fingers
+  side by side. The result's `points` lists every down point and `x1`/`y1`/`x2`/`y2`
+  the first finger's stroke.
+- **Swipe.** `direction` is required, and `distance` (default 30% of the travel axis) is
+  clamped to the room left so every finger stays on screen; a swipe with under 20 px of
+  room is refused, and a clamp is reported in `warning`.
+- **Duration.** `tap` holds 50 ms. `longPress` takes `durationMs` 500 to 3000 (default 1000) and `swipe` 1 to 3000 (default 300); the cap is the 5000 ms gesture request
+  minus 2000 ms of dispatch headroom.
+- **Layers.** With `layer`, every finger's down point is checked before dispatch.
+- **Android.** Two fingers use the existing CtrlProxy request. Three to five fingers
+  need the `multi_finger_gesture_v1` capability: an older APK would silently perform
+  two fingers, so the request is refused before dispatch with an actionable error.
+- **iOS.** The same fingers go through the runner's multi-finger stroke. A request that
+  was written but not acknowledged is reported as `outcomeIndeterminate` and is not
+  retryable, because it may already have landed.
+- **Limits.** A stationary stroke (tap, long press) relies on the platform accepting a
+  zero-length multi-finger path; how apps see that on each OS is unverified until it is
+  checked on a device.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
@@ -1200,20 +1232,21 @@ settled screenshot is eligible.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                                                                                                                |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                    |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                  |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                              |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                             |
+| Tool                          | What it does                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                            |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`. |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                       |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                                       |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                              |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                          |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                      |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                     |
 
 ### Tap, swipe, and form search options
 

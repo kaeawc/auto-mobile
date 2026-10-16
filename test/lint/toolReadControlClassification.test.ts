@@ -103,6 +103,7 @@ const CLASSIFICATION: Classification = {
     "openLink",
     "phoneCall",
     "pinchOn",
+    "multiTouch",
     "postNotification",
     "pressButton",
     "putAppFile",

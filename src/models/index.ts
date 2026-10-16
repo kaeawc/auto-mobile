@@ -77,6 +77,7 @@ export * from "./ShakeOptions";
 export * from "./ShakeResult";
 export * from "./SwipeResult";
 export * from "./SwipeOnOptions";
+export * from "./MultiTouchOptions";
 export * from "./SwipeOnResult";
 export * from "./SystemInsets";
 export * from "./ObservationInsets";

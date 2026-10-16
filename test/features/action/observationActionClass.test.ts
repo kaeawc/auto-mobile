@@ -33,6 +33,7 @@ const advertisedClasses = {
   biometricAuth: "unknown",
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
+  multiTouch: "unknown",
   pinchOn: "unknown",
   pressButton: "unknown", // Missing button; argument-dependent cases are pinned below.
   rotate: "unknown",

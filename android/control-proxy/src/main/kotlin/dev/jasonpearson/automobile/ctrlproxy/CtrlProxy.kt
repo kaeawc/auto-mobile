@@ -5500,7 +5500,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val path =
           Path().apply {
             moveTo(stroke.startX, stroke.startY)
-            lineTo(stroke.endX, stroke.endY)
+            // A stationary stroke (multi-finger tap / long press) is a bare moveTo, like a tap.
+            if (stroke.startX != stroke.endX || stroke.startY != stroke.endY) {
+              lineTo(stroke.endX, stroke.endY)
+            }
           }
         builder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
       }

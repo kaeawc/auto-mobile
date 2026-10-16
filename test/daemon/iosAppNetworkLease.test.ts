@@ -7,7 +7,7 @@ import {
   IosAppNetworkRuleClient,
   type IosAppNetworkRenewResult,
   type IosAppNetworkRule,
-} from "../../src/features/network-filter/IosAppNetworkRuleClient";
+} from "../../src/features/networkFilter/IosAppNetworkRuleClient";
 import { logger } from "../../src/utils/logger";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { FakeTimer } from "../fakes/FakeTimer";

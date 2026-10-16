@@ -165,7 +165,7 @@ After placing the signed app in `/Applications`, invoke its executable:
 
 Every command prints exactly one line of JSON on stdout, then exits. The daemon
 runs the installed controller as a subprocess and parses this line
-(`src/features/network-filter/NetworkFilterBridge.ts`); it never talks XPC to
+(`src/features/networkFilter/NetworkFilterBridge.ts`); it never talks XPC to
 the provider, which only accepts peers signed by its own team. The types live in
 `Sources/NetworkFilterCore/ControllerContract.swift`.
 

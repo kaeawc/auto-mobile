@@ -106,6 +106,7 @@ import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import { AndroidCtrlProxyDelegatingFacade } from "./AndroidCtrlProxyDelegatingFacade";
 import { AndroidDeviceStateSync } from "./AndroidDeviceStateSync";
 import { AndroidScreenshotCapture } from "./AndroidScreenshotCapture";
+import { AndroidActionDispatcher } from "./AndroidActionDispatcher";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -1587,6 +1588,36 @@ export class AndroidCtrlProxyClient
     this.getScreenshotCapture().resetA11yScreenshotSupport();
   }
 
+  private actionDispatcher: AndroidActionDispatcher | undefined;
+  private getActionDispatcher(): AndroidActionDispatcher {
+    if (!this.actionDispatcher) {
+      const client = this;
+      this.actionDispatcher = new AndroidActionDispatcher({
+        get timer() {
+          return client.timer;
+        },
+        get requestManager() {
+          return client.requestManager;
+        },
+        get pendingFocusedInputClickIds() {
+          return client.pendingFocusedInputClickIds;
+        },
+        get supportedCommands() {
+          return client.supportedCommands;
+        },
+        awaitActionWork: (work, signal) => client.awaitActionWork(work, signal),
+        awaitCancellableRequest: (requestId, promise, signal, startTime) =>
+          client.awaitCancellableRequest(requestId, promise, signal, startTime),
+        connectWebSocket: (perf) => client.connectWebSocket(perf),
+        waitForHandshake: (timeoutMs, signal) => client.waitForHandshake(timeoutMs, signal),
+        isCommandSupported: (messageType) => client.isCommandSupported(messageType),
+        cancelScreenshotBackoff: () => client.cancelScreenshotBackoff(),
+        createDelegateContext: () => client.createDelegateContext(),
+      });
+    }
+    return this.actionDispatcher;
+  }
+
   private getServiceRecovery(): AndroidServiceRecovery {
     if (!this.serviceRecovery) {
       const client = this;
@@ -2432,67 +2463,43 @@ export class AndroidCtrlProxyClient
   async requestAction(
     action: string,
     resourceId?: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.dispatchActionRequest(
+    return this.getActionDispatcher().requestAction(
       action,
-      (requestId) =>
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
-        ),
+      resourceId,
       timeoutMs,
       perf,
+      selector,
       signal,
     );
   }
 
   async requestClickFocusedInput(
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    try {
-      return await this.dispatchActionRequest(
-        "click",
-        (requestId) => {
-          this.pendingFocusedInputClickIds.add(requestId);
-          return serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestClickFocusedInput({ requestId }),
-          );
-        },
-        timeoutMs,
-        perf,
-        signal,
-      );
-    } finally {
-      this.pendingFocusedInputClickIds.clear();
-    }
+    return this.getActionDispatcher().requestClickFocusedInput(timeoutMs, perf, signal);
   }
 
-  /**
-   * Very old runners reject the focused-input click during decoding without echoing its id; settle
-   * the pending clicks so the host can fall back instead of timing out.
-   */
   private settleUnattributedFocusedClickRejection(
     requestId: string | null | undefined,
     rejectedCommand: string | undefined,
     errorText: string,
   ): void {
-    if (requestId || rejectedCommand !== "request_click_focused_input") {
-      return;
-    }
-    for (const id of this.pendingFocusedInputClickIds) {
-      this.requestManager.resolveError(id, errorText);
-    }
+    this.getActionDispatcher().settleUnattributedFocusedClickRejection(
+      requestId,
+      rejectedCommand,
+      errorText,
+    );
   }
 
   /** These legacy client requests bypass the generic capability/deadline gate. */
-  private async sendClientCommand<
-    T extends { success: boolean; totalTimeMs: number; error?: string },
-  >(
+  private sendClientCommand<T extends { success: boolean; totalTimeMs: number; error?: string }>(
     requestId: string,
     serializeRequest: (requestId: string) => string,
     options: Pick<
@@ -2502,196 +2509,38 @@ export class AndroidCtrlProxyClient
     cancellation?: { signal: AbortSignal | undefined; startTime: number },
     perf?: PerformanceTracker,
   ): Promise<T> {
-    const dispatch = () =>
-      sendCommand<T>(
-        {
-          ...this.createDelegateContext(),
-          isCommandSupported: undefined,
-          wireDeadlineParams: undefined,
-          serializeRequest: () => serializeRequest(requestId),
-        },
-        {
-          ...options,
-          responseError: options.responseError ?? null,
-          idPrefix: options.responseType,
-          createRequestId: () => requestId,
-          requireExistingConnection: true,
-          cancelScreenshotBackoff: false,
-          // A socket lost after the caller's connection check must take its catch path.
-          notConnectedError: () => {
-            throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
-          },
-          unsupportedCommandError: (_type, error) => {
-            throw new Error(error);
-          },
-        },
-      );
-    const { promise } = perf
-      ? await perf.track("sendRequest", async () => ({ promise: dispatch() }))
-      : { promise: dispatch() };
-    // sendCommand's abortSignal rejects. These callers instead settle a typed
-    // cancellation through RequestManager, including an abort during ws.send.
-    return cancellation
-      ? this.awaitCancellableRequest(
-          requestId,
-          promise,
-          cancellation.signal,
-          cancellation.startTime,
-        )
-      : promise;
-  }
-
-  private async dispatchActionRequest(
-    action: string,
-    serializeRequest: (requestId: string) => string,
-    timeoutMs: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    const startTime = this.timer.now();
-    const combinedSignal = combineWithAmbientAbort(signal);
-    let pendingRequestId: string | undefined;
-    let dispatched = false;
-
-    this.cancelScreenshotBackoff();
-
-    try {
-      const connected = await this.awaitActionWork(
-        () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
-        combinedSignal,
-      );
-      combinedSignal?.throwIfAborted();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for action");
-        return {
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-          dispatched: false,
-          acknowledged: false,
-        };
-      }
-
-      const requestId = this.requestManager.generateId("action");
-      pendingRequestId = requestId;
-      logger.debug(
-        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
-      );
-
-      const cancellableAction = this.sendClientCommand<A11yActionResult>(
-        requestId,
-        serializeRequest,
-        {
-          responseType: "action",
-          messageType: "request_action",
-          timeoutMs,
-          beforeSend: () => combinedSignal?.throwIfAborted(),
-          onDispatch: () => {
-            dispatched = true;
-            logger.debug(
-              `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
-            );
-          },
-          timeoutError: (timeout) => ({
-            success: false,
-            action,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Action timeout after ${timeout}ms`,
-            acknowledged: false,
-          }),
-          responseError: (error, totalTimeMs) => ({
-            success: false,
-            action,
-            totalTimeMs,
-            error,
-            acknowledged: true,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-        perf,
-      );
-
-      const result = await perf.track("waitForAction", () => cancellableAction);
-      combinedSignal?.throwIfAborted();
-      const clientDuration = this.timer.now() - startTime;
-
-      if (result.success) {
-        logger.debug(
-          `[CTRL_PROXY] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`,
-        );
-      } else {
-        logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
-      }
-
-      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
-    } catch (error) {
-      if (pendingRequestId) {
-        this.requestManager.resolveError(
-          pendingRequestId,
-          String(error),
-          this.timer.now() - startTime,
-        );
-      }
-      // A unit test reached the real WebSocket factory; fail it, never report a failed action.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
-      return {
-        success: false,
-        action,
-        totalTimeMs: duration,
-        error: `${error}`,
-        dispatched,
-        acknowledged: false,
-      };
-    }
+    return this.getActionDispatcher().sendClientCommand<T>(
+      requestId,
+      serializeRequest,
+      options,
+      cancellation,
+      perf,
+    );
   }
 
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector, signal);
+    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
   }
 
   async supportsNodeActionSelectors(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const combinedSignal = combineWithAmbientAbort(signal);
-    const connected = await this.awaitActionWork(
-      () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
-      combinedSignal,
-    );
-    combinedSignal?.throwIfAborted();
-    if (connected && this.supportedCommands === null) {
-      await this.waitForHandshake(undefined, combinedSignal);
-    }
-    combinedSignal?.throwIfAborted();
-    // Unknown selector support must stay closed: an old runner could click the wrong repeated node.
-    return (
-      connected &&
-      this.supportedCommands !== null &&
-      this.isCommandSupported("node_selector_actions")
-    );
+    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal);
   }
 
   public async supportsCommand(name: string): Promise<boolean> {
     return (await this.getSupportedCommands())?.includes(name) === true;
   }
 
-  async supportsAccessibilityLinkActivation(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<boolean> {
-    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
-    if (connected && this.supportedCommands === null) {
-      await this.waitForHandshake();
-    }
-    return connected && this.isCommandSupported("request_activate_accessibility_link");
+  async supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean> {
+    return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
   }
 
   // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
@@ -2700,89 +2549,20 @@ export class AndroidCtrlProxyClient
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<A11yActionResult> {
-    const startTime = this.timer.now();
-    const action = "activate_accessibility_link";
-    const combinedSignal = combineWithAmbientAbort(signal);
-    const checkCancellation = (): void => combinedSignal?.throwIfAborted();
-    let requestId: string | undefined;
-    let dispatched = false;
-    const unconfirmed = (error: string): A11yActionResult => ({
-      success: false,
-      action,
-      totalTimeMs: this.timer.now() - startTime,
-      error,
-      dispatched,
-      acknowledged: false,
-      ...(dispatched ? { retryable: false } : {}),
-    });
-    try {
-      const supported = await this.awaitActionWork(
-        () => this.supportsAccessibilityLinkActivation(perf),
-        combinedSignal,
-      );
-      checkCancellation();
-      if (!supported) {
-        return unconfirmed(
-          "Connected Android runner does not support semantic accessibility-link activation",
-        );
-      }
-      requestId = this.requestManager.generateId("accessibility-link");
-      const result = await this.sendClientCommand<A11yActionResult>(
-        requestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestActivateAccessibilityLink({
-              requestId,
-              text,
-              occurrence,
-              selector,
-            }),
-          ),
-        {
-          responseType: "accessibility-link",
-          messageType: "request_activate_accessibility_link",
-          timeoutMs,
-          beforeSend: checkCancellation,
-          onDispatch: () => {
-            dispatched = true;
-            onDispatch?.();
-          },
-          timeoutError: () =>
-            unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
-          responseError: (error, totalTimeMs) => ({
-            success: false,
-            action,
-            totalTimeMs,
-            error,
-            acknowledged: true,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-      );
-      checkCancellation();
-      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
-    } catch (error) {
-      if (requestId) {
-        this.requestManager.resolveError(
-          requestId,
-          errorMessage(error),
-          this.timer.now() - startTime,
-        );
-      }
-      // A unit test reached the real WebSocket factory; fail it, never report an unconfirmed activation.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
-      return unconfirmed(errorMessage(error));
-    } finally {
-      if (!dispatched) {
-        checkCancellation();
-      }
-    }
+    return this.getActionDispatcher().requestActivateAccessibilityLink(
+      text,
+      occurrence,
+      selector,
+      timeoutMs,
+      perf,
+      signal,
+      onDispatch,
+    );
   }
 
   async requestClipboard(

@@ -14,6 +14,9 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
+/** Enough turns to settle a barrier-tracked write behind the claim mutex. */
+const DRAIN_TURNS = 10;
+
 const IDLE_MS = 60_000;
 const DEFAULT_HEARTBEAT_MS = 4_000;
 const CLI_IDLE_MS = 600_000;
@@ -179,7 +182,7 @@ describe("SessionLivenessController", () => {
         timer.advanceTime(2_000);
         controller.recordHeartbeat("s1");
       }
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
 
       expect(port.activityWrites).toEqual([]);
       expect(port.barrier.trackCalls).toBe(0);
@@ -193,7 +196,7 @@ describe("SessionLivenessController", () => {
 
       controller.recordHeartbeat("s1");
       controller.recordHeartbeat("s1");
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
 
       expect(port.activityWrites).toEqual([session]);
       expect(port.barrier.trackCalls).toBe(1);
@@ -208,7 +211,7 @@ describe("SessionLivenessController", () => {
       timer.advanceTime(2_000);
 
       controller.recordHeartbeat("s1");
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
 
       expect(session.lastOwnerHeartbeat).toBe(timer.now());
       expect(session.hasReceivedHeartbeat).toBe(true);
@@ -334,7 +337,7 @@ describe("SessionLivenessController", () => {
       port.ownershipWrite = () => gate.promise;
       const first = controller.claimLivenessOwnership("s1", "token-a");
       const second = controller.claimLivenessOwnership("s1", "token-b");
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
 
       // The second claim has not been judged while the first holds the mutex.
       expect(port.ownerViewCalls).toEqual(["s1"]);
@@ -398,7 +401,7 @@ describe("SessionLivenessController", () => {
       expect(controller.claimUnownedLivenessOwnership("s1", "token-a")).toBe(true);
       expect(session.livenessOwnerToken).toBe("token-a");
       expect(session.lastOwnerHeartbeat).toBe(timer.now());
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
 
       expect(port.replacedOwnership).toEqual([["s1", "token-a"]]);
       expect(controller.hasLivenessOwnership("s1", "token-a")).toBe(true);
@@ -431,7 +434,7 @@ describe("SessionLivenessController", () => {
         throw new DeviceSessionNotActiveError("s1");
       };
       expect(controller.claimUnownedLivenessOwnership("s1", "token-a")).toBe(true);
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
       expect(session.livenessOwnerToken).toBe("token-a");
     });
 
@@ -441,7 +444,7 @@ describe("SessionLivenessController", () => {
         throw new Error("secret-token-a leaked in a driver message");
       };
       expect(controller.claimUnownedLivenessOwnership("s1", "token-a")).toBe(true);
-      await drainMicrotasks();
+      await drainMicrotasks(DRAIN_TURNS);
       expect(session.livenessOwnerToken).toBe("token-a");
     });
   });

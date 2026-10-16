@@ -40,6 +40,7 @@ fi
 current="$(
   find src -type f -name '*.ts' -print0 \
     | xargs -0 awk -v max="$MAX" '
+        { sub(/\r$/, "") }
         NF { count[FILENAME]++ }
         END { for (file in count) if (count[file] > max) print count[file] "\t" file }
       ' \

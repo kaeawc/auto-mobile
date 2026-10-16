@@ -22,36 +22,9 @@ import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessCon
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
-import {
-  acceptancePresentationOrder,
-  acquisitionLifecycleTimeoutError,
-  cancelUnownedColdBootUnlessRetryable,
-  describeStartDeviceRequest,
-  getAndroidSchema,
-  getAppleSchema,
-  getDeviceToolsDependencies,
-  initializedDevicePool,
-  reserveAndroidStartupLease,
-  reserveStableDeviceLifecycle,
-  resolveAndroidStartStableDeviceLifecycleTarget,
-  runWithinShutdownDeadline,
-  setAcquisitionStage,
-  validateRequestedAndroidIdentifiersBeforeBoot,
-} from "./deviceTools";
-import type {
-  AcquisitionStage,
-  DevicePreparationBudgets,
-  DeviceToolsDependencies,
-  GetAndroidArgs,
-  GetAppleArgs,
-  StableDeviceTarget,
-  StartDeviceArgs,
-} from "./deviceTools";
-import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
-import { admitRestartReservedStart } from "./deviceToolsStartDevice";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { TerminalSessionError } from "../daemon/sessionManager";
 import {
@@ -59,6 +32,31 @@ import {
   resolveLiveTransportDeadlineGetter,
   resolveLiveTransportDeadlineSubscriber,
 } from "./formTools";
+import { reserveAndroidStartupLease } from "./deviceToolsStartupLease";
+import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import {
+  AcquisitionStage,
+  DevicePreparationBudgets,
+  DeviceToolsDependencies,
+  GetAndroidArgs,
+  GetAppleArgs,
+  StableDeviceTarget,
+  StartDeviceArgs,
+  acceptancePresentationOrder,
+  acquisitionLifecycleTimeoutError,
+  admitRestartReservedStart,
+  cancelUnownedColdBootUnlessRetryable,
+  describeStartDeviceRequest,
+  getAndroidSchema,
+  getAppleSchema,
+  getDeviceToolsDependencies,
+  initializedDevicePool,
+  reserveStableDeviceLifecycle,
+  resolveAndroidStartStableDeviceLifecycleTarget,
+  runWithinShutdownDeadline,
+  setAcquisitionStage,
+  validateRequestedAndroidIdentifiersBeforeBoot,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 // Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
@@ -242,7 +240,7 @@ async function reserveStartStableDeviceLifecycle(
 
 /**
  * A name is a selector, and simulator display names are not unique: like the boot's own match it
- * skips the simulators managed slots hold (#11174, #11565). When only those match, the pick stays
+ * skips the simulators broker bindings hold (#11174, #11565). When only those match, the pick stays
  * managed and the caller refuses it as it refuses an explicit UDID.
  */
 async function matchIosSimulatorSkippingManaged(
@@ -251,8 +249,7 @@ async function matchIosSimulatorSkippingManaged(
   deviceMatcher: DeviceMatcher,
 ): Promise<DeviceInfo | null> {
   const managed =
-    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.("ios")) ??
-    new Set<string>();
+    (await bindingPoolGate(initializedDevicePool()).bindingStableIds?.("ios")) ?? new Set<string>();
   const free = simulators.filter(
     (device) => !managed.has(device.deviceId ?? "") && !managed.has(device.name),
   );
@@ -327,7 +324,7 @@ async function resolveStartStableDeviceLifecycleTarget(
     // enabled, not the stable identity of an existing simulator.
     return undefined;
   }
-  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+  await bindingPoolGate(initializedDevicePool()).assertNotAssignedToBinding?.({
     action: budgets.operationName,
     deviceId: match.deviceId,
     platform: "ios",
@@ -365,9 +362,9 @@ async function reserveStartSelectorDeviceLifecycle(
 }
 
 /**
- * An explicit acquisition target (an AVD name or simulator UDID) a managed slot holds is refused
+ * An explicit acquisition target (an AVD name or simulator UDID) a broker binding holds is refused
  * before anything boots or binds it, idle or not (#11174): generic acquisition never lends a
- * slot's device. Selector-based starts skip managed devices instead (see bootAndPrepareDevice).
+ * binding's device. Selector-based starts skip managed devices instead (see bootAndPrepareDevice).
  */
 async function assertStartTargetNotManaged(
   stableTarget: StableDeviceTarget | undefined,
@@ -376,7 +373,7 @@ async function assertStartTargetNotManaged(
   if (!stableTarget) {
     return;
   }
-  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+  await bindingPoolGate(initializedDevicePool()).assertNotAssignedToBinding?.({
     action: operationName,
     deviceId: stableTarget.stableId,
     platform: stableTarget.platform,

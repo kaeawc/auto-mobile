@@ -57,12 +57,12 @@ class AutoMobilePlanRedactionTest {
     fakeDaemonClient.executePlanResponse =
       buildFailureResponse(error = "timed out entering $secret into field")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-plan.yaml",
-      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
 
@@ -116,12 +116,12 @@ class AutoMobilePlanRedactionTest {
     fakeDaemonClient.executePlanResponse =
       buildFailureResponse(error = "timed out entering $secret into field")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-multiline-flow.yaml",
-      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-multiline-flow.yaml",
+        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
     assertFalse(
@@ -152,12 +152,12 @@ class AutoMobilePlanRedactionTest {
     fakeDaemonClient.executePlanResponse =
       buildFailureResponse(error = "boom $secretA and $secretB")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-multiline-quoted-hash.yaml",
-      mapOf("API#TOKEN" to secretA, "PASSWORD" to secretB),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-multiline-quoted-hash.yaml",
+        mapOf("API#TOKEN" to secretA, "PASSWORD" to secretB),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -180,12 +180,12 @@ class AutoMobilePlanRedactionTest {
     fakeDaemonClient.executePlanResponse =
       buildFailureResponse(error = "boom $secretA and $secretB")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-multiline-escaped-quote.yaml",
-      mapOf("a\"]b" to secretA, "PASSWORD" to secretB),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-multiline-escaped-quote.yaml",
+        mapOf("a\"]b" to secretA, "PASSWORD" to secretB),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -206,12 +206,12 @@ class AutoMobilePlanRedactionTest {
     // still cannot leak to the recovery LLM (#6097 — the important security assertion).
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-hex-escape-key.yaml",
-      mapOf("APITOKEN" to secret),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-hex-escape-key.yaml",
+        mapOf("APITOKEN" to secret),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -230,12 +230,12 @@ class AutoMobilePlanRedactionTest {
     val real = "REAL-hex-secret-1a2"
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $real")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-hex-escape-key.yaml",
-      mapOf("APITOKEN" to real, "APIx54OKEN" to "DECOY-not-the-secret"),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-hex-escape-key.yaml",
+        mapOf("APITOKEN" to real, "APIx54OKEN" to "DECOY-not-the-secret"),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -248,17 +248,17 @@ class AutoMobilePlanRedactionTest {
   fun `secret declared only via options secretParameterKeys is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom $secret")
 
-    AutoMobilePlanExecutor.execute(
-      // Reuse the plan but drive the secret purely through options, not the plan's
-      // secretParameters.
-      "test-plans/redaction-plan.yaml",
-      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
-      AutoMobilePlanExecutionOptions(
-        device = "emulator-5554",
-        secretParameterKeys = setOf("ENVIRONMENT"),
-      ),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        // Reuse the plan but drive the secret purely through options, not the plan's
+        // secretParameters.
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+        AutoMobilePlanExecutionOptions(
+          device = "emulator-5554",
+          secretParameterKeys = setOf("ENVIRONMENT"),
+        ),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -271,12 +271,12 @@ class AutoMobilePlanRedactionTest {
   fun `secret substituted into a failing tool name is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom", tool = secret)
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-plan.yaml",
-      mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -292,12 +292,12 @@ class AutoMobilePlanRedactionTest {
     // ZZ after) — neither the raw value nor a fully-resolved fixpoint (#6029 review 695).
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-plan.yaml",
-      mapOf("SECRET_TOKEN" to "sec-\${AA}-\${ZZ}", "AA" to "alpha", "ZZ" to "zeta"),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to "sec-\${AA}-\${ZZ}", "AA" to "alpha", "ZZ" to "zeta"),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -322,12 +322,12 @@ class AutoMobilePlanRedactionTest {
     // so there is no unbounded expansion (#6029 review 701).
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-plan.yaml",
-      mapOf("SECRET_TOKEN" to "marker-\${SECRET_TOKEN}"),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-plan.yaml",
+        mapOf("SECRET_TOKEN" to "marker-\${SECRET_TOKEN}"),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -348,12 +348,12 @@ class AutoMobilePlanRedactionTest {
   fun `parameterized secret key name is redacted`() {
     fakeDaemonClient.executePlanResponse = buildFailureResponse(error = "boom")
 
-    AutoMobilePlanExecutor.execute(
-      "test-plans/redaction-parameterized-key.yaml",
-      mapOf("SECRET_KEY" to "apiToken", "apiToken" to secret),
-      AutoMobilePlanExecutionOptions(device = "emulator-5554"),
-      collaborators = collaborators,
-    )
+    PlanExecutor(collaborators)
+      .execute(
+        "test-plans/redaction-parameterized-key.yaml",
+        mapOf("SECRET_KEY" to "apiToken", "apiToken" to secret),
+        AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      )
 
     val context = requireNotNull(capturingAgent.captured)
     assertFalse(
@@ -377,12 +377,12 @@ class AutoMobilePlanRedactionTest {
     val captured = java.io.ByteArrayOutputStream()
     System.setOut(java.io.PrintStream(captured, true, "UTF-8"))
     try {
-      AutoMobilePlanExecutor.execute(
-        "test-plans/redaction-plan.yaml",
-        mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
-        AutoMobilePlanExecutionOptions(device = "emulator-5554", debugMode = true),
-        collaborators = collaborators,
-      )
+      PlanExecutor(collaborators)
+        .execute(
+          "test-plans/redaction-plan.yaml",
+          mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
+          AutoMobilePlanExecutionOptions(device = "emulator-5554", debugMode = true),
+        )
     } finally {
       System.setOut(originalOut)
     }

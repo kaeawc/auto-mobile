@@ -25,7 +25,7 @@ launch metadata are intentionally excluded.
 | `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                                                         | `file`                                                     |
 | `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                                            | `info`                                                     |
 | `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root, iOS CtrlProxy bundle cache (`ctrl-proxy-ios`), and signing entitlements (`ctrl-proxy/entitlements`); must be an absolute path shared by cooperating agents.             | OS account home `.auto-mobile`                             |
-| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the managed-slot registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server.   | OS account home `.auto-mobile/adb-servers`                 |
+| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the broker binding registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server. | OS account home `.auto-mobile/adb-servers`                 |
 | `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                                                | resolved data directory `tool_outputs`                     |
 | `AUTOMOBILE_DEBUG`                                                                  | Enable CLI debug logging; exact `1` enables; debug mode also asks a capable control-proxy for the IME commit trace and attaches it to `sendKeys` command results as `imeTrace`.                                               | off                                                        |
 | `AUTOMOBILE_DEBUG_PERF`                                                             | Enable UI performance debug tracking; exact `1` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                                              | off                                                        |
@@ -198,10 +198,10 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 
 <div class="environment-variable-table" markdown>
 
-| Variable                           | Use and accepted values                                                                                                                                                                          | Default                     |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults.           | unset; ordinary daemon mode |
-| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with managed-slot configuration, `--initial-session-uuid`, or `--no-proxy`. | unset; ordinary proxy mode  |
+| Variable                           | Use and accepted values                                                                                                                                                                | Default                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults. | unset; ordinary daemon mode |
+| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with `--initial-session-uuid` or `--no-proxy`.                    | unset; ordinary proxy mode  |
 
 </div>
 
@@ -576,24 +576,18 @@ it and learns from the tool-call error:
 }
 ```
 
-| Field                                    | Meaning                                                                                                                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                             |
-| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it).            |
-| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                                |
-| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                                     |
-| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                                        |
-| `recovery.action`                        | `daemon_stalled`: `wait_for_managed_reclaim` for a ready managed connection's slot sessions, otherwise `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`. |
+| Field                                    | Meaning                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
+| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
+| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
+| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
+| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
+| `recovery.action`                        | `daemon_stalled`: `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`.                                                                           |
 
 For `daemon_stalled` on a generic connection the harness restarts the daemon, then resumes each session
 by passing its `sessionUuid` on a tool call: the first call after the error
-re-claims it with the same owner token. A ready managed connection's slot sessions
-instead receive `wait_for_managed_reclaim`: the proxy keeps probing every heartbeat
-interval and reclaims the session itself once a daemon answers again. Do not pass a
-`sessionUuid` or try to acquire a device; retry the call later. The proxy never restarts
-the shared daemon. If no daemon comes back, restarting it or relaunching the execution
-is the runner's decision. If the session turns out to be released, calls answer
-`managed_execution_ended`. For `proxy_stalled` the listed sessions and devices are gone;
+re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
 reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
 or while a session remains handed over, **the proxy never starts or restarts the
 daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
@@ -617,7 +611,7 @@ Managed reclaim awaits reasonless not-found and recoverable daemon handoff answe
 (`daemon-shutdown` or `daemon-restart`) for one existing rehydration window per
 answering daemon process; silence does not reset it, and only an answer naming a
 different daemon instance opens a new window.
-A managed execution's terminal answers, notification and slot resource all name
+A managed execution's terminal answers and notification both name
 the daemon's release reason, falling back to `session-not-found` when none was named.
 
 A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
@@ -700,50 +694,44 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                              | Use and accepted values                                                                                                                                                                                             | Default                                                            |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                                                                           | empty list                                                         |
-| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                                                                           | empty list                                                         |
-| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                                                                               | empty list                                                         |
-| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                                                                              | on                                                                 |
-| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                                                                     | off                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart.                                                    | passive continuity on; active restart off                          |
-| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                                                                     | unset                                                              |
-| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                                                                           | `2`                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                                                                            | `900000` ms                                                        |
-| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                                                                    | `LATEST`                                                           |
-| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                                                                   | off                                                                |
-| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                                                                                  | `60` seconds                                                       |
-| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                                                                         | headless on macOS and Linux without a display; otherwise windowed  |
-| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                                                                   | audio on                                                           |
-| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                                                                               | empty array                                                        |
-| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                                                                       | detect graphical login session                                     |
-| `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot admission gate for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                                                                            | on                                                                 |
-| `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of `AUTOMOBILE_BOOT_CAPACITY_GATE`: exact `0` disables, exact `1` enables; other values defer to the shared switch.                                                                               | unset (follows the shared switch)                                  |
-| `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators used by the boot admission gate; positive integer. Invalid values are ignored with a warning.                                                                          | min(RAM x 0.5 / measured per-emulator RSS, cores / 2), at least 1  |
-| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and the boot admission gate; positive integer. Invalid values are ignored with a warning.                                               | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
-| `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`                                                 | Host-wide total distinct managed Android and iOS resources, separate from boot limits. Positive safe integer; unset/empty disables enforcement. Invalid values warn once per daemon wiring and disable enforcement. | Unset (not enforced)                                               |
-| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                                                                          | `5000` ms                                                          |
+| Variable                                                                              | Use and accepted values                                                                                                                                               | Default                                                            |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                             | empty list                                                         |
+| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                             | empty list                                                         |
+| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                                 | empty list                                                         |
+| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                                | on                                                                 |
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                       | off                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart.      | passive continuity on; active restart off                          |
+| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                       | unset                                                              |
+| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                             | `2`                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                              | `900000` ms                                                        |
+| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                      | `LATEST`                                                           |
+| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                     | off                                                                |
+| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                                    | `60` seconds                                                       |
+| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                           | headless on macOS and Linux without a display; otherwise windowed  |
+| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                     | audio on                                                           |
+| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                                 | empty array                                                        |
+| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                         | detect graphical login session                                     |
+| `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot admission gate for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                              | on                                                                 |
+| `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of `AUTOMOBILE_BOOT_CAPACITY_GATE`: exact `0` disables, exact `1` enables; other values defer to the shared switch.                                 | unset (follows the shared switch)                                  |
+| `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators used by the boot admission gate; positive integer. Invalid values are ignored with a warning.                            | min(RAM x 0.5 / measured per-emulator RSS, cores / 2), at least 1  |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and the boot admission gate; positive integer. Invalid values are ignored with a warning. | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
+| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                            | `5000` ms                                                          |
 
 The Android boot limit is shared by every daemon using the same adb server on one host. Admissions are coordinated through the adb-server directory configured by `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`; every daemon sharing a server must use the same directory. `AUTOMOBILE_COORDINATION_DIR`, `AUTOMOBILE_DATA_DIR` and `AUTOMOBILE_DB_DIR` do not move it, so daemons isolated only by those still share one limit. Daemons on one adb server that are given different `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` values do not see each other's admitted boots (or device claims): each counts only the emulators adb or the process table already shows, and two boots started seconds apart can exceed the limit. The default root is under the home directory the runtime reports for the account, which follows `HOME` under Bun, so daemons started with different `HOME` values must set the variable to one shared path. To isolate a daemon's boot limit, give it its own adb server as well. An unreadable coordination directory refuses boots with retryable `discovery_incomplete`.
 
 </div>
 
-`AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES` is host-wide only when every daemon on the
-host starts with the same value. An unset daemon creates without admission and
-is not ordered against participating daemons. Upgrade all daemons sharing the
-registry together to a build that understands the deletion marker.
-
-Total-resource admission and eviction use the acquisition's preparation deadline;
-a deadline passing during admission returns `timeout`. A deletion journaled but
-unconfirmed in time stays charged until periodic redrive finishes it. Pending
-deletions count as committed room, so only the shortfall not covered by markers
-can evict more cache. A journaled delete is never reverted, including when its
-creation was refused after a transient busy check. Unrelated cache is retained
-while there is headroom. In a budget refusal, `usage.total` includes the refused
-request's own `preparing` reservation and can read as the limit plus one or more.
-See [Total-resource capacity](managed-slots.md#total-resource-capacity) for accounting
-and recovery guidance.
+Broker provisioning counts distinct native resources across active and idle bindings,
+pending creation/deletion journals, and product-owned inventory. Its resource budget
+uses the broker host configuration's `limits.totalDeviceCap`, independently of boot
+limits. An omitted cap disables total-device enforcement; zero refuses new devices.
+Broker admission and the native resource ledger each enforce that same cap without
+adding their counts together. Either can refuse creation, so unaccounted native
+devices and unconfirmed deletions remain charged. A budget refusal is retryable
+`binding_budget_exhausted`; free unused broker resources or raise `limits.totalDeviceCap`
+before retrying. The former
+free-pool eviction and declarative launch configuration are no longer available.
 
 The daemon's passive device work is limited to devices with a session in this
 daemon. At startup, it warms iOS CtrlProxy only for rehydrated sessions. An
@@ -840,7 +828,7 @@ reported (`hostPressure` in the capacity snapshot) but never refuses one.
 A boot over the limit is refused at once; it does not queue against the boot
 budget (#11209). It fails with a retryable error whose `retryAfterMs` (a fixed 5
 seconds: capacity frees when another device shuts down, which takes seconds) says
-when to try again. When emulators AutoMobile did not start occupy slots, the
+when to try again. When emulators AutoMobile did not start occupy boot capacity, the
 message lists them and `externalDevices` carries their serials:
 
 ```json

@@ -25,7 +25,7 @@ import {
   staleDisplayError,
   StaleDisplayError,
   type StaleDisplayDetails,
-} from "../../models/StaleDisplayError";
+} from "../observe/StaleDisplayError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type {
@@ -153,7 +153,7 @@ function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
  */
 export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
-interface ObservedChangeOptions {
+export interface ObservedChangeOptions {
   changeExpected: boolean;
   /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
   foregroundAppMayChange?: boolean;

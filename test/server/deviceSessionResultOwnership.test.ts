@@ -314,7 +314,7 @@ test.each([
   "expired",
   "heartbeat-timeout",
   "owner-disconnected",
-  "managed-slot-ownership-lost",
+  "binding-ownership-lost",
   "explicit-release",
 ])("ownership refusal qualifies only an idle reason: %s", (reason) => {
   const idle = ["cli-idle-timeout", "lazy-expiry", "cleanup-expired", "expired"].includes(reason);

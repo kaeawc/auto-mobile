@@ -90,7 +90,7 @@ export class SessionToolBinding {
    * the bound session's device is not the explicitly requested `deviceId`, return the bound session
    * instead of failing on the binding, so the tool registry decides — a read watches the named
    * device sessionless (reads stay open everywhere, owner decision Q6), and a managed connection's
-   * control call gets its typed `device_outside_managed_slots` refusal (#11271).
+   * control call gets its typed `device_outside_broker_grant` refusal (#11271).
    */
   resolveDeviceSessionUuid(
     mcpSessionId: string | undefined,

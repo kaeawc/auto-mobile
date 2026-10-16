@@ -41,6 +41,14 @@ export {
   type BuildMismatchReason,
 } from "./proxy/daemonErrors";
 import {
+  BoundSessionHeartbeat,
+  type BoundSessionHeartbeatPort,
+} from "./proxy/BoundSessionHeartbeat";
+import {
+  HeldSessionHeartbeatOutcomes,
+  type HeldSessionHeartbeatOutcomesPort,
+} from "./proxy/HeldSessionHeartbeatOutcomes";
+import {
   HeldSessionLosses,
   type HeldSessionLossesPort,
   type PendingHeldSessionLoss,
@@ -50,13 +58,13 @@ import { StallProbe, daemonRestartEvidence, type StallProbePort } from "./proxy/
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
 import {
   ProxySessionState,
+  type DaemonIdleReport,
+  type LatestHeartbeatAsk,
   type OtherHeldSession,
   type StallHandoverRecord,
   type TerminalBoundSession,
 } from "./proxy/ProxySessionState";
 import {
-  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
-  decideNotFoundAnswer,
   isRecoverableHandoffOfOwnedSession,
   type NotFoundAnswerOutcome,
 } from "./proxy/notFoundDecision";
@@ -68,7 +76,6 @@ export {
   type NotFoundAnswerFacts,
 } from "./proxy/notFoundDecision";
 import {
-  reportedOwnerHold,
   isLivenessOwnerConflictError,
   isLivenessOwnershipLostError,
   ackDaemonInstance,
@@ -123,7 +130,6 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
-  DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
@@ -136,12 +142,9 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   releaseReasonFromError,
   daemonInstanceFromError,
-  DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
-  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
-  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
   type DaemonOptions,
@@ -176,11 +179,7 @@ import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../con
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
 
-const {
-  ManagedExecutionRegistrationError,
-  DaemonPreflightConnectionError,
-  HeldSessionNotFoundError,
-} = daemonInternalErrors;
+const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInternalErrors;
 
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
@@ -193,16 +192,7 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
-import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
-import {
-  TimerManagedConnectionRebind,
-  classifyManagedConnectionRebindFailure,
-  type ManagedConnectionRebind,
-} from "./managedSlots/managedConnectionRebind";
-import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
-import { RegistryRetryPacing } from "./managedSlots/registryRetryPacing";
-import type { ManagedSlotConfig } from "../models/managedSlotConfig";
-import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "./sessionBroker/provisioning/executionLiveness";
 import {
   acquireSessionThroughDaemon,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
@@ -238,23 +228,13 @@ import {
   livenessResumedNotice,
   type DaemonRestartEvidence,
   ownershipConflictLeashMs,
-  advanceOwnerConflictLeash,
   type OwnerConflictLeash,
-  type ReportedOwnerHold,
   type LivenessHandover,
   type RecoveryAttemptOutcome,
 } from "./proxyLivenessRecovery";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
-/** The client name a managed slot proxy registers its re-bound connection under (#11178). */
-const MANAGED_SLOT_PROXY_CLIENT_NAME = "auto-mobile-managed-slot-proxy";
-
-interface ManagedExecutionHold {
-  sessionUuid: string;
-  signal: AbortSignal;
-  acknowledgedClient?: DaemonClientLike;
-}
 
 const SESSION_BROKER_PROXY_CLIENT_NAME = "auto-mobile-session-broker-proxy";
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
@@ -303,14 +283,6 @@ function isSuspectRefusalRetryable(
     !isDeviceSessionAcquisitionTool(name) &&
     name !== "setActiveDevice"
   );
-}
-
-/** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
-interface DaemonIdleReport {
-  /** Epoch-ms idle deadline, or null when the daemon explicitly exempts idle release. */
-  releaseAt: number | null;
-  /** Proxy-clock time the ack carrying it arrived. */
-  reportedAt: number;
 }
 
 /** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
@@ -370,8 +342,6 @@ export function resourceUriNamesSession(uri: string): boolean {
   return /^automobile:(?:device-session|observation\/session)\/[^/?#]+/.test(uri);
 }
 
-const NO_HANDOFFS: ReadonlySet<string> = new Set();
-
 function isSessionOwnershipLostError(error: unknown): boolean {
   return (
     error !== null &&
@@ -379,14 +349,6 @@ function isSessionOwnershipLostError(error: unknown): boolean {
     "code" in error &&
     error.code === SESSION_OWNERSHIP_LOST_CODE
   );
-}
-
-/** The latest binding's keeper heartbeat while it is in flight. */
-export interface LatestHeartbeatAsk {
-  /** It was answered not-found, so any further answer is to the second ask. */
-  notFound: boolean;
-  /** That answer named a recoverable handoff, and the heartbeat is asked again for it. */
-  handoff: boolean;
 }
 
 /** Append the resumed-session warning as one more text block of a tool result (#10989). */
@@ -605,24 +567,6 @@ const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
 /** A hint or backoff near zero must not busy-poll the daemon (#11900). */
 const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
 
-/**
- * Record a managed execution's release outcome (#11177). `cleanup_pending` means some of the
- * execution's work outlived the drain budget: the slot keeps its device but its next acquisition
- * waits until that work settles.
- */
-function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): void {
-  const outcome =
-    typeof result === "object" && result !== null && "outcome" in result
-      ? String(result.outcome)
-      : "unknown";
-  const message = `[DaemonMcpProxy] Released managed execution session ${sessionId}: ${outcome}`;
-  if (outcome === "reusable_for_this_slot") {
-    logger.info(message);
-  } else {
-    logger.warn(message);
-  }
-}
-
 export class DaemonMcpProxy {
   private readonly sessionState = new ProxySessionState();
   private readonly lifecycleReconciler: DaemonLifecycleReconciler;
@@ -651,22 +595,21 @@ export class DaemonMcpProxy {
    * heartbeat.
    */
   private heartbeatKeeperStarted = false;
-  /**
-   * What the daemon's latest not-found answer to a liveness recovery heartbeat means, per session,
-   * until recovery acts on that answer.
-   */
-  private readonly recoveryNotFoundOutcomes = new Map<
+  private get recoveryNotFoundOutcomes(): Map<
     string,
     { outcome: NotFoundAnswerOutcome; releaseReason: string | undefined }
-  >();
+  > {
+    return this.sessionState.recoveryNotFoundOutcomes;
+  }
   private get notFoundWindows(): Map<string, { since: number; handoffs: Set<string> }> {
     return this.sessionState.notFoundWindows;
   }
   private get notFoundStopped(): Set<string> {
     return this.sessionState.notFoundStopped;
   }
-  /** Last reported heartbeat answer per tracked session, including a stopped held session. */
-  private readonly sessionDaemonInstances = new Map<string, string>();
+  private get sessionDaemonInstances(): Map<string, string> {
+    return this.sessionState.sessionDaemonInstances;
+  }
   /**
    * The connection that was established with sessions already held, and the sessions the daemon
    * has not yet answered a heartbeat for on it: the latest binding (#11529) and every session held
@@ -677,16 +620,12 @@ export class DaemonMcpProxy {
   private ownershipReestablishment:
     | { client: DaemonClientLike; sessionUuids: Set<string> }
     | undefined;
-  /**
-   * The latest binding's heartbeat in flight, and whether it was answered not-found on a
-   * connection that had answered before. The connection made to ask that once more is this
-   * proxy's own doing, to the daemon it was already talking to: it re-establishes nothing, for
-   * the latest binding or for any session held besides it (#11557). Unless that answer named a
-   * recoverable handoff (`handoff`): the daemon said it is going away or handing the session
-   * back, so the connection may reach its successor, which has rehydrated nothing yet, and every
-   * session held gets its first answer there (#11570).
-   */
-  private latestHeartbeatAsked: LatestHeartbeatAsk | undefined;
+  private get latestHeartbeatAsked(): LatestHeartbeatAsk | undefined {
+    return this.sessionState.latestHeartbeatAsked;
+  }
+  private set latestHeartbeatAsked(value: LatestHeartbeatAsk | undefined) {
+    this.sessionState.latestHeartbeatAsked = value;
+  }
   /**
    * Whether this connection already declared its bound session CLI-owned
    * (issue #6870 review). Once declared, this proxy's remaining heartbeats must
@@ -704,10 +643,15 @@ export class DaemonMcpProxy {
   private get otherHeldSessions(): Map<string, OtherHeldSession> {
     return this.sessionState.otherHeldSessions;
   }
-  /** Supersession is informational; report it at most once per proxy instance. */
-  private livenessSupersessionLogged = false;
-  /** Sessions whose live-owner conflict was already reported, so each tick does not repeat it. */
-  private readonly livenessConflictLogged = new Set<string>();
+  private get livenessSupersessionLogged(): boolean {
+    return this.sessionState.livenessSupersessionLogged;
+  }
+  private set livenessSupersessionLogged(value: boolean) {
+    this.sessionState.livenessSupersessionLogged = value;
+  }
+  private get livenessConflictLogged(): Set<string> {
+    return this.sessionState.livenessConflictLogged;
+  }
   /** How long a refused claim keeps retrying: the other owner's lease plus its grace (#10053). */
   private readonly ownershipConflictLeashMs: number;
   /**
@@ -715,45 +659,48 @@ export class DaemonMcpProxy {
    * sessions. Read from the same `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` override the daemon reads.
    */
   private readonly boundSessionReplayTtlMs = getSessionIdleTimeoutMs();
-  /**
-   * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
-   * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
-   */
-  private latestBindingConflict: ({ sessionUuid: string } & OwnerConflictLeash) | undefined;
-  /**
-   * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
-   * While the previous owner is still heartbeating, its refusals must not fence the binding: the
-   * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
-   */
-  private initialSessionAwaitingFirstCall = false;
-  /**
-   * The terminally released binding whose release a tool call has already been told about
-   * (#10971). From then on, read-only tools are forwarded without a session.
-   */
-  private releaseSurfacedFor: string | undefined;
+  private get latestBindingConflict(): ({ sessionUuid: string } & OwnerConflictLeash) | undefined {
+    return this.sessionState.latestBindingConflict;
+  }
+  private set latestBindingConflict(
+    value: ({ sessionUuid: string } & OwnerConflictLeash) | undefined,
+  ) {
+    this.sessionState.latestBindingConflict = value;
+  }
+  private get initialSessionAwaitingFirstCall(): boolean {
+    return this.sessionState.initialSessionAwaitingFirstCall;
+  }
+  private set initialSessionAwaitingFirstCall(value: boolean) {
+    this.sessionState.initialSessionAwaitingFirstCall = value;
+  }
+  private get releaseSurfacedFor(): string | undefined {
+    return this.sessionState.releaseSurfacedFor;
+  }
+  private set releaseSurfacedFor(value: string | undefined) {
+    this.sessionState.releaseSurfacedFor = value;
+  }
   /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
   private readonly heldSessionLosses: HeldSessionLosses;
+  private readonly heartbeatOutcomes: HeldSessionHeartbeatOutcomes;
+  private readonly boundHeartbeat: BoundSessionHeartbeat;
   private get pendingHeldSessionPlatformLosses(): Map<string, PendingHeldSessionLoss> {
     return this.heldSessionLosses.pending;
   }
-  /** Plain restart losses remain fenced by UUID after their stall handovers end (#12282). */
-  private readonly plainRestartSessionLosses = new Map<string, string>();
+  private get plainRestartSessionLosses(): Map<string, string> {
+    return this.sessionState.plainRestartSessionLosses;
+  }
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
   private livenessRecoveryCallWait: { episode: number; deadline: number } | undefined;
   /** Detects this proxy's own tick firing later than the lease allows. */
   private readonly tickLateness: TickLatenessClock;
-  /** Proxy-clock time of each held session's last acknowledged heartbeat. */
-  private readonly livenessAcks = new Map<string, number>();
-  /**
-   * When the daemon said each held session would be idle-released: the heartbeat ack's
-   * `idleReleaseAt`, an epoch-ms instant on the wall clock both processes read; the daemon converts it from its steady
-   * session clock when reporting (#10823, #11105). The daemon's window comes
-   * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
-   * answers. Absent for a daemon that reports nothing.
-   */
-  private readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
+  private get livenessAcks(): Map<string, number> {
+    return this.sessionState.livenessAcks;
+  }
+  private get daemonIdleReports(): Map<string, DaemonIdleReport> {
+    return this.sessionState.daemonIdleReports;
+  }
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
   /** Platform each acquired session runs on; absent when its result did not describe one. */
@@ -761,25 +708,24 @@ export class DaemonMcpProxy {
   private get stallHandovers(): Map<string, StallHandoverRecord> {
     return this.sessionState.stallHandovers;
   }
-  /**
-   * Sessions resumed after a `daemon_stalled` handover whose next tool call has not run yet: that
-   * call carries the warning instead of the handover's failure (#10989).
-   */
-  private readonly resumedStallNotices = new Map<
+  private get resumedStallNotices(): Map<
     string,
     { handover: LivenessHandover; restart?: DaemonRestartEvidence }
-  >();
-  /**
-   * The daemon process that last acknowledged a heartbeat, as the daemon reports it (#10989). A
-   * stall probe only resumes sessions on this same process; a restarted daemon is left to the
-   * harness, which resumes by naming each session.
-   */
-  private ackedDaemonInstance: string | undefined;
+  > {
+    return this.sessionState.resumedStallNotices;
+  }
+  private get ackedDaemonInstance(): string | undefined {
+    return this.sessionState.ackedDaemonInstance;
+  }
+  private set ackedDaemonInstance(value: string | undefined) {
+    this.sessionState.ackedDaemonInstance = value;
+  }
   /** Keeps probing a daemon that stalled past recovery, so one that resumes is heard (#10989). */
   private readonly stallResumeProbe: SingleFlightInterval;
   private readonly stallProbe: StallProbe;
-  /** Definitively lost sessions awaiting one tool-call delivery; these do not fence lifecycle. */
-  private readonly pendingSessionLosses = new Map<string, LivenessHandover>();
+  private get pendingSessionLosses(): Map<string, LivenessHandover> {
+    return this.sessionState.pendingSessionLosses;
+  }
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
   /** Tool calls currently awaiting an answer on each daemon connection. */
   private readonly toolCallsInFlight = new WeakMap<DaemonClientLike, number>();
@@ -855,24 +801,6 @@ export class DaemonMcpProxy {
   private get claimableSessions(): Set<string> {
     return this.sessionState.claimableSessions;
   }
-  /** Sessions held for a managed slot execution; released promptly on close (#11176). */
-  private readonly managedExecutionSessions = new Set<string>();
-  /** Slot sessions whose acquisition abandoned its hold; never resumed or re-held (#12055). */
-  private readonly abandonedManagedSessions = new Set<string>();
-  /** The managed slot acquisition's result, once it ran (#11173). */
-  private managedSlotsResult: ManagedSlotsResult | undefined;
-  /** The grants' scope is available before their holds finish and publish ready. */
-  private acquiringManagedSlotBinding:
-    | {
-        scopeKey: string;
-        acquisitionClient: DaemonClientLike | null;
-        boundClient?: DaemonClientLike;
-      }
-    | undefined;
-  private managedExecutionHold: ManagedExecutionHold | undefined;
-  private managedConnectionRebind: ManagedConnectionRebind | undefined;
-  /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
-  private managedSlotsAcquisitionAbort: AbortController | undefined;
   /** The durable session broker result exposed by this proxy. */
   private sessionBrokerResult: SessionBrokerResult | undefined;
   /** A ready broker receipt currently held by the heartbeat keeper. */
@@ -1033,17 +961,35 @@ export class DaemonMcpProxy {
     this.tickLateness = new TickLatenessClock(this.heartbeatIntervalMs);
     this.livenessRecovery = this.createLivenessRecovery();
     this.livenessOwnerToken = resolveLivenessOwnerToken(config);
+    this.heartbeatOutcomes = new HeldSessionHeartbeatOutcomes({
+      timer: this.timer,
+      otherHeldSessions: this.sessionState.otherHeldSessions,
+      notFoundWindows: this.sessionState.notFoundWindows,
+      livenessAcks: this.livenessAcks,
+      livenessConflictLogged: this.livenessConflictLogged,
+      livenessRecovery: this.livenessRecovery,
+      ownershipConflictLeashMs: this.ownershipConflictLeashMs,
+      port: this.createHeldSessionHeartbeatOutcomesPort(),
+    });
     this.heldSessionLosses = new HeldSessionLosses(
       this.sessionPlatforms,
       this.createHeldSessionLossesPort(),
     );
+    this.boundHeartbeat = new BoundSessionHeartbeat({
+      timer: this.timer,
+      state: this.sessionState,
+      ownedDeviceSessions: this.ownedDeviceSessions,
+      ownershipConflictLeashMs: this.ownershipConflictLeashMs,
+      heartbeatOutcomes: this.heartbeatOutcomes,
+      heldSessionLosses: this.heldSessionLosses,
+      port: this.createBoundSessionHeartbeatPort(),
+    });
     this.sessionBinding = new SessionBinding(this.createSessionBindingDependencies());
     this.proxyHeartbeatKeeper = new HeartbeatKeeper({
       timer: this.timer,
       state: this.sessionState,
       tickLateness: this.tickLateness,
       livenessRecovery: this.livenessRecovery,
-      managedExecutionSessions: this.managedExecutionSessions,
       heartbeatLeashMs: this.heartbeatLeashMs,
       heartbeatIntervalMs: this.heartbeatIntervalMs,
       boundSessionReplayTtlMs: this.boundSessionReplayTtlMs,
@@ -1063,7 +1009,6 @@ export class DaemonMcpProxy {
     this.stallProbe = new StallProbe({
       timer: this.timer,
       stallHandovers: this.sessionState.stallHandovers,
-      managedExecutionSessions: this.managedExecutionSessions,
       port: this.createStallProbePort(),
     });
     this.stallResumeProbe = new SingleFlightInterval(
@@ -1147,204 +1092,6 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Hold a managed slot execution's session for the execution's lifetime (#11176). The managed
-   * slot acquisition (epic #11172 step 5) calls this once the daemon has put the session on the
-   * `managed-execution` policy. The session is bound like `--initial-session-uuid`, claimed and
-   * heartbeated from now on — not from the first tool call — and released promptly by
-   * {@link close} (stdin EOF, owner loss, or any other shutdown) instead of waiting out the
-   * daemon's no-heartbeat release. Throws when the proxy is closing, already holds a different
-   * binding, or cannot reach the daemon.
-   * When `signal` aborts mid-hold, this method throws and the caller must release what it
-   * tracked — {@link acquireManagedSlots} does.
-   */
-  async holdManagedExecutionSession(sessionUuid: string, signal?: AbortSignal): Promise<void> {
-    try {
-      signal?.throwIfAborted();
-    } catch (error) {
-      throw toActionableError(error, "Failed to hold managed execution session");
-    }
-    const trimmed = sessionUuid.trim();
-    if (trimmed.length === 0) {
-      throw new ActionableError("A managed execution session UUID is required.");
-    }
-    if (this.closing) {
-      throw new DaemonUnavailableError("MCP proxy is closing");
-    }
-    if (this.abandonedManagedSessions.has(trimmed)) {
-      throw new ActionableError(
-        `Cannot hold managed execution session ${trimmed}: this execution's acquisition abandoned it; relaunch the execution.`,
-      );
-    }
-    if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmed) {
-      throw new ActionableError(
-        `Cannot hold managed execution session ${trimmed}: this proxy is already bound to ` +
-          `session ${this.boundSessionUuid}.`,
-      );
-    }
-    this.bindStartupSession(trimmed);
-    this.managedExecutionSessions.add(trimmed);
-    const hold: ManagedExecutionHold = { sessionUuid: trimmed, signal: this.untilClosed(signal) };
-    this.managedExecutionHold = hold;
-    const pacing = new RegistryRetryPacing({ timer: this.timer });
-    try {
-      do {
-        await this.waitForManagedExecutionHold(hold, pacing);
-        this.assertManagedExecutionHoldWanted(hold);
-      } while (!this.managedExecutionHoldAcknowledged(hold));
-      this.syncHeartbeatKeeper();
-    } catch (error) {
-      throw toActionableError(error, `Failed to hold managed execution session ${trimmed}`);
-    } finally {
-      pacing.close();
-      if (this.managedExecutionHold === hold) {
-        this.managedExecutionHold = undefined;
-      }
-    }
-  }
-
-  private assertManagedExecutionHoldWanted(hold: ManagedExecutionHold): void {
-    hold.signal.throwIfAborted();
-    this.throwIfClosing();
-    if (this.terminalBoundSession || this.abandonedManagedSessions.has(hold.sessionUuid)) {
-      throw new ActionableError(`Managed execution session ${hold.sessionUuid} has ended.`);
-    }
-  }
-
-  private managedExecutionHoldAcknowledged(hold: ManagedExecutionHold): boolean {
-    const binding = this.acquiringManagedSlotBinding;
-    return Boolean(
-      this.transportLive &&
-      this.client &&
-      hold.acknowledgedClient === this.client &&
-      (!binding ||
-        binding.acquisitionClient === this.client ||
-        binding.boundClient === this.client),
-    );
-  }
-
-  /** One claim attempt; an acknowledgment on an obsolete connection cannot finish the hold. */
-  private async acknowledgeManagedExecutionHold(hold: ManagedExecutionHold): Promise<boolean> {
-    await this.ensureConnected();
-    this.assertManagedExecutionHoldWanted(hold);
-    // A fresh connection already sent the claim during establishment. On the acquisition's
-    // existing connection send that same first claim here, without an extra round trip.
-    if (hold.acknowledgedClient !== this.client) {
-      await this.sendFirstBoundSessionHeartbeat();
-    }
-    const binding = this.acquiringManagedSlotBinding;
-    if (
-      binding &&
-      binding.acquisitionClient !== this.client &&
-      binding.boundClient !== this.client
-    ) {
-      await this.rebindManagedConnection(this.requireClient());
-    }
-    this.assertManagedExecutionHoldWanted(hold);
-    return this.managedExecutionHoldAcknowledged(hold);
-  }
-
-  private managedExecutionHoldMayRetry(error: unknown): boolean {
-    if (error instanceof ManagedExecutionRegistrationError) {
-      return classifyManagedConnectionRebindFailure(error.cause).action !== "fail";
-    }
-    if (this.isDaemonSessionNotFoundError(error)) {
-      const reason = releaseReasonFromError(error);
-      return reason === undefined || isRecoverableDaemonHandoffReason(reason);
-    }
-    const refusal = error as { code?: unknown; retryable?: unknown } | null;
-    if (refusal?.code === DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE) {
-      return refusal.retryable === true;
-    }
-    return this.isRecoverableDaemonSessionError(error);
-  }
-
-  private async waitForManagedExecutionHold(
-    hold: ManagedExecutionHold,
-    pacing: RegistryRetryPacing,
-  ): Promise<void> {
-    for (let attempt = 1; ; attempt++) {
-      this.assertManagedExecutionHoldWanted(hold);
-      try {
-        const acknowledged = await raceWithDeadline(
-          () => this.acknowledgeManagedExecutionHold(hold),
-          {
-            timer: this.timer,
-            signal: hold.signal,
-            label: "Managed execution session hold",
-          },
-        );
-        if (acknowledged) {
-          return;
-        }
-        throw new DaemonUnavailableError("Managed execution claim lost its daemon connection");
-      } catch (error) {
-        this.assertManagedExecutionHoldWanted(hold);
-        if (!this.managedExecutionHoldMayRetry(error)) {
-          throw error;
-        }
-        // Expected daemon outages and pending rehydration must not publish ready.
-        logger.debug(`[ManagedSlots] Waiting to acknowledge hold for ${hold.sessionUuid}`, error);
-        const registration =
-          error instanceof ManagedExecutionRegistrationError
-            ? classifyManagedConnectionRebindFailure(error.cause)
-            : undefined;
-        if (error instanceof DaemonUnavailableError || registration?.action === "reconnect") {
-          await this.resetConnection();
-        }
-        await pacing.wait(
-          Math.max(pacing.delay(attempt), registration?.retryAfterMs ?? 0),
-          hold.signal,
-        );
-      }
-    }
-  }
-
-  /**
-   * Acquire this execution's managed device slots before the proxy serves `initialize` (#11173):
-   * negotiate `managed-slots/v1`, have the daemon reconcile the slots and hand each a fresh session
-   * claimed for this proxy's owner token, then hold those sessions for the execution. Bounded by
-   * the config's preparation deadline and aborted by {@link close}. Never throws: a failure is a
-   * typed `failed` result, which the MCP server exposes instead of device tools.
-   */
-  async acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> {
-    const abort = new AbortController();
-    let acquiredSessions: readonly string[] = [];
-    this.managedSlotsAcquisitionAbort = abort;
-    try {
-      const result = await acquireManagedSlotsThroughDaemon(
-        config,
-        {
-          ensureConnected: () => this.ensureConnected(),
-          callDaemonMethod: (method, params, options) =>
-            this.requireClient().callDaemonMethod(method, params, options),
-          trackAcquiredSessions: (sessionUuids, scopeKey) => {
-            this.acquiringManagedSlotBinding = scopeKey
-              ? { scopeKey, acquisitionClient: this.client }
-              : undefined;
-            acquiredSessions = sessionUuids.map((id) => id.trim()).filter((id) => id.length > 0);
-            for (const sessionUuid of acquiredSessions) {
-              this.managedExecutionSessions.add(sessionUuid);
-            }
-          },
-          holdSession: (sessionUuid, signal) =>
-            this.holdManagedExecutionSession(sessionUuid, signal),
-          releaseHeldSessions: () => this.abandonManagedExecutionSessions(acquiredSessions),
-          livenessOwnerToken: this.livenessOwnerToken,
-          timer: this.timer,
-        },
-        abort.signal,
-      );
-      this.managedSlotsResult = result;
-      return result;
-    } finally {
-      if (this.managedSlotsAcquisitionAbort === abort) {
-        this.managedSlotsAcquisitionAbort = undefined;
-        this.acquiringManagedSlotBinding = undefined;
-      }
-    }
-  }
-
-  /**
    * Prepare one durable broker request before serving MCP. The helper owns bounded same-request
    * status recovery; a ready result is bound, claimed and heartbeated here.
    */
@@ -1374,7 +1121,7 @@ export class DaemonMcpProxy {
     }
   }
 
-  /** Bind a ready receipt to the existing keeper without enrolling it in managed-slot release. */
+  /** Bind a ready receipt to the existing keeper without enrolling it in broker binding release. */
   private async holdBrokerSession(requestId: string, sessionUuid: string): Promise<void> {
     const trimmedRequestId = requestId.trim();
     const trimmedSessionUuid = sessionUuid.trim();
@@ -1483,11 +1230,11 @@ export class DaemonMcpProxy {
         client.callDaemonMethod(
           DAEMON_RELEASE_BROKER_SESSION_METHOD,
           { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
-          { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+          { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
         ),
       {
         timer: this.timer,
-        timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+        timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
         label: `Release broker session ${sessionUuid}`,
       },
     );
@@ -1558,159 +1305,12 @@ export class DaemonMcpProxy {
     );
   }
 
-  /** The scope and slot sessions this proxy holds after a ready acquisition, if any. */
-  private heldManagedSlotBinding(): { scopeKey: string; sessionUuids: string[] } | undefined {
-    const scopeKey =
-      this.acquiringManagedSlotBinding?.scopeKey ??
-      (this.managedSlotsResult?.outcome === "ready"
-        ? this.managedSlotsResult.scope.scopeKey
-        : null);
-    if (!scopeKey) {
-      return undefined;
-    }
-    const sessionUuids = [...this.managedExecutionSessions];
-    return sessionUuids.length > 0 ? { scopeKey, sessionUuids } : undefined;
-  }
-
-  /**
-   * Re-bind a reconnected socket to this proxy's managed slot sessions through
-   * `daemon/registerSession` (#11178), proven by the owner token the sessions were claimed for.
-   * The first attempt is awaited; transient refusals retry in the background on the same socket.
-   * The daemon confines refused registrations until their held sessions can be proven.
-   */
-  private async rebindManagedConnection(client: DaemonClientLike): Promise<void> {
-    const liveSessions = (sessionUuids: string[]) =>
-      sessionUuids.filter(
-        (uuid) =>
-          this.isHeldSession(uuid) ||
-          (this.claimableSessions.has(uuid) && this.stallHandovers.has(uuid)),
-      );
-    const currentBinding = () => {
-      const binding = this.heldManagedSlotBinding();
-      if (!binding) {
-        return undefined;
-      }
-      const sessionUuids = liveSessions(binding.sessionUuids);
-      // Even an ended execution declares the socket managed so the daemon confines its refusal.
-      return sessionUuids.length > 0 ? { ...binding, sessionUuids } : binding;
-    };
-    const sameSocket = () => !this.closing && this.client === client;
-    const stillWanted = () =>
-      sameSocket() && liveSessions(this.heldManagedSlotBinding()?.sessionUuids ?? []).length > 0;
-    const attempt = async () => {
-      const binding = currentBinding();
-      if (!binding || !sameSocket()) {
-        return;
-      }
-      await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
-        sessionId: binding.sessionUuids[0],
-        clientName: MANAGED_SLOT_PROXY_CLIENT_NAME,
-        managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
-      });
-      if (sameSocket() && this.acquiringManagedSlotBinding?.scopeKey === binding.scopeKey) {
-        this.acquiringManagedSlotBinding.boundClient = client;
-      }
-    };
-    if (!currentBinding() || !sameSocket()) {
-      return;
-    }
-    this.managedConnectionRebind ??= new TimerManagedConnectionRebind(this.timer);
-    try {
-      await attempt();
-    } catch (error) {
-      if (this.acquiringManagedSlotBinding) {
-        // An acquisition cannot publish ready before its replacement socket is bound. Its hold
-        // owns paced retries and turns terminal refusals into execution_hold_failed.
-        throw new ManagedExecutionRegistrationError(error);
-      }
-      // Establishment stays available; retry only while this socket still holds the execution.
-      this.managedConnectionRebind.start(
-        {
-          attempt,
-          stillWanted,
-          describe: () => {
-            const binding = currentBinding();
-            return `${binding?.scopeKey ?? "unknown scope"} sessions ${binding?.sessionUuids.join(", ") ?? "unknown"}`;
-          },
-        },
-        error,
-      );
-    }
-  }
-
-  /** The managed slot acquisition result, once {@link acquireManagedSlots} ran. */
-  getManagedSlotsResult(): ManagedSlotsResult | undefined {
-    return this.managedSlotsResult;
-  }
-
   /** The terminally released binding, excluding a resumable daemon stall, for reporting surfaces (#11712). */
   getTerminalSessionRelease(): { sessionUuid: string; reason: string } | undefined {
     const terminal = this.terminalBoundSession;
     return terminal && terminal.reason !== DAEMON_STALLED_CODE
       ? { sessionUuid: terminal.sessionUuid, reason: terminal.reason }
       : undefined;
-  }
-
-  /** The sessions this proxy holds for a managed execution (#11176). */
-  getManagedExecutionSessions(): string[] {
-    return [...this.managedExecutionSessions];
-  }
-
-  /**
-   * End every managed execution this proxy holds (#11176, #11177) through `daemon/releaseExecution`:
-   * the daemon drains the session's work, releases its live control and keeps the slot's device
-   * assignment, so the device never returns to generic allocation. Bounded so a wedged daemon
-   * cannot hold up shutdown; a failed or timed-out release falls back to the daemon's
-   * owner-disconnect / no-heartbeat release (~10 s), which keeps the assignment the same way.
-   */
-  private async releaseManagedExecutionSessions(): Promise<void> {
-    const client = this.client;
-    const sessions = [...this.managedExecutionSessions];
-    this.managedExecutionSessions.clear();
-    if (!client || sessions.length === 0) {
-      return;
-    }
-    await Promise.all(
-      sessions.map(async (sessionId) => {
-        try {
-          const result: unknown = await client.callDaemonMethod(
-            DAEMON_RELEASE_EXECUTION_METHOD,
-            // The daemon refuses a release by anyone but the session's current owner (#11232).
-            { sessionId, livenessOwnerToken: this.livenessOwnerToken },
-            { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
-          );
-          logManagedExecutionReleaseOutcome(sessionId, result);
-        } catch (error) {
-          logger.warn(
-            `[DaemonMcpProxy] Releasing managed execution session ${sessionId} failed; the daemon ` +
-              `releases it after the no-heartbeat window: ${errorMessage(error)}`,
-            error,
-          );
-        }
-      }),
-    );
-  }
-
-  /** Abandon acquired grants even when close already took their exactly-once release (#12055). */
-  private async abandonManagedExecutionSessions(sessions: readonly string[]): Promise<void> {
-    const releasedSessions = [...new Set([...sessions, ...this.managedExecutionSessions])];
-    for (const sessionUuid of releasedSessions) {
-      this.abandonedManagedSessions.add(sessionUuid);
-    }
-    const releasing = this.releaseManagedExecutionSessions();
-    // Start release first, then drop local targets before awaiting a potentially lost reply.
-    // close owns teardown when closing, including stopping the keeper after its release.
-    if (!this.closing) {
-      if (this.boundSessionUuid !== undefined && releasedSessions.includes(this.boundSessionUuid)) {
-        this.clearBoundSessionUuid();
-      }
-      for (const sessionUuid of releasedSessions) {
-        this.ownedDeviceSessions.delete(sessionUuid);
-        this.claimableSessions.delete(sessionUuid);
-      }
-      this.syncHeartbeatKeeper();
-    }
-    await releasing;
   }
 
   /** Release only this process's ordinary heartbeat holds; harness and CLI holds survive exit. */
@@ -1726,7 +1326,6 @@ export class DaemonMcpProxy {
     const sessions = this.heldSessionUuids().filter(
       (sessionId) =>
         sessionId !== this.config.initialSessionUuid?.trim() &&
-        !this.managedExecutionSessions.has(sessionId) &&
         !this.sessionBrokerSessions.has(sessionId) &&
         !this.releasedSessionReasons.has(sessionId),
     );
@@ -1738,11 +1337,11 @@ export class DaemonMcpProxy {
               client.callDaemonMethod(
                 DAEMON_RELEASE_SESSION_METHOD,
                 { sessionId, livenessOwnerToken: this.livenessOwnerToken },
-                { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+                { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
               ),
             {
               timer: this.timer,
-              timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+              timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
               label: `Release owned session ${sessionId}`,
             },
           );
@@ -2182,17 +1781,15 @@ export class DaemonMcpProxy {
           await this.resumeTokenOwnedSessions(client);
         }
       : () => this.establishBoundSessionHeartbeat(client);
-    // A managed slot connection that reconnects re-binds the new socket to its slot sessions
+    // A broker binding connection that reconnects re-binds the new socket to its binding sessions
     // (#11178); the daemon dropped the old socket's binding when it closed. Other proxies keep
     // their establishment exactly as before.
-    const establishOwnership =
-      this.heldManagedSlotBinding() || this.heldSessionBrokerBinding()
-        ? async () => {
-            await establishBaseOwnership();
-            await this.rebindManagedConnection(client);
-            await this.rebindSessionBrokerConnection(client);
-          }
-        : establishBaseOwnership;
+    const establishOwnership = this.heldSessionBrokerBinding()
+      ? async () => {
+          await establishBaseOwnership();
+          await this.rebindSessionBrokerConnection(client);
+        }
+      : establishBaseOwnership;
 
     return isFirstPresentationProfileApplication
       ? [applyPresentationProfile, establishOwnership]
@@ -2466,7 +2063,7 @@ export class DaemonMcpProxy {
     }
     const handleStallHandoverRelease = (): boolean => {
       const keepsHandover =
-        this.managedExecutionSessions.has(releasedSessionUuid) &&
+        this.sessionBrokerSessions.has(releasedSessionUuid) &&
         this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
         isRecoverableDaemonHandoffReason(notification.reason ?? "");
       if (!keepsHandover) {
@@ -3318,7 +2915,6 @@ export class DaemonMcpProxy {
   private async resetConnection(): Promise<void> {
     const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
-    this.managedConnectionRebind?.cancel();
     this.resourceSubscriptionSync = Promise.resolve();
     this.connected = false;
     this.client = null;
@@ -4302,9 +3898,7 @@ export class DaemonMcpProxy {
     return (
       terminal !== undefined &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
-      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) !== null
-        ? typeof args.deviceId === "string" && args.deviceId.trim().length > 0
-        : this.releaseSurfacedFor === terminal.sessionUuid) &&
+      this.releaseSurfacedFor === terminal.sessionUuid &&
       this.isDeviceReadOnlyTool(name, args)
     );
   }
@@ -5285,7 +4879,6 @@ export class DaemonMcpProxy {
     }
     if (
       sessionId === this.terminalBoundSession?.sessionUuid ||
-      this.abandonedManagedSessions.has(sessionId) ||
       this.otherHeldSessions.has(sessionId) ||
       this.stallHandovers.has(sessionId)
     ) {
@@ -5328,7 +4921,7 @@ export class DaemonMcpProxy {
         throw this.isDaemonSessionNotFoundError(error)
           ? new HeldSessionNotFoundError(
               sessionUuid,
-              this.noteNotFoundAnswer(
+              this.boundHeartbeat.noteNotFoundAnswer(
                 sessionUuid,
                 null,
                 releaseReasonFromError(error),
@@ -5447,18 +5040,13 @@ export class DaemonMcpProxy {
         this.livenessAcks.set(sessionUuid, this.timer.now());
       }
     } catch (error) {
-      if (this.managedExecutionHold?.sessionUuid === sessionUuid) {
-        // Managed holds require an acknowledged claim; their caller retries transient failures.
-        // Keep initial-session and resumed bindings on the existing best-effort path below.
-        throw error;
-      }
       if (this.isDaemonSessionNotFoundError(error) && this.boundSessionUuid === sessionUuid) {
         // The first heartbeat is the session's first answer on the connection just established:
         // decided like every other not-found answer, so only a release reason that ends the
         // session fences it. With no reason the daemon may not have rehydrated it yet (#11570).
-        this.applyNotFoundOutcome(
+        this.boundHeartbeat.applyNotFoundOutcome(
           sessionUuid,
-          this.noteNotFoundAnswer(
+          this.boundHeartbeat.noteNotFoundAnswer(
             sessionUuid,
             null,
             releaseReasonFromError(error),
@@ -5484,27 +5072,13 @@ export class DaemonMcpProxy {
     client: DaemonClientLike,
     sessionUuid: string,
   ): Promise<unknown> {
-    const hold =
-      this.managedExecutionHold?.sessionUuid === sessionUuid
-        ? this.managedExecutionHold
-        : undefined;
     const stopRenewing = this.renewLeaseWhileClaimReplyOutstanding(client, sessionUuid);
     try {
       const claiming = client.callDaemonMethod(
         DAEMON_HEARTBEAT_METHOD,
         this.boundSessionHeartbeatParams(sessionUuid, true, true),
       );
-      const ack = hold
-        ? await raceWithDeadline(claiming, {
-            timer: this.timer,
-            signal: hold.signal,
-            label: "Managed execution claiming heartbeat",
-          })
-        : await claiming;
-      hold?.signal.throwIfAborted();
-      if (hold && this.client === client && this.transportLive && !this.terminalBoundSession) {
-        hold.acknowledgedClient = client;
-      }
+      const ack = await claiming;
       return ack;
     } finally {
       stopRenewing();
@@ -5626,6 +5200,34 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createHeldSessionHeartbeatOutcomesPort(): HeldSessionHeartbeatOutcomesPort {
+    return {
+      isClosing: () => this.closing,
+      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      applyNotFoundOutcome: (...args) => this.boundHeartbeat.applyNotFoundOutcome(...args),
+      recordHeldSessionTerminalLoss: (...args) => this.recordHeldSessionTerminalLoss(...args),
+      dropHeldSession: (...args) => this.dropHeldSession(...args),
+    };
+  }
+
+  private createBoundSessionHeartbeatPort(): BoundSessionHeartbeatPort {
+    return {
+      requireClient: () => this.requireClient(),
+      boundSessionHeartbeatParams: (...args) => this.boundSessionHeartbeatParams(...args),
+      answersOwnershipReestablishment: (...args) => this.answersOwnershipReestablishment(...args),
+      noteHeartbeatDaemonInstance: (...args) => this.noteHeartbeatDaemonInstance(...args),
+      noteDaemonIdleEvidence: (...args) => this.noteDaemonIdleEvidence(...args),
+      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      isHeldSession: (...args) => this.isHeldSession(...args),
+      latestBindingClaimable: () => this.latestBindingClaimable(),
+      withRecoverableReconnect: (...args) => this.withRecoverableReconnect(...args),
+      fenceBoundSessionUuid: (...args) => this.fenceBoundSessionUuid(...args),
+      dropHeldSession: (...args) => this.dropHeldSession(...args),
+      syncHeartbeatKeeper: () => this.syncHeartbeatKeeper(),
+      isClosing: () => this.closing,
+    };
+  }
+
   private createStallProbePort(): StallProbePort {
     return {
       isClosing: () => this.closing,
@@ -5680,7 +5282,6 @@ export class DaemonMcpProxy {
       ownedDeviceSessions: this.ownedDeviceSessions,
       sessionPlatforms: this.sessionPlatforms,
       sessionDeviceIds: this.sessionDeviceIds,
-      managedExecutionSessions: this.managedExecutionSessions,
       sessionBrokerSessions: this.sessionBrokerSessions,
       plainRestartSessionLosses: this.plainRestartSessionLosses,
       pendingHeldSessionPlatformLosses: this.pendingHeldSessionPlatformLosses,
@@ -5721,13 +5322,13 @@ export class DaemonMcpProxy {
       idleSessionReleaseReason: (...args) => this.idleSessionReleaseReason(...args),
       dropHeldSession: (...args) => this.dropHeldSession(...args),
       withRecoverableReconnect: (...args) => this.withRecoverableReconnect(...args),
-      askSessionHeartbeat: (...args) => this.askSessionHeartbeat(...args),
+      askSessionHeartbeat: (...args) => this.boundHeartbeat.askSessionHeartbeat(...args),
       recordHeldSessionHeartbeatSuccess: (...args) =>
         this.recordHeldSessionHeartbeatSuccess(...args),
-      noteLateHeartbeatAck: (...args) => this.noteLateHeartbeatAck(...args),
+      noteLateHeartbeatAck: (...args) => this.heartbeatOutcomes.noteLateHeartbeatAck(...args),
       handleHeldSessionHeartbeatError: (...args) => this.handleHeldSessionHeartbeatError(...args),
       isMissingHeartbeatAcknowledgement: (...args) =>
-        this.isMissingHeartbeatAcknowledgement(...args),
+        this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(...args),
       heldSessionUuids: (...args) => this.heldSessionUuids(...args),
       isClosing: () => this.closing,
     };
@@ -5781,7 +5382,7 @@ export class DaemonMcpProxy {
           kind: "stopped",
         };
         this.recoveryNotFoundOutcomes.delete(sessionUuid);
-        this.applyNotFoundOutcome(sessionUuid, outcome);
+        this.boundHeartbeat.applyNotFoundOutcome(sessionUuid, outcome);
       },
       onHandover: (handover) => this.deliverLivenessHandover(handover),
     });
@@ -5912,7 +5513,7 @@ export class DaemonMcpProxy {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
       const releaseReason = releaseReasonFromError(error);
-      const outcome = this.noteNotFoundAnswer(
+      const outcome = this.boundHeartbeat.noteNotFoundAnswer(
         sessionUuid,
         attemptedClient,
         releaseReason,
@@ -5922,13 +5523,9 @@ export class DaemonMcpProxy {
         outcome,
         releaseReason,
       });
-      return outcome.kind === "awaited" &&
-        (!this.managedExecutionSessions.has(sessionUuid) ||
-          (releaseReason !== undefined && isRecoverableDaemonHandoffReason(releaseReason)))
-        ? "session-awaited"
-        : "session-gone";
+      return outcome.kind === "awaited" ? "session-awaited" : "session-gone";
     }
-    if (!this.isMissingHeartbeatAcknowledgement(error)) {
+    if (!this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered: the session's next answer on this connection is not its first.
       this.answersOwnershipReestablishment(attemptedClient, sessionUuid);
     }
@@ -5936,7 +5533,7 @@ export class DaemonMcpProxy {
       // Another token took the session over while this proxy could not heartbeat it.
       return "superseded";
     }
-    if (!this.isMissingHeartbeatAcknowledgement(error)) {
+    if (!this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered with a conflict refusal: it is reachable, and the regular tick's
       // own conflict handling takes it from here.
       return "acknowledged";
@@ -6273,9 +5870,6 @@ export class DaemonMcpProxy {
     releaseReason: string,
     error: unknown,
   ): boolean {
-    if (this.managedExecutionSessions.has(sessionUuid)) {
-      return false;
-    }
     const answeringDaemonInstance = daemonInstanceFromError(error);
     const restarted =
       record.managedReclaimSince !== undefined ||
@@ -6304,9 +5898,6 @@ export class DaemonMcpProxy {
       return;
     }
     terminal.reason = releaseReason;
-    if (this.managedExecutionSessions.has(sessionUuid)) {
-      terminal.reportedStallLossReason = releaseReason;
-    }
   }
 
   private reportToolSessionLoss(name: string, args: Record<string, unknown>): void {
@@ -6376,134 +5967,17 @@ export class DaemonMcpProxy {
     return this.proxyHeartbeatKeeper.heartbeatWithStallDetection(sessionUuid, send);
   }
 
-  /**
-   * Whether a failed heartbeat means the daemon never answered, as opposed to answering with a
-   * refusal (ownership, unknown session, fenced binding) that its own handler deals with.
-   */
-  private isMissingHeartbeatAcknowledgement(error: unknown): boolean {
-    if (
-      error instanceof DaemonBoundSessionExpiredError ||
-      error instanceof HeldSessionNotFoundError ||
-      this.isDaemonSessionNotFoundError(error)
-    ) {
-      return false;
-    }
-    if (isLivenessOwnerConflictError(error)) {
-      return false;
-    }
-    return !isLivenessOwnershipLostError(error);
-  }
-
-  /**
-   * A heartbeat the keeper had given up on was acknowledged after all (#10973). While the session
-   * is being recovered that acknowledgement is liveness evidence: the daemon renewed the lease, so
-   * recovery ends instead of handing the session over. Outside recovery it changes nothing.
-   */
-  private noteLateHeartbeatAck(sessionUuid: string): void {
-    if (this.livenessRecovery.isRecovering(sessionUuid)) {
-      this.livenessAcks.set(sessionUuid, this.timer.now());
-    }
-  }
-
+  // Kept as named methods: the liveness-clock guard follows the keeper's port to them.
   private recordHeldSessionHeartbeatSuccess(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
+    ...args: Parameters<HeldSessionHeartbeatOutcomes["recordHeldSessionHeartbeatSuccess"]>
   ): void {
-    const held = this.otherHeldSessions.get(sessionUuid);
-    if (held && claimLivenessOwnership) {
-      held.claimSent = true;
-    }
-    if (held) {
-      held.conflict = undefined;
-    }
-    this.notFoundWindows.delete(sessionUuid);
-    this.livenessAcks.set(sessionUuid, this.timer.now());
-    this.livenessConflictLogged.delete(sessionUuid);
+    this.heartbeatOutcomes.recordHeldSessionHeartbeatSuccess(...args);
   }
 
   private handleHeldSessionHeartbeatError(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
-    error: unknown,
+    ...args: Parameters<HeldSessionHeartbeatOutcomes["handleHeldSessionHeartbeatError"]>
   ): void {
-    if (this.closing) {
-      return;
-    }
-    if (isLivenessOwnershipLostError(error)) {
-      // Same informational outcome as the latest binding: no fencing or re-claim.
-      this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
-      return;
-    }
-    if (error instanceof HeldSessionNotFoundError) {
-      // The daemon does not know this session. Unless it is inside its window, drop it once;
-      // retrying every tick would only keep asking, and resetting the socket to ask again would
-      // hurt its siblings.
-      this.applyNotFoundOutcome(sessionUuid, error.outcome);
-      return;
-    }
-    if (isLivenessOwnerConflictError(error)) {
-      this.handleHeldSessionOwnerConflict(sessionUuid, reportedOwnerHold(error));
-      return;
-    }
-    if (error instanceof DaemonBoundSessionExpiredError) {
-      logger.warn(
-        `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating: ${error.message}`,
-        error,
-      );
-      this.recordHeldSessionTerminalLoss(sessionUuid, error.reason, error.release);
-      this.dropHeldSession(sessionUuid);
-      return;
-    }
-    logger.warn(
-      `[DaemonMcpProxy] Heartbeat for held session ${sessionUuid} failed: ${errorMessage(error)}`,
-      error,
-    );
-  }
-
-  /**
-   * The daemon refused this held session's claim because another token owns it
-   * with a live lease (#10050). The claim stays unsent so each tick retries it,
-   * which succeeds once that lease lapses. The other owner's session stays refused for
-   * its lease plus the suspect grace window (#10051), which the refusal reports, so it is only
-   * given up on once that owner keeps renewing past the handoff allowance (#10701): then this
-   * proxy cannot own the session and stops heartbeating that session alone; siblings are
-   * unaffected.
-   */
-  private handleHeldSessionOwnerConflict(
-    sessionUuid: string,
-    hold: ReportedOwnerHold | undefined,
-  ): void {
-    const held = this.otherHeldSessions.get(sessionUuid);
-    if (!held) {
-      return;
-    }
-    const { leash, exhausted } = advanceOwnerConflictLeash(
-      held.conflict,
-      this.timer.now(),
-      hold,
-      this.ownershipConflictLeashMs,
-    );
-    held.conflict = leash;
-    if (exhausted) {
-      logger.warn(
-        `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
-      );
-      this.livenessConflictLogged.delete(sessionUuid);
-      this.recordHeldSessionTerminalLoss(sessionUuid, "liveness-owner-conflict");
-      this.dropHeldSession(sessionUuid);
-      return;
-    }
-    this.noteLivenessOwnerConflict(sessionUuid);
-  }
-
-  private noteLivenessOwnerConflict(sessionUuid: string): void {
-    if (this.livenessConflictLogged.has(sessionUuid)) {
-      return;
-    }
-    this.livenessConflictLogged.add(sessionUuid);
-    logger.warn(
-      `[DaemonMcpProxy] Session ${sessionUuid} is owned by another live liveness owner; retrying the claim until its lease expires`,
-    );
+    this.heartbeatOutcomes.handleHeldSessionHeartbeatError(...args);
   }
 
   private clearNotFoundHistory(sessionUuid: string): void {
@@ -6570,6 +6044,17 @@ export class DaemonMcpProxy {
     }
   }
 
+  // Kept as named methods: the liveness-clock guard follows the keeper and tick paths to them.
+  private sendBoundSessionHeartbeat(isCurrent?: () => boolean): Promise<void> {
+    return this.boundHeartbeat.sendBoundSessionHeartbeat(isCurrent);
+  }
+
+  private recordBoundSessionHeartbeatSuccess(
+    ...args: Parameters<BoundSessionHeartbeat["recordBoundSessionHeartbeatSuccess"]>
+  ): void {
+    this.boundHeartbeat.recordBoundSessionHeartbeatSuccess(...args);
+  }
+
   private async runLatestBindingHeartbeatTick(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
@@ -6614,229 +6099,6 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * One heartbeat on the current connection for a session this proxy holds: the one path for the
-   * latest binding and for every session held besides it (#11557). A not-found answer is decided
-   * where it arrives ({@link noteNotFoundAnswer}) and raised as {@link HeldSessionNotFoundError},
-   * which the reconnect machinery neither resets the shared socket for nor retries.
-   *
-   * The latest binding passes `asked`: the one outcome that is not about the session
-   * (`ask-again`) rethrows the daemon's answer, so the heartbeat is asked once more on a fresh
-   * connection. That second answer (`asked.notFound`) is the same daemon's, not a re-established
-   * one's ({@link latestHeartbeatAsked}). A held session is never asked again: the socket is its
-   * siblings' too.
-   */
-  private askSessionHeartbeat(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
-    asked?: LatestHeartbeatAsk,
-  ): Promise<void> {
-    const client = this.requireClient();
-    return client
-      .callDaemonMethod(
-        DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership, true),
-      )
-      .then(
-        (ack) => {
-          this.answersOwnershipReestablishment(client, sessionUuid);
-          this.noteDaemonIdleEvidence(sessionUuid, ack);
-        },
-        (error: unknown) => {
-          if (!this.isDaemonSessionNotFoundError(error)) {
-            this.answersOwnershipReestablishment(client, sessionUuid);
-            throw error;
-          }
-          const outcome = this.noteNotFoundAnswer(
-            sessionUuid,
-            client,
-            releaseReasonFromError(error),
-            daemonInstanceFromError(error),
-            { mayAskAgain: asked?.notFound === false },
-          );
-          if (asked !== undefined) {
-            asked.notFound = true;
-            asked.handoff = outcome.kind === "ask-again" && outcome.handoff;
-          }
-          throw outcome.kind === "ask-again"
-            ? error
-            : new HeldSessionNotFoundError(sessionUuid, outcome);
-        },
-      );
-  }
-
-  private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
-    const sessionUuid = this.boundSessionUuid;
-    if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
-      return;
-    }
-    const asked: LatestHeartbeatAsk = { notFound: false, handoff: false };
-    this.latestHeartbeatAsked = asked;
-    try {
-      const claimLivenessOwnership = !this.livenessOwnershipClaimSent;
-      await runWithoutDaemonLifecycle(() =>
-        this.withRecoverableReconnect(
-          () => this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership, asked),
-          sessionUuid,
-          undefined,
-          // A replacement daemon has not materialized a persisted session until a
-          // device operation reaches recovery. Heartbeat misses before that point
-          // are not proof that the UUID is terminal; the first tool call remains
-          // responsible for either restoring it or applying the existing fence.
-          false,
-        ),
-      );
-      this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);
-    } catch (error) {
-      if (this.absorbOwnershipRefusal(error, sessionUuid, isCurrent)) {
-        return;
-      }
-      if (error instanceof HeldSessionNotFoundError) {
-        if (isCurrent()) {
-          this.applyNotFoundOutcome(sessionUuid, error.outcome);
-        }
-        return;
-      }
-      if (this.isDaemonSessionNotFoundError(error) && isCurrent()) {
-        // The answer to ask again could not be asked (the proxy is closing): decided as it stands.
-        this.applyNotFoundOutcome(
-          sessionUuid,
-          this.noteNotFoundAnswer(
-            sessionUuid,
-            null,
-            releaseReasonFromError(error),
-            daemonInstanceFromError(error),
-          ),
-        );
-        return;
-      }
-      if (error instanceof DaemonBoundSessionExpiredError) {
-        // Terminal fencing already stopped the keeper; this tick has no further work.
-        logger.debug(`[DaemonMcpProxy] Bound-session heartbeat stopped: ${error.message}`);
-        return;
-      }
-      throw error;
-    } finally {
-      this.endLatestHeartbeatAsk(asked);
-    }
-  }
-
-  /** The latest binding's heartbeat settled; a later one in flight keeps its own record. */
-  private endLatestHeartbeatAsk(asked: LatestHeartbeatAsk): void {
-    if (this.latestHeartbeatAsked === asked) {
-      this.latestHeartbeatAsked = undefined;
-    }
-  }
-
-  /**
-   * The daemon answered a heartbeat for `sessionUuid` on `client` with not-found: decide what
-   * that means ({@link decideNotFoundAnswer}) from the session's own state, and record the window
-   * the answer opens. Every heartbeat path decides here, when its answer arrives: the keeper tick
-   * for the latest binding and for each held session, the first heartbeat of a connection, a
-   * resume claim and liveness recovery (#11411, #11570). The caller acts on the outcome
-   * ({@link applyNotFoundOutcome}) unless its heartbeat was given up on meanwhile; the window is
-   * recorded either way, so the heartbeat that takes over (liveness recovery) decides inside it.
-   *
-   * A release reason is the one a missed notification would have carried (#10972) and is
-   * classified as that notification is ({@link releaseKeepsBinding}).
-   *
-   * `establishes`: the answer is the session's first on a connection that was just established
-   * while the proxy held it ({@link ownershipReestablishment}), or the caller knows it is (the
-   * first heartbeat of a connection). The daemon behind that connection is the one to wait for,
-   * and with no reason it is what a restarted daemon answers until it has rehydrated the session
-   * (#11529, #11557). Each session has its own first answer and its own window.
-   */
-  private noteNotFoundAnswer(
-    sessionUuid: string,
-    client: DaemonClientLike | null,
-    releaseReason: string | undefined,
-    daemonInstance: string | undefined,
-    options: { establishes?: boolean; mayAskAgain?: boolean } = {},
-  ): NotFoundAnswerOutcome {
-    const answeredByOtherDaemon = this.noteHeartbeatDaemonInstance(sessionUuid, daemonInstance);
-    const firstOnConnection = this.answersOwnershipReestablishment(client, sessionUuid);
-    const window = this.notFoundWindows.get(sessionUuid);
-    const outcome = decideNotFoundAnswer({
-      releaseReason,
-      answeredByOtherDaemon,
-      owned: this.ownedDeviceSessions.has(sessionUuid),
-      establishes: firstOnConnection || options.establishes === true,
-      windowSince: window?.since,
-      handoffs: window?.handoffs ?? NO_HANDOFFS,
-      now: this.timer.now(),
-      mayAskAgain: options.mayAskAgain === true,
-    });
-    const released = releaseReason ?? "no reason, from a daemon just connected to";
-    if (outcome.kind !== "awaited") {
-      return outcome;
-    }
-    if (outcome.handoff === undefined) {
-      logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} is still not recovered (${released})`);
-    } else if (this.isHeldSession(sessionUuid)) {
-      this.notFoundWindows.set(sessionUuid, {
-        since: outcome.windowSince,
-        handoffs: new Set([...(window?.handoffs ?? NO_HANDOFFS), outcome.handoff]),
-      });
-      logger.info(
-        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid} (released: ` +
-          `${released}); heartbeating it for up to ${RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}ms ` +
-          "in case the daemon is still recovering it",
-      );
-    }
-    return outcome;
-  }
-
-  /**
-   * Act on what a not-found heartbeat answer means for `sessionUuid`, the latest binding or a
-   * held session alike. One session's outcome never touches another session.
-   *
-   * - `awaited`: it keeps being heartbeated, each heartbeat claiming again (#11461): a restarted
-   *   daemon publishes a recovered session waiting for its owner, so an owner that went quiet here
-   *   lost it to `rehydration-owner-timeout`.
-   * - `ended`: the latest binding is fenced under the daemon's reason; a held session is dropped,
-   *   and the daemon refuses its calls under that same reason.
-   * - `stopped` (and an `ask-again` that could not be asked): no longer heartbeated, never fenced.
-   *   The daemon may still hand the session back (#11400): a tool call that reaches it restores it
-   *   and re-arms the heartbeat; otherwise that call reports the loss.
-   */
-  private applyNotFoundOutcome(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
-    // A not-found answer is no idle report: the daemon's instant no longer describes the session.
-    this.daemonIdleReports.delete(sessionUuid);
-    const latest = this.boundSessionUuid === sessionUuid && !this.terminalBoundSession;
-    const held = latest ? undefined : this.otherHeldSessions.get(sessionUuid);
-    if (!latest && !held) {
-      return;
-    }
-    if (outcome.kind === "awaited") {
-      if (held) {
-        held.claimSent = false;
-      } else {
-        this.livenessOwnershipClaimSent = false;
-      }
-      this.syncHeartbeatKeeper();
-      return;
-    }
-    if (outcome.kind === "ended" && latest) {
-      this.fenceBoundSessionUuid(sessionUuid, outcome.reason);
-      return;
-    }
-    if (held) {
-      logger.warn(
-        `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
-      );
-      this.heldSessionLosses.recordNotFoundLoss(sessionUuid, outcome);
-      this.dropHeldSession(sessionUuid, false, outcome.kind !== "ended");
-    } else if (!this.notFoundStopped.has(sessionUuid)) {
-      logger.info(
-        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
-      );
-    }
-    if (outcome.kind !== "ended") {
-      this.notFoundStopped.add(sessionUuid);
-    }
-    this.syncHeartbeatKeeper();
-  }
-
-  /**
    * The daemon admitted a call under `sessionUuid` and used it, so it knows the session (again):
    * its window is over, and a session the proxy stopped heartbeating on a not-found answer is
    * heartbeated again (#11570). A held session that was dropped for that answer is held again;
@@ -6860,108 +6122,6 @@ export class DaemonMcpProxy {
       this.plainRestartSessionLosses.delete(sessionUuid);
     }
     this.syncHeartbeatKeeper();
-  }
-
-  /**
-   * Handle the daemon refusing the latest binding's heartbeat on ownership grounds.
-   * Returns true when the refusal was absorbed (no fencing, reconnecting or failing
-   * the keeper).
-   */
-  private absorbOwnershipRefusal(
-    error: unknown,
-    sessionUuid: string,
-    isCurrent: () => boolean,
-  ): boolean {
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
-        error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
-    ) {
-      // #10115: a refusal proves transport reachability, not ownership. Do not
-      // fence or re-claim: that would undo a deliberate handoff. Report the loss
-      // visibly once; the local acknowledgement only prevents transport recovery.
-      if (!this.livenessSupersessionLogged) {
-        this.livenessSupersessionLogged = true;
-        logger.warn(
-          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper or explicitly claim with a fresh token.`,
-        );
-      }
-      this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
-      return true;
-    }
-    if (isLivenessOwnerConflictError(error)) {
-      // Another token owns this session with a live lease. Nothing was recorded
-      // (no local acknowledgement either), the claim stays unsent so the next
-      // tick retries it, and the keeper is not failed by the refusal.
-      this.noteLivenessOwnerConflict(sessionUuid);
-      this.leashLatestBindingConflict(sessionUuid, isCurrent, reportedOwnerHold(error));
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Give the latest binding the same leash held sessions have (#10664): an owner that keeps
-   * renewing past the handoff allowance means this proxy cannot own the session, so it stops
-   * claiming and fences the binding instead of inheriting another proxy's session. An owner that
-   * stopped is waited out for the hold the daemon reports, however long its lease (#10701).
-   */
-  private leashLatestBindingConflict(
-    sessionUuid: string,
-    isCurrent: () => boolean,
-    hold: ReportedOwnerHold | undefined,
-  ): void {
-    if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
-      return;
-    }
-    if (this.initialSessionAwaitingFirstCall) {
-      // A handoff proxy claimed its initial session at startup while the previous owner still
-      // heartbeats it. Keep the binding claimable and keep retrying: the claim lands once the old
-      // owner's lease lapses, and the leash starts only when a tool call needs the session.
-      this.latestBindingConflict = undefined;
-      return;
-    }
-    const { leash, exhausted } = advanceOwnerConflictLeash(
-      this.latestBindingConflict?.sessionUuid === sessionUuid
-        ? this.latestBindingConflict
-        : undefined,
-      this.timer.now(),
-      hold,
-      this.ownershipConflictLeashMs,
-    );
-    this.latestBindingConflict = { sessionUuid, ...leash };
-    if (!exhausted) {
-      return;
-    }
-    logger.warn(
-      `[DaemonMcpProxy] Session ${sessionUuid} is owned by another live liveness owner; no longer claiming it`,
-    );
-    this.fenceBoundSessionUuid(sessionUuid, "liveness-owner-conflict");
-  }
-
-  private recordBoundSessionHeartbeatSuccess(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
-    isCurrent: () => boolean,
-  ): void {
-    if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
-      return;
-    }
-    if (!isCurrent()) {
-      this.noteLateHeartbeatAck(sessionUuid);
-      return;
-    }
-    if (claimLivenessOwnership) {
-      this.livenessOwnershipClaimSent = true;
-    }
-    this.livenessConflictLogged.delete(sessionUuid);
-    this.latestBindingConflict = undefined;
-    this.notFoundWindows.delete(sessionUuid);
-    // Only a forwarded call refreshes the replay lease (`boundSessionUuidAt`); an ack proves the
-    // daemon still holds the session, not that the agent is using it (#10656).
-    this.livenessAcks.set(sessionUuid, this.timer.now());
   }
 
   private forwardedSessionReleaseReasonSince(
@@ -7316,7 +6476,7 @@ export class DaemonMcpProxy {
   /**
    * Close the connection to the daemon. Stdin EOF waits for received requests' answers before
    * reaching close (#12049); a signal, a stdout write error, or the EOF hard bound still cancels
-   * calls here, before managed execution release. The daemon admits `daemon/releaseExecution`
+   * calls here, before releasing owned sessions and broker grants. Session release is admitted
    * in arrival order on this proxy's socket, behind any call still running there; otherwise
    * release would time out unadmitted and leave the session to owner-disconnect release (#11642).
    * Each caller is answered with a typed `DaemonUnavailableError`, never left waiting. At the
@@ -7332,7 +6492,6 @@ export class DaemonMcpProxy {
     const connectedClient = this.connected ? this.client : null;
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
-    this.managedSlotsAcquisitionAbort?.abort(closingError);
     this.sessionBrokerAcquisitionAbort?.abort(closingError);
     this.closeAbort.abort(closingError);
     this.connected = false;
@@ -7346,12 +6505,10 @@ export class DaemonMcpProxy {
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
-    this.managedConnectionRebind?.cancel();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
-      this.releaseManagedExecutionSessions(),
       this.releaseBrokerSessions(),
       this.joinConnectionAttempt(),
     ]);

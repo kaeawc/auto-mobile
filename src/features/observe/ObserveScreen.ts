@@ -28,7 +28,7 @@ import {
   SelectedDisplayReadError,
   type SelectedDisplayReadPolicy,
 } from "./SelectedDisplayRead";
-import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError, staleDisplayError } from "./StaleDisplayError";
 import { ObserverPendingRequestTimeoutError } from "./DeviceServiceClient";
 import {
   identifyObservedHierarchy,

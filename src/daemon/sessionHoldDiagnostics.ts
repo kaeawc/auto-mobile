@@ -13,7 +13,7 @@
 import { sessionIdleDeadline } from "./sessionClocks";
 import type { Session } from "./sessionManager";
 import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
-import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
 import type { LivenessLeasePhase } from "./livenessOwnerLease";
 
 /** The kind of client holding a device session. */

@@ -24,6 +24,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 export const DELETE_KEYEVENT_CHUNK_SIZE = 50;
@@ -354,14 +355,13 @@ export class ClearText extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false, // Whether text changed cannot be determined reliably.
+        // Whether text changed cannot be determined reliably; the a11y service already waited for the tree.
+        ...OBSERVED_INTERACTION_PROFILES.textEdit,
         tolerancePercent: 0.0,
-        timeoutMs: 100,
+        timeoutMs: SETTLE_BUDGET_MS.immediate,
         progress,
         signal,
         perf,
-        skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
       },
     );
   }

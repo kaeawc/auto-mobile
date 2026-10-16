@@ -31,7 +31,6 @@
 4	test/daemon/daemonHttpRequestAdmission.test.ts
 15	test/daemon/daemonHttpSessionShutdown.test.ts
 2	test/daemon/daemonIdGenerator.test.ts
-1	test/daemon/daemonManagedSlotAcquisitionShutdown.test.ts
 1	test/daemon/daemonManagerPeerRejoin.test.ts
 4	test/daemon/daemonManagerReadiness.integration.test.ts
 4	test/daemon/daemonManagerRecovery.test.ts
@@ -45,7 +44,7 @@
 4	test/daemon/daemonShutdownSessionRelease.test.ts
 1	test/daemon/daemonShutdownStageBudget.test.ts
 2	test/daemon/daemonSocketIdentity.test.ts
-3	test/daemon/daemonStartWiring.test.ts
+4	test/daemon/daemonStartWiring.test.ts
 26	test/daemon/daemonStreamWiring.integration.test.ts
 3	test/daemon/daemonStrictPortBind.test.ts
 1	test/daemon/daemonToolCallEndWiring.test.ts
@@ -55,6 +54,7 @@
 1	test/daemon/devicePool.assignDevice.test.ts
 3	test/daemon/devicePool.assignMultipleDevices.test.ts
 3	test/daemon/devicePool.bindTransitionalAdbOffline.test.ts
+1	test/daemon/devicePool.bindingExclusion.test.ts
 11	test/daemon/devicePool.evictionCatch.test.ts
 4	test/daemon/devicePool.exitedLauncherSameSerial.test.ts
 8	test/daemon/devicePool.healthMarker.test.ts
@@ -85,7 +85,6 @@
 2	test/daemon/identityRecovery.test.ts
 2	test/daemon/inventoryReadEndRearmsOwnerDisconnectRelease.test.ts
 6	test/daemon/livenessScenarioMatrix.test.ts
-1	test/daemon/managedExecutionLiveness.test.ts
 1	test/daemon/navigationGraphRequestHandler.test.ts
 2	test/daemon/nestedReadKeepsOuterCallSessionKey.test.ts
 1	test/daemon/observationRequestHeldElsewhere.test.ts
@@ -103,6 +102,9 @@
 3	test/daemon/runDaemonCommandCharacterization.test.ts
 2	test/daemon/runDaemonCommandReleasePromises.test.ts
 1	test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
+1	test/daemon/sessionBroker/provisioning/daemonDeviceAcquisitionShutdown.test.ts
+1	test/daemon/sessionBroker/provisioning/deviceDeleter.test.ts
+1	test/daemon/sessionBroker/provisioning/executionLiveness.test.ts
 2	test/daemon/shuttingDownFrameTypedFields.test.ts
 1	test/daemon/socketRequestAdmission.test.ts
 1	test/daemon/socketServer/BaseSocketServerFraming.test.ts
@@ -139,7 +141,7 @@
 2	test/daemon/socketServerInventoryCancellation.test.ts
 4	test/daemon/socketServerKeyValue.integration.test.ts
 8	test/daemon/socketServerManagedConnectionDirectFrames.test.ts
-4	test/daemon/socketServerManagedConnectionInput.test.ts
+3	test/daemon/socketServerManagedConnectionInput.test.ts
 1	test/daemon/socketServerMcpCancelDispatchHold.test.ts
 8	test/daemon/socketServerMcpForwardSerialization.integration.test.ts
 2	test/daemon/socketServerNotifications.integration.test.ts
@@ -389,7 +391,7 @@
 7	test/helpers/inMemoryDaemonWire.ts
 1	test/helpers/iosDelegateHarness.ts
 1	test/helpers/livenessScenarioHarness.test.ts
-8	test/helpers/livenessScenarioHarness.ts
+9	test/helpers/livenessScenarioHarness.ts
 1	test/helpers/realToolCallPath.ts
 3	test/helpers/restartEndToEndScenario.ts
 3	test/helpers/restartScenarioHarness.ts
@@ -445,7 +447,6 @@
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
 6	test/server/inventorySurfaceParity.test.ts
-1	test/server/managedSlotDeviceDeleter.test.ts
 15	test/server/navigationTools.test.ts
 1	test/server/networkGraph.test.ts
 1	test/server/networkMockRules.property.test.ts

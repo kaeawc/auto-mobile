@@ -1,0 +1,13 @@
+{
+  "code": "device_outside_broker_grant.tool",
+  "builder": "DeviceOutsideBrokerGrantError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"startDevice refused: this broker connection controls only its own granted devices (code device_outside_broker_grant). Granted devices are acquired, started, stopped and deleted only by broker binding acquisition and release. Reads stay open; use a separate MCP connection for anything else.\",\"code\":\"device_outside_broker_grant\",\"action\":\"startDevice\",\"reason\":\"tool\",\"scopeKey\":\"0123abcd\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

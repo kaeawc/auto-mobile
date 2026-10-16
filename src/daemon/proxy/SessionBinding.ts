@@ -55,7 +55,6 @@ export interface SessionBindingDependencies {
   ownedDeviceSessions: Set<string>;
   sessionPlatforms: Map<string, "android" | "ios">;
   sessionDeviceIds: Map<string, string>;
-  managedExecutionSessions: Set<string>;
   sessionBrokerSessions: ReadonlyMap<string, string>;
   plainRestartSessionLosses: Map<string, string>;
   pendingHeldSessionPlatformLosses: Map<
@@ -294,7 +293,7 @@ export class SessionBinding {
 
   /**
    * Whether `sessionUuid` was minted by an acquisition RESULT on this proxy, as opposed to
-   * declared at startup (`--initial-session-uuid`, a managed slot) or only named by a caller.
+   * declared at startup (`--initial-session-uuid`) or only named by a caller.
    * Provenance belongs to the session, not to how the binding last reached it (#11483): a
    * connection that minted the session recovers in-band however the agent addressed it since.
    * A session resumed under this proxy's stable owner token (#10990) counts: the same owner
@@ -305,7 +304,6 @@ export class SessionBinding {
     return (
       this.deps.state.claimableSessions.has(sessionUuid) &&
       sessionUuid !== this.deps.initialSessionUuid()?.trim() &&
-      !this.deps.managedExecutionSessions.has(sessionUuid) &&
       !this.deps.sessionBrokerSessions.has(sessionUuid)
     );
   }

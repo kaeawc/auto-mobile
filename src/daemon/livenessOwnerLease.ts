@@ -10,7 +10,7 @@
 import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
-import { holdsOwnerHeartbeatLease } from "./managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import { leaseRunningAt } from "./stallForgiveness";
 
 /**

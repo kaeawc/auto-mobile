@@ -8,7 +8,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { serverConfig } from "../../utils/ServerConfig";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
-import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError, staleDisplayError } from "../observe/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";

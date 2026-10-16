@@ -16,11 +16,22 @@ import { homedir, userInfo, platform, loadavg, cpus, freemem, totalmem } from "n
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../src/utils/fileLock";
 import { hostPreflight, recordHostPreflight, type HostStats } from "./hostPreflight";
 import { bootGate, bootGateOptions, BOOT_GATE_FLAGS, type BootGateCommand } from "./bootGate";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
-import { defaultIdGenerator } from "../../src/utils/IdGenerator";
+import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
+import {
+  parseSessionBrokerHostConfig,
+  SESSION_BROKER_HOST_CONFIG_ENV,
+} from "../../src/daemon/sessionBroker/hostConfig";
+import {
+  BrokerBatchRequestIds,
+  parseBrokerBatch,
+  renderClientRequest,
+  renderHostConfig,
+  planExpectations,
+} from "./brokerBatch";
 import { probeControlSocket, type ControlSocketProbeResult } from "./controlSocketProbe";
 import { privateDaemonStatus, privateDaemonDeviceStatus } from "./privateDaemonStatus";
 import { PRODUCT_PATH_ENV_VARIABLES } from "./productPathEnv";
@@ -39,6 +50,8 @@ import {
   type PrivateDaemonSpec,
 } from "./privateDaemonEnv";
 
+import { createLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
+import type { LockOwnerGenerationProbe } from "../../src/utils/fileLock";
 import { privateDaemonStop } from "./privateDaemonStop";
 import {
   privateDaemonDevices,
@@ -50,7 +63,14 @@ export type PrivateDaemonCommand =
   | BootGateCommand
   | { op: "preflight"; batchDir: string; strict: boolean }
   | BatchDevicesCommand
-  | { op: "init"; options: PrivateDaemonBatchOptions }
+  | {
+      op: "init";
+      options: PrivateDaemonBatchOptions;
+      brokerBatch?: string;
+      maxDevices?: number;
+      allowReuse?: boolean;
+      dryRun?: boolean;
+    }
   | {
       op: "start" | "stop" | "status" | "env" | "wrappers";
       batchDir: string;
@@ -58,6 +78,7 @@ export type PrivateDaemonCommand =
       extraFlags: string[];
       devices?: boolean;
       waitMs?: number;
+      crash?: boolean;
     };
 const optionsSchema = z
   .object({
@@ -82,7 +103,27 @@ const optionsSchema = z
     daemonArgsByDaemon: z.record(z.array(z.string())).optional(),
   })
   .strict();
-const manifestSchema = z.object({ options: optionsSchema, specs: z.array(z.unknown()) }).strict();
+const brokerManifestSchema = z
+  .object({
+    daemon: z.literal(1),
+    hostConfig: z.literal("broker/host-config.json"),
+    allowReuse: z.boolean().optional(),
+    maxDevices: z.number().int().min(1).max(4).optional(),
+  })
+  .strict();
+type BrokerManifest = z.infer<typeof brokerManifestSchema>;
+interface PrivateBatch {
+  options: PrivateDaemonBatchOptions;
+  specs: PrivateDaemonSpec[];
+  broker?: BrokerManifest;
+}
+const manifestSchema = z
+  .object({
+    options: optionsSchema,
+    specs: z.array(z.unknown()),
+    broker: brokerManifestSchema.optional(),
+  })
+  .strict();
 import { PRIVATE_DAEMON_COMMANDS, privateDaemonHelp } from "./privateDaemonHelp";
 import { extraEnvRefusal, daemonArgsRefusal } from "./privateDaemonEnv";
 import { writePrivateDaemonWrappers } from "./privateDaemonWrappers";
@@ -95,11 +136,14 @@ interface ParsedValues {
   daemonArgsByDaemon: Record<string, string[]>;
   extraFlags: string[];
   split: boolean;
+  allowReuse: boolean;
   devices: boolean;
+  ledger: boolean;
   protectedDevices: string[];
   deviceSelectors: string[];
   dryRun: boolean;
   strict: boolean;
+  crash: boolean;
   bootCommand: string[];
 }
 function recordEnvironment(state: ParsedValues, flag: string, token: string): string | undefined {
@@ -165,6 +209,8 @@ function valueFlagsForCommand(op: string): string[] {
       "--daemon-env",
       "--daemon-arg",
       "--protect",
+      "--broker-batch",
+      "--max-devices",
     ];
   }
   const flags = ["--batch-dir", "--daemon"];
@@ -237,10 +283,19 @@ function readPassthrough(op: string, tokens: string[], state: ParsedValues): str
   return daemonArgsRefusal(tokens);
 }
 function readBooleanFlag(op: string, flag: string, state: ParsedValues): boolean {
-  const flags: Record<string, { op: string; key: "split" | "dryRun" | "devices" | "strict" }> = {
+  if (op === "init" && (flag === "--dry-run" || flag === "--allow-reuse")) {
+    state[flag === "--dry-run" ? "dryRun" : "allowReuse"] = true;
+    return true;
+  }
+  const flags: Record<
+    string,
+    { op: string; key: "split" | "dryRun" | "devices" | "strict" | "ledger" | "crash" }
+  > = {
     "--split-adb-coordination": { op: "init", key: "split" },
     "--dry-run": { op: "shutdown-devices", key: "dryRun" },
     "--devices": { op: "status", key: "devices" },
+    "--ledger": { op: "devices", key: "ledger" },
+    "--crash": { op: "stop", key: "crash" },
     "--strict": { op: "preflight", key: "strict" },
   };
   const match = flags[flag];
@@ -279,7 +334,20 @@ function initOptions(state: ParsedValues): PrivateDaemonCommand | { error: strin
   ) {
     return { error: "Per-daemon option index is outside --count." };
   }
-  return { op: "init", options };
+  const brokerBatch = values["--broker-batch"];
+  const maxDevices = durationArgument(values["--max-devices"], 2, 1);
+  if (maxDevices === undefined || maxDevices > 4) {
+    return { error: "--max-devices must be an integer from 1 to the hard ceiling of 4." };
+  }
+  if (!brokerBatch && (values["--max-devices"] !== undefined || state.allowReuse)) {
+    return { error: "--max-devices and --allow-reuse require --broker-batch." };
+  }
+  return {
+    op: "init",
+    options,
+    ...(brokerBatch ? { brokerBatch, maxDevices, allowReuse: state.allowReuse } : {}),
+    ...(state.dryRun ? { dryRun: true } : {}),
+  };
 }
 export function parsePrivateDaemonArgs(
   argv: string[],
@@ -302,11 +370,14 @@ export function parsePrivateDaemonArgs(
     daemonArgsByDaemon: {},
     extraFlags: [],
     split: false,
+    allowReuse: false,
     devices: false,
+    ledger: false,
     protectedDevices: [],
     deviceSelectors: [],
     dryRun: false,
     strict: false,
+    crash: false,
     bootCommand: [],
   };
   const error = readArguments(op, args, state);
@@ -355,7 +426,7 @@ function existingCommand(
     daemon,
     extraFlags: state.extraFlags,
     devices: state.devices,
-    ...(op === "stop" ? { waitMs } : {}),
+    ...(op === "stop" ? { waitMs, ...(state.crash ? { crash: true } : {}) } : {}),
   };
 }
 function deviceCommand(
@@ -377,6 +448,7 @@ function deviceCommand(
     daemon,
     extraFlags: [],
     timeoutMs,
+    ...(op === "devices" ? { ledger: state.ledger } : {}),
     ...(op === "shutdown-devices"
       ? { deviceSelectors: state.deviceSelectors, dryRun: state.dryRun }
       : {}),
@@ -393,6 +465,8 @@ function durationArgument(
     : undefined;
 }
 export interface PrivateDaemonCliDeps {
+  ids?: IdGenerator;
+  processGeneration?: LockOwnerGenerationProbe;
   timer: Timer;
   hostStats(): HostStats;
   bootLock: { tryAcquire(path: string, role: string): boolean; release(path: string): void };
@@ -468,10 +542,7 @@ function olderManifestMessage(
     ? `batch.json was written by an older harness (missing ${[...missing].join(", ")}); create a new batch with init`
     : undefined;
 }
-function readPrivateBatch(
-  batchDir: string,
-  deps: PrivateDaemonCliDeps,
-): { options: PrivateDaemonBatchOptions; specs: PrivateDaemonSpec[] } {
+export function readPrivateBatch(batchDir: string, deps: PrivateDaemonCliDeps): PrivateBatch {
   validateBatchPath(batchDir, deps);
   const manifest = manifestSchema.parse(JSON.parse(deps.readFile(join(batchDir, "batch.json"))));
   const options = manifest.options;
@@ -485,7 +556,7 @@ function readPrivateBatch(
         "Tampered batch manifest: options/specs must match the canonical private derivation.",
     );
   }
-  return { options, specs };
+  return { options, specs, ...(manifest.broker ? { broker: manifest.broker } : {}) };
 }
 function validateBatchPath(batchDir: string, deps: PrivateDaemonCliDeps): void {
   // Validate the requested path before any host probe or manifest read.
@@ -504,11 +575,8 @@ function validateBatchPath(batchDir: string, deps: PrivateDaemonCliDeps): void {
     throw new Error(pathError);
   }
 }
-function initializeBatch(
-  options: PrivateDaemonBatchOptions,
-  specs: PrivateDaemonSpec[],
-  deps: PrivateDaemonCliDeps,
-): void {
+function initializeBatch(batch: PrivateBatch, deps: PrivateDaemonCliDeps): void {
+  const { options, specs, broker } = batch;
   const manifestPath = join(options.batchDir, "batch.json");
   if (deps.exists(manifestPath)) {
     throw new Error("batch.json already exists; choose a new --batch-dir.");
@@ -532,8 +600,138 @@ function initializeBatch(
     }
     deps.writeFile(join(spec.dir, "env.sh"), renderEnvFile(spec, options));
   }
-  deps.writeFile(manifestPath, JSON.stringify({ options, specs }, null, 2));
+  deps.writeFile(
+    manifestPath,
+    JSON.stringify({ options, specs, ...(broker ? { broker } : {}) }, null, 2),
+  );
   writePrivateDaemonWrappers(options.batchDir, specs, deps);
+}
+function assertBrokerPaths(batch: PrivateBatch, deps: PrivateDaemonCliDeps): void {
+  if (!batch.broker) {
+    return;
+  }
+  // Production's injected canonicalizer is canonicalizeHostPath, including dangling symlinks.
+  const root = deps.host.canonicalize(batch.options.batchDir);
+  const spec = batch.specs[0];
+  for (const path of [
+    spec.env.AUTOMOBILE_COORDINATION_DIR,
+    spec.env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR,
+    join(batch.options.batchDir, "broker"),
+    join(batch.options.batchDir, batch.broker.hostConfig),
+    join(batch.options.batchDir, "broker/clients.json"),
+  ]) {
+    const rel = relative(root, deps.host.canonicalize(path));
+    if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw new Error(
+        "Broker registry/coordination and configuration paths must be under the batch root.",
+      );
+    }
+  }
+}
+function brokerInitFiles(
+  command: Extract<PrivateDaemonCommand, { op: "init" }>,
+  deps: PrivateDaemonCliDeps,
+): Record<string, string> {
+  if (!command.brokerBatch) {
+    return {};
+  }
+  const batch = parseBrokerBatch(JSON.parse(deps.readFile(command.brokerBatch)), command);
+  const ids = new BrokerBatchRequestIds(deps.ids ?? defaultIdGenerator);
+  const expectations = planExpectations(batch);
+  const clients = Object.fromEntries(
+    batch.clients.map((client, index) => {
+      const request = renderClientRequest(client, ids.next(client.name));
+      return [
+        client.name,
+        {
+          platform: client.platform,
+          profile: request.device,
+          requestId: request.requestId,
+          tokenFile: `sessions/${client.name}/owner-token`,
+          ...(request.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: request.idleTimeoutMs }),
+          ...(request.preparationTimeoutMs === undefined
+            ? {}
+            : { preparationTimeoutMs: request.preparationTimeoutMs }),
+          expected: expectations[index].expected,
+        },
+      ];
+    }),
+  );
+  return {
+    "broker/host-config.json": JSON.stringify(renderHostConfig(batch), null, 2),
+    "broker/clients.json": JSON.stringify(clients, null, 2),
+  };
+}
+async function runInit(
+  command: Extract<PrivateDaemonCommand, { op: "init" }>,
+  batch: PrivateBatch,
+  deps: PrivateDaemonCliDeps,
+): Promise<number> {
+  assertBrokerPaths(batch, deps);
+  const brokerFiles = brokerInitFiles(command, deps);
+  const files = new Map<string, { path: string; mode: string; content: string }>();
+  const directories: Array<{ path: string; mode: string }> = [];
+  const writer: PrivateDaemonCliDeps = command.dryRun
+    ? {
+        ...deps,
+        mkdir: (path, mode) => {
+          directories.push({ path, mode: mode.toString(8).padStart(4, "0") });
+        },
+        writeFile: (path, content) => {
+          files.set(path, { path, mode: "0600", content });
+        },
+        chmod: (path, mode) => {
+          files.get(path)!.mode = mode.toString(8).padStart(4, "0");
+        },
+      }
+    : deps;
+  initializeBatch(batch, writer);
+  if (batch.broker) {
+    writer.mkdir(join(batch.options.batchDir, "broker"), 0o700);
+    for (const [name, content] of Object.entries(brokerFiles)) {
+      const path = join(batch.options.batchDir, name);
+      writer.writeFile(path, content);
+      writer.chmod(path, 0o600);
+    }
+  }
+  if (command.dryRun) {
+    deps.log(
+      JSON.stringify({
+        dryRun: true,
+        directories,
+        files: [...files.values()],
+        daemonEnvironments: batch.specs.map((spec) => ({
+          daemon: spec.index,
+          env: daemonEnvironmentOverrides(batch, spec),
+        })),
+        clientEnvironments: batch.specs.map((spec) => ({ daemon: spec.index, env: spec.env })),
+      }),
+    );
+  } else {
+    await recordHostPreflight(batch.options.batchDir, deps);
+  }
+  return 0;
+}
+function daemonStartEnvironment(
+  batch: PrivateBatch,
+  spec: PrivateDaemonSpec,
+  deps: PrivateDaemonCliDeps,
+): Record<string, string> {
+  return privateClientEnvironment(
+    harnessChildEnvironment(deps.env, deps.logSinkOverride),
+    daemonEnvironmentOverrides(batch, spec),
+  );
+}
+/** Dry runs show planned overrides, without printing inherited shell credentials. */
+function daemonEnvironmentOverrides(
+  batch: PrivateBatch,
+  spec: PrivateDaemonSpec,
+): Record<string, string> {
+  const env = { ...spec.env };
+  if (batch.broker?.daemon === spec.index) {
+    env[SESSION_BROKER_HOST_CONFIG_ENV] = resolve(batch.options.batchDir, batch.broker.hostConfig);
+  }
+  return env;
 }
 type ExistingBatchCommand = Exclude<
   PrivateDaemonCommand,
@@ -549,10 +747,11 @@ function preflightStart(specs: PrivateDaemonSpec[], deps: PrivateDaemonCliDeps):
 }
 async function runLifecycle(
   command: ExistingBatchCommand,
-  options: PrivateDaemonBatchOptions,
+  batch: PrivateBatch,
   spec: PrivateDaemonSpec,
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
+  const { options } = batch;
   const args = [options.serverPath, "--daemon", command.op];
   if (command.op === "start") {
     args.push(
@@ -564,11 +763,11 @@ async function runLifecycle(
       ...command.extraFlags,
     );
   }
-  const result = await deps.runCommand(
-    deps.runtimePath,
-    args,
-    privateClientEnvironment(harnessChildEnvironment(deps.env, deps.logSinkOverride), spec.env),
-  );
+  const env =
+    command.op === "start"
+      ? daemonStartEnvironment(batch, spec, deps)
+      : privateClientEnvironment(harnessChildEnvironment(deps.env, deps.logSinkOverride), spec.env);
+  const result = await deps.runCommand(deps.runtimePath, args, env);
   if (result.exitCode !== 0) {
     return result.exitCode;
   }
@@ -577,6 +776,17 @@ async function runLifecycle(
     if (!record) {
       throw new Error(`${spec.name} started without a JSON pid file; inspect its launch log.`);
     }
+    const startIdentity = deps.processGeneration?.current(record.pid);
+    deps.writeFile(
+      join(spec.dir, "daemon-start.json"),
+      JSON.stringify({
+        pid: record.pid,
+        socketPath: spec.socketPath,
+        pidFilePath: spec.pidFilePath,
+        startIdentity,
+        startedAt: deps.timer.now(),
+      }),
+    );
     deps.writeFile(spec.plainPidFilePath, `${record.pid}\n`);
     deps.log(
       JSON.stringify({
@@ -621,13 +831,13 @@ function selectBatchSpecs(
 }
 async function runExistingBatch(
   command: ExistingBatchCommand,
-  options: PrivateDaemonBatchOptions,
-  specs: PrivateDaemonSpec[],
+  batch: PrivateBatch,
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
+  const { options, specs } = batch;
   const selected = selectBatchSpecs(command, specs);
   if (command.op === "stop") {
-    return privateDaemonStop(selected[0], options, command.waitMs ?? 30000, deps);
+    return privateDaemonStop(selected[0], options, command.waitMs ?? 30000, deps, command.crash);
   }
   if (command.op === "devices" || command.op === "shutdown-devices") {
     return privateDaemonDevices(command, options, selected, deps);
@@ -640,6 +850,22 @@ async function runExistingBatch(
     return logBatchStatus(selected, command.devices ?? false, deps);
   }
   if (command.op === "start") {
+    assertBrokerPaths(batch, deps);
+    if (batch.broker) {
+      const host = parseSessionBrokerHostConfig(
+        JSON.parse(deps.readFile(join(options.batchDir, batch.broker.hostConfig))),
+      );
+      parseBrokerBatch(
+        {
+          schemaVersion: 1,
+          limits: host.limits,
+          defaults: host.defaults,
+          reuseCleanDevices: host.reuseCleanDevices,
+          clients: [],
+        },
+        { maxDevices: batch.broker.maxDevices ?? 2, allowReuse: batch.broker.allowReuse ?? false },
+      );
+    }
     preflightStart(selected, deps);
     await recordHostPreflight(options.batchDir, deps);
     await recordHostBaseline(options.batchDir, deps);
@@ -649,7 +875,7 @@ async function runExistingBatch(
       deps.log(join(spec.dir, "env.sh"));
       continue;
     }
-    const code = await runLifecycle(command, options, spec, deps);
+    const code = await runLifecycle(command, batch, spec, deps);
     if (code !== 0) {
       return code;
     }
@@ -673,10 +899,24 @@ export async function runPrivateDaemonCommand(
       validateBatchPath(command.batchDir, deps);
       return await runPreflightCommand(command, deps);
     }
-    const { options, specs } =
+    const batch: PrivateBatch =
       command.op === "init"
-        ? { options: command.options, specs: derivePrivateDaemonBatch(command.options) }
+        ? {
+            options: command.options,
+            specs: derivePrivateDaemonBatch(command.options),
+            ...(command.brokerBatch
+              ? {
+                  broker: {
+                    daemon: 1,
+                    hostConfig: "broker/host-config.json",
+                    allowReuse: command.allowReuse ?? false,
+                    maxDevices: command.maxDevices ?? 2,
+                  } as const,
+                }
+              : {}),
+          }
         : readPrivateBatch(command.batchDir, deps);
+    const { options, specs } = batch;
     const refusal = privateDaemonBatchRefusal(specs, options, deps.host);
     if (refusal) {
       throw new Error(refusal);
@@ -688,14 +928,12 @@ export async function runPrivateDaemonCommand(
       throw new Error("repoRoot must be an absolute path without NUL.");
     }
     if (command.op === "init") {
-      initializeBatch(options, specs, deps);
-      await recordHostPreflight(options.batchDir, deps);
-      return 0;
+      return await runInit(command, batch, deps);
     }
     if (command.op === "boot-gate") {
       return await bootGate(command, deps);
     }
-    return await runExistingBatch(command, options, specs, deps);
+    return await runExistingBatch(command, batch, deps);
   } catch (error) {
     // The CLI reports refusals and I/O failures through its exit-2 boundary.
     deps.log(`Private daemon command failed: ${errorMessage(error)}`);
@@ -712,8 +950,11 @@ export async function main(): Promise<number> {
     console.log(parsed.help);
     return 0;
   }
+  return runPrivateDaemonCommand(parsed, await createPrivateDaemonDeps());
+}
+export async function createPrivateDaemonDeps(): Promise<PrivateDaemonCliDeps> {
   const { connectFrameSocket, connectWithDeadline, FrameRpc } = await import("./daemon-frame");
-  return runPrivateDaemonCommand(parsed, {
+  return {
     timer: defaultTimer,
     hostStats: () => ({
       platform: platform(),
@@ -727,6 +968,7 @@ export async function main(): Promise<number> {
         tryAcquireExclusiveLock(path, { pid: process.pid, metadata: role }),
       release: (path) => releaseExclusiveLock(path, process.pid),
     },
+    processGeneration: createLockOwnerGenerationProbe({ sameVerdictTtlMs: 0 }),
     signalPid: (pid, signal) => {
       process.kill(pid, signal);
     },
@@ -846,7 +1088,7 @@ export async function main(): Promise<number> {
     },
     log: console.log,
     env: harnessChildEnvironment(process.env),
-  });
+  };
 }
 if (import.meta.main) {
   process.exitCode = await main();

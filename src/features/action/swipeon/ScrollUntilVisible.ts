@@ -2,7 +2,7 @@ import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/h
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
-import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
+import { StaleDisplayError, type StaleDisplayDetails } from "../../observe/StaleDisplayError";
 import {
   scopedSearchDescription,
   usesScopedSwipeContainer,
@@ -84,6 +84,7 @@ import {
 
 import type { AndroidSearchDragState } from "./androidSearchDrag";
 import { resolveActionCallWithPerf, type ActionCall } from "../ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "../observedInteractionProfiles";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -1110,15 +1111,14 @@ export class ScrollUntilVisible {
             return result;
           },
           {
-            changeExpected: false,
-            timeoutMs: 500,
+            ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
+            timeoutMs: SETTLE_BUDGET_MS.brief,
             progress,
             perf,
             signal,
             // The gesture coordinates come from this in-call read, so it is the pre-action read
             // the display fence checks; after a fold it passes once it is at the new revision.
             previousObservation: lastObservation,
-            resolvesTargetFromRead: true,
             deferPostActionScreenshot: true,
             observationTimestampProvider: () => iosDispatchTimestamp,
             predictionContext: {

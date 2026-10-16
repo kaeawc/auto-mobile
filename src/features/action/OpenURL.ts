@@ -25,6 +25,7 @@ import type { ObserveResult } from "../../models";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
@@ -299,10 +300,9 @@ export class OpenURL extends BaseVisualChange {
       },
       {
         signal,
-        changeExpected: false,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
         foregroundAppMayChange: true,
-        usesObservationForResolution: false,
-        timeoutMs: 12000,
+        timeoutMs: SETTLE_BUDGET_MS.urlDispatch,
         perf,
       },
     );

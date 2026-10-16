@@ -1,19 +1,19 @@
-import type { ManagedExecutionRelease } from "../managedSlots/managedExecutionRelease";
-import type { ManagedSlotAcquisition } from "../managedSlots/managedSlotAcquisition";
-import type { ManagedSlotJournal } from "../managedSlots/slotJournal";
-import { defaultSlotExecOwnerLiveness } from "../managedSlots/slotOwnerLiveness";
-import { runAsManagedSlotReconciler } from "../managedSlots/managedSlotExclusion";
+import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
+import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
+import type { BindingJournal } from "./registry/bindingJournal";
+import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
+import { runAsBindingReconciler } from "./provisioning/exclusion";
 import {
-  computeSlotScopeKey,
+  computeBindingScopeKey,
   journalOwnersEqual,
   sameBinding,
-  type SlotAssignmentRecord,
-  type SlotKey,
-  type SlotRegistry,
-  type SlotScopeIdentity,
-  type SlotExecOwnerLiveness,
-} from "../managedSlots/slotRegistry";
-import { parseManagedSlotConfig, type ManagedSlotConfig } from "../../models/managedSlotConfig";
+  type BindingAssignmentRecord,
+  type BindingKey,
+  type BindingRegistry,
+  type BindingScopeIdentity,
+  type BindingExecOwnerLiveness,
+} from "./registry/bindingRegistry";
+import { type BrokerProvisionRequest } from "./provisioning/provisionRequest";
 import { ActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
@@ -25,25 +25,25 @@ import {
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 
-const BROKER_SLOT_ROLE = "session-broker-device";
+import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 
 type ManagedDevicePortRegistry = Pick<
-  SlotRegistry,
-  "getAssignment" | "listOpenSlotJournal" | "openSlotJournal"
+  BindingRegistry,
+  "getAssignment" | "listOpenBindingJournal" | "openBindingJournal"
 >;
-type ManagedSlotAcquisitionResult = Awaited<ReturnType<ManagedSlotAcquisition["acquire"]>>;
-type ManagedSlotAcquisitionEntry = ManagedSlotAcquisitionResult["slots"][number];
+type BrokerDeviceAcquisitionResult = Awaited<ReturnType<BrokerDeviceAcquisition["acquire"]>>;
+type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][number];
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
-  /** Stable provider-owned identity. Consumer requests never choose this scope or a slot index. */
-  scope: SlotScopeIdentity;
-  managedSlotAcquisition: Pick<ManagedSlotAcquisition, "acquire">;
-  managedExecutionRelease: Pick<ManagedExecutionRelease, "releaseExecution">;
+  /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
+  scope: BindingScopeIdentity;
+  brokerDeviceAcquisition: Pick<BrokerDeviceAcquisition, "acquire">;
+  brokerExecutionRelease: Pick<BrokerExecutionRelease, "releaseExecution">;
   registry: ManagedDevicePortRegistry;
-  managedSlotJournal: Pick<ManagedSlotJournal, "owner" | "redriveSlot">;
-  /** Defaults to the managed-slot PID plus process-generation liveness check. */
-  isExecOwnerLive?: SlotExecOwnerLiveness;
+  bindingJournal: Pick<BindingJournal, "owner" | "redriveBinding">;
+  /** Defaults to the binding PID plus process-generation liveness check. */
+  isExecOwnerLive?: BindingExecOwnerLiveness;
   /** Supplied only for qualified platform reset implementations. */
   resetIosBaseline?: (
     device: BootedDevice,
@@ -55,21 +55,21 @@ export interface ManagedDevicePortDependencies {
 }
 
 /**
- * Bounded native bridge for the session broker's private managed slots.
+ * Bounded native bridge for the session broker's private bindings.
  *
- * The managed-slot reconciler owns provisioning and readiness, the execution release owns the
- * bounded drain, and the durable slot journal owns destructive convergence. This adapter adds no
+ * The binding reconciler owns provisioning and readiness, the execution release owns the
+ * bounded drain, and the durable binding journal owns destructive convergence. This adapter adds no
  * allocator, journal, pool, process, or background work.
  */
 export class ManagedDevicePort implements SessionBrokerDevicePort {
-  private readonly scope: SlotScopeIdentity;
+  private readonly scope: BindingScopeIdentity;
   private readonly scopeKey: string;
-  private readonly isExecOwnerLive: SlotExecOwnerLiveness;
+  private readonly isExecOwnerLive: BindingExecOwnerLiveness;
 
   constructor(private readonly dependencies: ManagedDevicePortDependencies) {
     this.scope = { ...dependencies.scope };
-    this.scopeKey = computeSlotScopeKey(this.scope);
-    this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
+    this.scopeKey = computeBindingScopeKey(this.scope);
+    this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
   }
 
   async prepare(
@@ -82,8 +82,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
     const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
-    const config = this.managedSlotConfig(resource, profile, requestedSpec, options);
-    const result = await this.dependencies.managedSlotAcquisition.acquire(config, {
+    const config = this.bindingConfig(resource, profile, requestedSpec, options);
+    const result = await this.dependencies.brokerDeviceAcquisition.acquire(config, {
       livenessOwnerToken: options.livenessOwnerToken,
       ...(options.signal ? { signal: options.signal } : {}),
     });
@@ -92,25 +92,27 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   }
 
   private async readySessionId(
-    result: ManagedSlotAcquisitionResult,
+    result: BrokerDeviceAcquisitionResult,
     resource: BrokerResourceRecord,
     profile: BrokerNativeProfile,
   ): Promise<string> {
-    const slot = result.slots.find((entry) => entry.slotIndex === resource.allocationIndex);
+    const binding = result.bindings.find(
+      (entry) => entry.bindingIndex === resource.allocationIndex,
+    );
     const resultReady = [
       result.outcome === "ready",
       result.scope.scopeKey === this.scopeKey,
-      result.slots.length === 1,
+      result.bindings.length === 1,
     ].every(Boolean);
-    if (resultReady && this.isReadySlot(slot, profile)) {
-      return slot.sessionUuid;
+    if (resultReady && this.isReadyBinding(binding, profile)) {
+      return binding.sessionUuid;
     }
-    const sessionId = slot === undefined ? null : slot.sessionUuid;
+    const sessionId = binding === undefined ? null : binding.sessionUuid;
     if (typeof sessionId === "string" && sessionId.length > 0) {
-      await this.dependencies.managedExecutionRelease.releaseExecution(sessionId);
+      await this.dependencies.brokerExecutionRelease.releaseExecution(sessionId);
     }
     const { code, retryable, message } = result.failure ??
-      slot?.failure ?? {
+      binding?.failure ?? {
         code: "session_preparation_failed",
         retryable: false,
         message: "Managed device preparation did not return an automation-ready session",
@@ -118,22 +120,22 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     throw new SessionBrokerFailureError({ code, retryable, message });
   }
 
-  private isReadySlot(
-    slot: ManagedSlotAcquisitionEntry | undefined,
+  private isReadyBinding(
+    binding: BrokerDeviceAcquisitionEntry | undefined,
     profile: BrokerNativeProfile,
-  ): slot is ManagedSlotAcquisitionEntry & { sessionUuid: string } {
-    if (slot === undefined || slot.readiness === null) {
+  ): binding is BrokerDeviceAcquisitionEntry & { sessionUuid: string } {
+    if (binding === undefined || binding.readiness === null) {
       return false;
     }
-    if (typeof slot.sessionUuid !== "string" || slot.sessionUuid.length === 0) {
+    if (typeof binding.sessionUuid !== "string" || binding.sessionUuid.length === 0) {
       return false;
     }
     return [
-      slot.platform === profile.platform,
-      slot.failure === undefined,
-      slot.device !== null,
-      slot.readiness.mode === "automation",
-      slot.readiness.status === "automation_ready",
+      binding.platform === profile.platform,
+      binding.failure === undefined,
+      binding.device !== null,
+      binding.readiness.mode === "automation",
+      binding.readiness.status === "automation_ready",
     ].every(Boolean);
   }
 
@@ -141,12 +143,12 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (!sessionId.trim()) {
       throw new ActionableError("A managed execution session UUID must be non-empty");
     }
-    const result = await this.dependencies.managedExecutionRelease.releaseExecution(sessionId);
+    const result = await this.dependencies.brokerExecutionRelease.releaseExecution(sessionId);
     return {
       settled:
-        result.outcome === "reusable_for_this_slot" &&
+        result.outcome === "reusable_for_this_binding" &&
         result.settlement === "confirmed" &&
-        result.slotFailures.length === 0,
+        result.bindingFailures.length === 0,
     };
   }
 
@@ -185,7 +187,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     };
     await assertOwned();
-    const result = await runAsManagedSlotReconciler(key, () =>
+    const result = await runAsBindingReconciler(key, () =>
       reset(
         {
           platform: "ios",
@@ -219,10 +221,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   }
 
   private async destroyableAssignment(
-    key: SlotKey,
+    key: BindingKey,
     profile: BrokerNativeProfile,
-    requestedSpec: ManagedSlotConfig["requests"][number]["requestedSpec"],
-  ): Promise<SlotAssignmentRecord | DestructionProgress> {
+    requestedSpec: BrokerProvisionRequest["requests"][number]["requestedSpec"],
+  ): Promise<BindingAssignmentRecord | DestructionProgress> {
     const assignment = await this.dependencies.registry.getAssignment(key);
     if (!assignment || assignment.stableDeviceId === null) {
       return this.confirmNoBinding(key);
@@ -231,15 +233,15 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   }
 
   private async drainAssignment(
-    key: SlotKey,
-    assignment: SlotAssignmentRecord,
+    key: BindingKey,
+    assignment: BindingAssignmentRecord,
     profile: BrokerNativeProfile,
-    requestedSpec: ManagedSlotConfig["requests"][number]["requestedSpec"],
-  ): Promise<SlotAssignmentRecord | DestructionProgress> {
+    requestedSpec: BrokerProvisionRequest["requests"][number]["requestedSpec"],
+  ): Promise<BindingAssignmentRecord | DestructionProgress> {
     if (!assignment.execOwner) {
       return assignment;
     }
-    if (!journalOwnersEqual(assignment.execOwner, this.dependencies.managedSlotJournal.owner)) {
+    if (!journalOwnersEqual(assignment.execOwner, this.dependencies.bindingJournal.owner)) {
       return this.isExecOwnerLive(assignment.execOwner) ? "pending" : assignment;
     }
     const released = await this.release(assignment.execOwner.sessionUuid);
@@ -262,17 +264,17 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   }
 
   private async deleteAssignment(
-    key: SlotKey,
-    assignment: SlotAssignmentRecord,
+    key: BindingKey,
+    assignment: BindingAssignmentRecord,
   ): Promise<DestructionProgress> {
     if (assignment.stableDeviceId === null) {
       return this.confirmNoBinding(key);
     }
     const stableDeviceId = assignment.stableDeviceId;
-    const opened = await this.dependencies.registry.openSlotJournal(key, {
+    const opened = await this.dependencies.registry.openBindingJournal(key, {
       kind: "replace",
       phase: "deleting",
-      owner: this.dependencies.managedSlotJournal.owner,
+      owner: this.dependencies.bindingJournal.owner,
       target: {
         oldStableId: stableDeviceId,
         oldName: assignment.deviceName,
@@ -294,7 +296,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (opened.kind !== "opened" && opened.kind !== "journal_open") {
       return "pending";
     }
-    const redriven = await this.dependencies.managedSlotJournal.redriveSlot(key);
+    const redriven = await this.dependencies.bindingJournal.redriveBinding(key);
     if (redriven.kind === "blocked" || (await this.hasOpenJournal(key))) {
       return "pending";
     }
@@ -302,7 +304,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     return !after || after.stableDeviceId === null ? "absent" : "pending";
   }
 
-  private async confirmNoBinding(key: SlotKey): Promise<DestructionProgress> {
+  private async confirmNoBinding(key: BindingKey): Promise<DestructionProgress> {
     const assignment = await this.dependencies.registry.getAssignment(key);
     if (
       assignment !== null &&
@@ -336,24 +338,24 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
   }
 
-  private key(resource: BrokerResourceRecord): SlotKey {
-    return { scopeKey: this.scopeKey, slotIndex: resource.allocationIndex };
+  private key(resource: BrokerResourceRecord): BindingKey {
+    return { scopeKey: this.scopeKey, bindingIndex: resource.allocationIndex };
   }
 
-  private managedSlotConfig(
+  private bindingConfig(
     resource: BrokerResourceRecord,
     profile: BrokerNativeProfile,
-    requestedSpec: ManagedSlotConfig["requests"][number]["requestedSpec"],
+    requestedSpec: BrokerProvisionRequest["requests"][number]["requestedSpec"],
     options: SessionDevicePreparationOptions,
-  ): ManagedSlotConfig {
-    return parseManagedSlotConfig({
+  ): BrokerProvisionRequest {
+    return {
       contractVersion: 1,
       ...this.scope,
-      localSlotCapacity: 1,
+      localBindingCapacity: 1,
       requests: [
         {
-          slotIndex: resource.allocationIndex,
-          role: BROKER_SLOT_ROLE,
+          bindingIndex: resource.allocationIndex,
+          role: BROKER_BINDING_ROLE,
           platform: profile.platform,
           requestedSpec,
         },
@@ -365,12 +367,12 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       ...(options.executionOwnerPid === undefined
         ? {}
         : { executionOwnerPid: options.executionOwnerPid }),
-    });
+    };
   }
 
   private requestedSpec(
     profile: BrokerNativeProfile,
-  ): ManagedSlotConfig["requests"][number]["requestedSpec"] {
+  ): BrokerProvisionRequest["requests"][number]["requestedSpec"] {
     if (profile.platform === "ios") {
       return {
         runtime: profile.runtimeId,
@@ -395,13 +397,13 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   }
 
   private belongsToResource(
-    assignment: SlotAssignmentRecord,
+    assignment: BindingAssignmentRecord,
     profile: BrokerNativeProfile,
-    requestedSpec: ManagedSlotConfig["requests"][number]["requestedSpec"],
+    requestedSpec: BrokerProvisionRequest["requests"][number]["requestedSpec"],
   ): boolean {
     if (
       assignment.scopeKey !== this.scopeKey ||
-      assignment.role !== BROKER_SLOT_ROLE ||
+      assignment.role !== BROKER_BINDING_ROLE ||
       assignment.platform !== profile.platform
     ) {
       return false;
@@ -417,15 +419,15 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     );
   }
 
-  private async redriveOpenJournal(key: SlotKey): Promise<"clear" | "pending"> {
+  private async redriveOpenJournal(key: BindingKey): Promise<"clear" | "pending"> {
     if (!(await this.hasOpenJournal(key))) {
       return "clear";
     }
-    const result = await this.dependencies.managedSlotJournal.redriveSlot(key);
+    const result = await this.dependencies.bindingJournal.redriveBinding(key);
     return result.kind === "clear" && !(await this.hasOpenJournal(key)) ? "clear" : "pending";
   }
 
-  private async hasOpenJournal(key: SlotKey): Promise<boolean> {
-    return (await this.dependencies.registry.listOpenSlotJournal(key)).length > 0;
+  private async hasOpenJournal(key: BindingKey): Promise<boolean> {
+    return (await this.dependencies.registry.listOpenBindingJournal(key)).length > 0;
   }
 }

@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -9,7 +9,6 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
-import { deviceReservedForRestartRecoveryError } from "../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import {
   isAnonymousAcquisitionSession,
@@ -39,7 +38,6 @@ import {
 import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
-import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -49,10 +47,16 @@ import type { StartDeviceReadiness } from "./toolOutputSchemas";
 import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
+import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import {
+  DevicePreparationBudgets,
+  DeviceToolsDependencies,
+  ProvisionDeviceCleanup,
+  StartDeviceArgs,
   acquisitionLifecycleTimeoutError,
   androidSourceImageWithBootedMetadata,
   assertAndroidBootDidNotEnterRecovery,
+  bindUndoneIfUndelivered,
   cancelUnownedColdBoot,
   clearColdBootShutdownMarker,
   configuredImageForAcquiredDevice,
@@ -67,7 +71,6 @@ import {
   refreshResourcesAfterCommittedBoot,
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
-  bindUndoneIfUndelivered,
   rollBackUndeliveredBoot,
   runOperationWithinDeadline,
   setAcquisitionStage,
@@ -76,13 +79,9 @@ import {
   validatePooledDeviceMapping,
   validatePreservedSystemUiAnrRecoverySession,
   validateRequestedAndroidSerial,
-} from "./deviceTools";
-import type {
-  DevicePreparationBudgets,
-  DeviceToolsDependencies,
-  ProvisionDeviceCleanup,
-  StartDeviceArgs,
-} from "./deviceTools";
+  admitRestartReservedStart,
+  startRequester,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /**
  * Removes a device a createIfMissing acquisition created and then failed to
@@ -479,51 +478,14 @@ const bootAndPrepareDevice = async (
   });
 };
 
-/** Check exact identities before lifecycle waiting, and retain the admitted owner across boot. */
-export function admitRestartReservedStart(args: StartDeviceArgs): void {
-  const reservation = initializedDevicePool()?.restartReservationForStart?.(
-    args.platform,
-    [args.avdName, args.matchExactName ? args.name : undefined, args.deviceId].filter(
-      (id): id is string => id !== undefined,
-    ),
-    startRequester(args),
-  );
-  if (!reservation) {
-    return;
-  }
-  if (!reservation.owned) {
-    throw deviceReservedForRestartRecoveryError(
-      reservation.deviceId,
-      reservation.sessionUuid,
-      reservation.retryAfterMs,
-    );
-  }
-  if (reservation.restartHandoff) {
-    args.__restartResumeSessionUuid ??= reservation.sessionUuid;
-    args.__restartResumeTargets ??= initializedDevicePool()?.restartReservationExclusions(
-      args.platform,
-      startRequester(args),
-    ).resumeTargets;
-  }
-}
-
-function startRequester(args: StartDeviceArgs) {
-  const requester = lifecycleRequester(args);
-  return {
-    ...requester,
-    sessionUuid: args.__requesterSessionUuid ?? requester.sessionUuid,
-    oneShotCli: args.__oneShotCli,
-  };
-}
-
-/** Selectors skip recovery targets and managed slots before discovery can boot them. */
+/** Selectors skip recovery targets and broker bindings before discovery can boot them. */
 async function startMatchExclusions(args: StartDeviceArgs): Promise<{
   excludeDeviceNames: ReadonlySet<string> | undefined;
   excludeDeviceIds: ReadonlySet<string> | undefined;
 }> {
   const platform = args.platform;
   const managed =
-    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
+    (await bindingPoolGate(initializedDevicePool()).bindingStableIds?.(platform)) ??
     new Set<string>();
   if (platform === "ios") {
     const exclusions = unionSets(undefined, managed);

@@ -5,7 +5,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { DEVICE_OUTSIDE_MANAGED_SLOTS_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { DEVICE_OUTSIDE_BOUND_SESSION_CODE } from "../../src/server/deviceOutsideBoundSessionRefusal";
@@ -336,7 +336,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     });
   });
 
-  test("device_outside_managed_slots arrives as a typed result", async () => {
+  test("device_outside_broker_grant arrives as a typed result", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
@@ -348,7 +348,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     DaemonState.getInstance()
-      .getManagedConnectionScopes()
+      .getBrokerConnectionScopes()
       .bind("mcp-managed", { scopeKey: "scope-a", sessionUuids: [] });
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
@@ -361,7 +361,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     expect(result.isError).toBe(true);
     expect(wire(result)).toMatchObject({
       success: false,
-      code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+      code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
       retryable: false,
     });
     sessionManager.stopCleanupTimer();

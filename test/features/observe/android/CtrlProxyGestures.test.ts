@@ -1,5 +1,5 @@
 import { FakeDisplayTransitionReader } from "../../../fakes/FakeDisplayTransitionReader";
-import { staleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { staleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { describe, it, expect, spyOn } from "bun:test";

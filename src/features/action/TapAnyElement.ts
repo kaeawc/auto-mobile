@@ -45,7 +45,7 @@ import {
   resolveGestureCtrlProxyTimeoutMs as resolveTapAnyCtrlProxyTimeoutMs,
 } from "./gestureTransportTimeout";
 export { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
-import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
+import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
@@ -131,6 +131,7 @@ import {
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 import { deadlineRequest, resolveDeadlineActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 type TapAnyAccessibilityService = Pick<
   AndroidCtrlProxyClient,
@@ -1992,11 +1993,10 @@ export class TapAnyElement extends BaseVisualChange {
             requestDeadlineMs: request?.requestDeadlineMs,
           }),
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
           display: targetDisplay?.observation.display.key,
           previousObservation: targetDisplay?.observation,
-          resolvesTargetFromRead: true,
-          timeoutMs: 800,
+          timeoutMs: SETTLE_BUDGET_MS.gesture,
           progress,
           perf,
           signal,

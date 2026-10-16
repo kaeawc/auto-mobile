@@ -1,7 +1,7 @@
 import { indeterminateTapError } from "../action/coordinateTapDispatch";
 import { ActionableError, type TraversalOrderResult } from "../../models";
 import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
-import { StaleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";

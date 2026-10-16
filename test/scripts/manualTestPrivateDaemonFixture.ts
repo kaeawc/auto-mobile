@@ -6,6 +6,48 @@ import {
 } from "../../scripts/manual-test/private-daemon";
 import type { PrivateDaemonBatchOptions } from "../../scripts/manual-test/privateDaemonEnv";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+export function brokerBatchInput() {
+  return {
+    schemaVersion: 1,
+    limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0 },
+    reuseCleanDevices: false,
+    defaults: {
+      android: {
+        platform: "android",
+        policyVersion: "test-v1",
+        hardware: {
+          omitted: "phone",
+          profiles: [
+            { archetype: "phone", profileId: "medium_phone" },
+            { archetype: "tablet", profileId: "medium_tablet" },
+          ],
+        },
+        os: { selector: { kind: "major", major: 35 }, preferredVersion: "35" },
+      },
+      ios: {
+        platform: "ios",
+        policyVersion: "test-v1",
+        hardware: {
+          omitted: "phone",
+          archetypes: [{ archetype: "phone", modelType: { family: "iphone", variant: "pro" } }],
+          modelTypes: [
+            {
+              modelType: { family: "iphone", variant: "pro" },
+              model: { namespace: "product-model", value: "iPhone18,1" },
+            },
+          ],
+        },
+        os: { selector: { kind: "exact", version: "26.5" }, preferredVersion: "26.5" },
+      },
+    },
+    clients: [
+      { name: "a-phone", platform: "android", hardware: "phone" },
+      { name: "a-tablet", platform: "android", hardware: "tablet" },
+      { name: "i-phone", platform: "ios", hardware: "phone" },
+    ],
+  };
+}
 export const options: PrivateDaemonBatchOptions = {
   batchDir: resolve("/mt-batch"),
   count: 2,
@@ -38,6 +80,7 @@ export function fixture() {
     }> = [];
   const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
   const deps: PrivateDaemonCliDeps = {
+    ids: new FakeIdGenerator(["batch-id"]),
     timer: new FakeTimer(),
     hostStats: () => ({
       platform: "linux",
@@ -77,6 +120,9 @@ export function fixture() {
     host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
+      AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES: "999",
+      AUTOMOBILE_SESSION_BROKER_CONFIG: "/inherited/broker.json",
+      AUTOMOBILE_SESSION_CONFIG: "/inherited/session.json",
       AUTOMOBILE_DB_PATH: "/wrong-db",
       KEEP: "kept",
     },

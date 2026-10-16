@@ -1,5 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
+import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
@@ -315,5 +316,31 @@ describe("HandleIntentChooser", () => {
       expect(result.error).toBe("Target element not found");
       expect(result.observation).not.toBeNull();
     });
+  });
+
+  test("a missing view hierarchy reports detected:false with the error, never an undefined detected", async () => {
+    fakeObserveScreen.setObserveResult({ ...mockObserveResult, viewHierarchy: undefined });
+
+    const result = await handleIntentChooser.execute("custom", "com.example.target");
+
+    expect(result.success).toBe(false);
+    expect(result.detected).toBe(false);
+    expect(result.error).toBe("View hierarchy not found");
+  });
+
+  test("openLink's chooser selection treats that failure as a failed open with the chooser error", async () => {
+    fakeObserveScreen.setObserveResult({ ...mockObserveResult, viewHierarchy: undefined });
+
+    const opened = { success: true, url: "https://example.com", observation: mockObserveResult };
+    const result = await selectAndroidOpenLinkChooser(
+      testDevice,
+      "com.example.target",
+      opened as never,
+      "https://example.com",
+      handleIntentChooser,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("View hierarchy not found");
   });
 });

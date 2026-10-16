@@ -1,5 +1,5 @@
 import type { AndroidCtrlProxyClient } from "../../observe/android";
-import { StaleDisplayError, withStaleDisplay } from "../../../models/StaleDisplayError";
+import { StaleDisplayError, withStaleDisplay } from "../../observe/StaleDisplayError";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";

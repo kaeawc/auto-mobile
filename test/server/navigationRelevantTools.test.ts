@@ -1,13 +1,30 @@
-import { expect, describe, test } from "bun:test";
-import { NAVIGATION_RELEVANT_TOOLS } from "../../src/server/toolRegistry";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { registerInteractionTools } from "../../src/server/interactionTools";
+import { registerAppTools } from "../../src/server/appTools";
+import { registerObserveTools } from "../../src/server/observeTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
-describe("NAVIGATION_RELEVANT_TOOLS", () => {
-  test("is a Set for O(1) membership checks", () => {
-    expect(NAVIGATION_RELEVANT_TOOLS).toBeInstanceOf(Set);
+isolateToolRegistry();
+
+/** Names of the registered tools declaring `recordsNavigation`, sorted. */
+function navigationRecordingTools(): string[] {
+  return [...ToolRegistry["tools"].values()]
+    .filter((tool) => tool.recordsNavigation === true)
+    .map((tool) => tool.name)
+    .sort();
+}
+
+describe("recordsNavigation trait (formerly NAVIGATION_RELEVANT_TOOLS)", () => {
+  beforeAll(() => {
+    registerInteractionTools();
+    registerAppTools();
+    registerObserveTools();
   });
 
-  test("contains exactly the UI-interaction tools that may cause navigation", () => {
-    expect([...NAVIGATION_RELEVANT_TOOLS].sort()).toEqual([
+  test("is declared by exactly the UI-interaction tools that may cause navigation", () => {
+    // The former NAVIGATION_RELEVANT_TOOLS set in toolRegistry.ts.
+    expect(navigationRecordingTools()).toEqual([
       "dragAndDrop",
       "pinchOn",
       "pressButton",
@@ -19,7 +36,7 @@ describe("NAVIGATION_RELEVANT_TOOLS", () => {
 
   test("excludes app-lifecycle and observation tools", () => {
     for (const tool of ["launchApp", "terminateApp", "homeScreen", "observe", "installApp"]) {
-      expect(NAVIGATION_RELEVANT_TOOLS.has(tool)).toBe(false);
+      expect(ToolRegistry.getTool(tool)?.recordsNavigation).toBeUndefined();
     }
   });
 });

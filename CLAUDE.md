@@ -377,3 +377,11 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   simulator-free filter as `prepush-ios.sh` via
   `scripts/ios/xctestrunner_test_filter.sh`. Run locally with
   `bash scripts/ci/xctestrunner-tsan.sh`; logs are in `scratch/xctestrunner-tsan/`.
+
+## Manual Linux qualification
+
+`.github/workflows/linux-qualification.yml` is a manual-only Linux research run
+for real procfs fixtures and the emulator SIGSEGV GPU/workload matrix. Its tested
+bash entrypoints live in `scripts/ci/linux-qualification/`; see
+`scripts/README.md` for evidence formats and bounds. Never dispatch it as part of
+local validation; use `test/bats/linux-qualification-*.bats` with stubs instead.

@@ -739,6 +739,9 @@ test/features/shared/MetricsUtils.test.ts
 test/features/snapshot/DeviceSnapshotConfig.property.test.ts
 test/features/storage/storageCapabilities.test.ts
 test/features/storage/storageProviderCoverage.test.ts
+test/features/systemTray/NotificationUIDetector.test.ts
+test/features/systemTray/notificationDumpsys.test.ts
+test/features/systemTray/notificationHints.test.ts
 test/features/talkback/FocusElementMatcher.test.ts
 test/features/talkback/FocusNavigationExecutor.cancellation.test.ts
 test/features/talkback/FocusNavigationExecutor.test.ts
@@ -1163,9 +1166,6 @@ test/server/storageDomainResources.test.ts
 test/server/storageSdkErrors.test.ts
 test/server/strictToolInputs.test.ts
 test/server/stripInternalToolParams.property.test.ts
-test/server/system-tray/NotificationUIDetector.test.ts
-test/server/system-tray/notificationDumpsys.test.ts
-test/server/system-tray/notificationHints.test.ts
 test/server/talkBackReleaseDuringFocusNavigation.test.ts
 test/server/telephonyTools.test.ts
 test/server/templates/list.test.ts

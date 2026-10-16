@@ -6,6 +6,8 @@ test/daemon/socketServerOneShotCliAcquisition.integration.test.ts
 test/features/navigation/Explore.test.ts
 test/features/observe/ios/CtrlProxyStorage.test.ts
 test/features/record/ToolCallRecorderCoverage.test.ts
+test/features/systemTray/systemTray.test.ts
+test/features/systemTray/systemTrayList.test.ts
 test/lint/gatedToolsAcceptSessionUuid.test.ts
 test/lint/toolReadControlClassification.test.ts
 test/plan/planExecutorInternalNoDiffE2E.test.ts
@@ -79,8 +81,6 @@ test/server/setToolEnabledSessionValidation.integration.test.ts
 test/server/storageTools.androidInspectionFallback.test.ts
 test/server/storageTools.characterization.test.ts
 test/server/storageTools.test.ts
-test/server/systemTray.test.ts
-test/server/systemTrayList.test.ts
 test/server/toolCallDeviceIdAllPaths.test.ts
 test/server/toolRegistry.androidSessionContext.test.ts
 test/server/toolRegistry.deviceOwnership.test.ts

@@ -3,7 +3,7 @@
 7	test/ctrlProxy/IOSCtrlProxyManager.deviceRunner.test.ts
 1	test/ctrlProxy/IOSCtrlProxyManager.physicalRunner.test.ts
 1	test/ctrlProxy/IOSCtrlProxyManager.stopCleanup.test.ts
-162	test/ctrlProxy/IOSCtrlProxyManager.test.ts
+94	test/ctrlProxy/IOSCtrlProxyManager.test.ts
 2	test/ctrlProxy/IOSCtrlProxyManager.unresponsiveRunnerRelaunch.test.ts
 1	test/daemon/adbServerResetRecovery.test.ts
 5	test/daemon/appearanceConfigPerSession.test.ts
@@ -51,7 +51,6 @@
 1	test/daemon/daemonToolCallEndWiring.test.ts
 6	test/daemon/deviceDataStreamSocketServer.test.ts
 1	test/daemon/deviceGestureRecordingSocketServerAuth.test.ts
-1	test/daemon/deviceGestureRecordingSocketServerReadinessSession.test.ts
 1	test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts
 1	test/daemon/devicePool.assignDevice.test.ts
 3	test/daemon/devicePool.assignMultipleDevices.test.ts
@@ -336,7 +335,7 @@
 1	test/features/observe/ios/CtrlProxyExchangeRecorder.test.ts
 1	test/features/observe/ios/CtrlProxyStructure.test.ts
 10	test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts
-60	test/features/observe/ios/IOSCtrlProxyClient.test.ts
+38	test/features/observe/ios/IOSCtrlProxyClient.test.ts
 1	test/features/observe/ios/IOSCtrlProxyClientMessageOrder.test.ts
 3	test/features/observe/ios/IosSdkContractFixtures.contract.test.ts
 10	test/features/observe/ios/IosSdkEventIngestor.test.ts
@@ -360,6 +359,8 @@
 1	test/features/record/android/RotationDuringRecording.test.ts
 6	test/features/screen-stream/IosScreenCaptureHelper.test.ts
 1	test/features/screen-stream/IosScreenCaptureHelperCapability.test.ts
+2	test/features/systemTray/notificationHints.test.ts
+11	test/features/systemTray/systemTray.test.ts
 1	test/features/toolSelection/SqliteSessionToolSelectionRepository.integration.test.ts
 1	test/features/utility/DeepLinkManagerHostExec.test.ts
 1	test/features/utility/ElementGeometry.property.test.ts
@@ -404,9 +405,8 @@
 1	test/scripts/optimizeSourcemap.test.ts
 2	test/server/CriticalSectionCoordinator.test.ts
 1	test/server/DeviceIncarnationInvalidator.test.ts
-2	test/server/DeviceSessionManager.appearanceSync.test.ts
-2	test/server/DeviceSessionManager.foreignForward.test.ts
-1	test/server/DeviceSessionManager.readBoot.test.ts
+1	test/server/DeviceSessionManager.appearanceSync.test.ts
+1	test/server/DeviceSessionManager.foreignForward.test.ts
 1	test/server/androidStartLifecycleDiscoveryTyped.test.ts
 1	test/server/appFileService.test.ts
 3	test/server/bootedDeviceResourcesCharacterization.test.ts
@@ -456,7 +456,6 @@
 1	test/server/prototypeResources.test.ts
 1	test/server/prototypeTools.test.ts
 1	test/server/proxyServerProgress.test.ts
-1	test/server/readToolsExplicitDeviceIdRule.test.ts
 1	test/server/releaseCallerOrderingPreservedSession.test.ts
 10	test/server/resourceDeviceResolver.test.ts
 2	test/server/resourceNotifySlowSibling.test.ts
@@ -471,15 +470,12 @@
 6	test/server/restartReservationStartAdmission.test.ts
 1	test/server/setActiveDevice.refusedBeforeResume.test.ts
 10	test/server/storageResources.test.ts
-2	test/server/system-tray/notificationHints.test.ts
-11	test/server/systemTray.test.ts
 1	test/server/telephonyTools.test.ts
 1	test/server/terminalPersistedRecoveryTransport.integration.test.ts
 19	test/server/toolParamErrorHint.test.ts
 2	test/server/toolRegistry.collaborators.integration.test.ts
 1	test/server/toolRegistry.reachability.test.ts
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts
-1	test/server/toolRegistry.sessionlessReadHeldElsewhere.test.ts
 11	test/server/toolRegistryNotifyToolListChanged.test.ts
 1	test/server/tools/structuredContentGating.test.ts
 1	test/server/transportAliasRuleParity.test.ts

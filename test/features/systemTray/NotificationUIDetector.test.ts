@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { AndroidNotificationUIDetector } from "../../../src/server/system-tray/AndroidNotificationUIDetector";
-import { IosNotificationUIDetector } from "../../../src/server/system-tray/IosNotificationUIDetector";
-import { createNotificationUIDetector } from "../../../src/server/system-tray/createNotificationUIDetector";
+import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
+import { IosNotificationUIDetector } from "../../../src/features/systemTray/IosNotificationUIDetector";
+import { createNotificationUIDetector } from "../../../src/features/systemTray/createNotificationUIDetector";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
 import { ActionableError } from "../../../src/models";
 import type {
@@ -11,7 +11,7 @@ import type {
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
-import type { SystemTrayDependencies } from "../../../src/server/systemTrayHelpers";
+import type { SystemTrayDependencies } from "../../../src/features/systemTray/systemTrayHelpers";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**

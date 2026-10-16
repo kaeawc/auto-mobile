@@ -45,14 +45,14 @@ import {
   networkFilterNextStep,
   type NetworkFilterBridge,
   type NetworkFilterStatus,
-} from "../../network-filter/NetworkFilterBridge";
+} from "../../networkFilter/NetworkFilterBridge";
 import {
   IOS_APP_NETWORK_RULE_LEASE_MS,
   IosAppNetworkRuleClient,
   type IosAppNetworkApplyResult,
   type IosAppNetworkResetResult,
   type IosAppNetworkRuleCommandContext,
-} from "../../network-filter/IosAppNetworkRuleClient";
+} from "../../networkFilter/IosAppNetworkRuleClient";
 
 interface NetworkConditionOperationsDependencies {
   device: () => BootedDevice;

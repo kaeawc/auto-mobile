@@ -26,6 +26,7 @@ import {
 import {
   assertAndroidImageRunningStateKnown,
   type BootedDeviceDiscoveryOptions,
+  type DeviceManagerSimCtl,
   MultiPlatformDeviceManager,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
@@ -34,7 +35,7 @@ import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, type SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getSharedDevicectlDeviceLister,
@@ -56,7 +57,11 @@ import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmu
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
 import { getDeviceCreationGate } from "./deviceCreationGate";
-import { createDefaultDeviceProvisioner, type ProvisionedDevice } from "./deviceProvisioning";
+import {
+  createDefaultDeviceProvisioner,
+  type IosSimulatorCreator,
+  type ProvisionedDevice,
+} from "./deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -120,11 +125,19 @@ function lifecycleIdentityForDevice(
 }
 
 /**
+ * The simctl surface the session manager drives, plus what the device manager built from it
+ * needs. Exactly what consumers use, so a fake (`FakeSimctl`) satisfies it without a cast.
+ */
+export type DeviceClientSimctl = DeviceManagerSimCtl &
+  IosSimulatorCreator &
+  Pick<SimCtl, "bootSimulator" | "getDeviceInfo" | "presentSimulatorAfterStart">;
+
+/**
  * Provider interface for device clients - enables dependency injection for testing
  */
 export interface DeviceClientProvider {
   getAdb(): AdbExecutor;
-  getSimctl(): SimCtlClient | undefined;
+  getSimctl(): DeviceClientSimctl | undefined;
   getAndroidEmulator(): AndroidEmulatorClient | undefined;
   getDeviceUtils(): PlatformDeviceManager;
   /**
@@ -166,7 +179,7 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
     return this._adb;
   }
 
-  getSimctl(): SimCtlClient | undefined {
+  getSimctl(): DeviceClientSimctl | undefined {
     if (!this._simctl) {
       this._simctl = new SimCtlClient(null);
     }
@@ -523,7 +536,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return this._adb;
   }
 
-  private get simctl(): SimCtlClient | undefined {
+  private get simctl(): DeviceClientSimctl | undefined {
     return this.provider.getSimctl();
   }
 
@@ -545,7 +558,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * fails at once with the typed retryable `capacity_exhausted` refusal (#11236).
    */
   private async bootIosSimulatorAdmitted(
-    simctl: SimCtlClient,
+    simctl: Pick<DeviceClientSimctl, "bootSimulator">,
     device: { runtimeId?: string },
     udid: string,
     signal: AbortSignal,
@@ -2176,8 +2189,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
   private assertIosDeviceAvailable(
     deviceId: string,
-    deviceInfo: Awaited<ReturnType<SimCtlClient["getDeviceInfo"]>>,
-  ): asserts deviceInfo is NonNullable<Awaited<ReturnType<SimCtlClient["getDeviceInfo"]>>> {
+    deviceInfo: Awaited<ReturnType<DeviceClientSimctl["getDeviceInfo"]>>,
+  ): asserts deviceInfo is NonNullable<Awaited<ReturnType<DeviceClientSimctl["getDeviceInfo"]>>> {
     if (!deviceInfo) {
       throw new ActionableError(
         `iOS simulator ${deviceId} is not available. Please check if it exists and is available.`,

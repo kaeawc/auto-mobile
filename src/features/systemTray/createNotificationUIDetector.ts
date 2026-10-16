@@ -5,7 +5,7 @@ import type {
   SystemTrayAdb,
   SystemTrayDependencies,
   SystemTrayIosClient,
-} from "../systemTrayHelpers";
+} from "./systemTrayHelpers";
 import {
   AndroidNotificationUIDetector,
   type AndroidNotificationUIDetectorDeps,

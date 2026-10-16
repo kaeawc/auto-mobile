@@ -65,7 +65,7 @@
 1	src/server/finalizeToolResponse.ts	eslint(max-lines-per-function)
 1	src/server/index.ts	eslint(complexity)
 1	src/server/interactionTools.ts	eslint(complexity)
-1	src/server/observeTools.ts	eslint(max-params)
+1	src/server/observeWaitEvaluation.ts	eslint(max-params)
 1	src/server/toolRegistry.ts	eslint(max-lines-per-function)
 1	src/utils/android-cmdline-tools/AdbClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(complexity)

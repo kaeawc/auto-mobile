@@ -1,7 +1,7 @@
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
 
 /**
- * Platform-specific surface used by `systemTrayHelpers.ts` so its
+ * Platform-specific surface used by `src/features/systemTray/systemTrayHelpers.ts` so its
  * helper functions are free of `device.platform === ...` branches.
  *
  * Each implementation captures its {@link BootedDevice} at construction.

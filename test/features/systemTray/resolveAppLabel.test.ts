@@ -3,7 +3,7 @@ import {
   resetSystemTrayDependencies,
   resolveAppLabel,
   setSystemTrayDependencies,
-} from "../../../src/server/systemTrayHelpers";
+} from "../../../src/features/systemTray/systemTrayHelpers";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice } from "../../../src/models";

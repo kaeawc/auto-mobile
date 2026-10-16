@@ -1,15 +1,11 @@
-import { afterEach, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import {
-  resetAppPermissionsFactory,
-  setAppPermissionsFactory,
-  setAppPermissionsHandler,
-} from "../../../src/server/appTools";
+import { createSetAppPermissionsHandler } from "../../../src/server/appTools";
 import type { BootedDevice } from "../../../src/models";
 
 const device: BootedDevice = { platform: "android", name: "emu", deviceId: "emulator-5554" };
@@ -43,7 +39,6 @@ function harness(before = egg, after = before) {
     permissions: new AppPermissions(device, { adbFactory: factory }),
   };
 }
-afterEach(resetAppPermissionsFactory);
 
 test.each(["grant", "revoke"] as const)(
   "%s rejects unrequested CAMERA before pm, including aggregate counts",
@@ -213,7 +208,7 @@ test.each(["grant", "revoke"] as const)(
 
 test("mixed list counts only verified changes and handler retains partial success", async () => {
   const h = harness(egg, flip(egg, read, true));
-  setAppPermissionsFactory(() => h.permissions);
+  const setAppPermissionsHandler = createSetAppPermissionsHandler(() => h.permissions);
   const response = await setAppPermissionsHandler(device, {
     appId: "com.android.egg",
     permissions: [read, post, camera],
@@ -237,7 +232,7 @@ test("mixed list counts only verified changes and handler retains partial succes
 
 test("all failed handler sets isError", async () => {
   const h = harness(playground);
-  setAppPermissionsFactory(() => h.permissions);
+  const setAppPermissionsHandler = createSetAppPermissionsHandler(() => h.permissions);
   const response = await setAppPermissionsHandler(device, {
     appId: "dev.jasonpearson.automobile.playground",
     permissions: [camera],
@@ -248,7 +243,7 @@ test("all failed handler sets isError", async () => {
 
 test("all unchanged handler explains that no changes were needed", async () => {
   const h = harness();
-  setAppPermissionsFactory(() => h.permissions);
+  const setAppPermissionsHandler = createSetAppPermissionsHandler(() => h.permissions);
   const response = await setAppPermissionsHandler(device, {
     appId: "com.android.egg",
     permissions: [post],

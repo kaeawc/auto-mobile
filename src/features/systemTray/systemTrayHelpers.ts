@@ -1,23 +1,20 @@
-import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
-import { rawContentDesc, rawNodeValue, rawResourceId } from "../features/utility/elementProperties";
-import { SearchableHierarchy } from "../features/utility/SearchableNode";
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { rawContentDesc, rawNodeValue, rawResourceId } from "../utility/elementProperties";
+import { SearchableHierarchy } from "../utility/SearchableNode";
 /**
  * System tray helper functions for notification handling.
  * Extracted from interactionTools.ts for maintainability.
  */
-import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
-import { pollObserveUntil } from "../features/observe/ObservePoll";
-import {
-  diffObserveResult,
-  isSameObservationScreen,
-} from "../features/observe/output/ObserveResultOutput";
-import { isStabilityDiffEmpty } from "../features/observe/SettleObserve";
-import type { Timer } from "../utils/SystemTimer";
-import { waitForScrollIdle } from "../utils/scrollIdle";
-import { defaultTimer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { shellQuote } from "../utils/shellQuote";
+import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
+import { pollObserveUntil } from "../observe/ObservePoll";
+import { diffObserveResult, isSameObservationScreen } from "../observe/output/ObserveResultOutput";
+import { isStabilityDiffEmpty } from "../observe/SettleObserve";
+import type { Timer } from "../../utils/SystemTimer";
+import { waitForScrollIdle } from "../../utils/scrollIdle";
+import { defaultTimer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { shellQuote } from "../../utils/shellQuote";
 import {
   ActionableError,
   BootedDevice,
@@ -26,27 +23,27 @@ import {
   ViewHierarchyResult,
   ViewHierarchyNode,
   isTruthy,
-} from "../models";
-import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
-import { ignoreCasePolicy, INSPECT_INTENT } from "../features/utility/SelectionPolicy";
-import { DefaultElementParser } from "../features/utility/ElementParser";
-import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
-import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
-import type { IosGestureResult } from "./system-tray/IosNotificationUIDetector";
+} from "../../models";
+import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveScreen";
+import { RealObserveScreen } from "../observe/ObserveScreen";
+import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { ignoreCasePolicy, INSPECT_INTENT } from "../utility/SelectionPolicy";
+import { DefaultElementParser } from "../utility/ElementParser";
+import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
+import { createNotificationUIDetector } from "./createNotificationUIDetector";
+import type { IosGestureResult } from "./IosNotificationUIDetector";
 import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
   type DumpsysNotificationRecord,
-} from "./system-tray/notificationDumpsys";
-import { errorMessage } from "../utils/describeUnknownError";
+} from "./notificationDumpsys";
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
@@ -57,19 +54,19 @@ import {
   getHierarchyRoots,
   getNodeProperties,
   traverseForHint,
-} from "./system-tray/notificationHints";
-import type { ProgressCallback } from "./toolRegistry";
-import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
-import { boundsArea, boundsEqual } from "../utils/bounds";
-import { logger } from "../utils/logger";
+} from "./notificationHints";
+import type { ProgressCallback } from "../../server/toolRegistry";
+import type { SystemTrayNotificationArgs } from "../../server/interactionToolTypes";
+import { boundsArea, boundsEqual } from "../../utils/bounds";
+import { logger } from "../../utils/logger";
 import {
   resolveScreenshotMode,
   shouldSkipActionObservationScreenshot,
-} from "../features/observe/automaticScreenshotPolicy";
-import { getDeviceDataStreamServer } from "../daemon/deviceDataStreamSocketServer";
-import { serverConfig } from "../utils/ServerConfig";
-import type { PerformanceTracker } from "../utils/PerformanceTracker";
-import type { AdbExecuteOptions } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+} from "../observe/automaticScreenshotPolicy";
+import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { serverConfig } from "../../utils/ServerConfig";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
+import type { AdbExecuteOptions } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 // ============================================================================
 // Interfaces
@@ -518,7 +515,10 @@ export const resolveAppLabel = async (
   } catch (error) {
     // Both the CtrlProxy fast path and this dumpsys fallback failed (e.g. app
     // uninstalled mid-check); null lets the caller fall back to the package name.
-    logger.debug(`src/server/systemTrayHelpers.ts dumpsys label lookup failed: ${error}`, error);
+    logger.debug(
+      `src/features/systemTray/systemTrayHelpers.ts dumpsys label lookup failed: ${error}`,
+      error,
+    );
     throwIfAborted(signal);
     return null;
   }

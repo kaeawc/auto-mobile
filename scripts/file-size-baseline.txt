@@ -4,9 +4,9 @@
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
-1539	src/daemon/client.ts
+1540	src/daemon/client.ts
 5652	src/daemon/daemon.ts
-5970	src/daemon/daemonMcpProxy.ts
+6003	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts
@@ -16,8 +16,8 @@
 2558	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
-13324	src/daemon/sessionManager.ts
-9081	src/daemon/socketServer.ts
+13327	src/daemon/sessionManager.ts
+9108	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1096	src/db/failureAnalyticsRepository.ts
@@ -50,7 +50,7 @@
 1056	src/features/observe/ViewHierarchy.ts
 5115	src/features/observe/android/AndroidCtrlProxyClient.ts
 1857	src/features/observe/android/CtrlProxyHierarchy.ts
-1839	src/features/observe/android/ctrlProxyProtocol.ts
+1841	src/features/observe/android/ctrlProxyProtocol.ts
 1114	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
 4569	src/features/observe/ios/IOSCtrlProxyClient.ts
@@ -58,8 +58,8 @@
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
-1249	src/features/prototype/prototypeSpec.ts
-1184	src/features/prototype/prototypeValidation.ts
+1253	src/features/prototype/prototypeSpec.ts
+1204	src/features/prototype/prototypeValidation.ts
 2878	src/features/systemTray/systemTrayHelpers.ts
 1684	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
@@ -79,7 +79,7 @@
 1170	src/server/executionTracker.ts
 1642	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
-3673	src/server/interactionTools.ts
+3691	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2874	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts

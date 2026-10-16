@@ -164,7 +164,7 @@ import {
   SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
-import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
   isIdleReleaseReason,
@@ -1486,7 +1486,10 @@ type RehydrationRowOutcome =
   | { kind: "terminalized"; reason: string }
   | { kind: "skipped"; reason: string };
 
-export class UnissuedSessionError extends ActionableError {}
+export class UnissuedSessionError extends ActionableError {
+  /** The JSON-RPC `data` the daemon proxy classifies this refusal by, instead of its prose. */
+  readonly data = { code: DAEMON_SESSION_NOT_ACTIVE_CODE };
+}
 
 /**
  * The durable device identity a persisted row can be recovered onto, or undefined when the row

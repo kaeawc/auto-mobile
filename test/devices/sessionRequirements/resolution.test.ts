@@ -734,6 +734,18 @@ describe("Android system image selection", () => {
     expect(resolved.profile).toMatchObject({ flavor: "default" });
   });
 
+  test("an installed image with an unrecognized release does not poison other selectors (#12788)", () => {
+    const unknown = { ...image("google_apis"), apiLevel: 99, osVersion: undefined as never };
+    const resolved = unwrap(resolveWith([unknown, image("google_apis")]));
+    expect(resolved.profile).toMatchObject({ osVersion: "16" });
+
+    const missing = unwrapError(
+      resolveWith([unknown, image("google_apis")], { kind: "major", major: 14 }),
+    );
+    expect(missing.code).toBe("missing_installed_runtime");
+    expect(missing.message).toContain("not recognized");
+  });
+
   test("an API level used as os names the release version in the error", () => {
     const error = unwrapError(resolveWith([image("google_apis")], { kind: "major", major: 36 }));
     expect(error.code).toBe("missing_installed_runtime");

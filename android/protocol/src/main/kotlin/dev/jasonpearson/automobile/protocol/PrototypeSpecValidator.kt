@@ -1227,10 +1227,29 @@ object PrototypeSpecValidator {
     else null
   }
 
+  /** Pull-to-refresh needs a vertical scroll, and its declared key must hold a boolean. */
+  private fun refreshErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    if (value.text("type") != "scroll") return null
+    val refresh = value["refresh"] as? JsonObject ?: return null
+    if (value.text("axis") == "horizontal")
+      return fail("$path.refresh", "Pull-to-refresh needs a vertical scroll")
+    val key = refresh.text("stateKey") ?: return null
+    val stored = state[key] as? JsonPrimitive
+    return if (
+      state.containsKey(key) && (stored == null || stored.isString || stored.booleanOrNull == null)
+    )
+      fail("$path.refresh.stateKey", "Refresh requires a boolean state key")
+    else null
+  }
+
   private fun sheetBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
-      openWhenErrors(value, path, state)?.let {
+      (openWhenErrors(value, path, state) ?: refreshErrors(value, path, state))?.let {
         return it.forItem(item)
       }
     }
@@ -1246,6 +1265,7 @@ object PrototypeSpecValidator {
     nodeBindingErrors(value, path, state)
       ?: trailingErrors(value, path, state)
       ?: openWhenErrors(value, path, state)
+      ?: refreshErrors(value, path, state)
 
   /** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
   private fun boundKeys(value: JsonObject): List<String> =
@@ -1256,6 +1276,8 @@ object PrototypeSpecValidator {
       value.text("minuteKey"),
       (value["trailing"] as? JsonObject)?.text("stateKey"),
       if (value.text("type") in modalNames) (value["openWhen"] as? JsonObject)?.text("key")
+      else null,
+      if (value.text("type") == "scroll") (value["refresh"] as? JsonObject)?.text("stateKey")
       else null,
     )
 

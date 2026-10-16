@@ -9,6 +9,7 @@ import type {
   NewFailureNotification,
 } from "./types";
 import { logger } from "../utils/logger";
+import { decodeStackTrace, decodeToolCallInfo } from "./failureAggregateJson";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
@@ -313,15 +314,10 @@ export class FailureAnalyticsRepository {
             .where("id", "=", groupId)
             .executeTakeFirst();
 
-          let mergedToolCallInfo = input.toolCallInfo;
-          if (current?.tool_call_info_json) {
-            const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
-            mergedToolCallInfo = this.mergeToolCallInfo(
-              existing,
-              input.toolCallInfo,
-              input.occurrence,
-            );
-          }
+          const existing = decodeToolCallInfo(current?.tool_call_info_json);
+          const mergedToolCallInfo = existing
+            ? this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence)
+            : input.toolCallInfo;
 
           await trx
             .updateTable("failure_groups")
@@ -453,12 +449,8 @@ export class FailureAnalyticsRepository {
         versionBreakdown: versionBreakdowns.get(group.id) ?? [],
         screenBreakdown,
         failureScreens: this.computeFailureScreens(screenBreakdown),
-        stackTraceElements: group.stack_trace_json
-          ? (JSON.parse(group.stack_trace_json) as StackTraceElement[])
-          : [],
-        toolCallInfo: group.tool_call_info_json
-          ? (JSON.parse(group.tool_call_info_json) as AggregatedToolCallInfo)
-          : null,
+        stackTraceElements: decodeStackTrace(group.stack_trace_json),
+        toolCallInfo: decodeToolCallInfo(group.tool_call_info_json),
         affectedTests: affectedTestsByGroup.get(group.id) ?? {},
         recentCaptures: recentCapturesByGroup.get(group.id) ?? [],
         sampleOccurrences: sampleOccurrencesByGroup.get(group.id) ?? [],

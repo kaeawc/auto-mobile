@@ -7,9 +7,25 @@
  * dump). Baselines are comparison data, never gates: metric and tool-sequence
  * deltas are reported but never change the verdict.
  */
-import { isDeviceInventoryTool } from "../../src/daemon/daemonMcpProxy";
+import toolDefinitions from "../../schemas/tool-definitions.json";
 import type { SuiteBaseline } from "./config";
 import type { TranscriptAudit } from "./transcript";
+
+/**
+ * Tools the server registers as device-aware (`requiresDevice`). Registration adds the
+ * device-targeting `device` label to exactly those schemas, and the committed
+ * `schemas/tool-definitions.json` is generated from the live registry. Control and inventory
+ * tools (setToolEnabled, listDevices) lack it, so they never count as using the device.
+ */
+const DEVICE_TOOLS: ReadonlySet<string> = new Set(
+  (toolDefinitions as { name: string; inputSchema?: { properties?: object } }[])
+    .filter((tool) => "device" in (tool.inputSchema?.properties ?? {}))
+    .map((tool) => tool.name),
+);
+
+export function isDeviceTool(name: string): boolean {
+  return DEVICE_TOOLS.has(name);
+}
 
 export type Verdict = "passed" | "failed" | "incomplete";
 
@@ -241,10 +257,9 @@ function missingFrom(haystack: string, needles: string[]): string[] {
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {
   // A UI benchmark that never touched the device proved nothing, whatever it answered; a
   // call that errored (bad arguments, refused) did not touch it either, and neither does a
-  // sessionless inventory call such as listDevices.
+  // tool that is not device-aware (listDevices, setToolEnabled).
   const succeeded = audit.toolCalls.filter(
-    (call) =>
-      call.isMcp && call.hasResult && !call.isError && !isDeviceInventoryTool(call.shortName),
+    (call) => call.isMcp && call.hasResult && !call.isError && isDeviceTool(call.shortName),
   ).length;
   const checks: CheckResult[] = [
     {

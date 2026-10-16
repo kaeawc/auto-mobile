@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compareRun,
   containsBounded,
+  isDeviceTool,
   diffToolSequence,
   type RunOutcome,
 } from "../../../scripts/agent-benchmark/compare";
@@ -104,17 +105,25 @@ describe("compareRun verdict", () => {
     });
     expect(partial.verdict).toBe("passed");
     expect(partial.stumbles).toBe(1);
-    // Listing devices is inventory, not use of the device under test.
-    const inventoryOnly = new TranscriptBuilder()
-      .init()
-      .mcp("listDevices")
-      .result({ finalText: "COUNT: 3" });
-    expect(
-      compareRun(audit(inventoryOnly), OK_OUTCOME, {
-        answerIncludes: ["COUNT: 3"],
-        screenIncludes: [],
-      }).verdict,
-    ).toBe("failed");
+    // Inventory and control tools are not use of the device under test.
+    for (const tool of ["listDevices", "setToolEnabled", "recordToolCalls"]) {
+      const controlOnly = new TranscriptBuilder()
+        .init()
+        .mcp(tool)
+        .result({ finalText: "COUNT: 3" });
+      expect({
+        tool,
+        verdict: compareRun(audit(controlOnly), OK_OUTCOME, {
+          answerIncludes: ["COUNT: 3"],
+          screenIncludes: [],
+        }).verdict,
+      }).toEqual({ tool, verdict: "failed" });
+    }
+    // The classification comes from the generated tool schemas.
+    expect(isDeviceTool("observe")).toBe(true);
+    expect(isDeviceTool("tapOn")).toBe(true);
+    expect(isDeviceTool("listDevices")).toBe(false);
+    expect(isDeviceTool("setToolEnabled")).toBe(false);
   });
 
   test("a wrong final answer fails without making the run incomplete", () => {

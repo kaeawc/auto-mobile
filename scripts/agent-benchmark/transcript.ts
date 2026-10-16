@@ -104,6 +104,15 @@ function contentBlocks(event: JsonRecord, line: number, state: AuditState): Json
   return content.filter(isRecord);
 }
 
+/**
+ * A tool_result content block: an object whose `text`, when present, is a string. Other
+ * block types (an image) carry no text and are fine; a bare string or a non-string `text`
+ * would be dropped and could hide failure evidence.
+ */
+function isContentBlock(block: unknown): boolean {
+  return isRecord(block) && (block.text === undefined || typeof block.text === "string");
+}
+
 /** tool_result content is either a string or an array of `{type:"text", text}` blocks. */
 export function toolResultText(content: unknown): string {
   if (typeof content === "string") {
@@ -150,8 +159,12 @@ function handleInit(event: JsonRecord, state: AuditState): void {
   state.audit.observedModel ??= identity(event.model);
   state.audit.claudeCodeVersion ??= identity(event.claude_code_version);
   const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers.filter(isRecord) : [];
-  const ours = servers.find((server) => server.name === MCP_SERVER_NAME);
-  state.audit.mcpServerStatus = asString(ours?.status) ?? "missing";
+  const ours = servers.filter((server) => server.name === MCP_SERVER_NAME);
+  if (ours.length > 1) {
+    // Two entries for one server can disagree (connected, then failed); trust neither.
+    state.audit.parseErrors.push(`init lists ${MCP_SERVER_NAME} ${ours.length} times`);
+  }
+  state.audit.mcpServerStatus = asString(ours[0]?.status) ?? "missing";
 }
 
 function handleAssistant(event: JsonRecord, line: number, state: AuditState): void {
@@ -208,7 +221,7 @@ function handleUser(event: JsonRecord, line: number, state: AuditState): void {
     if (
       block.content !== undefined &&
       typeof block.content !== "string" &&
-      !Array.isArray(block.content)
+      !(Array.isArray(block.content) && block.content.every(isContentBlock))
     ) {
       // An unreadable container would read as empty text and hide failure evidence.
       state.audit.parseErrors.push(`tool_result for ${id} has malformed content`);

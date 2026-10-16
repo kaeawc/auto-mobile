@@ -156,6 +156,40 @@ describe("agent benchmark transcript audit", () => {
     ]);
   });
 
+  test("an init that lists the server twice fails the transcript", () => {
+    const init = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      model: "m",
+      mcp_servers: [
+        { name: "auto-mobile", status: "connected" },
+        { name: "auto-mobile", status: "failed" },
+      ],
+    });
+    const audit = auditTranscript(`${init}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["init lists auto-mobile 2 times"]);
+  });
+
+  test("tool_result content members must be blocks with string text", () => {
+    const base = new TranscriptBuilder().init().mcp("observe", "ok", { noResult: true }).build();
+    const id = auditTranscript(base, NO_PATTERNS).toolCalls[0].id;
+    const result = (content: unknown) =>
+      `${JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: id, content }] },
+      })}\n`;
+    const malformed = [`tool_result for ${id} has malformed content`];
+    expect(auditTranscript(`${base}${result(["WAIT_TIMEOUT"])}`, NO_PATTERNS).parseErrors).toEqual(
+      malformed,
+    );
+    expect(
+      auditTranscript(`${base}${result([{ type: "text", text: 7 }])}`, NO_PATTERNS).parseErrors,
+    ).toEqual(malformed);
+    expect(
+      auditTranscript(`${base}${result([{ type: "image", source: {} }])}`, NO_PATTERNS).parseErrors,
+    ).toEqual([]);
+  });
+
   test("a second init event fails the transcript and keeps the first status", () => {
     const init = (status: string) =>
       JSON.stringify({

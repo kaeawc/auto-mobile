@@ -16,6 +16,8 @@ export type PrototypePatchReply = PrototypeResult & {
 export interface PrototypePatchConflict {
   revision: number;
   state: PrototypeState;
+  /** `/data` paths a newer device write touched (#12519); absent for a `/state` conflict. */
+  data?: string[];
 }
 const revisionSchema = z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const conflictSchema = z
@@ -25,6 +27,7 @@ const conflictSchema = z
       z.string().regex(STATE_KEY),
       z.union([z.string(), z.number().finite(), z.boolean()]),
     ),
+    data: z.array(z.string().min(1)).max(64).optional(),
   })
   .strict();
 /** Keeps only well-formed patch reply fields. */

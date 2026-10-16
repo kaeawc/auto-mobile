@@ -1,6 +1,8 @@
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
+import { applyPrototypeDataWrite } from "./prototypeDataWrite";
+import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { PrototypeEvent, PrototypeResult } from "../observe/android/ctrlProxyProtocol";
@@ -270,6 +272,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
 
   /** Accepted pushes may precede the successful show acknowledgement. */
   recordEvent(scope: PrototypeScope, event: PrototypeEvent): void {
+    this.applyDeviceDataWrite(scope.deviceId, event);
     const dispatches = this.showDispatches.get(scope.deviceId);
     if (
       dispatches?.has(event.id) &&
@@ -354,6 +357,42 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   readonly shownSpecs = new PrototypeShownSpecs();
+
+  /**
+   * A `change` event reporting a device `/data` write (#12519) updates the host's spec copy and
+   * the data status reports. A write that cannot be applied exactly removes the reported data
+   * rather than leaving content the device no longer shows.
+   */
+  private applyDeviceDataWrite(deviceId: string, event: PrototypeEvent): void {
+    const write = prototypeDataWriteOf(event);
+    if (!write) {
+      return;
+    }
+    this.shownSpecs.recordDeviceDataWrite(deviceId, event.id, write);
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(event.id) : undefined;
+      if (!entry) {
+        continue;
+      }
+      const applied =
+        write.op === "remove"
+          ? applyPrototypeDataWrite(entry.data, { op: "remove", path: write.path })
+          : write.value === undefined
+            ? undefined
+            : applyPrototypeDataWrite(entry.data, {
+                op: write.op,
+                path: write.path,
+                value: write.value,
+              });
+      const written = { ...entry };
+      if (applied?.success) {
+        written.data = applied.data;
+      } else {
+        delete written.data;
+      }
+      stored.shown.set(event.id, written);
+    }
+  }
 
   recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
     for (const stored of this.scopes.values()) {

@@ -90,6 +90,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   }),
+  prototype_data_actions_v1: fixture({
+    ...label,
+    onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
+  }),
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {

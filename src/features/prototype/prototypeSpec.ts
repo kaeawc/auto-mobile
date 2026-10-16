@@ -10,6 +10,7 @@ export const {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   MAX_PROTOTYPE_DATA_BYTES,
+  MAX_PROTOTYPE_DATA_WRITE_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
@@ -18,32 +19,12 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
-export type PrototypeJson =
-  | null
-  | string
-  | number
-  | boolean
-  | PrototypeJson[]
-  | { [key: string]: PrototypeJson };
-// zod v3 calls a lazy schema's getter on every parse, so each getter builds its schema once and
-// returns that same instance afterwards instead of rebuilding it for every nested value.
-let jsonValueUnion: z.ZodType<PrototypeJson> | undefined;
-const jsonValueSchema: z.ZodType<PrototypeJson> = z.lazy(
-  () =>
-    (jsonValueUnion ??= z.union([
-      z.null(),
-      z.string(),
-      z.number().finite(),
-      z.boolean(),
-      z.array(jsonValueSchema),
-      z.record(jsonValueSchema),
-    ])),
-);
-// Preserve arbitrary JSON keys: Zod record decoding deliberately drops __proto__.
-const prototypeJsonSchema = z.custom<PrototypeJson>(
-  (value) => jsonValueSchema.safeParse(value).success,
-);
-export const prototypeJsonObjectSchema = z.record(prototypeJsonSchema).and(z.unknown());
+import {
+  prototypeJsonSchema,
+  prototypeJsonObjectSchema,
+  type PrototypeJson,
+} from "./prototypeJson";
+export { prototypeJsonSchema, prototypeJsonObjectSchema, type PrototypeJson };
 // Icon names are the closed list of Material icons the Android renderer bundles
 // (androidx material-icons-extended); the shared contract is the single source.
 const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
@@ -412,15 +393,26 @@ export const placementSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
-export const prototypeEmitContextBindingSchema = z.union([
+/** The emit.context binding forms except `page`; `{value: literal}` is the literal form. */
+export const prototypeDataActionValueSchema = z.union([
   z.object({ state: stateKeySchema }).strict(),
   z.object({ item: keySchema }).strict(),
   z.object({ index: z.literal(true) }).strict(),
-  z.object({ page: z.string().min(1) }).strict(),
   z.object({ data: pointerSchema }).strict(),
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
+export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
+export const prototypeEmitContextBindingSchema = z.union([
+  ...prototypeDataActionValueSchema.options,
+  z.object({ page: z.string().min(1) }).strict(),
+]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
+// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
+const dataActionPathSchema = z
+  .string()
+  .min(1)
+  .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -471,6 +463,9 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -1241,6 +1236,9 @@ export const PROTOTYPE_ACTION_TYPES = [
   "increment",
   "decrement",
   "dismiss",
+  "setData",
+  "appendData",
+  "removeData",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

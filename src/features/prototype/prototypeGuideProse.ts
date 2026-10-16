@@ -277,6 +277,47 @@ devices are refused before upload, display or patch dispatch. The \`prototype_ev
 
 `;
 
+export const GUIDE_DATA_ACTIONS = `### Data actions
+
+A tap can change \`/data\` on the device without the agent answering it. Three actions write a
+member of \`data\`; each \`path\` is \`/data\` plus a non-empty data pointer (the same syntax and
+\`MAX_PROTOTYPE_DATA_POINTER_LENGTH\` as \`{data: pointer}\`), so the whole document cannot be
+written:
+
+- \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
+  array element. A missing parent is an error.
+- \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
+- \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
+
+\`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
+\`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
+\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
+\`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
+\`{alias.field}\`, is rejected.
+
+The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
+rejects an \`appendData\` whose target resolves in the spec's own \`data\` to something other than an
+array. A target that only exists after earlier writes is checked by the device. A write that would
+leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
+target is missing or not an array, changes nothing.
+Actions run in order, so a later action sees an earlier write.
+
+Each write is a \`change\` event with \`name\` the written \`/data/...\` path and \`payload\`
+\`{op: "set"|"append"|"remove", value?, revision}\`; \`awaitEvent\` with \`kind: "change"\` returns it.
+\`revision\` is the device revision after the write, the same counter as a patch result's. The host
+applies each write to its own copy of the spec and to \`status\` data, so both stay current. The
+agent's \`/data\` patches and a device's writes never silently lose each other: once the device
+has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\` (the latest
+\`revision\` the agent has seen) and is refused with \`conflict: {revision, state, data}\` when a write
+newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
+own \`data\` authoritative again and clears the history.
+
+Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
+refused on a device without it, before anything is shown or sent.
+
+`;
+
 export const GUIDE_DATA = `## Data
 
 \`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and
@@ -344,7 +385,7 @@ The host validates data and repeat paths; the device resolves bindings once per 
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
 before uploads or show, with an update/relaunch hint. \`status\` reports the last successful show's
 data next to state; \`inspect\` reports and adopts device data. Absent data is omitted; dismiss
-clears it. Events never carry data.
+clears it. Events carry data only as the value of a device data write (see Data actions).
 `;
 
 export const GUIDE_COMPONENTS = `## Reuse: components
@@ -608,8 +649,10 @@ must keep that id. Replacement nodes cannot contain \`use\` nodes or element
 anchors. Inline the component, use a bounds anchor, or use \`show\`.
 
 The agent writes data; the user writes state. Data-only patches and patches
-containing only data ops and \`replaceNode\` ignore \`baseRevision\`. Any state op,
-including \`test\`, requires \`baseRevision\`. A device supporting the capability
+containing only data ops and \`replaceNode\` ignore \`baseRevision\`, until the device has
+written the prototype's data with a data action (\`prototype_data_actions_v1\`): from then on a
+\`/data\` op also needs \`baseRevision\` and conflicts with newer overlapping device writes (see
+Data actions). Any state op, including \`test\`, requires \`baseRevision\`. A device supporting the capability
 must refuse the whole patch with \`conflict\` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 

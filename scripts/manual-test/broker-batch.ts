@@ -480,6 +480,38 @@ export async function runBrokerBatchCommand(
     return 2;
   }
 }
+const devicesViewSchema = z.object({
+  devices: z.array(
+    z.object({
+      name: z.string(),
+      deviceId: z.string(),
+      platform: z.enum(["android", "ios"]),
+    }),
+  ),
+  daemons: z.array(z.object({ alive: z.boolean(), error: z.string().optional() })),
+});
+/**
+ * `private-daemon devices` mixes one JSON inventory line with human-readable diagnostics
+ * (for example "Private daemon command failed: ..."). Take the inventory from the lines that
+ * parse as one, and surface the diagnostics instead of a JSON.parse crash when it is absent.
+ */
+export function parseDevicesViewOutput(code: number, lines: readonly string[]): LedgerDevicesView {
+  let view: LedgerDevicesView | undefined;
+  for (const line of lines) {
+    try {
+      view = devicesViewSchema.parse(JSON.parse(line));
+    } catch {
+      // Diagnostic lines are not inventory JSON; they are reported below if no view arrives.
+    }
+  }
+  if (code !== 0 || !view) {
+    const detail = lines.filter((line) => line.trim()).join(" | ");
+    throw new Error(
+      `Batch device inventory unavailable (exit ${code})${detail ? `: ${detail}` : ""}.`,
+    );
+  }
+  return view;
+}
 async function realDeps(): Promise<BrokerBatchOrchestratorDeps> {
   const proxy = createProxySessionDeps();
   if (!proxy.env.MT_BATCH) {
@@ -519,30 +551,12 @@ async function realDeps(): Promise<BrokerBatchOrchestratorDeps> {
       return runProxySessionCommand(command, proxy);
     },
     devicesView: async () => {
-      let view: LedgerDevicesView | undefined;
-      const schema = z.object({
-        devices: z.array(
-          z.object({
-            name: z.string(),
-            deviceId: z.string(),
-            platform: z.enum(["android", "ios"]),
-          }),
-        ),
-        daemons: z.array(z.object({ alive: z.boolean(), error: z.string().optional() })),
-      });
+      const lines: string[] = [];
       const code = await runPrivateDaemonCommand(
         { op: "devices", batchDir, daemon: 1, timeoutMs: 5000, extraFlags: [] },
-        {
-          ...daemon,
-          log: (text) => {
-            view = schema.parse(JSON.parse(text));
-          },
-        },
+        { ...daemon, log: (text) => lines.push(text) },
       );
-      if (code !== 0 || !view) {
-        throw new Error("Batch device inventory unavailable.");
-      }
-      return view;
+      return parseDevicesViewOutput(code, lines);
     },
     isPidAlive: proxy.isPidAlive,
     log: proxy.log,

@@ -5,6 +5,7 @@ import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonBatchOptions, PrivateDaemonSpec } from "./privateDaemonEnv";
 import { androidDevices, iosDevices, definedEnv } from "./privateDaemonStatus";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import { isBrokerBatch } from "./brokerClientFiles";
 import {
   BrokerDeviceLedger,
@@ -519,6 +520,20 @@ interface DeviceResult {
   code?: string | number;
   message?: string;
 }
+/**
+ * A `session_broker` hold only means "broker-held" for this batch when its own ownership evidence
+ * agrees: a ledger grant (classification is set only for ledger batches) or a product broker
+ * device name. A plain-startDevice emulator in a ledger-less batch with that hold is an
+ * unverified claim; it still needs batch-booted process evidence and the daemon's stop frame
+ * remains the backstop that refuses a genuinely bound device.
+ */
+function unverifiedBrokerHold(device: BatchDevice): boolean {
+  return (
+    device.heldBy === "session_broker" &&
+    device.classification === undefined &&
+    !isSessionBrokerDeviceName(device.name)
+  );
+}
 function refusal(
   device: BatchDevice,
   protectedDevices: string[],
@@ -536,7 +551,7 @@ function refusal(
   if (device.heldBy === "other_daemon") {
     return { outcome: "held-by-other-daemon", message: "Device is held by another daemon." };
   }
-  if (device.heldBy !== undefined) {
+  if (device.heldBy !== undefined && !unverifiedBrokerHold(device)) {
     return {
       outcome: "broker-held",
       message: "Device is broker-held; release it through the session broker.",

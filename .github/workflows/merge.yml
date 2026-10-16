@@ -691,6 +691,11 @@ jobs:
 
   node-unit-tests:
     name: "Node Unit Tests (${{ matrix.os }})"
+    # Job-level permissions replace the workflow's. This job only checks out,
+    # runs tests and uploads artifacts; actions: write is for the rerun dispatch.
+    permissions:
+      actions: write
+      contents: read
     runs-on: ${{ matrix.os }}
     # 1560s unit lane cap (one infra retry) + 600s rechecks + 120s reserve < 2400s.
     timeout-minutes: 40
@@ -749,6 +754,22 @@ jobs:
             scratch/watchdog-snapshot-*.txt
           if-no-files-found: ignore
           retention-days: 7
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   node-host-integration-tests:
     name: "Node Host Integration Tests (${{ matrix.os }})"

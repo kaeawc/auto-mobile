@@ -64,6 +64,19 @@ selector; OS uses the product requirement contract. See
 [session broker operator/consumer contract](../design-docs/session-broker-experiment.md)
 for valid defaults and requirements; the harness uses those product parsers.
 
+The batch also carries the product's catalog classification keys, validated by
+the same host-config parser and copied into `broker/host-config.json`:
+`androidProfileArchetypes` (AVD profile id to `phone` or `tablet`, for example
+`{ "medium_phone": "phone" }`) and `iosClassifications` (simulator device type
+identifier to model type). Omit them and the broker fails the first acquisition
+with `catalog_metadata_invalid` ("lacks current archetype metadata").
+
+Android `os` values are the Android release major or version (for example
+`{ "kind": "major", "major": 16 }` with `preferredVersion: "16"`), never the API
+level (36). Among installed images of the same release the resolver prefers the
+`google_apis` flavor over `google_apis_playstore`, which can stay adb
+`unauthorized` for many minutes after boot.
+
 `--max-devices` defaults to **2**, with a hard cap of **4**, and must cover
 `totalDeviceCap`. Zero pooling is the default: `idlePoolCap: 0` and
 `reuseCleanDevices: false`. Reserve `init --allow-reuse` for a deliberate
@@ -524,19 +537,19 @@ to 2, hard 4. `--crash` is restricted to `daemon-restart-with-live-sessions
 --device`. Evidence is `evidence/<scenario>/summary.json`: redacted requests,
 replies/errors, durations, ledger deltas and explicit assertion limits.
 
-| Scenario                            | Class         | Expected evidence                                                                                                                                                                                                    |
-| ----------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parallel-acquire`                  | device        | At least two clients within cap; distinct session/native identities, matching profiles, observe per client, release and absence.                                                                                     |
-| `capacity-refusal-and-replay`       | fake + device | Cap winners plus one refusal with no tools/grant; same refusal on replay after release; fresh attempt succeeds.                                                                                                      |
-| `release-destroy-verification`      | fake + device | Released receipt, cleanup complete, native absence, old session refused, fresh session/native identity. Fake proves only fake-native absence.                                                                        |
-| `owner-death-and-abandon`           | fake + device | Fake: abandon pending/unknown/ready identities and join cleanup. Device: disposable-owner exit closes proxy with `session_owner_exited`; ready abandonment yields `session_request_abandoned` and old proxy refusal. |
-| `cross-client-isolation`            | fake          | Wrong-token status/release/rebind and generic lifecycle tools refused; legitimate client still observes. Use raw bound frames for live cross-client checks.                                                          |
-| `daemon-restart-with-live-sessions` | device        | Graceful restart preserves session/native identities and observe. `--crash`: interrupted requests become terminal `session_owner_exited`, replay is identical, destruction precedes fresh successors.                |
-| `#12451-restart-handoff`            | device        | Graceful restart handoff using the same restart assertions; no crash flag on this alias.                                                                                                                             |
-| `#12452-retryable-prep-failure`     | fake          | Retryable `catalog_unavailable` replay is unchanged; unknown archetype fails validation; disabled Duo is terminal `capability_disabled`.                                                                             |
-| `#12452-prep-timeout`               | device        | 1 ms preparation timeout is retryable with settled cleanup; disabled Duo is a nonretryable control.                                                                                                                  |
-| `#12491-pid-reuse-fencing`          | fake          | Reused PID/start identity refuses before allocation; matching identity acquires and releases.                                                                                                                        |
-| `#12491-pid-reuse-positive-control` | device        | Recorded live disposable owner is accepted, then owner death closes proxy and destroys its device.                                                                                                                   |
+| Scenario                            | Class         | Expected evidence                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parallel-acquire`                  | device        | At least two clients within cap; distinct session/native identities, matching profiles, observe per client, release and absence.                                                                                                                                                                                                              |
+| `capacity-refusal-and-replay`       | fake + device | Cap winners plus one refusal with no tools/grant; same refusal on replay after release; fresh attempt succeeds.                                                                                                                                                                                                                               |
+| `release-destroy-verification`      | fake + device | Released receipt, cleanup complete, native absence, old session refused, fresh session/native identity. Fake proves only fake-native absence.                                                                                                                                                                                                 |
+| `owner-death-and-abandon`           | fake + device | Fake: abandon pending/unknown/ready identities and join cleanup. Device: disposable-owner exit closes the proxy (its `closed.json` reason is the transport-local `proxy_exited_or_transport_closed`) and the broker's terminal receipt is `session_owner_exited`; ready abandonment yields `session_request_abandoned` and old proxy refusal. |
+| `cross-client-isolation`            | fake          | Wrong-token status/release/rebind and generic lifecycle tools refused; legitimate client still observes. Use raw bound frames for live cross-client checks.                                                                                                                                                                                   |
+| `daemon-restart-with-live-sessions` | device        | Graceful restart preserves session/native identities and observe. `--crash`: interrupted requests become terminal `session_owner_exited`, replay is identical, destruction precedes fresh successors.                                                                                                                                         |
+| `#12451-restart-handoff`            | device        | Graceful restart handoff using the same restart assertions; no crash flag on this alias.                                                                                                                                                                                                                                                      |
+| `#12452-retryable-prep-failure`     | fake          | Retryable `catalog_unavailable` replay is unchanged; unknown archetype fails validation; disabled Duo is terminal `capability_disabled`.                                                                                                                                                                                                      |
+| `#12452-prep-timeout`               | device        | 1 ms preparation timeout is retryable (`timeout`, `daemon_unavailable` or `provision_failed`, whichever the deadline hits first) with settled cleanup; disabled Duo is a nonretryable control.                                                                                                                                                |
+| `#12491-pid-reuse-fencing`          | fake          | Reused PID/start identity refuses before allocation; matching identity acquires and releases.                                                                                                                                                                                                                                                 |
+| `#12491-pid-reuse-positive-control` | device        | Recorded live disposable owner is accepted, then owner death closes proxy and destroys its device.                                                                                                                                                                                                                                            |
 
 The live adapter marks destruction/handoff resource samples **`not-verifiable`**
 until the product exposes a read-only resource-state diagnostic. Native

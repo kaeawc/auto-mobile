@@ -6176,7 +6176,6 @@ export class DevicePool {
         .then(() => {
           if (
             this.deferredDeviceReleases.get(deviceId) !== deferredRelease ||
-            this.devices.get(deviceId) !== device ||
             device.assignmentCount !== expectedAssignmentCount
           ) {
             return;

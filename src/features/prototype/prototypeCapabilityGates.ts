@@ -13,11 +13,19 @@ import {
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+  PROTOTYPE_NETWORK_CAPABILITY,
+  PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
 } from "./prototypeDataActions";
+import {
+  prototypeDeviceRequestFields,
+  prototypeNetworkDeviceUnsupportedMessage,
+  prototypeNetworkUnsupportedMessage,
+  prototypeRequestFields,
+} from "./prototypeRequest";
 import { prototypeStackFields, prototypeStackUnsupportedMessage } from "./prototypeSpec";
 import {
   prototypeThemeModeFields,
@@ -134,6 +142,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_DATA_ACTIONS_CAPABILITY,
     fields: prototypeDataActionFields,
     unsupportedMessage: prototypeDataActionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NETWORK_CAPABILITY,
+    fields: prototypeRequestFields,
+    unsupportedMessage: prototypeNetworkUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
+    fields: prototypeDeviceRequestFields,
+    unsupportedMessage: prototypeNetworkDeviceUnsupportedMessage,
   },
 ];
 

@@ -29,6 +29,10 @@ import {
   isPrototypeDataWriteName,
   prototypeDataWriteOf,
 } from "../../prototype/prototypeDataWriteEvent";
+import {
+  isPrototypeRequestEventName,
+  prototypeRequestEventOf,
+} from "../../prototype/prototypeRequestEvent";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
@@ -216,6 +220,17 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema
           code: z.ZodIssueCode.custom,
           path: ["payload"],
           message: "Invalid data write for a change event",
+        });
+      }
+      return;
+    }
+    // A finished request (#12523) is an emit under a reserved name and must carry its payload.
+    if (isPrototypeRequestEventName(event)) {
+      if (prototypeRequestEventOf(event) === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["payload"],
+          message: "Invalid request event",
         });
       }
       return;

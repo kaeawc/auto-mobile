@@ -1105,10 +1105,7 @@ export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1"
  */
 export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
 
-/**
- * Advertised by a CtrlProxy that buffers a device-persistent prototype's events while no host is
- * connected, replays them on the next connection, and answers `inspect_prototypes`.
- */
+/** Buffers a device-persistent prototype's events while no host is connected; answers inspect. */
 export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
 
 /**
@@ -1118,7 +1115,6 @@ export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_re
  */
 export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 
-// ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry (briefs/prototype-capability-gate-registry)
 export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
 
 /**
@@ -1140,6 +1136,9 @@ export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** setData/appendData/removeData on `/data`, each write reported as a `change` event. */
 export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
+/** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
+export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
+export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 

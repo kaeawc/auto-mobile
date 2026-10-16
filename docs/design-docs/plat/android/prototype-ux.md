@@ -984,6 +984,108 @@ change event; a stale `baseRevision` gets the existing conflict. Host-side bookk
 `PrototypeShownSpecs` (`recordDeviceDataWrite`, `dataPatchGuard`), called from
 `InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
 
+### Request action (#12523)
+
+```json
+{ "type": "request", "method": "GET", "url": "http://localhost:8080/feed",
+  "headers": {"Accept": "application/json"}, "query": {"q": {"state": "search"}},
+  "into": "/data/feed", "statusKey": "feedStatus", "via": "host",
+  "onSuccess": [{"type": "setState", "key": "loaded", "value": true}],
+  "onError": [] }
+```
+
+A `request` calls an HTTP endpoint from a tap, writes the answer into `/data` and reports its
+progress in a state key, so a prototype can load and post real content with no agent round trip.
+It requires `prototype_network_v1`, and `prototype_network_device_v1` as well when `via` is
+`"device"`; both are entries in `PROTOTYPE_SPEC_CAPABILITY_GATES` (the second gate's fields are only
+the via-device requests), so show, patch and `replaceNode` refuse a spec containing one on a device
+without them. A device advertising `prototype_network_v1` also writes `/data` for `into`, with the
+`applyPrototypeDataWrite` semantics, without `prototype_data_actions_v1`.
+
+| Field | Rule |
+| --- | --- |
+| `url` | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`. |
+| `method` | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`. |
+| `headers`, `query` | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in order. |
+| `body` | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one. |
+| `into` | `/data/<pointer>` with the data-action rules (whole `{index}` segment in a repeat). It must name an object member, not an array element, and its parent must exist. Optional: without it nothing is written to data. |
+| `statusKey` | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key. |
+| `via` | `"host"` (default) or `"device"`. |
+| `timeoutMs` | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`. |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests. |
+
+**Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
+reads them from there (the contract is the single source for the host executor, the validator and
+the native runtimes):
+
+| Limit | Value |
+| --- | --- |
+| `DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS` | 10000 |
+| `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS` | 30000 (a larger `timeoutMs` is a validation error; the host clamps) |
+| `MAX_PROTOTYPE_RESPONSE_BYTES` | 262144, never above `MAX_PROTOTYPE_DATA_WRITE_BYTES`, so an accepted response is one `/data` write |
+| `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` | 4 per device |
+| `MAX_PROTOTYPE_ACTION_DEPTH` | 4: a top-level action is level 1 and each `onSuccess` / `onError` adds one. The contract walk counts it like selector and condition depth; Zod does not, and treats follow-up entries as actions of any depth. |
+
+**Response handling** is the pure function `applyPrototypeRequestOutcome`
+(`prototypeRequestOutcome.ts`), the reference the device runtimes copy:
+
+1. A 2xx response is written to `into` as `set` does: parsed JSON as it is, any non-JSON body as a
+   string, an empty body (and a HEAD) as `""`. If the value is not data (it holds null, or breaks a
+   depth, array or byte limit) the request is an error with `error.code` `invalid_response` and `into`
+   is left alone.
+2. A non-2xx status leaves `into` untouched and is an error with `error.code` `http_error`
+   (`message` `HTTP <status>`). A transport failure is an error with the executor's code (`timeout`,
+   `too_large`, `connection_refused`, `cancelled`, `invalid_url`, `invalid_request`, `network`,
+   `too_many_in_flight`).
+3. With `into`, the metadata is then written to **`<into>__meta`**: the same pointer with `__meta`
+   appended to its last segment (`/data/feed` reports at `/data/feed__meta`; `prototypeRequestMetaPath`).
+   Its value is `{status?: number, headers?: {name: value}, durationMs: number, error?: {code, message}}`.
+   `status` and `headers` (lower-cased names) exist once a response arrived; `error` exists for every
+   failure. If it does not fit the data write limit, `headers` is dropped.
+4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
+   `onError` runs.
+
+**Event.** A finished request is an `emit` event with `name` `prototype_request` (reserved; an
+authored `emit` with that name is a validation error) and a payload decoded by
+`prototypeRequestEventOf` (`prototypeRequestEvent.ts`), so no wire field is added and
+`ctrlProxyWireManifest.ts` is unchanged:
+
+```json
+{ "requestId": "r-1", "method": "GET", "url": "http://localhost:8080/feed?q=cats", "via": "host",
+  "into": "/data/feed", "outcome": "success", "status": 200, "durationMs": 31 }
+```
+
+`outcome` is `"success"` or `"error"`; `error: {code, message}` is present exactly for `"error"`;
+`status` is absent when no response arrived; `url` is the resolved URL cut to 2048 characters and
+`message` is cut to 512. A malformed payload under that name drops the event, as for data writes.
+`awaitEvent {kind: "emit", eventName: "prototype_request"}` returns it. The `/data` writes of
+step 1 and 3 are `change` events as for data actions, sent before it.
+
+**Concurrency (device runtime).** A request whose `into` already has one in flight cancels the
+first: the latest wins. The cancelled request writes nothing to `into`, `<into>__meta` or `statusKey`,
+runs no follow-up and reports a `cancelled` event. A `via: "host"` call has no cancel frame, so the
+device ignores the stale `prototype_response`; the host call runs to its end or timeout and holds
+its in-flight slot until then. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
+`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
+are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
+
+Worked example: a feed that shows a spinner, the result and an error (state
+`{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
+
+```json
+[
+  { "type": "text", "text": "Loading", "visibleWhen": { "key": "feedStatus", "equals": "loading" } },
+  { "type": "text", "text": "{data:/feed__meta/error/message}",
+    "visibleWhen": { "key": "feedStatus", "equals": "error" } },
+  { "type": "button", "label": "Load",
+    "onTap": [{ "type": "request", "url": "http://localhost:8080/feed",
+      "query": { "q": { "state": "search" } }, "into": "/data/feed", "statusKey": "feedStatus" }] }
+]
+```
+
+The shared native-parity fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers
+both `via` values, `onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
@@ -1288,7 +1390,7 @@ ignored.
   prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
   the device is unbound or removed.
 - Best-effort: a failed reverse is logged and reported as `reverseFailures`; it never fails the show.
-- A port that is a binding (`http://localhost:{state:port}/feed`) or an unparseable URL cannot be
+- A port that is a binding (`http://localhost:{port}/feed`) or an unparseable URL cannot be
   reversed, because it is unknown until the request runs. `inspect` reports these as
   `unreversiblePorts`, and the authoring guide says to use `via: "host"` for them.
 - A saved prototype launched with no host connected has no host to run `adb reverse`, so its

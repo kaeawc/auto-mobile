@@ -131,7 +131,10 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
  * How a bindable field is bound: `text` and `emitName` render to text, `operand` keeps a single
  * placeholder's type, and `key` renders to text that must then be a literal state key.
  * `dataPath` is a data action's `/data/...` pointer: it renders to text, and only a whole
- * `{index}` segment may be a placeholder.
+ * `{index}` segment may be a placeholder; `requestInto` is the same grammar for a `request`'s
+ * `into`, kept apart so `setData` capability gating does not claim it. `request` and `deviceRequest` mark a whole `request`
+ * action (the latter only when `via` is `device`) so capability gates can locate it; their value
+ * is the action itself and no binder rewrites it.
  */
 export type FieldKind =
   | "text"
@@ -140,7 +143,14 @@ export type FieldKind =
   | "key"
   | "emitBinding"
   | "emitContext"
-  | "dataPath";
+  | "dataPath"
+  | "requestInto"
+  | "request"
+  | "deviceRequest";
+
+/** True for the kinds holding a `/data/...` path with `{index}` segments. */
+export const isDataPathKind = (kind: FieldKind): boolean =>
+  kind === "dataPath" || kind === "requestInto";
 
 /** Receives each bindable field's value and path; its result replaces the value. */
 export type FieldVisitor = (
@@ -249,10 +259,51 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "removeData":
       mapField(action, "path", path, "dataPath", visit);
       break;
+    case "request":
+      mapRequestAction(action, path, visit);
+      break;
     default:
       break;
   }
   return action;
+}
+
+const memberPath = (path: string, name: string): string =>
+  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+
+/** A header or query entry: a literal is text, an object is a value binding. */
+function mapRequestEntries(action: Raw, field: string, path: string, visit: FieldVisitor): void {
+  const entries = record(action[field]);
+  if (entries) {
+    action[field] = Object.fromEntries(
+      Object.entries(entries).map(([name, value]) => {
+        const at = memberPath(`${path}.${field}`, name);
+        return [
+          name,
+          typeof value === "string" ? visit(value, at, "text") : mapBinding(value, at, visit),
+        ];
+      }),
+    );
+  }
+}
+
+/** `url` and literal header/query strings are text; `into` is a data path; follow-ups recurse. */
+function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void {
+  visit(action, path, "request");
+  if (action.via === "device") {
+    visit(action, path, "deviceRequest");
+  }
+  mapField(action, "url", path, "text", visit);
+  mapRequestEntries(action, "headers", path, visit);
+  mapRequestEntries(action, "query", path, visit);
+  if (action.body !== undefined) {
+    action.body = mapBinding(action.body, `${path}.body`, visit);
+  }
+  mapField(action, "into", path, "requestInto", visit);
+  mapField(action, "statusKey", path, "key", visit);
+  for (const field of ["onSuccess", "onError"]) {
+    mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  }
 }
 
 function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
@@ -398,6 +449,7 @@ export function checkedKeyValues(value: Raw): unknown[] {
     ...(Array.isArray(value.requireValid) ? value.requireValid : []),
     value.key,
     value.stateKey,
+    value.statusKey,
     value.activeKey,
     value.hourKey,
     value.minuteKey,
@@ -418,7 +470,7 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     );
   }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "activeKey", "hourKey", "minuteKey"]) {
+  for (const field of ["key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey"]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }

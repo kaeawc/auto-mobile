@@ -11,6 +11,7 @@ import {
   requireTestTag,
   type FocusIdentifierKey,
 } from "./tapFocusIdentity";
+import { pollSearchUntil } from "./searchUntilPoller";
 import { matchedTapElement } from "./tapPointGeometry";
 import {
   isContainerAvailable,
@@ -2959,82 +2960,77 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element = null;
         offScreenRejections += 1;
       }
-      const deadline = startTime + searchDurationMs;
       // Fast cached iOS responses must yield just like device round-trips.
       // Keep an independent request ceiling even if the wall clock moves backward.
-      const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
-      let nextPollAt = startTime;
-      while (this.timer.now() < deadline && requestCount < maxRequests) {
-        throwIfAborted(signal);
-        const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
-        if (delayMs > 0) {
-          await this.timer.sleep(delayMs);
-          throwIfAborted(signal);
-        }
-        if (this.timer.now() >= deadline) {
-          break;
-        }
-        nextPollAt = this.timer.now() + TapOnElement.SEARCH_POLL_INTERVAL_MS;
-        const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-        const refreshedHierarchy = await this.tapVerificationRefresh({
-          refresh: options.verification?.refresh,
-          screenSize: latestScreenSize,
-          signal,
-        })(remainingTimeMs);
-        requestCount += 1;
+      const polled = await pollSearchUntil({
+        timer: this.timer,
+        startTime,
+        durationMs: searchDurationMs,
+        intervalMs: TapOnElement.SEARCH_POLL_INTERVAL_MS,
+        pacing: "cadence",
+        maxRequests: Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS),
+        discardLateResult: false,
+        signal,
+        fetch: (remainingTimeMs) =>
+          this.tapVerificationRefresh({
+            refresh: options.verification?.refresh,
+            screenSize: latestScreenSize,
+            signal,
+          })(remainingTimeMs),
+        accept: (refreshedHierarchy) => {
+          latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
+            observationScreenSize: latestScreenSize,
+            display: latestViewHierarchy,
+          });
+          latestViewHierarchy = refreshedHierarchy;
+          const hash = this.hashViewHierarchy(refreshedHierarchy);
+          if (hash && hash !== lastHash) {
+            changeCount += 1;
+            lastHash = hash;
+          } else if (hash && !lastHash) {
+            changeCount += 1;
+            lastHash = hash;
+          }
 
-        if (!refreshedHierarchy) {
-          continue;
-        }
-
-        latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
-          observationScreenSize: latestScreenSize,
-          display: latestViewHierarchy,
-        });
-        latestViewHierarchy = refreshedHierarchy;
-        const hash = this.hashViewHierarchy(refreshedHierarchy);
-        if (hash && hash !== lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        } else if (hash && !lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        }
-
-        const searchResult = this.findElementForSearch(
-          {
-            ...options,
-            screenSizeOptions: {
-              observationScreenSize: latestScreenSize,
-              display: latestViewHierarchy,
+          const searchResult = this.findElementForSearch(
+            {
+              ...options,
+              screenSizeOptions: {
+                observationScreenSize: latestScreenSize,
+                display: latestViewHierarchy,
+              },
             },
-          },
-          refreshedHierarchy,
-        );
-        selection = searchResult.selection;
-        element = selection.element;
-        containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (!element && selection.matchedElement) {
-          visibilityError = invisibleError();
-        }
-        if (
-          element &&
-          this.isElementTapTargetOffScreen(selection, refreshedHierarchy, latestScreenSize, options)
-        ) {
-          visibilityError = invisibleError();
-          logger.warn(
-            `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
-              `bounds=${JSON.stringify(element.bounds)}`,
+            refreshedHierarchy,
           );
-          selection = { ...selection, element: null };
-          element = null;
-          offScreenRejections += 1;
-          continue;
-        }
-        if (element) {
-          break;
-        }
-      }
+          selection = searchResult.selection;
+          element = selection.element;
+          containerFoundEver = containerFoundEver || searchResult.containerFound;
+          if (!element && selection.matchedElement) {
+            visibilityError = invisibleError();
+          }
+          if (
+            element &&
+            this.isElementTapTargetOffScreen(
+              selection,
+              refreshedHierarchy,
+              latestScreenSize,
+              options,
+            )
+          ) {
+            visibilityError = invisibleError();
+            logger.warn(
+              `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
+                `bounds=${JSON.stringify(element.bounds)}`,
+            );
+            selection = { ...selection, element: null };
+            element = null;
+            offScreenRejections += 1;
+            return false;
+          }
+          return element !== null;
+        },
+      });
+      requestCount = polled.requestCount;
     }
 
     if (this.isPrototypeWindowPending(options, latestViewHierarchy)) {

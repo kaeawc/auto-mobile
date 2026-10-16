@@ -34,11 +34,11 @@
 1528	src/features/action/InstallApp.ts
 2258	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
-1791	src/features/action/SendKeys.ts
 1897	src/features/action/SetUIState.ts
 1981	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 5407	src/features/action/TapOnElement.ts
+1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1435	src/features/action/swipeon/ScrollUntilVisible.ts
 1804	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts

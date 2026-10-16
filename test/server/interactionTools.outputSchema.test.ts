@@ -252,6 +252,11 @@ interface SourceIndex {
   registrations: Array<{ name: string; handler: ts.Expression }>;
 }
 const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
+// Handlers delegate response building to helpers that moved out of src/server
+// (e.g. createProvisionDeviceResponse in deviceLifecycleCore, #12719), so imports
+// are followed anywhere under src/ and the scan also indexes those helper modules.
+const sourceRoot = path.resolve(import.meta.dir, "../../src");
+const auditedDirectories = [serverDirectory, path.join(sourceRoot, "features/deviceLifecycle")];
 
 function isInside(directory: string, target: string, pathApi = path): boolean {
   const relative = pathApi.relative(directory, target);
@@ -272,7 +277,7 @@ function sourceKey(file: string, pathApi = path): string {
 function indexSource(
   file: string,
   source: string,
-  directory = serverDirectory,
+  directory = sourceRoot,
   pathApi = path,
 ): SourceIndex {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -436,8 +441,10 @@ function auditHandler(
 let sourceAudit: Array<{ name: string; structured: boolean; offenders: string[] }>;
 beforeAll(() => {
   const indexes = new Map<string, SourceIndex>();
-  for (const file of new Bun.Glob("**/*.ts").scanSync({ cwd: serverDirectory, absolute: true })) {
-    indexes.set(sourceKey(file), indexSource(file, readFileSync(file, "utf8")));
+  for (const cwd of auditedDirectories) {
+    for (const file of new Bun.Glob("**/*.ts").scanSync({ cwd, absolute: true })) {
+      indexes.set(sourceKey(file), indexSource(file, readFileSync(file, "utf8")));
+    }
   }
   sourceAudit = [...indexes].flatMap(([file, index]) =>
     index.registrations.map(({ name, handler }) => ({

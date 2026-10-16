@@ -1015,6 +1015,10 @@ export async function runProxySessionCommand(
       const pid = deps.spawnServe(command, privateEnv(command, deps));
       if (context) {
         deps.writeFile(join(dir, "driver.pid"), `${pid}\n`);
+        const driverIdentity = deps.ownerStartIdentity(pid);
+        if (driverIdentity) {
+          deps.writeFile(join(dir, "driver-identity"), driverIdentity);
+        }
       }
       const deadline = deps.timer.now() + command.initTimeoutMs + 5000;
       while (deps.timer.now() < deadline) {

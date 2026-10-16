@@ -71,6 +71,48 @@ describe("swipeAt dispatch", () => {
     expect(swipes.map((swipe) => swipe.duration)).toEqual([duration]);
   });
 
+  test.each(devices)("dispatches the exact durationMs on $platform", async (device) => {
+    const { swipeAt, swipes } = createSwipeAt(device);
+
+    const result = await swipeAt.execute({
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+      durationMs: 87,
+    });
+
+    expect(swipes).toEqual([{ x1: 10, y1: 20, x2: 10, y2: 150, duration: 87 }]);
+    // 130 px over 87 ms.
+    expect(result).toMatchObject({ success: true, duration: 87, velocityPxPerSecond: 1494 });
+  });
+
+  test("reports the speed-preset velocity too", async () => {
+    const { swipeAt } = createSwipeAt(androidDevice);
+
+    const result = await swipeAt.execute({ from: { x: 0, y: 0 }, to: { x: 30, y: 40 } });
+
+    // 50 px over the 300 ms normal preset.
+    expect(result.velocityPxPerSecond).toBe(167);
+  });
+
+  test.each([
+    [{ durationMs: 100, speed: "fast" as const }, "cannot be combined with speed"],
+    [{ durationMs: 0 }, "integer from 1 to 3000"],
+    [{ durationMs: 3001 }, "integer from 1 to 3000"],
+    [{ durationMs: 1.5 }, "integer from 1 to 3000"],
+  ])("rejects %j before dispatch", async (extra, message) => {
+    const { swipeAt, swipes } = createSwipeAt(androidDevice);
+
+    const result = await swipeAt.execute({
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+      ...extra,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(message);
+    expect(swipes).toEqual([]);
+  });
+
   test("reports a failed dispatch without claiming the swipe happened", async () => {
     const { swipeAt, gesture } = createSwipeAt(androidDevice);
     gesture.failWith = "injection refused";

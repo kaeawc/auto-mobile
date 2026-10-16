@@ -20,6 +20,8 @@ interface SwipeAtGestureOptions {
   snapshotId?: string;
   /** Swipe speed preset; defaults to normal. */
   speed?: "slow" | "normal" | "fast";
+  /** Exact stroke duration in ms (#12538); exclusive with speed. */
+  durationMs?: number;
   /** Refuse the gesture when the `from` point lies on the other layer's windows. */
   layer?: HierarchyLayer;
 }

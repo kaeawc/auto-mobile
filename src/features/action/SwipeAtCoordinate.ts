@@ -16,6 +16,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { ExecuteGesture } from "./ExecuteGesture";
+import { validateDurationMs } from "./swipeon/swipeTiming";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
 
@@ -138,6 +139,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
 
     try {
       throwIfAborted(signal);
+      // Reject an ambiguous or out-of-range duration before any observation or input.
+      const durationError = validateDurationMs(options);
+      if (durationError) {
+        return failure(durationError);
+      }
       const result = await this.observedInteraction(
         async (_observed, fence) => {
           // Validate against the latest available frame immediately before dispatch.
@@ -173,6 +179,8 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           }
 
           throwIfAborted(signal);
+          const duration =
+            options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
             this.executeGesture.swipe(
               resolved.from.x,
@@ -180,7 +188,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
               resolved.to.x,
               resolved.to.y,
               {
-                duration: this.geometry.getSwipeDurationFromSpeed(options.speed),
+                duration,
                 // A display change since the pre-dispatch read refuses just before the finger goes down.
                 displayFence: fence,
               },
@@ -191,6 +199,13 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           if (this.device.platform === "ios" && result.success) {
             iosDispatchTimestamp = this.timer.now();
             this.invalidateIosCache();
+          }
+          if (result.success && duration > 0) {
+            const distance = Math.hypot(
+              resolved.to.x - resolved.from.x,
+              resolved.to.y - resolved.from.y,
+            );
+            result.velocityPxPerSecond = Math.round((distance / duration) * 1000);
           }
           return result;
         },

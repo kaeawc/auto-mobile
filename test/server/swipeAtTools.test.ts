@@ -16,6 +16,19 @@ function handlerFor(execute: SwipeAtElementLike["execute"]) {
   return createSwipeAtHandler({ swipeAtFactory: () => ({ execute }) });
 }
 
+describe("swipeAtSchema durationMs", () => {
+  test.each([1, 120, 3000])("accepts durationMs %d", (durationMs) => {
+    expect(
+      swipeAtSchema.safeParse({
+        platform: "android",
+        from: { x: 1, y: 2 },
+        to: { x: 3, y: 4 },
+        durationMs,
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe("swipeAtSchema", () => {
   test.each([
     ["absolute from/to", { platform: "android", from: { x: 1, y: 2 }, to: { x: 30, y: 40 } }],
@@ -134,10 +147,21 @@ describe("swipeAtSchema", () => {
       [],
     ],
     [
-      "undeclared durationMs",
-      { platform: "android", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, durationMs: 500 },
-      [],
+      "durationMs together with speed",
+      {
+        platform: "android",
+        from: { x: 1, y: 2 },
+        to: { x: 3, y: 4 },
+        durationMs: 500,
+        speed: "fast",
+      },
+      ["durationMs"],
     ],
+    ...[0, -5, 1.5, 3001, Number.NaN].map((durationMs) => [
+      `out-of-range durationMs ${durationMs}`,
+      { platform: "android", from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, durationMs },
+      ["durationMs"],
+    ]),
     [
       "extra key on a point",
       { platform: "android", from: { x: 1, y: 2, z: 3 }, to: { x: 3, y: 4 } },
@@ -188,6 +212,23 @@ describe("swipeAtHandler", () => {
     expect(getStructuredField(response, "message")).toBe("Swiped from (10, 20) to (80, 170)");
     expect(getStructuredField(response, "deviceId")).toBe(device.deviceId);
     expect(getStructuredField(response, "platform")).toBe("android");
+  });
+
+  test("forwards durationMs to the action", async () => {
+    const received: SwipeAtOptions[] = [];
+    const swipeAtHandler = handlerFor(async (options) => {
+      received.push(options);
+      return { ...success, duration: 120 };
+    });
+
+    const response = await swipeAtHandler(device, {
+      from: { x: 10, y: 20 },
+      to: { x: 80, y: 170 },
+      durationMs: 120,
+    });
+
+    expect(received[0]?.durationMs).toBe(120);
+    expect(getStructuredField(response, "duration")).toBe(120);
   });
 
   test("passes an image swipe through without outer coordinates", async () => {

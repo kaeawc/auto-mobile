@@ -32907,6 +32907,12 @@
           "type": "string",
           "enum": ["slow", "normal", "fast"]
         },
+        "durationMs": {
+          "description": "Exact stroke duration in ms (integer 1-3000); exclusive with speed. Velocity = swipe distance / duration; the result reports the dispatched duration and velocityPxPerSecond. Android may quantize very short strokes.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
         "layer": {
           "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",

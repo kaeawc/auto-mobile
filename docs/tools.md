@@ -214,7 +214,7 @@ duration must be at most 3000 ms, and forward + pause + return must be at most
 increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
 These timing options require `boomerang: true`.
 
-`swipeOn.durationMs` sets the forward-stroke duration exactly instead of a `speed`
+`swipeOn.durationMs` (and `swipeAt.durationMs`) sets the forward-stroke duration exactly instead of a `speed`
 preset. It is an integer from 1 to 3000 ms (the gesture transport allows a 5000 ms
 request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined with
 `speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
@@ -406,7 +406,14 @@ swipeAt({
 are in `image.unit`, not `coordinateSpace`. Add
 `snapshotId` to reject the swipe when the screen geometry changed since that
 observation, or the reference expired. `speed` selects `slow`, `normal` (the
-default), or `fast` as in `swipeOn`. `layer` is checked at the `from` point, because touches go to the window under the
+default), or `fast` as in `swipeOn`. `durationMs` instead sets the stroke duration
+exactly (integer 1 to 3000 ms, the same bounds and transport headroom as
+`swipeOn.durationMs`); it cannot be combined with `speed`, and either violation is
+rejected before any input is sent. Velocity is the straight-line distance divided by
+the duration: the result's `duration` is what was dispatched and
+`velocityPxPerSecond` is that velocity in native px/s, so a fling can be reproduced.
+The same quantization caveat as `swipeOn.durationMs` applies on Android and no
+per-platform effective minimum has been measured. `layer` is checked at the `from` point, because touches go to the window under the
 finger-down point. `swipeAt` does not accept `display`; use `swipeOn` for a
 non-default display.
 

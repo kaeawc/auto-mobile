@@ -5,6 +5,11 @@ import { RecompositionTracker } from "../features/performance/RecompositionTrack
 import type { BootedDevice } from "../models";
 import type { SwipeAtOptions } from "../models/SwipeAtOptions";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
+import {
+  SWIPE_DURATION_MAX_MS,
+  SWIPE_DURATION_MIN_MS,
+  validateDurationMs,
+} from "../features/action/swipeon/swipeTiming";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import {
@@ -105,12 +110,25 @@ export const swipeAtSchema = withJsonSchemaOverride(
             "Screenshot-relative from/to points sharing one image source; mutually exclusive with outer from, to, and coordinateSpace. Without image, from and to are required.",
           ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        durationMs: z
+          .number()
+          .int()
+          .min(SWIPE_DURATION_MIN_MS)
+          .max(SWIPE_DURATION_MAX_MS)
+          .optional()
+          .describe(
+            `Exact stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed. Velocity = swipe distance / duration; the result reports the dispatched duration and velocityPxPerSecond. Android may quantize very short strokes.`,
+          ),
         layer: hierarchyLayerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
       })
       .strict(),
   ).superRefine((value, context) => {
+    const durationError = validateDurationMs(value);
+    if (durationError) {
+      context.addIssue({ code: "custom", message: durationError, path: ["durationMs"] });
+    }
     if (value.image !== undefined) {
       if (
         value.from !== undefined ||
@@ -165,6 +183,7 @@ export function createSwipeAtHandler({
           : { from: args.from, to: args.to, coordinateSpace: args.coordinateSpace }),
         snapshotId: args.snapshotId,
         speed: args.speed,
+        durationMs: args.durationMs,
         layer: args.layer,
       } as SwipeAtOptions,
       { progress, signal },

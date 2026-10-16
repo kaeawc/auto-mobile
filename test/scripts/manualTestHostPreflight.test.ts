@@ -121,16 +121,49 @@ test.each([
     "caffeinate",
   ],
   ["lid", { lid: { closed: true } }, "open"],
-  ["clamshell", { lid: { closed: false, clamshellCausesSleep: true } }, "cannot prevent"],
+  [
+    "clamshell on battery",
+    {
+      power: { source: "battery", chargePercent: 50 },
+      lid: { closed: false, clamshellCausesSleep: true },
+    },
+    "cannot prevent",
+    2,
+  ],
+  [
+    "clamshell with unknown power",
+    { power: { source: "unknown" }, lid: { closed: false, clamshellCausesSleep: true } },
+    "cannot prevent",
+    2,
+  ],
+  [
+    "clamshell with unavailable power",
+    { power: { unavailable: "x" }, lid: { closed: false, clamshellCausesSleep: true } },
+    "cannot prevent",
+    2,
+  ],
+  [
+    "closed lid on AC",
+    { lid: { closed: true, clamshellCausesSleep: true } },
+    "The lid is closed",
+    1,
+  ],
   ["unavailable", { power: { unavailable: "reader failed" } }, "reader failed"],
-] satisfies Array<[string, Partial<HostSections>, string]>)(
+] satisfies Array<[string, Partial<HostSections>, string, number?]>)(
   "typed %s warning is actionable",
-  (_name, sections, message) => {
+  (_name, sections, message, count = 1) => {
     const report = buildHostPreflightReport(options.batchDir, stats, { ...healthy, ...sections });
-    expect(report.warnings).toHaveLength(1);
-    expect(report.warnings[0]).toContain(message);
+    expect(report.warnings).toHaveLength(count);
+    expect(report.warnings.some((w) => w.includes(message))).toBe(true);
   },
 );
+test("clamshell warning is suppressed on AC with the lid open", () => {
+  const report = buildHostPreflightReport(options.batchDir, stats, {
+    ...healthy,
+    lid: { closed: false, clamshellCausesSleep: true },
+  });
+  expect(report.warnings).toEqual([]);
+});
 test("high load warns; memory is report only; healthy and unsupported hosts do not warn", () => {
   expect(
     buildHostPreflightReport(options.batchDir, { ...stats, loadAverage: [17, 0, 0] }, healthy)

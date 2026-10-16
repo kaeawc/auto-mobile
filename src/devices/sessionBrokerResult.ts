@@ -10,6 +10,11 @@ export interface SessionBrokerFailure {
   code: string;
   message: string;
   retryable: boolean;
+  /**
+   * Set when a retry only succeeds under a fresh request ID: this request ID's terminal refusal
+   * is stored and replays byte-identically, so resending it can never succeed.
+   */
+  retryRequires?: "new_request_id";
 }
 
 /** Consumer result intentionally has no scope, allocation index, lane, generation, or cap. */

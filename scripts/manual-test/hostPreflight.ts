@@ -85,7 +85,7 @@ export function buildHostPreflightReport(
       "Idle system sleep is not prevented; run the printed caffeinate command before the batch.",
     );
   }
-  warnings.push(...lidWarnings(lid));
+  warnings.push(...lidWarnings(lid, power));
   if (!("unavailable" in lowPower) && lowPower.enabled) {
     warnings.push(
       "Low Power Mode is on; timings are unreliable and the host may throttle; turn it off before the batch.",
@@ -127,14 +127,17 @@ function powerWarnings(power: HostPower, platform: string): string[] {
       ]
     : [];
 }
-function lidWarnings(lid: HostLid): string[] {
+function lidWarnings(lid: HostLid, power: HostPower): string[] {
   const warnings: string[] = [];
   if (!("unavailable" in lid) && lid.closed) {
     warnings.push(
       "The lid is closed; open it before the batch or connect an external display with AC power.",
     );
   }
-  if (!("unavailable" in lid) && lid.clamshellCausesSleep) {
+  // Every MacBook reports AppleClamshellCausesSleep=Yes with the lid open on AC; the
+  // risk only exists on battery, so warn only when AC is not confirmed.
+  const onAc = !("unavailable" in power) && power.source === "ac";
+  if (!("unavailable" in lid) && lid.clamshellCausesSleep && !onAc) {
     warnings.push(
       "Closing the lid will sleep the host and caffeinate cannot prevent clamshell sleep on battery; keep AC attached and the lid open or an external display connected.",
     );

@@ -16,12 +16,14 @@ preflight:
       display_name: Agent Benchmark
   launchUri: automobile:playground/demos
 claude:
-  # The task is tap navigation: deep links (openLink) and graph navigation (navigateTo)
-  # could reach the Summary screen without exercising the flow.
+  # The task is tap navigation: deep links (openLink), graph navigation (navigateTo),
+  # and plans (executePlan, which can run a nested openLink step) could reach the
+  # Summary screen without exercising the flow.
   disallowedTools:
     - Bash
     - mcp__auto-mobile__openLink
     - mcp__auto-mobile__navigateTo
+    - mcp__auto-mobile__executePlan
   maxBudgetUsd: 2
   timeoutSeconds: 600
 verify:

@@ -60,7 +60,20 @@ const suiteSchema = z
         sharedPreferences: z
           .record(
             z.string().regex(/^[A-Za-z0-9_.-]+$/, "preference file names are plain identifiers"),
-            z.record(z.union([z.boolean(), z.number(), z.string()])),
+            z.record(
+              z.union([
+                z.boolean(),
+                // Android parses integers as int/long; beyond the safe range a JS number is
+                // already imprecise and may serialize as 1e+21, which Android rejects.
+                z
+                  .number()
+                  .finite()
+                  .refine((value) => !Number.isInteger(value) || Number.isSafeInteger(value), {
+                    message: "integer preference values must be safe integers",
+                  }),
+                z.string(),
+              ]),
+            ),
           )
           .optional(),
         launchUri: z.string().min(1).optional(),

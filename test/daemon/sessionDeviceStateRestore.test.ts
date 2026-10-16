@@ -127,9 +127,13 @@ function makeRestore(
   keepScreenAwake: SessionDeviceStateRestoreOptions["keepScreenAwake"] = () => ({
     restore: async () => ({ status: "restored" as const }),
   }),
+  biometricEnrollment: SessionDeviceStateRestoreOptions["biometricEnrollment"] = () => ({
+    restore: async () => {},
+  }),
 ): SessionDeviceStateRestore {
   return new SessionDeviceStateRestore(host, {
     keepScreenAwake,
+    biometricEnrollment,
     screenReader,
     screenReaderBackoff: backoff,
     rotation,
@@ -624,5 +628,84 @@ describe("keep-awake family", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("biometric family", () => {
+  async function createBiometric(
+    result: (call: number) => Promise<void>,
+    enrollment: "enrolled" | "not_enrolled" = "not_enrolled",
+  ) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    const restored: string[] = [];
+    const restore = makeRestore(host, undefined, undefined, undefined, undefined, () => ({
+      restore: (value) => {
+        restored.push(String(value));
+        return result(restored.length);
+      },
+    }));
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s4", "ios-sim-1", "ios");
+    factory.setBiometricEnrollment("s4", { initialEnrollment: enrollment });
+    return { timer, host, restore, session, restored };
+  }
+
+  test("no enrollment baseline means no restore target", async () => {
+    const h = await createBiometric(async () => {});
+    delete h.session.cacheData.biometricEnrollment;
+    expect(h.restore.biometricRestoreTarget(h.session)).toBeNull();
+    expect((await h.restore.restoreBiometricEnrollmentBestEffort(h.session)).pending).toBeNull();
+    expect(h.restored).toEqual([]);
+  });
+
+  test("the target is resolved before any await and keyed on the cache alone", async () => {
+    const h = await createBiometric(async () => {});
+    const target = h.restore.biometricRestoreTarget(h.session);
+    expect(target).toMatchObject({
+      sessionId: "s4",
+      deviceId: "ios-sim-1",
+      enrollment: "not_enrolled",
+    });
+  });
+
+  test("a successful restore clears the health marker and leaves nothing pending", async () => {
+    const h = await createBiometric(async () => {});
+    expect((await h.restore.restoreBiometricEnrollmentBestEffort(h.session)).pending).toBeNull();
+    expect(h.restored).toEqual(["not_enrolled"]);
+    expect(h.host.healthEvents).toContain("clear:ios-sim-1:biometric-enrollment");
+  });
+
+  test("a failing restore retries twice, then hands the device to health recovery", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createBiometric(() => Promise.reject(new Error("simctl failed")));
+      const { pending } = await h.restore.restoreBiometricEnrollmentBestEffort(h.session);
+      expect(pending).not.toBeNull();
+      for (let i = 0; i < 2; i++) {
+        await flush();
+        h.timer.advanceTime(250);
+      }
+      await pending;
+      expect(h.restored).toHaveLength(3);
+      expect(h.host.abandoned).toContain("ios-sim-1:biometric-enrollment");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a restore sequenced after draining setups waits for them", async () => {
+    const h = await createBiometric(async () => {});
+    const gate = Promise.withResolvers<void>();
+    const { pending } = await h.restore.getPendingBiometricRestoration(h.session, gate.promise);
+    await flush();
+    expect(h.restored).toEqual([]);
+    gate.resolve();
+    await pending;
+    expect(h.restored).toEqual(["not_enrolled"]);
   });
 });

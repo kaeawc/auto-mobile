@@ -18,22 +18,21 @@ function create(options?: SessionManagerOptions): SessionManager {
   return manager;
 }
 
+// Restorers and backoffs owned by SessionDeviceStateRestore (#11795), by their old manager names.
+const OWNED_BY_STATE_RESTORE: Record<string, string> = {
+  keepScreenAwakeRestorerFactory: "keepScreenAwakeRestorer",
+  biometricEnrollmentRestorerFactory: "biometricEnrollmentRestorer",
+  screenReaderRestorerFactory: "screenReaderRestorer",
+  screenReaderRestoreBackoff: "screenReaderRestoreBackoff",
+  rotationRestoreBackoff: "rotationRestoreBackoff",
+};
+
 function field<T>(manager: SessionManager, name: string): T {
-  // The screen-reader restorer and backoff are owned by SessionDeviceStateRestore (#11795).
-  const owner =
-    name.startsWith("screenReader") ||
-    name === "rotationRestoreBackoff" ||
-    name === "keepScreenAwakeRestorerFactory"
-      ? (Reflect.get(manager, "stateRestore") as object)
-      : manager;
-  return Reflect.get(
-    owner,
-    name === "screenReaderRestorerFactory"
-      ? "screenReaderRestorer"
-      : name === "keepScreenAwakeRestorerFactory"
-        ? "keepScreenAwakeRestorer"
-        : name,
-  ) as T;
+  const owned = OWNED_BY_STATE_RESTORE[name];
+  if (owned === undefined) {
+    return Reflect.get(manager, name) as T;
+  }
+  return Reflect.get(Reflect.get(manager, "stateRestore") as object, owned) as T;
 }
 
 afterEach(() => {

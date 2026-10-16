@@ -12,6 +12,7 @@ import {
 } from "../features/utility/DeviceClock";
 import type { DeviceHealthReason } from "./deviceHealthMarkers";
 import type { KeepScreenAwakeState, KeepAwakeRestoreReport } from "../utils/KeepScreenAwakeManager";
+import type { BiometricEnrollment } from "../features/utility/DeviceState";
 import type { BackoffPolicy } from "../utils/Backoff";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -34,7 +35,9 @@ import {
 } from "./iosAppNetworkLease";
 import {
   CLOCK_RESTORE_TIMEOUT_MS,
+  BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
   KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
+  type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
   NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
@@ -140,6 +143,23 @@ export interface KeepScreenAwakeRestoreTarget {
   state: KeepScreenAwakeState;
 }
 
+/**
+ * A failed restore leaves the simulator holding session-modified enrollment, so
+ * the device must not return to the idle pool on the strength of one attempt.
+ * Retries run inside the pending-cleanup promise, which keeps the device
+ * quarantined until they settle.
+ */
+const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
+const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
+
+export interface BiometricRestoreTarget {
+  restoreGeneration?: number;
+  incarnation?: number;
+  sessionId: string;
+  deviceId: string;
+  enrollment: BiometricEnrollment;
+}
+
 /** What SessionDeviceStateRestore needs from the session manager that owns it (#11795). */
 export interface SessionDeviceStateRestoreHost {
   readonly timer: Timer;
@@ -199,6 +219,7 @@ export interface SessionDeviceStateRestoreHost {
 }
 
 export interface SessionDeviceStateRestoreOptions {
+  biometricEnrollment: (device: BootedDevice) => BiometricEnrollmentRestorer;
   keepScreenAwake: (device: BootedDevice) => KeepScreenAwakeRestorer;
   screenReader: (device: BootedDevice) => ScreenReaderRestorer;
   screenReaderBackoff: BackoffPolicy;
@@ -237,6 +258,9 @@ export function runDeviceStateMutationExclusive<T>(
  * comments next to it and in SessionManager's release path (#11795).
  */
 export class SessionDeviceStateRestore {
+  private readonly biometricEnrollmentRestorer: (
+    device: BootedDevice,
+  ) => BiometricEnrollmentRestorer;
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
   private readonly keepScreenAwakeRestorer: (device: BootedDevice) => KeepScreenAwakeRestorer;
   readonly screenReaderRestores = new DeviceStateRestoreQueue<ScreenReaderSessionState>(
@@ -321,6 +345,7 @@ export class SessionDeviceStateRestore {
     options: SessionDeviceStateRestoreOptions,
   ) {
     this.keepScreenAwakeRestorer = options.keepScreenAwake;
+    this.biometricEnrollmentRestorer = options.biometricEnrollment;
     this.screenReaderRestorer = options.screenReader;
     this.screenReaderRestoreBackoff = options.screenReaderBackoff;
     this.rotationRestorer = options.rotation;
@@ -1641,5 +1666,170 @@ export class SessionDeviceStateRestore {
     this.host.abandonRestore(target, "keep-screen-awake", () =>
       this.restoreKeepScreenAwakeTarget(target),
     );
+  }
+
+  /**
+   * Snapshot of what a restore must write, taken before any await. A rebind
+   * reassigns `session.assignedDevice` while retries are still outstanding, so
+   * resolving the device lazily from the session would aim them at the new
+   * simulator and leave the old one dirty.
+   */
+  biometricRestoreTarget(session: Session): BiometricRestoreTarget | null {
+    const state = session.cacheData.biometricEnrollment;
+    // Keyed on the cache alone, not session.platform. The slot is only ever
+    // written by the iOS Simulator biometric path, so its presence is the
+    // authoritative evidence that a simulator needs restoring — whereas
+    // session.platform carries whatever the caller declared to setActiveDevice
+    // and can disagree with the device actually bound.
+    if (!state) {
+      return null;
+    }
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      incarnation: this.host.healthIncarnation(session.assignedDevice),
+      restoreGeneration: this.host.restoreGeneration(session.assignedDevice),
+      enrollment: state.initialEnrollment,
+    };
+  }
+
+  async restoreBiometricEnrollment(target: BiometricRestoreTarget): Promise<void> {
+    const device: BootedDevice = {
+      name: target.deviceId,
+      platform: "ios",
+      deviceId: target.deviceId,
+    };
+    if (!this.host.restoreIncarnationIsCurrent(target)) {
+      return;
+    }
+    await this.host.dispatchDeviceRestore(
+      target.deviceId,
+      (_signal, _identitySignal, acknowledge) =>
+        this.biometricEnrollmentRestorer(device).restore(target.enrollment).then(acknowledge),
+      target.restoreGeneration,
+      2,
+    );
+    this.host.clearRestoreHealth(target, "biometric-enrollment");
+  }
+
+  async restoreBiometricEnrollmentBestEffort(
+    session: Session,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const target = this.biometricRestoreTarget(session);
+    if (!target) {
+      return { pending: null };
+    }
+    const restoration = this.restoreBiometricEnrollment(target).then(
+      () => ({ outcome: "restored" as const }),
+      (error) => ({ outcome: "failed" as const, error }),
+    );
+    const timeout = new Error("Biometric restore timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.host.timer,
+      timeoutMs: BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
+      label: "Biometric restore",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw error;
+    });
+    if (this.host.hasIdentityReplacementFence(target.deviceId)) {
+      return { pending: null };
+    }
+    if (result.outcome === "failed") {
+      logger.warn(
+        `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
+      );
+      // Quarantine the device until the retries below settle; a prompt
+      // rejection otherwise returns a dirty simulator straight to the pool.
+      return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
+    }
+    if (result.outcome === "timed-out") {
+      logger.warn(
+        `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
+      );
+      return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
+    }
+    return { pending: null };
+  }
+
+  /** A slow restore can still fail; retry before the device leaves quarantine. */
+  private async settleBiometricEnrollmentRestore(
+    target: BiometricRestoreTarget,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(
+      `Failed to restore biometric enrollment for session ${target.sessionId}: ${result.error}`,
+    );
+    await this.retryBiometricEnrollmentRestore(target, result.error);
+  }
+
+  private async retryBiometricEnrollmentRestore(
+    target: BiometricRestoreTarget,
+    initialError: unknown,
+  ): Promise<void> {
+    let lastError = initialError;
+    for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.host.timer.sleep(BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS);
+      if (!this.host.restoreIncarnationIsCurrent(target)) {
+        return;
+      }
+      try {
+        await this.restoreBiometricEnrollment(target);
+        logger.info(
+          `Restored biometric enrollment for session ${target.sessionId} on retry ${attempt}`,
+        );
+        return;
+      } catch (error) {
+        // Teardown is best-effort: keep retrying, then report the last failure.
+        lastError = error;
+        logger.debug(
+          `Retry ${attempt} restoring biometric enrollment for session ${target.sessionId} failed: ${error}`,
+        );
+      }
+    }
+    logger.warn(
+      `Gave up restoring biometric enrollment for session ${target.sessionId} after ` +
+        `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
+        `may hold session-modified enrollment: ${lastError}`,
+    );
+    this.host.abandonRestore(target, "biometric-enrollment", () =>
+      this.restoreBiometricEnrollment(target),
+    );
+  }
+
+  /**
+   * A timed-out setup can still write simulator state. Defer its restoration
+   * until that write settles so an old command cannot overwrite the restore.
+   */
+  private restoreBiometricEnrollmentAfterSetups(
+    session: Session,
+    pendingSetups: Promise<void>,
+  ): Promise<void> {
+    return pendingSetups.then(async () => {
+      const pendingRestoration = (await this.restoreBiometricEnrollmentBestEffort(session)).pending;
+      await pendingRestoration;
+    });
+  }
+
+  /**
+   * Returned wrapped, never bare: `return somePromise` inside an async function
+   * adopts that promise, which would make the caller await the very cleanup it
+   * is trying to hand off and stall the release.
+   */
+  async getPendingBiometricRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups && session.cacheData.biometricEnrollment) {
+      return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
+    }
+    return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
   }
 }

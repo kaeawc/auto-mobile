@@ -34,6 +34,7 @@ import {
 } from "../../utils/PostActionCaptureContext";
 import { isDebugModeEnabled } from "../../utils/debug";
 import { logger } from "../../utils/logger";
+import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -3397,7 +3398,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {
     for (const command of plan.commands) {
       signal?.throwIfAborted();
-      if (this.typingPasswordField && command.startsWith("shell ")) {
+      if (command.startsWith("shell input text ")) {
+        await executeAndroidInputText(this.adb, this.timer, command, {
+          signal,
+          ...(this.typingPasswordField ? { logLabel: "shell input <password key event>" } : {}),
+        });
+      } else if (this.typingPasswordField && command.startsWith("shell ")) {
         // The command names the key code typed; adb logs and errors show only the label.
         await this.adb.execute(["shell", command.slice("shell ".length)], {
           signal,

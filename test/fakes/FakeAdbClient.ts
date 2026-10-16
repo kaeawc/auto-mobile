@@ -152,7 +152,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       throw preDispatchError;
     }
     await options?.beforeDispatch?.(options.timeoutMs);
-    return this.executeCommand(
+    const result = await this.executeCommand(
       command,
       options?.timeoutMs,
       options?.maxBuffer,
@@ -160,6 +160,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
       options?.signal,
       options?.waitForProcessSettlementAfterAbort,
     );
+    options?.onStdout?.(result.stdout);
+    return result;
   }
 
   /**

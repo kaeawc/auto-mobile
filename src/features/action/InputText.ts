@@ -12,6 +12,7 @@ import {
   SendTextResult,
 } from "../../models";
 import { logger } from "../../utils/logger";
+import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -1014,15 +1015,18 @@ export class InputText extends BaseVisualChange {
   ): Promise<void> {
     for (const [index, command] of plan.commands.entries()) {
       assertInputNotAborted(signal);
-      await this.withTextDispatch(() =>
-        this.adb.execute(command.split(" "), {
+      await this.withTextDispatch(() => {
+        const options = {
           timeoutMs,
           noRetry,
           beforeDispatch: index === 0 ? beforeDispatch : undefined,
           signal,
           waitForProcessSettlementAfterAbort: true,
-        }),
-      );
+        };
+        return command.startsWith("shell input text ")
+          ? executeAndroidInputText(this.adb, this.timer, command, options)
+          : this.adb.execute(command.split(" "), options);
+      });
       assertInputNotAborted(signal);
     }
   }

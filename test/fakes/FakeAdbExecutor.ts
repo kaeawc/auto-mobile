@@ -17,6 +17,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private commandResponseSequences: Map<string, ExecResult[]> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  private commandStdoutChunks = new Map<string, string[]>();
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
@@ -115,6 +116,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     // If response already has the required methods, use it as-is; otherwise enhance it
     const enhancedResponse = this.ensureExecResultMethods(response);
     this.commandResponses.set(commandPattern, enhancedResponse);
+  }
+
+  /** Stream configured chunks before the command completes or rejects. */
+  setCommandStdoutChunks(commandPattern: string, chunks: string[]): void {
+    this.commandStdoutChunks.set(commandPattern, chunks);
   }
 
   /**
@@ -342,6 +348,15 @@ export class FakeAdbExecutor implements AdbExecutor {
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
+    if (options.onStdout) {
+      for (const [pattern, chunks] of this.commandStdoutChunks) {
+        if (args.join(" ").includes(pattern)) {
+          for (const chunk of chunks) {
+            options.onStdout(chunk);
+          }
+        }
+      }
+    }
     return this.executeCommand(
       args.join(" "),
       options.timeoutMs,

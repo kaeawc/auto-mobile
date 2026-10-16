@@ -43,6 +43,12 @@ export type TextDelivery =
   | { kind: "insert" | "replace" | "commit"; text: string }
   | { kind: "keyevent" | "inputText"; text: string };
 
+/** Expected PID wrapper; keep argv assertions explicit about both Android implementations. */
+export function trackedInputTextCommand(command: string): string {
+  const input = command.slice("shell ".length);
+  return `shell if [ "$(getprop ro.build.version.sdk)" -ge 31 ]; then echo $$; exec cmd ${input}; else echo $$; exec ${input}; fi`;
+}
+
 /**
  * Split a device-shell command line into words the way `/system/bin/sh` does for the subset
  * adb commands use: single quotes, backslash escapes outside quotes, and unquoted whitespace.
@@ -98,6 +104,16 @@ export function decodeAndroidInputTextArgument(argument: string): string {
 
 /** The text a `shell input text ...` adb command types on the device, or undefined. */
 export function decodeInputTextCommand(command: string): string | undefined {
+  const modernPrefix =
+    'shell if [ "$(getprop ro.build.version.sdk)" -ge 31 ]; then echo $$; exec cmd ';
+  if (command.startsWith(modernPrefix)) {
+    const end = command.indexOf("; else echo $$; exec ", modernPrefix.length);
+    const input = command.slice(modernPrefix.length, end);
+    if (command !== trackedInputTextCommand(`shell ${input}`)) {
+      throw new Error(`unexpected tracked input wrapper: ${command}`);
+    }
+    command = `shell ${input}`;
+  }
   if (!command.startsWith("shell input text ")) {
     return undefined;
   }
@@ -120,6 +136,10 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
         return async (args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) => {
           const result = await execute(args, options);
           const command = args.join(" ");
+          const inputText = decodeInputTextCommand(command);
+          if (inputText !== undefined) {
+            deliveries.push({ kind: "inputText", text: inputText });
+          }
           if (command === "shell ime list -a -s" && !result.stdout.trim()) {
             return { ...result, stdout: `${priorImeId}\n${commitImeId}\n` };
           }

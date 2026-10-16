@@ -16,6 +16,7 @@ import {
   createSendKeysHarness,
   createSendKeysCaptureHarness,
   observer as harnessObserver,
+  trackedInputTextCommand,
 } from "./SendKeysTestHarness";
 import { settleEmbeddedObservationInResponse } from "../../../src/server/embeddedObservationSettle";
 import { createStructuredToolResponse, getStructuredPayload } from "../../../src/utils/toolUtils";
@@ -2198,9 +2199,9 @@ describe("DefaultSendKeysCommandExecutor", () => {
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_P",
     );
     // #9888: a password is never batched into one `input text` command line.
-    expect(
-      adb.getExecutedCommands().filter((command) => command.startsWith("shell input text")),
-    ).toEqual([]);
+    expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual(
+      [],
+    );
   });
 
   // #9888: a password-field eventAll run is never batched, and no log, warning or error carries
@@ -2265,9 +2266,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
 
     expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
-    expect(
-      adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
-    ).toEqual(["shell input text '50%'", "shell input text 's%s1'"]);
+    expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual([
+      trackedInputTextCommand("shell input text '50%'"),
+      trackedInputTextCommand("shell input text 's%s1'"),
+    ]);
   });
 
   test("auto password replace is not pre-checked and sets the whole value", async () => {
@@ -2564,7 +2566,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
     expect(textClient.commitViaImeCalls).toEqual([]);
     expect(adb.getExecutedCommands()).toContain(`shell ime set ${commitImeId}`);
-    expect(adb.getExecutedCommands()).toContain("shell input text 'abc'");
+    expect(adb.getExecutedCommands()).toContain(trackedInputTextCommand("shell input text 'abc'"));
   });
 
   test("auto IME does not fall back after a partial commit", async () => {
@@ -2887,7 +2889,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       "shell settings --user 10 delete secure selected_input_method_subtype",
     );
     expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
-    expect(commands).toContain("shell input text 'Abc'");
+    expect(commands).toContain(trackedInputTextCommand("shell input text 'Abc'"));
     // The case read-back ran once: one warning, from one bounded series of settled re-reads.
     expect(result.warning?.match(/changed the letter case/g)).toHaveLength(1);
     expect(result.warning).toContain('eventAll typed "Abc"');
@@ -3897,13 +3899,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
     {
       label: "first",
       text: "bc🙂",
-      failingCommand: "shell input text 'bc'",
+      failingCommand: trackedInputTextCommand("shell input text 'bc'"),
       committedGraphemes: 0,
     },
     {
       label: "later",
       text: "a🙂bc",
-      failingCommand: "shell input text 'bc'",
+      failingCommand: trackedInputTextCommand("shell input text 'bc'"),
       committedGraphemes: 2,
     },
   ]) {
@@ -5003,7 +5005,9 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
   }
 
   const keyCommands = (adb: FakeAdbExecutor) =>
-    adb.getExecutedCommands().filter((command) => command.startsWith("shell input"));
+    adb
+      .getExecutedCommands()
+      .filter((command) => command.startsWith("shell input") || command.includes("input text"));
 
   describe("#9884 clear waits for the field to stop showing the pre-clear text", () => {
     test("polls until the old text is gone before the a11y insert is dispatched", async () => {
@@ -5626,7 +5630,9 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(
         await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
       ).toMatchObject({ success: true });
-      expect(keyCommands(h.adb)).toEqual(["shell input text 'Ab%scD%sef'"]);
+      expect(keyCommands(h.adb)).toEqual([
+        trackedInputTextCommand("shell input text 'Ab%scD%sef'"),
+      ]);
     });
 
     test("a case-only difference stays successful with a warning and is not a partial application", async () => {

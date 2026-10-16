@@ -21,6 +21,7 @@ test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
+test/contracts/telemetryRepository.integration.test.ts | safe | fake versus real telemetry repositories over createTestDatabase in-memory L27
 test/ctrlProxy/ios/IOSHostPortAvailabilityChecker.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server L22
 test/daemon/daemonClientAvailability.integration.test.ts | safe | mkdtemp socket path L20, local net server only
 test/daemon/daemonClientHandshake.integration.test.ts | safe | tmpdir socket L59, fake capture server, DaemonClient only connects to it

@@ -13,6 +13,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -157,6 +160,10 @@ class PrototypeController(
   private val settle: suspend (Long) -> Unit = { delay(it) },
   /** The supplied host handles the first surface; additional surfaces need independent hosts. */
   private val hostFactory: () -> PrototypeHost = { host },
+  /** The transports behind `request` actions (#12528). */
+  private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /** Where requests wait for their response; they are cancelled when their prototype ends. */
+  private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
@@ -511,6 +518,10 @@ class PrototypeController(
         nextRevision = { nextRevision(validated.id) },
         previousStacks =
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
+        httpClients = httpClients,
+        requestScope = requestScope,
+        // A response lands between interactions, never in the middle of one.
+        exclusively = { block -> mutex.withLock { block() } },
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))

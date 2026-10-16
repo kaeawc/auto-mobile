@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.protocol
 
 import java.net.URLDecoder
 import java.net.URLEncoder
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -42,6 +45,39 @@ object PrototypeRequests {
 
   /** The `<into>__meta` pointer: the same path with `__meta` appended to its last segment. */
   fun metaPath(into: String): String = into + META_SUFFIX
+
+  /**
+   * `JSON.parse` semantics for a response body: valid JSON as is, else null (the caller keeps the
+   * raw text as a string). kotlinx keeps an unquoted word such as `OK` as a literal instead of
+   * refusing it, so every non-string primitive must also be a JSON `true`, `false`, `null` or
+   * number.
+   */
+  fun parseJson(text: String): JsonElement? =
+    try {
+      Json.parseToJsonElement(text).takeIf {
+        PrototypeSpecValidator.validNumberTokens(it) && lowerCaseKeywords(it)
+      }
+    } catch (_: SerializationException) {
+      // Not JSON is a supported shape: the response carries the raw string.
+      null
+    }
+
+  /** kotlinx reads `True` as a boolean; JSON only has `true` and `false`. */
+  private fun lowerCaseKeywords(element: JsonElement): Boolean =
+    when (element) {
+      is JsonObject -> element.values.all(::lowerCaseKeywords)
+      is JsonArray -> element.all(::lowerCaseKeywords)
+      JsonNull -> true
+      is JsonPrimitive ->
+        element.isString ||
+          !(element.content.equals("true", ignoreCase = true) ||
+            element.content.equals("false", ignoreCase = true)) ||
+          element.content == "true" ||
+          element.content == "false"
+    }
+
+  /** `{data:/pointer}` placeholders in [text] read from [data], as in any text field. */
+  fun bindDataText(text: String, data: JsonObject?): String = PrototypeDataText.bind(text, data)
 }
 
 /** The transport codes of the host executor (`prototypeRequestProtocol.ts`) plus two of ours. */

@@ -44,6 +44,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
+import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
 import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
@@ -65,7 +66,10 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
@@ -506,6 +510,17 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
+    is PrototypeRequestAction ->
+      copy(
+        url = instance.interpolate(url),
+        headers = headers?.mapValues { (_, entry) -> instance.requestEntry(entry) },
+        query = query?.mapValues { (_, entry) -> instance.requestEntry(entry) },
+        body = body?.let(instance::dataValue),
+        into = into?.let(instance::dataPath),
+        statusKey = statusKey?.let(instance::interpolate),
+        onSuccess = onSuccess?.map { it.bound(instance) },
+        onError = onError?.map { it.bound(instance) },
+      )
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
@@ -515,6 +530,11 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
 /** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
 private fun RepeatInstance.dataPath(path: String): String =
   PrototypeRepeatTemplate.bindDataPath(path, index)
+
+/** A header or query entry: a literal string interpolates, a binding binds like a data value. */
+private fun RepeatInstance.requestEntry(entry: JsonElement): JsonElement =
+  if (entry is JsonObject) dataValue(entry)
+  else JsonPrimitive(interpolate(entry.jsonPrimitive.content))
 
 /** `{item}` and `{index}` become literals of this row; `{state}` keys interpolate. */
 private fun RepeatInstance.dataValue(binding: EmitContextBinding): EmitContextBinding =

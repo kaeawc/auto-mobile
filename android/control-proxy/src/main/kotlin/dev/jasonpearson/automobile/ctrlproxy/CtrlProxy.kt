@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecod
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
@@ -80,6 +81,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
@@ -87,6 +90,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
@@ -205,6 +209,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
+import okhttp3.OkHttpClient
 
 /**
  * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
@@ -1132,6 +1137,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var prototypeController: PrototypeController
+
+  /** `via: "host"` prototype requests: sent over the socket to the latest connected host. */
+  private val hostPrototypeHttp =
+    HostPrototypeHttpClient(
+      PrototypeHostLink { frame ->
+        ::webSocketServer.isInitialized && webSocketServer.sendToHost(frame)
+      },
+    )
   private val prototypeRefreshCoalescer =
     PrototypeRefreshCoalescer(
       launch = { action -> serviceScope.launch { action() } },
@@ -2104,6 +2117,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
             hostFactory = createPrototypeHost,
+            httpClients =
+              PrototypeHttpClients(
+                host = hostPrototypeHttp,
+                device = RetrofitPrototypeHttpClient(OkHttpClient()),
+              ),
+            requestScope = serviceScope,
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -2329,8 +2348,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               gestureStreamRouter.cancelOwnedBy(client)
             },
             onClientCountChanged = { count, session ->
+              if (count == 0) hostPrototypeHttp.onHostLost()
               serviceScope.launch { prototypes.onClientCountChanged(count, session) }
             },
+            onPrototypeResponse = hostPrototypeHttp::onResponse,
             onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
             onPermanentStartFailure = { disableSelf() },
           )

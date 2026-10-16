@@ -67,6 +67,11 @@ class WebSocketServer(
   private val onClientConnected: () -> Unit = {},
   /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
   private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
+  /**
+   * A host's `prototype_response` (#12528) answers a `prototype_request` this device sent. It is
+   * not a protocol request, so it is routed here before decoding rather than to [messageHandler].
+   */
+  private val onPrototypeResponse: (String) -> Unit = {},
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -378,6 +383,14 @@ class WebSocketServer(
     // change event. Older APKs reject the actions as unknown, so hosts refuse a spec using one
     // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
     add("prototype_data_actions_v1")
+    // The request action (#12528): an HTTP call from a tap, run by the host (via "host") or by the
+    // device itself (via "device"), that writes /data and moves a status key. Older APKs reject the
+    // action as unknown. Advertised only together with prototype_data_model_v1, since the
+    // response is written with the data-action semantics.
+    add("prototype_network_v1")
+    // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
+    // http or https host. Without it a host refuses a spec that asks for via "device".
+    add("prototype_network_device_v1")
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
@@ -1061,6 +1074,16 @@ class WebSocketServer(
     if (overflowed) disconnectClient(connection, "Outgoing buffer full")
   }
 
+  /**
+   * Sends [message] to one host: the most recently connected client, so a reconnecting daemon
+   * replaces the one it superseded and a request is never run twice. False when none is connected.
+   */
+  internal fun sendToHost(message: String): Boolean {
+    val host = synchronized(connections) { connections.lastOrNull() } ?: return false
+    sendToClient(host, message)
+    return true
+  }
+
   /** Send a typed terminal failure only to the client whose inbound message failed. */
   private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
@@ -1181,6 +1204,10 @@ class WebSocketServer(
   }
 
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
+    if (message.startsWith(PrototypeNetworkFrames.RESPONSE_PREFIX)) {
+      onPrototypeResponse(message)
+      return
+    }
     val handler = messageHandler
     if (handler == null) {
       // Length only: an inbound frame can carry prototype asset bytes.

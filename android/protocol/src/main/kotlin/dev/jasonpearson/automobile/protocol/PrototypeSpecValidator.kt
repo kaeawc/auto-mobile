@@ -199,7 +199,7 @@ object PrototypeSpecValidator {
 
   // JsonElement's tree parser retains unquoted literals; validate number tokens
   // structurally instead of relying on primitive coercion or exception messages.
-  private fun validNumberTokens(root: JsonElement): Boolean {
+  internal fun validNumberTokens(root: JsonElement): Boolean {
     val pending = ArrayDeque<JsonElement>()
     pending.add(root)
     while (pending.isNotEmpty()) {

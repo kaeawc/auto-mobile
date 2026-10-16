@@ -476,6 +476,22 @@ class PrototypeRequestTest {
     assertEquals(obj("""{"status":200,"durationMs":12}"""), result.data!!["feed__meta"])
   }
 
+  @Test
+  fun `a response body parses like JSON parse and anything else stays text`() {
+    assertEquals(
+      obj("""{"a":[1,true,null]}"""),
+      PrototypeRequests.parseJson("""{"a":[1,true,null]}"""),
+    )
+    assertEquals(Json.parseToJsonElement("12.5"), PrototypeRequests.parseJson(" 12.5 "))
+    assertEquals(Json.parseToJsonElement("true"), PrototypeRequests.parseJson("true"))
+    assertEquals(JsonNull, PrototypeRequests.parseJson("null"))
+    assertEquals(JsonPrimitive("quoted"), PrototypeRequests.parseJson("\"quoted\""))
+    // kotlinx would keep these as unquoted literals; JSON.parse refuses them, so they are text.
+    for (text in listOf("OK", "yyyy", "NaN", "Infinity", "True", "1 2", "<b>x</b>", "{oops", "")) {
+      assertNull(PrototypeRequests.parseJson(text), text)
+    }
+  }
+
   // ---- the event ----
 
   @Test

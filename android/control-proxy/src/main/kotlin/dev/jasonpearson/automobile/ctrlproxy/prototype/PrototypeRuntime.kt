@@ -2,10 +2,17 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
@@ -124,6 +131,20 @@ class PrototypeRuntime(
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
   private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
+  /** The transports behind `request` actions (#12528); a seam so JVM tests use a fake. */
+  private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /**
+   * Where `request` actions wait for their response. The runtime cancels its own requests on
+   * dismissal and never this scope; tests pass a test scope to control time.
+   */
+  private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  /**
+   * Runs a request's completion alongside the interactions: the controller passes its own lock so a
+   * response never lands in the middle of a tap. The default runs it directly.
+   */
+  private val exclusively: suspend (suspend () -> Unit) -> Unit = { it() },
+  /** A request id is unique on the device and stable between the request and its response. */
+  private val newRequestId: () -> String = { UUID.randomUUID().toString() },
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -284,6 +305,7 @@ class PrototypeRuntime(
 
   fun close() {
     mutableSnapshot.value = current.copy(active = false)
+    cancelRequests()
   }
 
   suspend fun handle(interaction: PrototypeInteraction) {
@@ -462,6 +484,7 @@ class PrototypeRuntime(
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
+        is PrototypeRequestAction -> startRequest(action, touched)
         else ->
           writes[index]?.let { (key, spec) ->
             writeInteractionSpec(spec)
@@ -693,11 +716,19 @@ class PrototypeRuntime(
    */
   private suspend fun writeData(action: PrototypeAction) {
     val write = dataWrite(action) ?: return
+    applyDataWrite(write)?.let { refusedDataWrite(write, it.message) }
+  }
+
+  /**
+   * One accepted or refused `/data` write; shared by the data actions and a request's response.
+   * Null once the write took effect (and reported itself), else why it was refused.
+   */
+  private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
     val before = current
     val data =
       when (val result = PrototypeDataWriter.apply(before.spec.data, write)) {
         is PrototypeDataWriteResult.Success -> result.data
-        is PrototypeDataWriteResult.Failure -> return refusedDataWrite(write, result.error.message)
+        is PrototypeDataWriteResult.Failure -> return result.error
       }
     val spec = before.spec.copy(data = data)
     // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
@@ -706,7 +737,10 @@ class PrototypeRuntime(
       PrototypeRenderMapper()
         .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
     } catch (error: IllegalArgumentException) {
-      return refusedDataWrite(write, error.message ?: "Data write exceeds a prototype limit")
+      return PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+        error.message ?: "Data write exceeds a prototype limit",
+      )
     }
     val revision = allocateRevision()
     // The next state write of this interaction allocates a later revision, so it never regresses.
@@ -718,6 +752,7 @@ class PrototypeRuntime(
       name = write.path,
       payload = dataWritePayload(write, revision),
     )
+    return null
   }
 
   private fun refusedDataWrite(write: PrototypeDataWrite, message: String) {
@@ -767,6 +802,237 @@ class PrototypeRuntime(
     )
       full
     else payload(null)
+  }
+
+  // ---- request action (#12528) ----
+
+  /** A started request, kept until its response settles or it is superseded or cancelled. */
+  private class RequestInFlight(
+    val requestId: String,
+    val method: String,
+    val url: String,
+    val via: String,
+    val into: String?,
+    val statusKey: String?,
+    val startedAt: Long,
+    val onSuccess: List<PrototypeAction>?,
+    val onError: List<PrototypeAction>?,
+  ) {
+    lateinit var job: Job
+  }
+
+  private val inFlight = LinkedHashMap<String, RequestInFlight>()
+
+  /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
+  private fun cancelRequests() {
+    val jobs = synchronized(inFlight) { inFlight.values.map { it.job }.also { inFlight.clear() } }
+    jobs.forEach { it.cancel() }
+  }
+
+  /** `{data:/pointer}` and `{key}` placeholders read the committed data and state at the action. */
+  private fun requestText(text: String): String =
+    interpolatePrototypeText(
+      PrototypeRequests.bindDataText(text, current.spec.data),
+      current.state,
+    )
+
+  private fun requestEntries(entries: Map<String, JsonElement>?): Map<String, JsonElement>? =
+    entries?.mapValues { (_, entry) ->
+      if (entry is JsonPrimitive && entry.isString) JsonPrimitive(requestText(entry.content))
+      else entry
+    }
+
+  /**
+   * A `request` action: resolves its bindings against the committed state and data, moves
+   * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
+   * for the same `into` wins (the older one reports `cancelled`), at most
+   * [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
+   * cannot start finishes at once as an error. The response is applied by [finishRequest].
+   */
+  private suspend fun startRequest(action: PrototypeRequestAction, touched: MutableSet<String>) {
+    val bound =
+      action.copy(
+        url = requestText(action.url),
+        headers = requestEntries(action.headers),
+        query = requestEntries(action.query),
+      )
+    val info = { url: String ->
+      RequestInFlight(
+        newRequestId(),
+        action.method ?: PrototypeRequests.DEFAULT_METHOD,
+        url,
+        action.via ?: PrototypeHttpClients.VIA_HOST,
+        action.into,
+        action.statusKey,
+        clock(),
+        action.onSuccess,
+        action.onError,
+      )
+    }
+    val resolved =
+      when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
+        is PrototypeResolvedRequestResult.Failure ->
+          return finishRequest(
+            info(bound.url),
+            PrototypeRequestResponse.Failed(result.error),
+          )
+        is PrototypeResolvedRequestResult.Success -> result.request
+      }
+    val started = info(resolved.url)
+    supersedeRequests(action.into)
+    if (
+      synchronized(inFlight) { inFlight.size } >=
+        PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT
+    ) {
+      val error =
+        PrototypeRequestError(
+          PrototypeRequestErrorCode.TOO_MANY_IN_FLIGHT,
+          "At most ${PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT} requests can be in flight.",
+        )
+      return finishRequest(started, PrototypeRequestResponse.Failed(error))
+    }
+    action.statusKey?.let { key ->
+      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
+    }
+    val request =
+      PrototypeHttpRequest(
+        requestId = started.requestId,
+        prototypeId = current.spec.id,
+        method = started.method,
+        url = resolved.url,
+        headers = resolved.headers,
+        body = resolved.body,
+        timeoutMs = action.timeoutMs ?: PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+      )
+    val client = httpClients.forVia(started.via)
+    // Lazy, so the job is registered before it can settle even on an eager dispatcher.
+    started.job =
+      requestScope.launch(start = CoroutineStart.LAZY) {
+        val response =
+          try {
+            client.execute(request)
+          } catch (error: CancellationException) {
+            throw error
+          } catch (error: Exception) {
+            warn("Request ${started.requestId} failed: ${error.message}")
+            PrototypeRequestResponse.Failed(
+              PrototypeRequestError(
+                PrototypeRequestErrorCode.NETWORK,
+                error.message ?: error.javaClass.simpleName,
+              ),
+            )
+          }
+        exclusively { settleRequest(started, response) }
+      }
+    synchronized(inFlight) { inFlight[started.requestId] = started }
+    started.job.start()
+  }
+
+  /** A newer request to the same `into` ends the older one: it writes nothing and says so. */
+  private suspend fun supersedeRequests(into: String?) {
+    if (into == null) return
+    val older =
+      synchronized(inFlight) {
+        inFlight.values
+          .filter { it.into == into }
+          .also { it.forEach { old -> inFlight.remove(old.requestId) } }
+      }
+    for (request in older) {
+      request.job.cancel()
+      val error =
+        PrototypeRequestError(
+          PrototypeRequestErrorCode.CANCELLED,
+          "Superseded by a newer request to $into",
+        )
+      sendRequestEvent(request, null, clock() - request.startedAt, error)
+    }
+  }
+
+  /** Only a request still registered settles; a superseded or dismissed one is dropped. */
+  private suspend fun settleRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val registered =
+      synchronized(inFlight) {
+        (inFlight[request.requestId] === request).also {
+          if (it) inFlight.remove(request.requestId)
+        }
+      }
+    if (!registered || !current.active) return
+    try {
+      finishRequest(request, response)
+    } finally {
+      interactionRevision = null
+    }
+  }
+
+  /**
+   * The completion order of the contract: `into`, then `<into>__meta`, then `statusKey`, then the
+   * `prototype_request` event, then `onSuccess` or `onError`.
+   */
+  private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val result =
+      PrototypeRequestOutcome.complete(request.into, response) { write ->
+        applyDataWrite(write)?.also {
+          warn("Refused request write at ${write.path}: ${it.message}")
+        }
+      }
+    if (!current.active) return
+    request.statusKey?.let { key ->
+      val status =
+        if (result.succeeded) PrototypeRequests.STATUS_SUCCESS else PrototypeRequests.STATUS_ERROR
+      if (writeStatus(key, status)) emitStateChange(listOf(key))
+    }
+    sendRequestEvent(
+      request,
+      result.meta.status,
+      result.meta.durationMs,
+      result.meta.error,
+    )
+    val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
+    if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
+    val writes =
+      try {
+        plannedWrites(followUps, current.spec)
+      } catch (error: IllegalArgumentException) {
+        warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
+        return
+      }
+    run(followUps, writes)
+  }
+
+  private suspend fun sendRequestEvent(
+    request: RequestInFlight,
+    status: Int?,
+    durationMs: Long,
+    error: PrototypeRequestError?,
+  ) {
+    emit(
+      kind = PrototypeEventKind.EMIT,
+      name = PrototypeRequests.EVENT_NAME,
+      payload =
+        PrototypeRequestEvent.payload(
+          request.requestId,
+          request.method,
+          request.url,
+          request.via,
+          request.into,
+          status,
+          durationMs,
+          error,
+        ),
+    )
+  }
+
+  /** True when the state key changed; a rejected write leaves state alone and says why. */
+  private fun writeStatus(key: String, status: String): Boolean {
+    val value = PrototypeScalar.Text(status)
+    if (current.state[key] == value) return false
+    return try {
+      writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+      true
+    } catch (error: IllegalArgumentException) {
+      warn("Refused statusKey $key = $status: ${error.message}")
+      false
+    }
   }
 
   private suspend fun emitAction(action: PrototypeEmitAction) {

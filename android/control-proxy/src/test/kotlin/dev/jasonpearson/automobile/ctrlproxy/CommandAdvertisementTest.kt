@@ -42,6 +42,8 @@ class CommandAdvertisementTest {
       "prototype_pager_options_v1",
       "prototype_data_model_v1",
       "prototype_data_actions_v1",
+      "prototype_network_v1",
+      "prototype_network_device_v1",
       "prototype_text_field_options_v1",
       "prototype_gestures_v1",
       "prototype_carousel_v1",
@@ -91,6 +93,8 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_pager_options_v1"))
       assertTrue(commands.contains("prototype_data_model_v1"))
       assertTrue(commands.contains("prototype_data_actions_v1"))
+      assertTrue(commands.contains("prototype_network_v1"))
+      assertTrue(commands.contains("prototype_network_device_v1"))
       assertTrue(commands.contains("prototype_text_field_options_v1"))
       assertTrue(commands.contains("prototype_gestures_v1"))
       assertTrue(commands.contains("prototype_carousel_v1"))

@@ -1079,6 +1079,34 @@ its in-flight slot until then. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new r
 `too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
 are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
 
+**Android runtime (#12528).** CtrlProxy advertises both capabilities and runs the action in
+`PrototypeRuntime`; the Kotlin twins of the TypeScript rules live in the `protocol` module
+(`PrototypeRequest.kt`: the resolver, `PrototypeRequestOutcome` and the event payload) and are
+tested against the same fixture, `request-actions.json`.
+
+- `statusKey` becomes `loading` in the tap's own interaction. The request then waits off the
+  interaction on the controller's scope, and its completion runs under the controller's lock, so a
+  response never lands in the middle of a tap. The completion order is the contract's: `into`,
+  `<into>__meta`, `statusKey`, the `prototype_request` event, then `onSuccess` / `onError`. A request
+  that cannot start (an unresolvable binding, or the in-flight cap) finishes at once as an error
+  without a `loading` step.
+- Both transports implement `PrototypeHttpClient`, so the runtime does not know which one ran.
+  `via: "host"` sends a `prototype_request` frame to the latest connected host over the CtrlProxy
+  socket and waits for the `prototype_response` with the same `requestId` (a host that never
+  answers times out five seconds after the request's own timeout; no host connected fails at once
+  with `network` and a message naming `via: "host"`). `via: "device"` is one Retrofit service
+  (`PrototypeHttpService`) over an injected `OkHttpClient` with raw `RequestBody` / `ResponseBody`
+  and no converter; the response is read with the `MAX_PROTOTYPE_RESPONSE_BYTES` cap, and the
+  contract timeout is the whole-call timeout. The two frames are plain serializable classes
+  (`PrototypeNetworkFrames.kt`), kept out of the `WebSocketRequest` / `WebSocketResponse` hierarchies
+  because the host reads them outside its Kotlin-mirrored wire manifest.
+- A request to any absolute http or https URL is allowed: CtrlProxy declares
+  `android.permission.INTERNET` and a `network_security_config` with `cleartextTrafficPermitted="true"`
+  on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
+  distributed.
+- Saved prototypes (`SavedPrototypeActivity`) are not wired to a transport yet: a `request` in one
+  finishes as a `network` error.
+
 Worked example: a feed that shows a spinner, the result and an error (state
 `{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
 

@@ -761,6 +761,26 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `rejects two-finger swipe with an unsupported fingerCount before dispatch`() = runTest {
+    for (count in listOf(0, 1, 6)) {
+      val response =
+        handler.handleMessage(
+          RequestTwoFingerSwipe(
+            requestId = "mf",
+            x1 = 0.0,
+            y1 = 0.0,
+            x2 = 10.0,
+            y2 = 20.0,
+            fingerCount = count,
+          ),
+        )
+      assertTrue(response is SwipeResult)
+      assertEquals(false, (response as SwipeResult).success)
+      assertTrue(response.error!!.contains("fingerCount must be 2-5"))
+    }
+  }
+
+  @Test
   fun `rejects drag with NaN coordinate`() = runTest {
     val response =
       handler.handleMessage(

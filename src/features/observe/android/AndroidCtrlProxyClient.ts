@@ -177,6 +177,7 @@ import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  MULTI_FINGER_GESTURE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
@@ -2750,6 +2751,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       displayId,
       beforeSend,
     );
+  }
+
+  async requestMultiFingerSwipe(
+    request: Parameters<CtrlProxyGestures["requestMultiFingerSwipe"]>[0],
+  ): Promise<A11ySwipeResult> {
+    return this.gestures.requestMultiFingerSwipe(request);
   }
 
   async requestDrag(
@@ -5425,6 +5432,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       [
         "gesture_display_id_v1",
         "tap_double_v1",
+        MULTI_FINGER_GESTURE_CAPABILITY,
         PROTOTYPE_DISPLAY_CAPABILITY,
         PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
         PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,

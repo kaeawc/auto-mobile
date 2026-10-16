@@ -2692,7 +2692,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val offset = request.offset
     val displayId = request.displayId
 
-    performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset, displayId)
+    performTwoFingerSwipe(
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      offset,
+      displayId,
+      request.fingerCount,
+    )
   }
 
   override suspend fun requestDrag(request: RequestDrag) {
@@ -5473,35 +5483,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
     offset: Int = 100,
     displayId: Int? = null,
+    fingerCount: Int = 2,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(
       TAG,
-      "performTwoFingerSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms, offset=${offset}px",
+      "performTwoFingerSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms, offset=${offset}px, fingers=$fingerCount",
     )
     perfProvider.serial("performTwoFingerSwipe")
 
     try {
-      // Create two parallel paths for the two fingers
+      // One parallel stroke per finger (geometry shared with iOS via computeMultiFingerStrokes).
       perfProvider.startOperation("buildPaths")
-      val path1 =
-        Path().apply {
-          moveTo(x1.toFloat(), y1.toFloat())
-          lineTo(x2.toFloat(), y2.toFloat())
-        }
-
-      val path2 =
-        Path().apply {
-          moveTo((x1 + offset).toFloat(), y1.toFloat())
-          lineTo((x2 + offset).toFloat(), y2.toFloat())
-        }
-
-      // Build the gesture description with two strokes
-      val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path1, 0, duration))
-          .addStroke(GestureDescription.StrokeDescription(path2, 0, duration))
-          .build()
+      val builder = gestureBuilder(displayId)
+      for (stroke in computeMultiFingerStrokes(x1, y1, x2, y2, offset, fingerCount)) {
+        val path =
+          Path().apply {
+            moveTo(stroke.startX, stroke.startY)
+            // A stationary stroke (multi-finger tap / long press) is a bare moveTo, like a tap.
+            if (stroke.startX != stroke.endX || stroke.startY != stroke.endY) {
+              lineTo(stroke.endX, stroke.endY)
+            }
+          }
+        builder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+      }
+      val gesture = builder.build()
       perfProvider.endOperation("buildPaths")
 
       val gestureBuiltTime = System.currentTimeMillis()

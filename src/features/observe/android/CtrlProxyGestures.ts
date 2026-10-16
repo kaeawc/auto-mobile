@@ -13,7 +13,10 @@ import {
 } from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext, A11ySwipeResult, A11yTapCoordinatesResult } from "./types";
-import { normalizeCtrlProxyMilliseconds } from "./ctrlProxyProtocol";
+import {
+  MULTI_FINGER_GESTURE_CAPABILITY,
+  normalizeCtrlProxyMilliseconds,
+} from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -121,6 +124,58 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       beforeSend,
       requiredCapability:
         displayId === undefined || displayId === 0 ? undefined : "gesture_display_id_v1",
+    });
+  }
+
+  /**
+   * Request an N-finger (2-5) simultaneous stroke. Finger `i` starts `i * fingerSpacing` px right
+   * of the first finger's path, matching the iOS runner. Identical start and end points make a
+   * multi-finger tap, or a long press with a long duration. Counts above two need
+   * `multi_finger_gesture_v1`: an older runner would silently perform two fingers, so it is refused
+   * before dispatch with `unsupportedCapability`.
+   */
+  async requestMultiFingerSwipe(request: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    fingerCount: number;
+    duration: number;
+    fingerSpacing: number;
+    timeoutMs: number;
+    perf?: PerformanceTracker;
+    displayId?: number;
+    signal?: AbortSignal;
+    onDispatch?: () => void;
+    beforeSend?: () => void;
+  }): Promise<A11ySwipeResult> {
+    const needsDisplay = request.displayId !== undefined && request.displayId !== 0;
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "multi_finger_swipe",
+      responseType: "swipe",
+      messageType: "request_two_finger_swipe",
+      params: this.gestureParams("request_two_finger_swipe", {
+        x1: this.coord(request.x1),
+        y1: this.coord(request.y1),
+        x2: this.coord(request.x2),
+        y2: this.coord(request.y2),
+        duration: request.duration,
+        offset: Math.round(request.fingerSpacing),
+        ...(request.fingerCount > 2 ? { fingerCount: request.fingerCount } : {}),
+        ...this.gestureDisplayParams(request.displayId),
+      }),
+      timeoutMs: request.timeoutMs,
+      perf: request.perf ?? new NoOpPerformanceTracker(),
+      errorLabel: "Multi-finger gesture",
+      abortSignal: request.signal,
+      beforeSend: request.beforeSend,
+      onDispatch: request.onDispatch,
+      requiredCapability:
+        request.fingerCount > 2
+          ? MULTI_FINGER_GESTURE_CAPABILITY
+          : needsDisplay
+            ? "gesture_display_id_v1"
+            : undefined,
     });
   }
 

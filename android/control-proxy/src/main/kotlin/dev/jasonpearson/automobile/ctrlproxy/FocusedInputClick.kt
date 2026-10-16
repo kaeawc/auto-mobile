@@ -3,11 +3,11 @@ package dev.jasonpearson.automobile.ctrlproxy
 internal data class FocusedInputClickOutcome(val success: Boolean, val error: String?)
 
 /** Click only the input-focused editable node and release the acquired node on every outcome. */
-internal fun <T> clickFocusedInput(
+internal suspend fun <T> clickFocusedInput(
   findFocusedInput: () -> T?,
   click: (T) -> Boolean,
   recycle: (T) -> Unit,
-  settleAfterClick: () -> Unit = {},
+  settleAfterClick: suspend () -> Unit = {},
 ): FocusedInputClickOutcome {
   val node =
     findFocusedInput() ?: return FocusedInputClickOutcome(false, "No focused editable input")

@@ -45,11 +45,11 @@ internal fun isPrecedingInputReflected(
  * Bounds added waiting to 300ms plus a final node-refresh IPC, without extracting the hierarchy.
  * IME capitalization/correction can time out rather than falsely proving input was delivered.
  */
-internal fun awaitPrecedingInput(
+internal suspend fun awaitPrecedingInput(
   expectedSuffix: String,
   readSnapshot: () -> InsertTextSnapshot?,
   nowMs: () -> Long,
-  pause: (Long) -> Unit,
+  pause: suspend (Long) -> Unit,
   deadlineMs: Long = 300L,
   pollMs: Long = 25L,
   baseline: InsertTextSnapshot? = null,

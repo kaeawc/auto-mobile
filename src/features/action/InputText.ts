@@ -33,6 +33,9 @@ import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 import { getRequestContext } from "../../utils/AbortContext";
 
+// The UI needs a brief settle after a key event.
+export const KEY_EVENT_SETTLE_MS = 100;
+
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
 
 /** Selector variants that identify a field to focus before typing (issue #5872). */
@@ -1017,6 +1020,7 @@ export class InputText extends BaseVisualChange {
           noRetry,
           beforeDispatch: index === 0 ? beforeDispatch : undefined,
           signal,
+          waitForProcessSettlementAfterAbort: true,
         }),
       );
       assertInputNotAborted(signal);
@@ -1134,7 +1138,7 @@ export class InputText extends BaseVisualChange {
     if (keyCode) {
       // Small delay to ensure text input is processed
       assertInputNotAborted(signal);
-      await this.timer.sleep(100);
+      await this.timer.sleep(KEY_EVENT_SETTLE_MS);
       assertInputNotAborted(signal);
 
       // Execute the key event(s)
@@ -1143,12 +1147,28 @@ export class InputText extends BaseVisualChange {
         const keys = keyCode.split(" ");
         for (const key of keys) {
           assertInputNotAborted(signal);
-          await this.withTextDispatch(() => this.adb.executeCommand(`shell input keyevent ${key}`));
+          await this.withTextDispatch(() =>
+            this.adb.executeCommand(
+              `shell input keyevent ${key}`,
+              undefined,
+              undefined,
+              undefined,
+              signal,
+              true,
+            ),
+          );
           assertInputNotAborted(signal);
         }
       } else {
         await this.withTextDispatch(() =>
-          this.adb.executeCommand(`shell input keyevent ${keyCode}`),
+          this.adb.executeCommand(
+            `shell input keyevent ${keyCode}`,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+            true,
+          ),
         );
         assertInputNotAborted(signal);
       }

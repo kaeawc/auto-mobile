@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -126,80 +127,84 @@ class CtrlProxyOnDestroyTest {
   }
 
   @Test
-  fun `onDestroy dispatches in-flight terminal lift and answers pending ends before quitting without awaiting completion`() {
-    service.requestGestureStart(
-      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
-    )
-    service.requestGestureEnd("end-1", "gesture", 3.0, 4.0, false)
-    service.requestGestureEnd("end-2", "gesture", 5.0, 6.0, false)
-    assertEquals(listOf(Ack("start", true, null)), acks)
-    assertEquals(1, shadow.gesturesDispatched.size)
-    assertTrue(shadow.gesturesDispatched.single().description().getStroke(0).willContinue())
-    assertTrue(scopeJob.isActive)
-    assertTrue(serverRetryJob.isActive)
-
-    thread.onQuit = {
-      // close -> session.cancel -> pump -> dispatchGesture happens in the same runnable as quit.
-      // Completion is deliberately unconfirmed; Android cancels service-owned gestures on teardown.
-      assertTerminalLift()
-      assertEquals(
-        listOf(
-          Ack("start", true, null),
-          Ack("end-1", false, "Gesture stream closed"),
-          Ack("end-2", false, "Gesture stream closed"),
-        ),
-        acks,
+  fun `onDestroy dispatches in-flight terminal lift and answers pending ends before quitting without awaiting completion`() =
+    runTest {
+      service.requestGestureStart(
+        RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
       )
-      assertTrue(serverRetryJob.isCancelled)
+      service.requestGestureEnd("end-1", "gesture", 3.0, 4.0, false)
+      service.requestGestureEnd("end-2", "gesture", 5.0, 6.0, false)
+      assertEquals(listOf(Ack("start", true, null)), acks)
+      assertEquals(1, shadow.gesturesDispatched.size)
+      assertTrue(shadow.gesturesDispatched.single().description().getStroke(0).willContinue())
       assertTrue(scopeJob.isActive)
+      assertTrue(serverRetryJob.isActive)
+
+      thread.onQuit = {
+        // close -> session.cancel -> pump -> dispatchGesture happens in the same runnable as quit.
+        // Completion is deliberately unconfirmed; Android cancels service-owned gestures on
+        // teardown.
+        assertTerminalLift()
+        assertEquals(
+          listOf(
+            Ack("start", true, null),
+            Ack("end-1", false, "Gesture stream closed"),
+            Ack("end-2", false, "Gesture stream closed"),
+          ),
+          acks,
+        )
+        assertTrue(serverRetryJob.isCancelled)
+        assertTrue(scopeJob.isActive)
+      }
+
+      destroyService()
+
+      assertEquals(1, thread.quits)
+      assertFalse(server.isRunning())
+      assertNull(ReflectionHelpers.getField<Job?>(server, "startRetryJob"))
+      assertTrue(scopeJob.isCancelled)
+      assertClosedAndIgnoresLateCallbacks()
     }
 
-    destroyService()
+  @Test
+  fun `onDestroy dispatches terminal lift for a parked continued stroke before quitting`() =
+    runTest {
+      service.requestGestureStart(
+        RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
+      )
+      val press = shadow.gesturesDispatched.single()
+      press.callback().onCompleted(press.description())
+      assertEquals(1, shadow.gesturesDispatched.size)
+      thread.onQuit = { assertTerminalLift() }
 
-    assertEquals(1, thread.quits)
-    assertFalse(server.isRunning())
-    assertNull(ReflectionHelpers.getField<Job?>(server, "startRetryJob"))
-    assertTrue(scopeJob.isCancelled)
-    assertClosedAndIgnoresLateCallbacks()
-  }
+      destroyService()
+
+      assertEquals(1, thread.quits)
+      assertTrue(serverRetryJob.isCancelled)
+      assertTrue(scopeJob.isCancelled)
+      assertClosedAndIgnoresLateCallbacks()
+    }
 
   @Test
-  fun `onDestroy dispatches terminal lift for a parked continued stroke before quitting`() {
-    service.requestGestureStart(
-      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
-    )
-    val press = shadow.gesturesDispatched.single()
-    press.callback().onCompleted(press.description())
-    assertEquals(1, shadow.gesturesDispatched.size)
-    thread.onQuit = { assertTerminalLift() }
+  fun `onDestroy quits gesture thread and cancels service scope even when real router close throws`() =
+    runTest {
+      service.requestGestureStart(
+        RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
+      )
+      val failure = IllegalStateException("gesture close post failed")
+      thread.postFailure = failure
 
-    destroyService()
+      destroyService()
 
-    assertEquals(1, thread.quits)
-    assertTrue(serverRetryJob.isCancelled)
-    assertTrue(scopeJob.isCancelled)
-    assertClosedAndIgnoresLateCallbacks()
-  }
-
-  @Test
-  fun `onDestroy quits gesture thread and cancels service scope even when real router close throws`() {
-    service.requestGestureStart(
-      RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
-    )
-    val failure = IllegalStateException("gesture close post failed")
-    thread.postFailure = failure
-
-    destroyService()
-
-    assertEquals(1, thread.quits)
-    assertTrue(serverRetryJob.isCancelled)
-    assertTrue(scopeJob.isCancelled)
-    assertTrue(
-      ShadowLog.getLogs().any {
-        it.msg == "Failed to close streamed gestures" && it.throwable === failure
-      },
-    )
-  }
+      assertEquals(1, thread.quits)
+      assertTrue(serverRetryJob.isCancelled)
+      assertTrue(scopeJob.isCancelled)
+      assertTrue(
+        ShadowLog.getLogs().any {
+          it.msg == "Failed to close streamed gestures" && it.throwable === failure
+        },
+      )
+    }
 
   private fun destroyService() {
     controller.destroy()
@@ -221,7 +226,7 @@ class CtrlProxyOnDestroyTest {
     assertEquals(RectF(1f, 2f, 1f, 2f), bounds)
   }
 
-  private fun assertClosedAndIgnoresLateCallbacks() {
+  private suspend fun assertClosedAndIgnoresLateCallbacks() {
     val before = acks.toList()
     val dispatched = shadow.gesturesDispatched.toList()
     dispatched.forEach {

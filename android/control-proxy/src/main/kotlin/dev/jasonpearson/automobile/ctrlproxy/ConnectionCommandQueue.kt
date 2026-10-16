@@ -59,14 +59,15 @@ internal class CommandOriginContext(val origin: QueuedCommandOrigin) :
 
 /**
  * One bounded FIFO and sequential worker per connection, on the injected dispatcher. Inline
- * delegate blocking calls and its remaining runBlocking bridges occupy that connection's IO worker,
- * never Ktor's read loop. Existing actions' service jobs and gesture callbacks retain their thread
- * requirements. Workers run concurrently; a child job isolates command cancellation from the loop.
- * Cancellation is cooperative: a blocking Android API must return before the worker can advance.
+ * delegate Android calls occupy that connection's IO worker, never Ktor's read loop. Suspend action
+ * waits and inline replies inherit the command child's cancellation; cancelling that child releases
+ * the worker for its next command. Workers run concurrently; a child job isolates command
+ * cancellation from the loop. Cancellation is cooperative: a blocking Android API must return
+ * before the worker can advance. Existing service jobs and gesture callbacks retain their thread
+ * requirements and asynchronous completion semantics.
  *
  * Disconnect immediately drops pending work and cancels the active child. Lifetime completion
- * provides the same cleanup if the read loop exits first. Delegate actions that launch service jobs
- * retain their existing asynchronous completion semantics.
+ * provides the same cleanup if the read loop exits first.
  */
 internal class ConnectionCommandQueue(
   private val scope: CoroutineScope,

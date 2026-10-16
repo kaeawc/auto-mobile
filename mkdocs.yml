@@ -155,6 +155,7 @@ nav:
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md

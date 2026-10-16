@@ -75,6 +75,7 @@ test/daemon/deviceDisconnectHandler.test.ts
 test/daemon/deviceForwardLeaseIdleReleaser.test.ts
 test/daemon/deviceGestureRecordingSocketServerReadinessSession.test.ts
 test/daemon/deviceHealthMarkers.test.ts
+test/daemon/deviceHold.test.ts
 test/daemon/deviceLeaseActivity.test.ts
 test/daemon/deviceLeaseOwnerQuery.test.ts
 test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts
@@ -731,6 +732,7 @@ test/features/record/android/GestureClassifier.test.ts
 test/features/record/android/TouchFrameReconstructor.test.ts
 test/features/record/android/TouchNodeCaptures.test.ts
 test/features/record/android/TouchNodeDiscovery.test.ts
+test/features/retryBehaviorConstants.test.ts
 test/features/screen-stream/IosScreenCaptureHelperCapability.test.ts
 test/features/screen-stream/LatestFrameQueue.test.ts
 test/features/screen-stream/encodedVideoFrameProtocol.test.ts

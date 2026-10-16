@@ -19,7 +19,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class HierarchyDebouncerSuspendTest {
   @Test
-  fun `suspend quiescence returns same tree as blocking facade without emitting`() = runTest {
+  fun `suspend quiescence returns extracted tree without emitting`() = runTest {
     val expected = ViewHierarchy(packageName = "settled")
     val debouncer =
       HierarchyDebouncer(
@@ -35,9 +35,7 @@ class HierarchyDebouncerSuspendTest {
         quiescenceMs = 0,
         initialEventWaitMs = 0,
       )
-    val blocking = debouncer.extractAfterQuiescence(quiescenceMs = 0, initialEventWaitMs = 0)
     assertEquals(expected, suspending)
-    assertEquals(suspending, blocking)
     assertTrue(debouncer.hierarchyFlow.replayCache.isEmpty())
   }
 

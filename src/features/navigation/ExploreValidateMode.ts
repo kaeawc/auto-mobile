@@ -8,6 +8,9 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
 
+// Validation waits for the explored screen to settle.
+const EXPLORE_VALIDATION_SETTLE_MS = 500;
+
 /**
  * Initialize graph traversal state for validate mode
  */
@@ -479,7 +482,7 @@ export async function validateNavigation(
   setStopReason: (reason: string) => void,
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
-  await timer.sleep(500);
+  await timer.sleep(EXPLORE_VALIDATION_SETTLE_MS);
 
   const actualScreen = navigationManager.getCurrentScreen() ?? "unknown";
   const success = actualScreen === expectedEdge.to;

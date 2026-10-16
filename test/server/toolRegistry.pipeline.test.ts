@@ -53,14 +53,16 @@ describe("ToolRegistry device-aware pipeline", () => {
 
   let restorePipelineOverrides: (() => void) | undefined;
   let restoreDefaultPipelineOverrides: (() => void) | undefined;
-  let originalToolCallRepository: unknown;
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeEach(() => {
     ToolRegistry.clearTools();
     restoreDefaultPipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
   });
 
   afterEach(() => {
@@ -68,7 +70,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     restorePipelineOverrides = undefined;
     restoreDefaultPipelineOverrides?.();
     restoreDefaultPipelineOverrides = undefined;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     serverConfig.setToolOutputsDir(undefined);
     ToolRegistry.clearTools();
   });
@@ -159,14 +161,16 @@ describe("ToolRegistry device-aware pipeline", () => {
         },
       },
     });
-    (ToolRegistry as any).toolCallRepository = {
-      async recordToolCall(record: any) {
-        events.push("record");
-        expect(record.toolName).toBe("pipelineProbe");
-        expect(record.sessionUuid).toBe("session-1");
-        expect(record.durationMs).toBe(7);
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(record: any) {
+          events.push("record");
+          expect(record.toolName).toBe("pipelineProbe");
+          expect(record.sessionUuid).toBe("session-1");
+          expect(record.durationMs).toBe(7);
+        },
       },
-    };
+    });
 
     ToolRegistry.registerDeviceAware(
       "pipelineProbe",

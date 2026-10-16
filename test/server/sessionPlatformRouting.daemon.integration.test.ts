@@ -61,7 +61,9 @@ let pool: DevicePool;
 let androidSession: string | undefined;
 let iosSession: string | undefined;
 let previousAutolock: string | undefined;
-let originalRepository: unknown;
+let originalRepository: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["toolCallRepository"];
 let originalDeviceSessionManager: unknown;
 let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
@@ -105,8 +107,10 @@ beforeEach(async () => {
   restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
     displayInventory: new FakeDisplayInventoryProvider(),
   });
-  originalRepository = (ToolRegistry as any).toolCallRepository;
-  (ToolRegistry as any).toolCallRepository = { recordToolCall: async () => {} };
+  originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+  ToolRegistry.setCollaboratorsForTesting({
+    toolCallRepository: { recordToolCall: async () => {} },
+  });
 });
 
 afterEach(async () => {
@@ -114,7 +118,7 @@ afterEach(async () => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     PlatformDeviceManagerFactory.setInstance(null);
-    (ToolRegistry as any).toolCallRepository = originalRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();

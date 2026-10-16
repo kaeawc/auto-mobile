@@ -52,7 +52,9 @@ let manager: SessionManager;
 let pool: DevicePool;
 let timer: FakeTimer;
 let previousAutolock: string | undefined;
-let originalRepository: unknown;
+let originalRepository: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["toolCallRepository"];
 let originalDeviceSessionManager: unknown;
 let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
@@ -104,8 +106,10 @@ beforeEach(async () => {
   restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
     displayInventory: new FakeDisplayInventoryProvider(),
   });
-  originalRepository = registryInternals().toolCallRepository;
-  registryInternals().toolCallRepository = { recordToolCall: async () => {} };
+  originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+  ToolRegistry.setCollaboratorsForTesting({
+    toolCallRepository: { recordToolCall: async () => {} },
+  });
   received = [];
   const flags = spyOn(FeatureFlagService, "getInstance").mockReturnValue(
     new FeatureFlagService(new FakeFeatureFlagRepository(), new FakeFeatureFlagApplier()),
@@ -129,7 +133,7 @@ afterEach(async () => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     PlatformDeviceManagerFactory.setInstance(null);
-    registryInternals().toolCallRepository = originalRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
@@ -143,11 +147,6 @@ afterEach(async () => {
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
   }
 });
-
-/** The registry's call recorder, swapped so no test touches the real database. */
-function registryInternals(): { toolCallRepository: unknown } {
-  return ToolRegistry as unknown as { toolCallRepository: unknown };
-}
 
 interface ForwardRoute {
   clientKey: string;

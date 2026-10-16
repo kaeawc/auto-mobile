@@ -88,7 +88,7 @@ describe("EventLastTyper", () => {
       return { commands: ["tail"] };
     };
     const pending = new EventLastTyper(host).type({ text: "a", operation: "insert" });
-    host.isCaretUnsafe = () => true;
+    host.session.androidCaretUnsafe = true;
     timer.advanceTime(1);
     expect(await pending).toMatchObject({
       success: false,

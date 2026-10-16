@@ -53,7 +53,7 @@ import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
-import { PrototypeAgentProvider } from "../features/prototype-agent/PrototypeAgentProvider";
+import { PrototypeAgentProvider } from "../features/prototype/ios/PrototypeAgentProvider";
 import { NodePrototypeAgentConnector } from "../features/prototype/ios/prototypeAgentClient";
 import {
   createPrototypeAgentConnect,

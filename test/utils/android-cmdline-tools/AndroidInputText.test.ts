@@ -1,7 +1,9 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
+  INPUT_TEXT_CONSUME_MARGIN_MS,
   INPUT_TEXT_HOST_WAIT_PER_CHAR_MS,
+  INPUT_TEXT_CONSUME_PER_CHAR_MS,
   INPUT_TEXT_SETTLEMENT_BASE_MS,
   INPUT_TEXT_SETTLEMENT_PER_CHAR_MS,
 } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
@@ -17,6 +19,9 @@ import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeGuestInputAdb } from "../../fakes/FakeGuestInputAdb";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
+
+const drainMs = (chars: number) =>
+  chars * INPUT_TEXT_CONSUME_PER_CHAR_MS + INPUT_TEXT_CONSUME_MARGIN_MS;
 
 describe("tracked Android input text", () => {
   const settlementMs = INPUT_TEXT_SETTLEMENT_BASE_MS + 5 * INPUT_TEXT_SETTLEMENT_PER_CHAR_MS;
@@ -94,12 +99,64 @@ describe("tracked Android input text", () => {
       await drainMicrotasks(50);
       expect(h.settled()).toBe(false);
       h.timer.advanceTime(1);
+      await drainMicrotasks(50);
+      // Host exit is not "typing done": the drain wait follows it.
+      expect(h.settled()).toBe(false);
+      h.timer.advanceTime(5 * INPUT_TEXT_CONSUME_PER_CHAR_MS + INPUT_TEXT_CONSUME_MARGIN_MS);
       expect(await h.outcome).toBe(h.error);
       expect(h.adb.isTyping()).toBe(false);
       expect(h.adb.cleanupCalls).toEqual([]);
       expect(h.timer.getPendingTimeoutCount()).toBe(0);
     },
   );
+
+  test("API 31+ cancel holds past host exit until the app has consumed the events (#12599)", async () => {
+    const h = start(undefined, 34);
+    // The host cmd client exits at 150 ms; the app is still consuming until 400 ms.
+    h.adb.setTypingDuration(h.timer, 400, 150);
+    await h.adb.entered.promise;
+    h.cancel();
+    h.timer.advanceTime(150);
+    await drainMicrotasks(50);
+    expect(h.settled()).toBe(false);
+    const settleMs = 5 * INPUT_TEXT_CONSUME_PER_CHAR_MS + INPUT_TEXT_CONSUME_MARGIN_MS;
+    h.timer.advanceTime(settleMs - 1);
+    await drainMicrotasks(50);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1);
+    expect(await h.outcome).toBe(h.error);
+    expect(h.adb.isTyping()).toBe(false);
+  });
+
+  test("API 31+ success paces the call to the app's consumption rate", async () => {
+    const h = start(undefined, 34, 32);
+    h.adb.setTypingDuration(h.timer, 100);
+    await h.adb.entered.promise;
+    h.timer.advanceTime(100);
+    await drainMicrotasks(50);
+    const paceMs = 32 * INPUT_TEXT_CONSUME_PER_CHAR_MS;
+    h.timer.advanceTime(paceMs - 100 - 1);
+    await drainMicrotasks(50);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1);
+    expect(await h.result).toEqual({ stdout: "", stderr: "" });
+  });
+
+  test("API 31+ cancel while pacing still settles before rethrowing", async () => {
+    const h = start(undefined, 34, 32);
+    h.adb.setTypingDuration(h.timer, 100);
+    await h.adb.entered.promise;
+    h.timer.advanceTime(100);
+    await drainMicrotasks(50);
+    h.cancel();
+    await drainMicrotasks(50);
+    const settleMs = 32 * INPUT_TEXT_CONSUME_PER_CHAR_MS + INPUT_TEXT_CONSUME_MARGIN_MS;
+    h.timer.advanceTime(settleMs - 1);
+    await drainMicrotasks(50);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1);
+    expect(await h.outcome).toBe(h.error);
+  });
 
   test("API 31+ command timeout also waits for the host and keeps the timeout error type", async () => {
     const h = start(undefined, 34, 5, 1000);
@@ -113,6 +170,8 @@ describe("tracked Android input text", () => {
     await drainMicrotasks(50);
     expect(h.settled()).toBe(false);
     h.timer.advanceTime(1000);
+    await drainMicrotasks(50);
+    h.timer.advanceTime(drainMs(5));
     expect(await h.outcome).toBeInstanceOf(AdbCommandTimeoutError);
   });
 
@@ -132,16 +191,19 @@ describe("tracked Android input text", () => {
     const hostSignal = h.adb.dispatchOptions[0].signal;
     expect(hostSignal?.aborted).toBe(false);
     h.timer.advanceTime(3000 + 5 * INPUT_TEXT_HOST_WAIT_PER_CHAR_MS);
-    expect(await h.outcome).toBe(h.error);
+    await drainMicrotasks(50);
     expect(hostSignal?.aborted).toBe(true);
+    h.timer.advanceTime(drainMs(5));
+    expect(await h.outcome).toBe(h.error);
   });
 
   test("API 31+ dispatch runs outside the ambient request signal", async () => {
     const request = new AbortController();
     const adb = new FakeGuestInputAdb();
     adb.setAndroidApiLevel(34);
+    const timer = new FakeTimer();
     const done = runWithAbortSignal(request.signal, () =>
-      executeAndroidInputText(adb, new FakeTimer(), buildAndroidInputTextCommand("abc"), {
+      executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("abc"), {
         apiLevel: 34,
         textLength: 3,
       }),
@@ -149,6 +211,8 @@ describe("tracked Android input text", () => {
     await adb.entered.promise;
     expect(adb.ambientSignals).toEqual([undefined]);
     adb.host.resolve({ stdout: "", stderr: "" });
+    await drainMicrotasks(50);
+    timer.advanceTime(3 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await done;
   });
 
@@ -218,6 +282,8 @@ describe("tracked Android input text", () => {
     await drainMicrotasks(20);
     expect(h.settled()).toBe(false);
     h.timer.advanceTime(1);
+    await drainMicrotasks(50);
+    h.timer.advanceTime(drainMs(length));
     expect(await h.outcome).toBe(h.error);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`after ${cap}ms`), expect.any(Error));
   });
@@ -272,6 +338,8 @@ describe("tracked Android input text", () => {
     const h = start(undefined, apiLevel);
     await h.adb.entered.promise;
     h.adb.host.resolve({ stdout: "", stderr: "" });
+    await drainMicrotasks(50);
+    h.timer.advanceTime(5 * INPUT_TEXT_CONSUME_PER_CHAR_MS);
     await h.result;
     const quoted = buildAndroidInputTextCommand("a b'$").slice("shell ".length);
     expect(h.adb.getExecutedArgv()).toEqual([

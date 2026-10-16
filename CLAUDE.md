@@ -203,8 +203,9 @@ because they carry pre-existing violations: `complexity`, `max-depth`, `max-para
 `auto-mobile/no-unknown-cast`,
 `auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
 (`typescript/no-floating-promises`, `typescript/no-misused-promises`). Inline suppressions of ANY rule are ratcheted too: a
-TypeScript-scanner comment scan of `src/`, `test/`, `scripts/`, `benchmark/` and
-`build.ts` (`scripts/lib/oxlintDisableScan.ts`) adds
+TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
+file oxlint lints (repo-wide via `git ls-files`, TypeScript extensions only,
+minus the `.oxlintrc.json` `ignorePatterns`) adds
 `oxlint-disable(<rule>)` rows (and `oxlint-disable-no-reason(<rule>)` for
 directives lacking a `-- reason`) to the same baseline, so a new
 `oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs

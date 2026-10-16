@@ -194,21 +194,31 @@ write_src() { # <name> <lines...>
   ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'oxlint-disable'
 }
 
-@test "the scan fails closed when src/ is missing" {
+@test "the scan fails closed when no linted files are found" {
   rm -rf "$OXLINT_SCAN_ROOT/src"
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
   [ "$status" -ne 0 ]
-  [[ "$output" == *"required root 'src'"* ]]
+  [[ "$output" == *"no source files found"* ]]
   [ ! -f "$OXLINT_BASELINE" ]
 }
 
-@test "suppressions in test/ and scripts/ are ratcheted too" {
+@test "a suppression in a TypeScript file outside the old roots is ratcheted" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
-  mkdir -p "$OXLINT_SCAN_ROOT/test"
-  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/test/t.ts"
+  mkdir -p "$OXLINT_SCAN_ROOT/tools/deep"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/tools/deep/t.ts"
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"1 new in test/t.ts  oxlint-disable(max-params)"* ]]
+  [[ "$output" == *"1 new in tools/deep/t.ts  oxlint-disable(max-params)"* ]]
+}
+
+@test "JavaScript files and ignorePatterns paths are not scanned" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  printf '{ // JSONC\n "ignorePatterns": ["vendor/**", "**/*.js",],\n}\n' > "$OXLINT_SCAN_ROOT/.oxlintrc.json"
+  mkdir -p "$OXLINT_SCAN_ROOT/vendor"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/vendor/v.ts"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/src/legacy.js"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
 }
 
 @test "eslint/complexity and complexity share one key" {

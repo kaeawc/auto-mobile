@@ -17,13 +17,18 @@
 // next-line, line and block forms count; the enable forms do not. Like oxlint, a
 // directive must start the comment body, so a doc-comment line with a leading
 // star is not one.
+//
+// Files: the repo-wide set oxlint lints, so a new root cannot bypass the ratchet.
+// In a git work tree that is the tracked plus untracked-not-ignored files, else a
+// full walk; either way only TypeScript-family extensions (oxlint ignores the
+// JavaScript ones) minus the ignorePatterns of .oxlintrc.json. No files is an error.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
 const DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])(.*)$/s;
-const SCAN_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+const SCAN_EXTENSIONS = /\.(?:[cm]?ts|tsx)$/;
 
 export interface Directive {
   rules: string[];
@@ -95,6 +100,10 @@ export function findDirectives(source: string, fileName = "input.tsx"): Directiv
 }
 
 export function countRows(file: string, source: string, counts: Map<string, number>): void {
+  // Cheap prefilter: parsing thousands of files is slow, and most have no directive text.
+  if (!/(?:oxlint|eslint)-disable/.test(source)) {
+    return;
+  }
   const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const d of findDirectives(source, file)) {
     for (const rule of d.rules) {
@@ -106,42 +115,89 @@ export function countRows(file: string, source: string, counts: Map<string, numb
   }
 }
 
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+const IGNORE_CONFIG = ".oxlintrc.json";
+
+/** The oxlint `ignorePatterns` of <root>/.oxlintrc.json (JSONC), as globs. */
+export function readIgnoreGlobs(root: string): Bun.Glob[] {
+  let text: string;
+  try {
+    text = readFileSync(join(root, IGNORE_CONFIG), "utf8");
+  } catch (error) {
+    // A scan root without an oxlint config (test fixtures) ignores nothing.
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  // The TypeScript JSONC reader handles the comments and trailing commas oxlint accepts.
+  const parsed = ts.parseConfigFileTextToJson(IGNORE_CONFIG, text);
+  if (parsed.error) {
+    throw new Error(`oxlint-disable scan: cannot parse ${IGNORE_CONFIG}`);
+  }
+  const patterns: unknown = parsed.config?.ignorePatterns ?? [];
+  return (Array.isArray(patterns) ? patterns : []).map((p) => new Bun.Glob(String(p)));
 }
 
-function walk(root: string, rel: string, out: string[], optional: boolean): void {
-  let isDir: boolean;
-  try {
-    isDir = statSync(join(root, rel)).isDirectory();
-  } catch (error) {
-    // Only an optional root may be absent; a missing required root must fail closed.
-    if (optional && isMissing(error)) {
-      return;
-    }
-    throw new Error(`oxlint-disable scan: cannot read required root '${rel}'`, { cause: error });
+/** Lists candidate files under root, or null when root is not a git work tree (walk instead). */
+export type FileLister = (root: string) => string[] | null;
+
+/** Tracked plus untracked-not-ignored files when root IS a git work tree, else null. */
+export const gitFiles: FileLister = (root) => {
+  const top = Bun.spawnSync(["git", "-C", root, "rev-parse", "--show-toplevel"], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  if (top.exitCode !== 0 || realpathSync(top.stdout.toString().trim()) !== realpathSync(root)) {
+    return null;
   }
-  if (!isDir) {
-    out.push(rel);
-    return;
+  const ls = Bun.spawnSync(
+    ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { stdout: "pipe", stderr: "pipe", maxBuffer: 256 * 1024 * 1024 },
+  );
+  if (ls.exitCode !== 0) {
+    throw new Error(`oxlint-disable scan: git ls-files failed: ${ls.stderr.toString().trim()}`);
   }
+  return ls.stdout.toString().split("\0").filter(Boolean);
+};
+
+function walkAll(root: string, rel: string, out: string[]): void {
   for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
-    const child = `${rel}/${e.name}`;
+    const child = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) {
-      if (e.name !== "node_modules" && e.name !== "generated") {
-        walk(root, child, out, false);
+      if (e.name !== "node_modules" && e.name !== ".git") {
+        walkAll(root, child, out);
       }
-    } else if (SCAN_EXTENSIONS.test(e.name) && !e.name.endsWith(".generated.ts")) {
+    } else {
       out.push(child);
     }
   }
 }
 
-/** Scan required roots (must exist) and optional roots (may be absent). */
-export function scanRoots(root: string, required: string[], optional: string[] = []): string {
-  const files: string[] = [];
-  required.forEach((d) => walk(root, d, files, false));
-  optional.forEach((d) => walk(root, d, files, true));
+/** The files oxlint lints under root: repo-wide, TypeScript-family, minus ignorePatterns. */
+export function listLintedFiles(root: string, lister: FileLister = gitFiles): string[] {
+  let all = lister(root);
+  if (all === null) {
+    all = [];
+    walkAll(root, "", all);
+  }
+  const ignores = readIgnoreGlobs(root);
+  return all
+    .filter((f) => SCAN_EXTENSIONS.test(f))
+    .filter((f) => !ignores.some((g) => g.match(f)))
+    .filter((f) => {
+      try {
+        return statSync(join(root, f)).isFile();
+      } catch {
+        // A tracked file deleted in the work tree has nothing to scan.
+        return false;
+      }
+    })
+    .sort();
+}
+
+/** Scan every file oxlint lints; fails closed when none are found. */
+export function scanRepo(root: string, lister: FileLister = gitFiles): string {
+  const files = listLintedFiles(root, lister);
   if (files.length === 0) {
     throw new Error("oxlint-disable scan: no source files found");
   }
@@ -152,13 +208,9 @@ export function scanRoots(root: string, required: string[], optional: string[] =
 }
 
 if (import.meta.main) {
-  // Usage: oxlintDisableScan.ts <root> <required-dir>... [--optional <path>...]
-  const [root, ...rest] = process.argv.slice(2);
-  const split = rest.indexOf("--optional");
-  const required = split === -1 ? rest : rest.slice(0, split);
-  const optional = split === -1 ? [] : rest.slice(split + 1);
+  // Usage: oxlintDisableScan.ts <root>
   try {
-    process.stdout.write(scanRoots(root, required, optional));
+    process.stdout.write(scanRepo(process.argv[2]));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(3);

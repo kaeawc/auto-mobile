@@ -27,9 +27,10 @@
 # Inline suppressions are ratcheted too. An `oxlint-disable*` / `eslint-disable*`
 # directive removes the diagnostic from oxlint's report, so without this a new
 # violation could be hidden instead of failing. scripts/lib/oxlintDisableScan.ts
-# scans the comments of src/ (mandatory; the scan fails closed without it), test/,
-# scripts/, benchmark/ and build.ts using the TypeScript scanner, and this script
-# merges its rows into the same baseline and the same new_or_increased compare:
+# scans the comments of every file oxlint lints (repo-wide via git ls-files, minus
+# the .oxlintrc.json ignorePatterns; it fails closed when none are found) with the
+# TypeScript scanner, and this script merges its rows into the same baseline and
+# the same new_or_increased compare:
 #   <count>  <file>  oxlint-disable(<rule>)            every directive, per rule
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,
@@ -161,7 +162,7 @@ compare_counts() {
 
 # Suppression rows. OXLINT_SCAN_ROOT overrides the scanned root (BATS fixtures).
 scan_suppressions() {
-  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}" src --optional test scripts benchmark build.ts
+  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}"
 }
 
 report_json="$(run_oxlint_json)"

@@ -305,7 +305,7 @@ export class VideoServerJarProvider {
         logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", { path: jarPath, sha256 });
         return {
           version: resolvePinnedVersion(this.env),
-          sha256,
+          sha256: sha256 ?? expected,
           size,
           downloadedAt: this.timer.now(),
         } satisfies VideoServerJarMetadata;

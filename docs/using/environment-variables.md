@@ -611,7 +611,7 @@ Managed reclaim awaits reasonless not-found and recoverable daemon handoff answe
 (`daemon-shutdown` or `daemon-restart`) for one existing rehydration window per
 answering daemon process; silence does not reset it, and only an answer naming a
 different daemon instance opens a new window.
-A managed execution's terminal answers, notification and slot resource all name
+A managed execution's terminal answers and notification both name
 the daemon's release reason, falling back to `session-not-found` when none was named.
 
 A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
@@ -828,7 +828,7 @@ reported (`hostPressure` in the capacity snapshot) but never refuses one.
 A boot over the limit is refused at once; it does not queue against the boot
 budget (#11209). It fails with a retryable error whose `retryAfterMs` (a fixed 5
 seconds: capacity frees when another device shuts down, which takes seconds) says
-when to try again. When emulators AutoMobile did not start occupy slots, the
+when to try again. When emulators AutoMobile did not start occupy boot capacity, the
 message lists them and `externalDevices` carries their serials:
 
 ```json

@@ -5,6 +5,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 
@@ -161,6 +163,21 @@ class PrototypeStorageRestorerTest {
     assertEquals(listOf("data:/extra"), restore.applied)
     assertEquals(
       listOf(PrototypeStorageDrop("data:/title", PrototypeStorageDropReason.MISMATCH)),
+      restore.dropped,
+    )
+  }
+
+  @Test
+  fun `a stored number is dropped when the spec's value is null`() {
+    // The validator refuses null authored data, but a spec can hold one after a data write.
+    val base = spec(storage = """{"version":1,"keys":["data:/nothing"]}""")
+    val block = base.copy(data = JsonObject(base.data!! + ("nothing" to JsonNull)))
+    val restore =
+      PrototypeStorageRestorer.restore(block, stored(1, "data:/nothing" to JsonPrimitive(5)))
+    assertEquals(JsonNull, restore.spec.data!!["nothing"])
+    assertEquals(emptyList(), restore.applied)
+    assertEquals(
+      listOf(PrototypeStorageDrop("data:/nothing", PrototypeStorageDropReason.MISMATCH)),
       restore.dropped,
     )
   }

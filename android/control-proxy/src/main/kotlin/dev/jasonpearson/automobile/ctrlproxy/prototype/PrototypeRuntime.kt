@@ -150,6 +150,8 @@ class PrototypeRuntime(
   private val exclusively: suspend (suspend () -> Unit) -> Unit = { it() },
   /** A request id is unique on the device and stable between the request and its response. */
   private val newRequestId: () -> String = { UUID.randomUUID().toString() },
+  /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
+  private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -834,6 +836,9 @@ class PrototypeRuntime(
     val onError: List<PrototypeAction>?,
   ) {
     lateinit var job: Job
+
+    /** The runtime that applies the response; a same-id replacement hands it to the new one. */
+    @Volatile lateinit var owner: PrototypeRuntime
   }
 
   private val inFlight = LinkedHashMap<String, RequestInFlight>()
@@ -841,7 +846,29 @@ class PrototypeRuntime(
   /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
   private fun cancelRequests() {
     val jobs = synchronized(inFlight) { inFlight.values.map { it.job }.also { inFlight.clear() } }
-    jobs.forEach { it.cancel() }
+    jobs.forEach {
+      it.cancel()
+      requestLimiter.release()
+    }
+  }
+
+  /**
+   * Hands the requests still in flight to [replacement], the runtime that replaces this one for the
+   * same id without a reset: their responses then apply to the new spec through the normal outcome
+   * path. Call before [close], which would cancel them.
+   */
+  internal fun handOverRequests(replacement: PrototypeRuntime) {
+    val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
+    moved.forEach { request ->
+      requestLimiter.release()
+      replacement.adoptRequest(request)
+    }
+  }
+
+  private fun adoptRequest(request: RequestInFlight) {
+    request.owner = this
+    requestLimiter.acquire()
+    synchronized(inFlight) { inFlight[request.requestId] = request }
   }
 
   /** `{data:/pointer}` and `{key}` placeholders read the committed data and state at the action. */
@@ -884,6 +911,8 @@ class PrototypeRuntime(
         action.onError,
       )
     }
+    // The newest request wins even when it fails to resolve: the older one must not land later.
+    supersedeRequests(action.into)
     val resolved =
       when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
         is PrototypeResolvedRequestResult.Failure ->
@@ -894,11 +923,8 @@ class PrototypeRuntime(
         is PrototypeResolvedRequestResult.Success -> result.request
       }
     val started = info(resolved.url)
-    supersedeRequests(action.into)
-    if (
-      synchronized(inFlight) { inFlight.size } >=
-        PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT
-    ) {
+    started.owner = this
+    if (!requestLimiter.tryAcquire()) {
       val error =
         PrototypeRequestError(
           PrototypeRequestErrorCode.TOO_MANY_IN_FLIGHT,
@@ -937,7 +963,8 @@ class PrototypeRuntime(
               ),
             )
           }
-        exclusively { settleRequest(started, response) }
+        val owner = started.owner
+        owner.exclusively { owner.settleRequest(started, response) }
       }
     synchronized(inFlight) { inFlight[started.requestId] = started }
     started.job.start()
@@ -954,6 +981,7 @@ class PrototypeRuntime(
       }
     for (request in older) {
       request.job.cancel()
+      requestLimiter.release()
       val error =
         PrototypeRequestError(
           PrototypeRequestErrorCode.CANCELLED,
@@ -971,6 +999,7 @@ class PrototypeRuntime(
           if (it) inFlight.remove(request.requestId)
         }
       }
+    if (registered) requestLimiter.release()
     if (!registered || !current.active) return
     try {
       finishRequest(request, response)
@@ -1203,4 +1232,28 @@ fun settlePrototypeSheet(
   val desired = current - drag
   if (dismissOnSwipe && desired < heights.min() / 2) return null
   return heights.minBy { kotlin.math.abs(it - desired) }
+}
+
+/**
+ * Counts the requests in flight against `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT`. One instance is shared
+ * by every runtime of a controller, so the cap holds for the device and not per window.
+ */
+class PrototypeRequestLimiter(
+  private val max: Int = PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT,
+) {
+  private var count = 0
+
+  /** True and counted when there is room. */
+  @Synchronized fun tryAcquire(): Boolean = (count < max).also { if (it) count++ }
+
+  /** Counts a request that already exists, as when a replacement adopts it. */
+  @Synchronized
+  fun acquire() {
+    count++
+  }
+
+  @Synchronized
+  fun release() {
+    if (count > 0) count--
+  }
 }

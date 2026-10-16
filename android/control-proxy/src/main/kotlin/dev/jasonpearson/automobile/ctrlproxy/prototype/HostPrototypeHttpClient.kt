@@ -17,8 +17,11 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** Where a `prototype_request` frame goes: the CtrlProxy socket to the connected host. */
 fun interface PrototypeHostLink {
-  /** True once the frame is queued for a host; false when none is connected. */
-  fun send(frame: String): Boolean
+  /**
+   * The connection the frame was queued for (compared by identity, so a later [onHostLost] can name
+   * it), or null when no host is connected.
+   */
+  fun send(frame: String): Any?
 }
 
 /**
@@ -37,14 +40,20 @@ class HostPrototypeHttpClient(
   private val graceMs: Long = DEFAULT_GRACE_MS,
   private val warn: (String) -> Unit = { Log.w(TAG, it) },
 ) : PrototypeHttpClient {
-  private val pending = ConcurrentHashMap<String, CompletableDeferred<PrototypeRequestResponse>>()
+  private class Pending(val answer: CompletableDeferred<PrototypeRequestResponse>) {
+    /** The connection the request frame went to; set once the link accepts it. */
+    @Volatile var target: Any? = null
+  }
+
+  private val pending = ConcurrentHashMap<String, Pending>()
 
   override suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse {
     val started = clock()
     fun failed(code: PrototypeRequestErrorCode, message: String) =
       PrototypeRequestResponse.Failed(PrototypeRequestError(code, message), clock() - started)
-    val answer = CompletableDeferred<PrototypeRequestResponse>()
-    pending[request.requestId] = answer
+    val entry = Pending(CompletableDeferred())
+    val answer = entry.answer
+    pending[request.requestId] = entry
     try {
       val frame =
         PrototypeNetworkFrames.json.encodeToString(
@@ -58,9 +67,8 @@ class HostPrototypeHttpClient(
             timeoutMs = request.timeoutMs,
           ),
         )
-      if (!link.send(frame)) {
-        return failed(PrototypeRequestErrorCode.NETWORK, NO_HOST_MESSAGE)
-      }
+      entry.target =
+        link.send(frame) ?: return failed(PrototypeRequestErrorCode.NETWORK, NO_HOST_MESSAGE)
       return withTimeoutOrNull(request.timeoutMs + graceMs) { answer.await() }
         ?: failed(
           PrototypeRequestErrorCode.TIMEOUT,
@@ -80,18 +88,24 @@ class HostPrototypeHttpClient(
         failMalformed(frame, error)
         return
       }
-    pending[response.requestId]?.complete(response.toResponse())
+    pending[response.requestId]?.answer?.complete(response.toResponse())
   }
 
-  /** The host went away: nothing will answer what is waiting. */
-  fun onHostLost() {
-    pending.values.toList().forEach {
-      it.complete(
-        PrototypeRequestResponse.Failed(
-          PrototypeRequestError(PrototypeRequestErrorCode.NETWORK, HOST_LOST_MESSAGE),
-        ),
-      )
-    }
+  /**
+   * The host went away: nothing will answer what is waiting. With a [connection], only the requests
+   * sent to it fail, at once; the others still have a live socket to answer on. Without one, every
+   * waiting request fails.
+   */
+  fun onHostLost(connection: Any? = null) {
+    pending.values
+      .filter { connection == null || it.target === connection }
+      .forEach {
+        it.answer.complete(
+          PrototypeRequestResponse.Failed(
+            PrototypeRequestError(PrototypeRequestErrorCode.NETWORK, HOST_LOST_MESSAGE),
+          ),
+        )
+      }
   }
 
   private fun failMalformed(frame: String, error: SerializationException) {
@@ -112,6 +126,7 @@ class HostPrototypeHttpClient(
       }
     requestId
       ?.let { pending[it] }
+      ?.answer
       ?.complete(
         PrototypeRequestResponse.Failed(
           PrototypeRequestError(

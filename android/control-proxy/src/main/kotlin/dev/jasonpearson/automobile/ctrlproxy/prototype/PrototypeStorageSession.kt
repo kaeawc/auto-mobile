@@ -13,6 +13,8 @@ import java.io.IOException
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 
@@ -28,14 +30,32 @@ private val logWarn = PrototypeStorageWarn { message, error ->
   Log.w("PrototypeStorage", message, error)
 }
 
-/** The shown spec, with the stored values applied, and the session that keeps them current. */
-class PrototypeStorageOpen(val spec: PrototypeSpec, val session: PrototypeStorageSession?)
+/**
+ * The shown spec, with the stored values applied, and the session that keeps them current. Making
+ * one touches no disk: the deletions and rewrites a show implies are a plan that [commit] applies,
+ * so a show the device refuses leaves the stored document as it was.
+ */
+class PrototypeStorageOpen(
+  val spec: PrototypeSpec,
+  val session: PrototypeStorageSession?,
+  private val plan: suspend () -> Unit = {},
+) {
+  private var committed = false
+
+  /** Applies the planned deletions and rewrites; call once the window is accepted. Idempotent. */
+  suspend fun commit() {
+    if (committed) return
+    committed = true
+    plan()
+  }
+}
 
 /**
  * Opens a prototype's storage on a show (#12522): reads the stored document, applies the adopted
- * precedence through [PrototypeStorageRestorer], deletes what it dropped and returns the spec to
- * draw. Restoring is not a device write: no revision, no `change` event, and it happens before the
- * first draw because the runtime is built from the returned spec.
+ * precedence through [PrototypeStorageRestorer] and returns the spec to draw plus a plan to delete
+ * what it dropped ([prepare] writes nothing; [PrototypeStorageOpen.commit] applies the plan once
+ * the show is accepted). Restoring is not a device write: no revision, no `change` event, and it
+ * happens before the first draw because the runtime is built from the returned spec.
  */
 class PrototypeStoragePersistence(
   private val store: PrototypeStorageStore,
@@ -49,6 +69,14 @@ class PrototypeStoragePersistence(
    * the values were applied); if not, every stored value is dropped and the spec's stand.
    */
   suspend fun open(
+    spec: PrototypeSpec,
+    fits: (PrototypeSpec) -> Boolean = { true },
+  ): PrototypeStorageOpen = prepare(spec, fits).also { it.commit() }
+
+  /**
+   * Like [open] but side-effect-free: nothing on disk changes until [PrototypeStorageOpen.commit].
+   */
+  suspend fun prepare(
     spec: PrototypeSpec,
     fits: (PrototypeSpec) -> Boolean = { true },
   ): PrototypeStorageOpen {
@@ -78,13 +106,14 @@ class PrototypeStoragePersistence(
         )
     }
     val kept = stored?.values.orEmpty().filterKeys { it in restore.applied }
-    // Dropped and corrupt entries are deleted now, so the next show does not meet them again.
-    if (
+    // Dropped and corrupt entries are deleted on commit, so the next show does not meet them.
+    val rewriteNeeded =
       loaded !is PrototypeStorageLoad.Missing &&
         (restore.dropped.isNotEmpty() || stored == null || spec.storage == null)
-    )
-      rewrite(spec.id, stored?.version, kept)
-    val block = spec.storage ?: return PrototypeStorageOpen(restore.spec, null)
+    val plan: suspend () -> Unit = {
+      if (rewriteNeeded) rewrite(spec.id, stored?.version, kept)
+    }
+    val block = spec.storage ?: return PrototypeStorageOpen(restore.spec, null, plan)
     val session =
       PrototypeStorageSession(
         id = spec.id,
@@ -98,7 +127,7 @@ class PrototypeStoragePersistence(
         stored = kept,
         baseline = PrototypeStorageRestorer.currentValues(restore.spec),
       )
-    return PrototypeStorageOpen(restore.spec, session)
+    return PrototypeStorageOpen(restore.spec, session, plan)
   }
 
   /** Clears an id nobody is showing: the stored keys removed, from disk alone. */
@@ -155,6 +184,12 @@ internal constructor(
   private var dirty = false
   private var pending: PrototypeScheduledTask? = null
 
+  /** Bumped by [clear]: a snapshot taken before it must never reach the disk afterwards. */
+  private var generation = 0L
+
+  /** Orders every disk operation of this session, so a clear cannot overtake an older save. */
+  private val diskLock = Mutex()
+
   /** Notes the shown spec's listed values; stores those that changed. Cheap when none did. */
   fun record(spec: PrototypeSpec) {
     val now = PrototypeStorageRestorer.currentValues(spec)
@@ -197,6 +232,7 @@ internal constructor(
   suspend fun flush() = write(cancelPending = true)
 
   private suspend fun write(cancelPending: Boolean) {
+    var snapshotGeneration = 0L
     val document =
       synchronized(lock) {
         // The scheduled task is the caller when it is not cancelled: it must not cancel itself.
@@ -204,20 +240,28 @@ internal constructor(
         pending = null
         if (!dirty) return
         dirty = false
+        snapshotGeneration = generation
         PrototypeStoredValues(version, LinkedHashMap(values))
       }
     try {
-      withContext(io) {
-        if (document.values.isEmpty()) store.delete(id) else store.save(id, document)
+      diskLock.withLock {
+        // A clear that ran after the snapshot already emptied the disk; the snapshot is stale.
+        if (synchronized(lock) { generation != snapshotGeneration }) return
+        withContext(io) {
+          if (document.values.isEmpty()) store.delete(id) else store.save(id, document)
+        }
       }
     } catch (error: CancellationException) {
-      synchronized(lock) { dirty = true }
+      markDirtyUnlessCleared(snapshotGeneration)
       throw error
     } catch (error: IOException) {
-      synchronized(lock) { dirty = true }
+      markDirtyUnlessCleared(snapshotGeneration)
       warn.warn("Could not store the values of $id: ${error.message}", error)
     }
   }
+
+  private fun markDirtyUnlessCleared(snapshotGeneration: Long) =
+    synchronized(lock) { if (generation == snapshotGeneration) dirty = true }
 
   /** Forgets every stored value of this id, writes nothing pending; returns the keys removed. */
   suspend fun clear(): Int {
@@ -226,13 +270,14 @@ internal constructor(
         pending?.cancel()
         pending = null
         dirty = false
+        generation++
         values.size.also {
           values.clear()
           sizes.clear()
           skipped.clear()
         }
       }
-    withContext(io) { store.delete(id) }
+    diskLock.withLock { withContext(io) { store.delete(id) } }
     return removed
   }
 

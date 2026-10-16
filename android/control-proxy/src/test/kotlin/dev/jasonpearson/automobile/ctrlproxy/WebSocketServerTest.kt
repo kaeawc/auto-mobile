@@ -31,6 +31,7 @@ import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -626,7 +627,7 @@ class WebSocketServerTest {
       server.registerClient(2, latest)
       val frame = """{"type":"prototype_request","requestId":"r-1"}"""
 
-      assertTrue(server.sendToHost(frame))
+      assertNotNull(server.sendToHost(frame))
       runCurrent()
 
       assertEquals(listOf(frame), latest.messages)
@@ -635,7 +636,7 @@ class WebSocketServerTest {
 
   @Test
   fun `with no connected host a prototype request is not sent`() {
-    assertFalse(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
+    assertNull(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
   }
 
   @Test

@@ -21,6 +21,7 @@ import {
   normalizePermissions,
   type IosSimulatorPermissionAction,
   type IosSimulatorPrivacyClient,
+  type PhotosAuthorizationVerifier,
   type TccPermissionReader,
 } from "./IosSimulatorPermissions";
 import {
@@ -107,6 +108,7 @@ export interface AppPermissionOperationResult {
   skipped?: boolean;
   result?: unknown;
   error?: string;
+  code?: string;
   /** Set when the operation succeeded but its outcome could not be verified. */
   warning?: string;
 }
@@ -138,6 +140,7 @@ export interface AppPermissionsDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
+  photosVerifier?: PhotosAuthorizationVerifier;
   iosPhysicalClient?: IosPhysicalPrivacyClient | null;
 }
 
@@ -150,6 +153,8 @@ export class AppPermissions {
 
   private tccReader: TccPermissionReader | null;
 
+  private photosVerifier: PhotosAuthorizationVerifier | undefined;
+
   private iosPhysicalClient: IosPhysicalPrivacyClient | null;
 
   constructor(device: BootedDevice, dependencies: AppPermissionsDependencies = {}) {
@@ -157,6 +162,7 @@ export class AppPermissions {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? null;
     this.tccReader = dependencies.tccReader ?? null;
+    this.photosVerifier = dependencies.photosVerifier;
     this.iosPhysicalClient = dependencies.iosPhysicalClient ?? null;
   }
 
@@ -216,7 +222,13 @@ export class AppPermissions {
       return this.setIosPhysicalPermissions(appId, action, permissions);
     }
 
-    const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
+    const iosPermissions = new IosSimulatorPermissions(
+      this.device,
+      this.simctl,
+      this.tccReader,
+      undefined,
+      this.photosVerifier,
+    );
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 
     return {
@@ -233,6 +245,7 @@ export class AppPermissions {
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,
         result: permissionResult,
+        ...(permissionResult.code ? { code: permissionResult.code } : {}),
         ...(permissionResult.error ? { error: permissionResult.error } : {}),
         ...(permissionResult.warning ? { warning: permissionResult.warning } : {}),
       })),

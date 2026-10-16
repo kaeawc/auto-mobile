@@ -1,10 +1,13 @@
 import type { ExecResult } from "../../src/models";
-import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecuteOptions,
+  AdbExecutor,
+} from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "./FakeAdbExecutor";
 import type { FakeTimer } from "./FakeTimer";
 
 /** A host that can exit while its guest input process is still alive. */
-export class FakeGuestInputAdb extends FakeAdbExecutor {
+export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
   readonly entered = Promise.withResolvers<void>();
   readonly host = Promise.withResolvers<ExecResult>();
   readonly cleanupCalls: Array<{ args: string[]; options: AdbExecuteOptions }> = [];

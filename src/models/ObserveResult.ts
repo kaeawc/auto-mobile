@@ -15,12 +15,12 @@ import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
 import { SelectedElement } from "../utils/interfaces/NavigationGraph";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "../features/observe/IdentifyMediaViews";
-import type { ObserveError } from "../features/observe/ObserveError";
+import type { ObserveError } from "./ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
 import type { DisplayPanel, DisplayRef } from "./DisplayPanel";
-import type { SnapshotReference } from "../features/observe/SnapshotReferenceStore";
+import type { SnapshotReference } from "./SnapshotReference";
 
 /** Output-only screen dimensions with an optional coordinate-unit marker. */
 export interface ScreenSizeWithUnits extends ScreenSize {
@@ -247,7 +247,7 @@ export type ObserveResult = {
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
   /** Status of opt-in inline screenshot delivery; absent for ordinary observations. */
-  screenshotImage?: import("../features/observe/screenshot/inlineScreenshotImage").ScreenshotImageStatus;
+  screenshotImage?: import("./ScreenshotImageStatus").ScreenshotImageStatus;
 
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)

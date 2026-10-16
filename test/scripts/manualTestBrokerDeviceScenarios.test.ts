@@ -177,6 +177,12 @@ function fixture(clientCount = 2) {
         })),
     }),
     resources: async () => structuredClone(resources),
+    foreignControl: async (c, foreign) => {
+      calls.push(`foreign:${c.name}->${foreign.name}`);
+      const ready = (x: BrokerScenarioClient) =>
+        receipts.get(x.config.requestId)?.outcome === "ready";
+      return { code: ready(c) && ready(foreign) ? "device_outside_broker_grant" : null };
+    },
   };
   const privateDaemon: PrivateDaemonControl = {
     stop: async () => {
@@ -239,6 +245,21 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
       expect(bytes).not.toMatch(/startDevice|provisionDevice|killDevice/);
     },
   );
+  test("cross-client-isolation-live probes both directions and keeps both grants", async () => {
+    const f = fixture();
+    const scenario = scenarios.find((s) => s.name === "cross-client-isolation-live")!;
+    const summary = await runBrokerScenario(scenario, f.context, { device: true });
+    expect(summary.error).toBeUndefined();
+    expect(f.calls).toContain("foreign:client-0->client-1");
+    expect(f.calls).toContain("foreign:client-1->client-0");
+  });
+  test("cross-client-isolation-live fails when the foreign control call is not refused", async () => {
+    const f = fixture();
+    f.deviceOps.foreignControl = async () => ({ code: null });
+    const scenario = scenarios.find((s) => s.name === "cross-client-isolation-live")!;
+    const summary = await runBrokerScenario(scenario, f.context, { device: true });
+    expect(summary.outcome).toBe("failed");
+  });
   test("crash restart destroys the old resource, replays terminal receipt and acquires anew", async () => {
     const f = fixture();
     const summary = await runBrokerScenario(

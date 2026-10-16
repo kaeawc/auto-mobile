@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { restoreIosSettings } from "../../../src/utils/ios-cmdline-tools/iosSettings";
 import { getAppDataContainerPath } from "../../../src/utils/ios-cmdline-tools/iosAppContainer";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { createExecResult } from "../../../src/utils/execResult";
 
 const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
@@ -86,7 +86,7 @@ describe("simctl argv integrity (#4196)", () => {
   describe("restoreIosSettings issues an argv array, preserving every value", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`defaults write survives ${label}`, async () => {
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
 
         await restoreIosSettings(simctl as any, UDID, {
           values: { ".GlobalPreferences/AppleLocale": value },
@@ -107,7 +107,7 @@ describe("simctl argv integrity (#4196)", () => {
     }
 
     test("an empty value keeps `write` as the verb and does not shift positions", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
 
       await restoreIosSettings(simctl as any, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "" },
@@ -119,7 +119,7 @@ describe("simctl argv integrity (#4196)", () => {
     });
 
     test("no legacy string command path is used for defaults write", async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       await restoreIosSettings(simctl as any, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
         ui: { appearance: "dark", contentSize: "large" },
@@ -131,7 +131,7 @@ describe("simctl argv integrity (#4196)", () => {
   describe("getAppDataContainerPath issues an argv array", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`bundle id survives ${label}`, async () => {
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setCommandArgsResult(["get_app_container", UDID, value, "data"], "/tmp/container\n");
 
         const result = await getAppDataContainerPath(simctl as any, UDID, value);

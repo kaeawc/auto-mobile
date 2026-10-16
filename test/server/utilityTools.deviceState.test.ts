@@ -22,7 +22,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android/Andro
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
 
@@ -174,7 +174,7 @@ describe("device state tools", () => {
         DaemonState.getInstance().initialize(manager, pool);
         const device = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios");
         await manager.createSession("location-session", device.deviceId, "ios");
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         const registry = new LocationRouteRegistry(timer);
         const state = new DeviceState(device, { timer, simctl, routeRegistry: registry });
         const originalSetState = DeviceState.prototype.setState;

@@ -17,7 +17,6 @@ import {
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -137,7 +136,7 @@ describe("platform device preparation tools", () => {
 
   test("getAndroid retains a bounded Android discovery failure before lifecycle allocation", async () => {
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
+      new FakeAdbClient(),
       fakeDeviceManagerSimctl({ isAvailable: async () => false }),
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => {

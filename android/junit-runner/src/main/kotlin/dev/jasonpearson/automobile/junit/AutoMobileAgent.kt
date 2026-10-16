@@ -112,6 +112,18 @@ open class AutoMobileAgent(
   open fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+  ): RecoveryOutcome =
+    attemptAiRecovery(context, secretValues, PlanExecutorTimings(), DaemonHeartbeat)
+
+  /**
+   * Recovery uses the same held-device wait and heartbeat owner as its executor. The executor calls
+   * this overload, so overriding only the two-argument [attemptAiRecovery] is not honoured by it.
+   */
+  internal open fun attemptAiRecovery(
+    context: FailedStepContext,
+    secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     val startTime = timeProvider.currentTimeMillis()
     val maxToolCalls = recoveryConfigProvider.getMaxRecoveryToolCalls()
@@ -166,7 +178,19 @@ open class AutoMobileAgent(
       val deviceClient =
         if (context.sessionUuid.isNullOrBlank()) pinnedClient
         else
-          HeldDeviceWaitingMCPClient(SessionLossGuardMCPClient(pinnedClient, context.sessionUuid))
+          HeldDeviceWaitingMCPClient(
+            SessionLossGuardMCPClient(pinnedClient, context.sessionUuid, heartbeat::sessionLoss),
+            backoffDelayMs = { waits, waited, retryAfterMs, code ->
+              AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+                waits,
+                waited,
+                retryAfterMs,
+                code,
+                timings,
+              )
+            },
+            sleeper = timings.deviceOwnedSleeper,
+          )
       val agentMcpClient =
         if (redactionValues.isEmpty()) deviceClient
         else RedactingMCPClient(deviceClient, redactionValues)

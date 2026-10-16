@@ -15,7 +15,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCa
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const android: BootedDevice = { name: "android", platform: "android", deviceId: "test-android" };
@@ -191,7 +191,7 @@ describe("app restart cache generation", () => {
     async (device) => {
       for (const fails of [false, true]) {
         const events: string[] = [];
-        const simctl = new FakeSimCtlClient();
+        const simctl = new FakeSimctl();
         simctl.setContainerPath(appId, "/fake/container");
         const { invalidator, store } = clearInvalidationHarness(events);
         const action = new ClearAppData(device, undefined, {

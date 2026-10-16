@@ -28,7 +28,8 @@ lines() {
   run bash "$SCRIPT" --update
   [ "$status" -eq 0 ]
   grep -q "^8"$'\t'"src/big.ts$" "$FILE_SIZE_BASELINE"
-  ! grep -q 'small.ts' "$FILE_SIZE_BASELINE"
+  run grep -q 'small.ts' "$FILE_SIZE_BASELINE"
+  [ "$status" -ne 0 ]
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no growth (1 file(s) over 5 lines"* ]]

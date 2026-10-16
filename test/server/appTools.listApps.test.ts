@@ -11,10 +11,8 @@ import {
   crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
-  resetCrashAppToolDependencies,
   resetListAppsToolDependencies,
   resetTerminateAppToolDependencies,
-  setCrashAppToolDependencies,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,
   setListAppsToolDependencies,
@@ -389,29 +387,30 @@ describe("crashApp tool", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    resetCrashAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetCrashAppToolDependencies();
   });
 
   test("returns an explicit unsupported result as structured JSON", async () => {
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => ({
-          success: false,
-          supported: false,
-          platform: "ios",
-          appId: "com.example.app",
-          mechanism: "unsupported",
-          timestamp: 1234,
-          confirmed: false,
-          error: "Physical iOS devices are unsupported",
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => ({
+            success: false,
+            supported: false,
+            platform: "ios",
+            appId: "com.example.app",
+            mechanism: "unsupported",
+            timestamp: 1234,
+            confirmed: false,
+            error: "Physical iOS devices are unsupported",
+          }),
         }),
-      }),
+      },
     });
     const tool = ToolRegistry.getTool("crashApp");
 
@@ -433,20 +432,23 @@ describe("crashApp tool", () => {
   });
 
   test("reports the mechanism and OS confirmation on success", async () => {
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => ({
-          success: true,
-          supported: true,
-          platform: "ios",
-          appId: "com.example.app",
-          processId: 42,
-          mechanism: "ios_simulator_sigabrt",
-          timestamp: 1234,
-          wasRunning: true,
-          confirmed: true,
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => ({
+            success: true,
+            supported: true,
+            platform: "ios",
+            appId: "com.example.app",
+            processId: 42,
+            mechanism: "ios_simulator_sigabrt",
+            timestamp: 1234,
+            wasRunning: true,
+            confirmed: true,
+          }),
         }),
-      }),
+      },
     });
     const tool = ToolRegistry.getTool("crashApp");
 
@@ -466,14 +468,17 @@ describe("crashApp tool", () => {
     const controller = new AbortController();
     let invalidations = 0;
     let notifications = 0;
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => {
-          controller.abort();
-          controller.signal.throwIfAborted();
-          throw new Error("unreachable");
-        },
-      }),
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => {
+            controller.abort();
+            controller.signal.throwIfAborted();
+            throw new Error("unreachable");
+          },
+        }),
+      },
     });
     setInstalledAppResourceRefresh({
       invalidate: () => invalidations++,

@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
-  resetCrashAppToolDependencies,
   resetInstallAppToolDependencies,
   resetInstalledAppResourceRefresh,
   resetLaunchAppToolDependencies,
   resetTerminateAppToolDependencies,
   resetUninstallAppToolDependencies,
-  setCrashAppToolDependencies,
   setInstallAppToolDependencies,
   setInstalledAppResourceRefresh,
   setLaunchAppToolDependencies,
@@ -61,7 +59,6 @@ describe("app tool installed-app cache invalidation", () => {
     ToolRegistry.clearTools();
     resetLaunchAppToolDependencies();
     resetTerminateAppToolDependencies();
-    resetCrashAppToolDependencies();
     resetInstallAppToolDependencies();
     resetUninstallAppToolDependencies();
     resetInstalledAppResourceRefresh();
@@ -72,7 +69,6 @@ describe("app tool installed-app cache invalidation", () => {
     ToolRegistry.clearTools();
     resetLaunchAppToolDependencies();
     resetTerminateAppToolDependencies();
-    resetCrashAppToolDependencies();
     resetInstallAppToolDependencies();
     resetUninstallAppToolDependencies();
     resetInstalledAppResourceRefresh();
@@ -87,7 +83,8 @@ describe("app tool installed-app cache invalidation", () => {
       setTerminateAppToolDependencies({ createTerminateApp: () => executor });
     }
     if (tool === "crashApp") {
-      setCrashAppToolDependencies({ createCrashApp: () => executor });
+      ToolRegistry.clearTools();
+      registerAppTools({ crashApp: { createCrashApp: () => executor } });
     }
     if (tool === "installApp") {
       setInstallAppToolDependencies({ createInstallApp: () => executor });

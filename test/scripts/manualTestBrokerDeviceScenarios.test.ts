@@ -22,7 +22,7 @@ import captured from "../fixtures/session-broker/fake-lifecycle.json";
 
 const scenarios = brokerScenarios.filter((s) => s.class === "device");
 /** Logic tests only: scripted proxy, identity and native views do not prove device behavior. */
-function fixture(clientCount = 2) {
+function fixture(clientCount = 2, timeoutCode = "timeout") {
   const timer = new FakeTimer();
   const files = new Map<string, string>();
   const fs = {
@@ -130,7 +130,7 @@ function fixture(clientCount = 2) {
       ) {
         result = fail(c, "capability_disabled");
       } else if (c.config.preparationTimeoutMs === 1) {
-        result = fail(c, "timeout", true);
+        result = fail(c, timeoutCode, true);
       } else if (resources.filter((r) => r.state === "active").length >= 2) {
         result = fail(c, "capacity_exhausted");
       } else {
@@ -239,6 +239,28 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
       expect(bytes).not.toMatch(/startDevice|provisionDevice|killDevice/);
     },
   );
+  test.each(["timeout", "daemon_unavailable", "provision_failed"])(
+    "#12452 prep timeout accepts the documented retryable code %s and still proves no leak",
+    async (code) => {
+      const f = fixture(2, code);
+      const summary = await runBrokerScenario(
+        scenarios.find((s) => s.name === "#12452-prep-timeout")!,
+        f.context,
+        { device: true },
+      );
+      expect(summary.error).toBeUndefined();
+      expect(summary.outcome).toBe("passed");
+    },
+  );
+  test("#12452 prep timeout rejects an undocumented or non-retryable code", async () => {
+    const f = fixture(2, "capacity_exhausted");
+    const summary = await runBrokerScenario(
+      scenarios.find((s) => s.name === "#12452-prep-timeout")!,
+      f.context,
+      { device: true },
+    );
+    expect(summary.outcome).not.toBe("passed");
+  });
   test("crash restart destroys the old resource, replays terminal receipt and acquires anew", async () => {
     const f = fixture();
     const summary = await runBrokerScenario(

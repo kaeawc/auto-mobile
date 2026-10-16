@@ -1,3 +1,4 @@
+import { parseDevicesViewOutput } from "../../scripts/manual-test/broker-batch";
 import { expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
@@ -535,4 +536,18 @@ test("up reports refused native info and records a leak without granting ledger 
   expect(
     ledger.entries.some((row) => row.kind === "leaked" && row.device?.name === "personal-device"),
   ).toBe(true);
+});
+
+test("devices inventory output tolerates diagnostics and surfaces them when no inventory arrives", () => {
+  const view = { devices: [{ name: "n", deviceId: "d", platform: "ios" }], daemons: [] };
+  expect(parseDevicesViewOutput(0, ["note: slow probe", JSON.stringify(view)])).toEqual(view);
+  let message = "";
+  try {
+    parseDevicesViewOutput(2, ["Private daemon command failed: daemon 1 is stopped"]);
+  } catch (error) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain("Private daemon command failed: daemon 1 is stopped");
+  expect(message).not.toContain("JSON Parse error");
+  expect(() => parseDevicesViewOutput(0, [])).toThrow("inventory unavailable");
 });

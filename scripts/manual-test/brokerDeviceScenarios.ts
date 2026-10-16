@@ -301,6 +301,8 @@ async function ownerDeath(ctx: BrokerScenarioContext) {
   );
   await ctx.record("proxy/owner-kill", { client: c.name }, () => ops(ctx).ownerKill(c));
   await poll(ctx, "Proxy self-shutdown", () => ops(ctx).proxyClosed(c), Boolean);
+  // The broker's terminal reason is session_owner_exited. The proxy's own closed.json carries a
+  // transport-local reason (proxy_exited_or_transport_closed), so only its presence is asserted.
   await terminal(ctx, c, grant, "session_owner_exited");
   return { c, grant };
 }
@@ -404,18 +406,34 @@ async function restart(ctx: BrokerScenarioContext) {
     }
   }
 }
+/**
+ * A 1 ms preparation budget expires wherever the acquisition happens to be: `timeout` when the
+ * reconciler's deadline passes, `daemon_unavailable` when the proxy's own connect/prepare race
+ * loses (iOS), `provision_failed` when the provisioner's retryable timeout surfaces first
+ * (Android). All are the documented retryable deadline outcomes (acquisitionResult.ts,
+ * reconciler.ts); the scenario asserts retryability and no leaked resource, not one code.
+ */
+export const PREPARATION_TIMEOUT_CODES: readonly string[] = [
+  "timeout",
+  "daemon_unavailable",
+  "provision_failed",
+];
 async function timeout(ctx: BrokerScenarioContext) {
   const c = successor(ctx, first(ctx));
   c.config = { ...c.config, preparationTimeoutMs: 1 };
   const failure = await acquire(ctx, c);
   assert.equal(failure.outcome, "failed");
-  assert.equal(failure.failure?.code, "timeout");
+  const code = failure.failure?.code;
+  assert(
+    code !== undefined && PREPARATION_TIMEOUT_CODES.includes(code),
+    `Preparation timeout yielded ${String(code)}; expected one of ${PREPARATION_TIMEOUT_CODES.join(", ")}.`,
+  );
   assert.equal(failure.failure?.retryable, true);
   const settled = await poll(
     ctx,
     "Preparation timeout cleanup",
     () => status(ctx, c),
-    (r) => r?.failure?.code === "timeout" && !r.cleanupPending,
+    (r) => r?.failure?.code === code && !r.cleanupPending,
   );
   assert.equal(settled?.failure?.retryable, true);
   await poll(

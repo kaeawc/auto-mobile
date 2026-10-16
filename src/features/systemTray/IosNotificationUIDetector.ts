@@ -5,7 +5,7 @@ import {
   ObserveResult,
   ViewHierarchyResult,
 } from "../../models";
-import { DefaultElementGeometry } from "../../features/utility/ElementGeometry";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
   getHierarchyRoots,

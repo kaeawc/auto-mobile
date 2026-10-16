@@ -359,6 +359,8 @@
 1	test/features/record/android/RotationDuringRecording.test.ts
 6	test/features/screen-stream/IosScreenCaptureHelper.test.ts
 1	test/features/screen-stream/IosScreenCaptureHelperCapability.test.ts
+2	test/features/systemTray/notificationHints.test.ts
+11	test/features/systemTray/systemTray.test.ts
 1	test/features/toolSelection/SqliteSessionToolSelectionRepository.integration.test.ts
 1	test/features/utility/DeepLinkManagerHostExec.test.ts
 1	test/features/utility/ElementGeometry.property.test.ts
@@ -468,8 +470,6 @@
 6	test/server/restartReservationStartAdmission.test.ts
 1	test/server/setActiveDevice.refusedBeforeResume.test.ts
 10	test/server/storageResources.test.ts
-2	test/server/system-tray/notificationHints.test.ts
-11	test/server/systemTray.test.ts
 1	test/server/telephonyTools.test.ts
 1	test/server/terminalPersistedRecoveryTransport.integration.test.ts
 19	test/server/toolParamErrorHint.test.ts

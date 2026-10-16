@@ -4,7 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { executeAndroidSearchDrag } from "../../../../src/features/action/swipeon/androidSearchDrag";
-import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";

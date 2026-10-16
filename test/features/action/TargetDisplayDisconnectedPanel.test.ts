@@ -4,7 +4,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { Posture } from "../../../src/models/DisplayPanel";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BaseActionResult } from "../../../src/models/BaseActionResult";
-import { withStaleDisplay } from "../../../src/models/StaleDisplayError";
+import { withStaleDisplay } from "../../../src/features/observe/StaleDisplayError";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";

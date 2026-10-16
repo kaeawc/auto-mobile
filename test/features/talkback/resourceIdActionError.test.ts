@@ -6,7 +6,7 @@ import {
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import type { ViewHierarchyResult } from "../../../src/models";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { notificationHierarchy, notificationRows } from "./capturedNotificationTargets";
 
 const unique: ViewHierarchyResult = { hierarchy: { node: { $: { "resource-id": "app:id/row" } } } };

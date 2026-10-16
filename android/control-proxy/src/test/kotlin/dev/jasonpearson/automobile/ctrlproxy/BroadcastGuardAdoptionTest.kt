@@ -19,10 +19,10 @@ import org.junit.Test
  *    reintroducing an inner `try { … } catch (e: Exception) { Log.e(…) }` swallow — the guard only
  *    fires on a throw that *escapes* the block, so a stray inner swallow silently defeats it.
  *
- * This test source-scans [CtrlProxy] and fails CI on either regression. The scanning logic is
- * factored into [BroadcastGuardScanner] (a pure function over source text) so the enforcement
- * contract itself is unit-tested against synthetic good/bad snippets — the real-file assertions
- * then prove the live source complies.
+ * This test source-scans [CtrlProxy] and [CaCertificateController] and fails CI on either
+ * regression. The scanning logic is factored into [BroadcastGuardScanner] (a pure function over
+ * source text) so the enforcement contract itself is unit-tested against synthetic good/bad
+ * snippets — the real-file assertions then prove the live source complies.
  *
  * Scope: [ResultBroadcaster.guard] adoption is enforced fully (missing guard + reintroduced
  * swallow). [AsyncActionRunner] coverage is the swallow-regression check only. For raw
@@ -41,59 +41,67 @@ class BroadcastGuardAdoptionTest {
 
   @Test
   fun `every requestId-correlated broadcast helper in CtrlProxy routes through ResultBroadcaster guard`() {
-    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+    for ((fileName, source) in readGuardedSources()) {
+      val result = BroadcastGuardScanner.scan(source)
 
-    val missingGuard =
-      result.violations.filter { it.kind == BroadcastGuardScanner.Kind.MISSING_GUARD }
-    assertTrue(
-      "Every `broadcast*Result/Error/Response(requestId: …)` helper must wrap its body in " +
-        "`resultBroadcaster.guard(...)` (issue #3045/#3085). Offenders:\n" +
-        missingGuard.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
-      missingGuard.isEmpty(),
-    )
+      val missingGuard =
+        result.violations.filter { it.kind == BroadcastGuardScanner.Kind.MISSING_GUARD }
+      assertTrue(
+        "Every `broadcast*Result/Error/Response(requestId: …)` helper must wrap its body in " +
+          "`resultBroadcaster.guard(...)` (issue #3045/#3085). Offenders:\n" +
+          missingGuard.joinToString("\n") { "  - ${it.symbol} ($fileName:${it.line})" },
+        missingGuard.isEmpty(),
+      )
+    }
   }
 
   @Test
   fun `no requestId-correlated broadcast helper reintroduces an inner log-and-swallow`() {
-    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+    for ((fileName, source) in readGuardedSources()) {
+      val result = BroadcastGuardScanner.scan(source)
 
-    val swallows =
-      result.violations.filter { it.kind == BroadcastGuardScanner.Kind.SWALLOW_IN_BROADCAST }
-    assertTrue(
-      "A guarded broadcast helper must not reintroduce an inner catch that logs-and-swallows — " +
-        "the guard only fires on a throw that escapes the block (issue #3085). Offenders:\n" +
-        swallows.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
-      swallows.isEmpty(),
-    )
+      val swallows =
+        result.violations.filter { it.kind == BroadcastGuardScanner.Kind.SWALLOW_IN_BROADCAST }
+      assertTrue(
+        "A guarded broadcast helper must not reintroduce an inner catch that logs-and-swallows — " +
+          "the guard only fires on a throw that escapes the block (issue #3085). Offenders:\n" +
+          swallows.joinToString("\n") { "  - ${it.symbol} ($fileName:${it.line})" },
+        swallows.isEmpty(),
+      )
+    }
   }
 
   @Test
   fun `no asyncActionRunner launch block reintroduces an inner log-and-swallow`() {
-    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+    for ((fileName, source) in readGuardedSources()) {
+      val result = BroadcastGuardScanner.scan(source)
 
-    val swallows =
-      result.violations.filter { it.kind == BroadcastGuardScanner.Kind.SWALLOW_IN_LAUNCH }
-    assertTrue(
-      "An `asyncActionRunner.launch { … }` block must not reintroduce an inner catch that " +
-        "logs-and-swallows (issue #3023/#3085). Offenders:\n" +
-        swallows.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
-      swallows.isEmpty(),
-    )
+      val swallows =
+        result.violations.filter { it.kind == BroadcastGuardScanner.Kind.SWALLOW_IN_LAUNCH }
+      assertTrue(
+        "An `asyncActionRunner.launch { … }` block must not reintroduce an inner catch that " +
+          "logs-and-swallows (issue #3023/#3085). Offenders:\n" +
+          swallows.joinToString("\n") { "  - ${it.symbol} ($fileName:${it.line})" },
+        swallows.isEmpty(),
+      )
+    }
   }
 
   @Test
   fun `no raw serviceScope launch captures requestId without RequestIdContext`() {
-    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+    for ((fileName, source) in readGuardedSources()) {
+      val result = BroadcastGuardScanner.scan(source)
 
-    val uncorrelatedLaunches =
-      result.violations.filter { it.kind == BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH }
-    assertTrue(
-      "A raw `serviceScope.launch { ... }` block that captures `requestId` must attach " +
-        "`RequestIdContext(requestId)` or route through `AsyncActionRunner`; otherwise " +
-        "ServiceScopeGuard can only emit a null-id error frame (issue #3128). Offenders:\n" +
-        uncorrelatedLaunches.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
-      uncorrelatedLaunches.isEmpty(),
-    )
+      val uncorrelatedLaunches =
+        result.violations.filter { it.kind == BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH }
+      assertTrue(
+        "A raw `serviceScope.launch { ... }` block that captures `requestId` must attach " +
+          "`RequestIdContext(requestId)` or route through `AsyncActionRunner`; otherwise " +
+          "ServiceScopeGuard can only emit a null-id error frame (issue #3128). Offenders:\n" +
+          uncorrelatedLaunches.joinToString("\n") { "  - ${it.symbol} ($fileName:${it.line})" },
+        uncorrelatedLaunches.isEmpty(),
+      )
+    }
   }
 
   @Test
@@ -147,7 +155,7 @@ class BroadcastGuardAdoptionTest {
     // "no violations" assertion vacuously pass). CtrlProxy has 31 such helpers today; assert a
     // conservative lower bound plus a few known members so the check stays meaningful as helpers
     // are added or removed.
-    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+    val result = BroadcastGuardScanner.scan(readGuardedSources().joinToString("\n") { it.second })
 
     assertTrue(
       "expected the scanner to match the CtrlProxy broadcast helpers, found " +
@@ -156,6 +164,8 @@ class BroadcastGuardAdoptionTest {
     )
     for (known in
       listOf(
+        "broadcastCaCertResult",
+        "broadcastDeviceOwnerStatusResult",
         "broadcastSetTextResult",
         "broadcastPinchResult",
         "broadcastCurrentFocusError",
@@ -181,6 +191,49 @@ class BroadcastGuardAdoptionTest {
   // Contract tests — prove the scanner catches each regression and does not
   // false-positive on legitimate code. These define the enforcement contract.
   // ---------------------------------------------------------------------------
+
+  @Test
+  fun `removing the controller guards is detected on both moved result helpers`() {
+    val source =
+      locateSource("CaCertificateController.kt")
+        .readText()
+        .replace("resultBroadcaster.guard(requestId, \"ca_cert_result\")", "run")
+        .replace("resultBroadcaster.guard(requestId, \"device_owner_status_result\")", "run")
+
+    val missing =
+      BroadcastGuardScanner.scan(source).violations.filter {
+        it.kind == BroadcastGuardScanner.Kind.MISSING_GUARD
+      }
+
+    assertEquals(
+      setOf("broadcastCaCertResult", "broadcastDeviceOwnerStatusResult"),
+      missing.map { it.symbol }.toSet(),
+    )
+  }
+
+  @Test
+  fun `controller sender emissions require a guard around the actual broadcast`() {
+    for (guard in listOf("", "resultBroadcaster.guard(requestId, \"foo_result\") {}")) {
+      val source =
+        """
+        class Fake {
+          private suspend fun broadcastFooResult(requestId: String?) {
+            $guard
+            responseSender.broadcastWithPerf("foo_result", requestId) { put("success", true) }
+          }
+        }
+        """
+          .trimIndent()
+
+      val result = BroadcastGuardScanner.scan(source)
+
+      assertEquals(listOf("broadcastFooResult"), result.guardedHelpers)
+      assertEquals(
+        listOf(BroadcastGuardScanner.Kind.MISSING_GUARD),
+        result.violations.map { it.kind },
+      )
+    }
+  }
 
   @Test
   fun `flags a new broadcast result helper that forgets the guard`() {
@@ -841,10 +894,15 @@ class BroadcastGuardAdoptionTest {
   // Source location
   // ---------------------------------------------------------------------------
 
-  private fun readCtrlProxySource(): String = locateCtrlProxySource().readText()
+  private fun readGuardedSources(): List<Pair<String, String>> =
+    listOf("CtrlProxy.kt", "CaCertificateController.kt").map { fileName ->
+      fileName to locateSource(fileName).readText()
+    }
 
-  private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
+
+  private fun locateSource(fileName: String): File {
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     // Depending on the Gradle working directory the module root may be the cwd (AGP unit tests),
     // the `android` dir, or the repo root. Try the common anchors, then walk up as a fallback.
     val direct =
@@ -867,7 +925,7 @@ class BroadcastGuardAdoptionTest {
       }
       dir = dir.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=$userDir")
+    fail("Could not locate $fileName from user.dir=$userDir")
     error("unreachable")
   }
 }
@@ -923,7 +981,7 @@ object BroadcastGuardScanner {
   // The actual result emission. Every such call in a helper must sit *inside* a guard (or launch)
   // block — proving the guard is merely *mentioned* is not enough (a token guard call with the real
   // broadcast outside it would still hang; issue #3085 regression form).
-  private val BROADCAST_CALL = Regex("""webSocketServer\.broadcast""")
+  private val BROADCAST_CALL = Regex("""(?:webSocketServer|responseSender)\.broadcast""")
   // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow.
   private val RETHROW = Regex("""\bthrow\b""")
   // Surfacing requires an actual `broadcast*(` call, not a bare `broadcast` substring — an

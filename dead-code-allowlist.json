@@ -10,7 +10,7 @@
     "src/models/index.ts",
     "src/server/deviceMatcher.ts"
   ],
-  "ignorePathPatterns": ["scripts/memory/"],
+  "ignorePathPatterns": ["scripts/memory/", "^src/daemon/sessionBroker/registry/migrations/"],
   "ignoreEntries": [
     {
       "file": "src/utils/android-cmdline-tools/avdmanager.ts",

@@ -16,7 +16,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import type { BaseActionResult, BootedDevice } from "../../../src/models";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

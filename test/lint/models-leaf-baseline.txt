@@ -17,7 +17,6 @@ src/models/ObserveResult.ts	src/utils/PerformanceTracker
 src/models/ObserveResult.ts	src/utils/interfaces/NavigationGraph
 src/models/PackageSigningInspection.ts	src/utils/android-cmdline-tools/apkSigningBlock
 src/models/ScreenshotResult.ts	src/features/observe/ScreenshotMetadata
-src/models/StaleDisplayError.ts	src/features/observe/SessionDisplayContext
 src/models/SwipeOnResult.ts	src/utils/DebugContextBuilder
 src/models/SwipeOnResult.ts	src/utils/PerformanceTracker
 src/models/TapOnElementResult.ts	src/features/talkback/TalkBackTapStrategy

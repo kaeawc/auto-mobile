@@ -5,7 +5,7 @@ import {
 import { settleEmbeddedObservationInResponse } from "../../../src/server/embeddedObservationSettle";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import { createStructuredToolResponse, getStructuredField } from "../../../src/utils/toolUtils";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   BaseVisualChange,

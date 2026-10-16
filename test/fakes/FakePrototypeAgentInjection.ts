@@ -8,7 +8,7 @@ import type {
   PrototypeAgentDylibResolver,
   PrototypeAgentPortAllocator,
 } from "../../src/features/prototype/ios/prototypeAgentInjection";
-import type { ResolvedPrototypeAgent } from "../../src/features/prototype-agent/PrototypeAgentProvider";
+import type { ResolvedPrototypeAgent } from "../../src/features/prototype/ios/PrototypeAgentProvider";
 
 export const FAKE_PROTOTYPE_AGENT_HANDSHAKE: PrototypeAgentHandshake = {
   agentVersion: "0.1.0",

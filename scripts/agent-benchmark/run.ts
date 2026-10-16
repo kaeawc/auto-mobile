@@ -352,7 +352,15 @@ const realDeviceClaims: DeviceClaims = {
   },
 };
 
-function dryRunReport(suite: LoadedSuite, options: CliOptions): string {
+/**
+ * What a run would launch. `env` is the inherited environment the real run passes to the
+ * MCP config, so the adb endpoint and claim-root routing it will use are visible here.
+ */
+export function dryRunReport(
+  suite: LoadedSuite,
+  options: CliOptions,
+  env: Record<string, string | undefined> = process.env,
+): string {
   const placeholders = {
     deviceSerial: options.device ?? "<serial>",
     packageName: suite.definition.app.packageName,
@@ -375,7 +383,7 @@ function dryRunReport(suite: LoadedSuite, options: CliOptions): string {
     `suite ${suite.definition.name} (${suite.suitePath}) is valid`,
     `prompt ${suite.promptPath}`,
     `claude ${JSON.stringify([options.claude, ...args])}`,
-    `mcp-config ${JSON.stringify(buildMcpConfig(paths))}`,
+    `mcp-config ${JSON.stringify(buildMcpConfig(paths, env))}`,
   ].join("\n");
 }
 

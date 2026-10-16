@@ -253,6 +253,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("duplicate result event");
     return;
   }
+  if (event.result !== undefined && typeof event.result !== "string") {
+    // The final answer is the run's text; any other shape would read as an empty answer.
+    state.audit.parseErrors.push("result event has a non-string result");
+  }
   if (event.is_error !== undefined && typeof event.is_error !== "boolean") {
     // A non-boolean terminal flag ("true") cannot be read as success either.
     state.audit.parseErrors.push("result event has a non-boolean is_error");

@@ -307,7 +307,15 @@ export class SessionBroker {
       this.options.owner,
       prepared.sessionId,
     );
-    return this.resultUnlessAborted(request, signal);
+    // Activation committed: the session now belongs to the request identity. A caller abort from
+    // here on hands it back for a replay of that identity instead of destroying it; the session's
+    // own liveness policy releases it if the caller never returns. Abandonment is separate and
+    // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
+    return this.result(
+      signal.aborted
+        ? ((await this.options.store.getRequest(config.requestId)) ?? request)
+        : request,
+    );
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {

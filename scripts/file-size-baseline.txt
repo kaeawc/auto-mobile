@@ -62,7 +62,7 @@
 1249	src/features/prototype/prototypeSpec.ts
 1184	src/features/prototype/prototypeValidation.ts
 2878	src/features/systemTray/systemTrayHelpers.ts
-1674	src/features/utility/DeepLinkManager.ts
+1684	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts

@@ -55,6 +55,7 @@ import {
 } from "./processLifecycle";
 import { resolveSessionOwnerGenerationToken, type SessionConfig } from "./devices/sessionConfig";
 import type { SessionBrokerResult } from "./devices/sessionBrokerResult";
+import type { DaemonMcpProxyCloseOptions } from "./daemon/daemonMcpProxy";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
 import { sweepNativeHelperOrphans } from "./utils/nativeHelpers/sweepNativeHelperOrphans";
@@ -174,7 +175,7 @@ async function main() {
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
-  let stdioProxy: { close(): Promise<void> } | undefined;
+  let stdioProxy: { close(options?: DaemonMcpProxyCloseOptions): Promise<void> } | undefined;
   let directModeActive = false;
   let shutdownCleanupFailed = false;
   setProcessShutdownHandler(
@@ -197,7 +198,9 @@ async function main() {
           stopWebRtcStreamSocketServer: () => stopWebRtcStreamSocketServer(),
           stopAppearanceSyncScheduler: () => stopAppearanceSyncScheduler(),
           cleanupPrefetchedApk: () => AndroidCtrlProxyManager.cleanupPrefetchedApk(),
-          closeStdioProxy: () => stdioProxy?.close(),
+          // An owner-loss shutdown ends broker sessions as session_owner_exited (#12791).
+          closeStdioProxy: () =>
+            stdioProxy?.close({ executionOwnerLost: signal === "execution-owner-lost" }),
           // The database modules are loaded only in direct mode, which is the only caller.
           drainDatabaseWrites: async (timeoutMs) => {
             const { getDbWriteBarrier } = await import("./db/dbWriteBarrier");

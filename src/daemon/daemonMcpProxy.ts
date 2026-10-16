@@ -196,9 +196,11 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
 } from "./sessionBrokerProxyAcquisition";
 import type { SessionConfig } from "../devices/sessionConfig";
-import type {
-  SessionBrokerReleaseResult,
-  SessionBrokerResult,
+import {
+  SESSION_OWNER_EXITED_CODE,
+  type SessionBrokerReleaseReason,
+  type SessionBrokerReleaseResult,
+  type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
@@ -564,6 +566,14 @@ const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
 
 /** A hint or backoff near zero must not busy-poll the daemon (#11900). */
 const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
+
+export interface DaemonMcpProxyCloseOptions {
+  /**
+   * The proxy shuts down because its execution owner died (#12791): broker sessions are ended as
+   * `session_owner_exited`, not as the client's release.
+   */
+  executionOwnerLost?: boolean;
+}
 
 export class DaemonMcpProxy {
   private readonly sessionState = new ProxySessionState();
@@ -1251,7 +1261,10 @@ export class DaemonMcpProxy {
     return this.sessionBrokerResult;
   }
 
-  private async callBrokerRelease(sessionUuid: string): Promise<unknown> {
+  private async callBrokerRelease(
+    sessionUuid: string,
+    reason?: SessionBrokerReleaseReason,
+  ): Promise<unknown> {
     const client = this.client;
     if (!client) {
       throw new DaemonUnavailableError("Cannot release broker session without a daemon connection");
@@ -1260,7 +1273,11 @@ export class DaemonMcpProxy {
       () =>
         client.callDaemonMethod(
           DAEMON_RELEASE_BROKER_SESSION_METHOD,
-          { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
+          {
+            sessionId: sessionUuid,
+            livenessOwnerToken: this.livenessOwnerToken,
+            ...(reason ? { reason } : {}),
+          },
           { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
         ),
       {
@@ -1298,14 +1315,18 @@ export class DaemonMcpProxy {
     }
   }
 
-  /** Broker teardown remains durable in the daemon even when this bounded call cannot confirm it. */
-  private async releaseBrokerSessions(): Promise<void> {
+  /**
+   * Broker teardown remains durable in the daemon even when this bounded call cannot confirm it.
+   * An execution-owner loss reports `session_owner_exited` (#12791): the daemon records that
+   * terminal receipt and answers before device destruction, which outlasts this bound.
+   */
+  private async releaseBrokerSessions(reason?: SessionBrokerReleaseReason): Promise<void> {
     const sessions = [...this.sessionBrokerSessions.keys()];
     this.sessionBrokerBinding = undefined;
     await Promise.all(
       sessions.map(async (sessionUuid) => {
         try {
-          const result = await this.callBrokerRelease(sessionUuid);
+          const result = await this.callBrokerRelease(sessionUuid, reason);
           const release = result as Partial<SessionBrokerReleaseResult> | undefined;
           if (
             release?.sessionUuid !== sessionUuid ||
@@ -6209,12 +6230,12 @@ export class DaemonMcpProxy {
    * EOF hard bound, `OutputGatedTransport` still writes received answers while dropping all
    * unsolicited output; a stdout write error closes that gate fully at once (#11951).
    */
-  close(): Promise<void> {
+  close(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.
-    return (this.closePromise ??= this.closeOnce());
+    return (this.closePromise ??= this.closeOnce(options));
   }
 
-  private async closeOnce(): Promise<void> {
+  private async closeOnce(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     const connectedClient = this.connected ? this.client : null;
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
@@ -6235,7 +6256,9 @@ export class DaemonMcpProxy {
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
-      this.releaseBrokerSessions(),
+      this.releaseBrokerSessions(
+        options?.executionOwnerLost ? SESSION_OWNER_EXITED_CODE : undefined,
+      ),
       this.joinConnectionAttempt(),
     ]);
     await this.latestBindingKeeper.stopBoundSessionHeartbeat();

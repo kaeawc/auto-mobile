@@ -323,7 +323,7 @@ describe("published observe waitFor input schema", () => {
   };
 
   beforeAll(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
     registerObserveTools();
     const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();
@@ -364,7 +364,7 @@ describe("published observe waitFor input schema", () => {
   };
 
   test("documents textMatch as applying only to waitFor.text", () => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
     registerObserveTools();
     const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();

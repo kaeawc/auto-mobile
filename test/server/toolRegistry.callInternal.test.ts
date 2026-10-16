@@ -125,7 +125,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     // A gated (debugOnly) but planExecutable tool: getTool hides it, getToolForPlan
     // returns it. Only the `forPlan` resolution should reach it.
     registerCapturingTool("hiddenStep", { debugOnly: true });
-    ((ToolRegistry as any).tools.get("hiddenStep") as RegisteredTool).planExecutable = true;
+    (ToolRegistry.getRegisteredTool("hiddenStep") as RegisteredTool).planExecutable = true;
 
     // Sanity: getTool hides it, so the default (non-forPlan) resolution must fail.
     expect(ToolRegistry.getTool("hiddenStep")).toBeUndefined();

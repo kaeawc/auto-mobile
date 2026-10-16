@@ -18,7 +18,7 @@ import {
   navigateToSchema,
   registerNavigationTools,
 } from "../../src/server/navigationTools";
-import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { PortManager } from "../../src/utils/PortManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -71,9 +71,7 @@ describe("navigation tool session graph selection", () => {
         new Error("must not start exploration"),
       );
       try {
-        const handler = (
-          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
-        ).tools.get("explore")!.deviceAwareHandler!;
+        const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         await expect(
           handler({ ...device, platform }, { packageName: "com.nope.missing" }),
         ).rejects.toThrow("Package not installed: com.nope.missing");
@@ -105,9 +103,7 @@ describe("navigation tool session graph selection", () => {
         new Error("must not start exploration"),
       );
       try {
-        const handler = (
-          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
-        ).tools.get("explore")!.deviceAwareHandler!;
+        const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         await expect(
           handler({ ...device, platform }, { packageName: "com.test.app" }),
         ).rejects.toBeInstanceOf(ActionableError);
@@ -150,9 +146,7 @@ describe("navigation tool session graph selection", () => {
         new Error("must not start exploration"),
       );
       try {
-        const handler = (
-          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
-        ).tools.get("explore")!.deviceAwareHandler!;
+        const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         await expect(
           handler({ ...device, platform: "android" }, { packageName: "com.test.app" }),
         ).rejects.toMatchObject({
@@ -209,9 +203,7 @@ describe("navigation tool session graph selection", () => {
       };
       const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(result);
       try {
-        const handler = (
-          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
-        ).tools.get("explore")!.deviceAwareHandler!;
+        const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         const response = await handler(
           { ...device, platform: "android" },
           { packageName: "com.test.app" },
@@ -268,9 +260,7 @@ describe("navigation tool session graph selection", () => {
       };
       const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(normal);
       try {
-        const handler = (
-          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
-        ).tools.get("explore")!.deviceAwareHandler!;
+        const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         const response = await handler({ ...device, platform }, { packageName: " com.test.app " });
         expect(response.isError).toBeUndefined();
         expect(JSON.parse(response.content[0].text)).toMatchObject(normal);
@@ -485,7 +475,6 @@ describe("navigation tool session graph selection", () => {
     fakeDevices.setCurrentDevice(device, "ios");
     const registry = ToolRegistry as unknown as {
       deviceSessionManager: FakeDeviceSessionManager;
-      tools: Map<string, { handler: (args: unknown) => Promise<unknown> }>;
     };
     const originalDevices = registry.deviceSessionManager;
     registry.deviceSessionManager = fakeDevices;
@@ -530,7 +519,7 @@ describe("navigation tool session graph selection", () => {
         ["getNavigationGraph", getNavigationGraphSchema.parse({})],
       ] as const;
       for (const [name, args] of calls) {
-        await registry.tools.get(name)!.handler(args);
+        await ToolRegistry.getRegisteredTool(name)!.handler(args);
         expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("either");
       }
       expect(fakeDevices.getEnsureDeviceReadyCallCount()).toBe(3);
@@ -587,14 +576,8 @@ describe("navigation tool session graph selection", () => {
     );
 
     try {
-      const tools = ToolRegistry as unknown as {
-        tools: Map<
-          string,
-          { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<unknown> }
-        >;
-      };
-      const navigateHandler = tools.tools.get("navigateTo")?.deviceAwareHandler;
-      const exploreHandler = tools.tools.get("explore")?.deviceAwareHandler;
+      const navigateHandler = ToolRegistry.getRegisteredTool("navigateTo")?.deviceAwareHandler;
+      const exploreHandler = ToolRegistry.getRegisteredTool("explore")?.deviceAwareHandler;
 
       expect(navigateHandler).toBeDefined();
       expect(exploreHandler).toBeDefined();
@@ -683,14 +666,7 @@ describe("navigation tool session graph selection", () => {
     } as never);
 
     try {
-      const handler = (
-        ToolRegistry as unknown as {
-          tools: Map<
-            string,
-            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
-          >;
-        }
-      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = ToolRegistry.getRegisteredTool("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 
@@ -771,14 +747,7 @@ describe("navigation tool session graph selection", () => {
     } as never);
 
     try {
-      const handler = (
-        ToolRegistry as unknown as {
-          tools: Map<
-            string,
-            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
-          >;
-        }
-      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = ToolRegistry.getRegisteredTool("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, {
         platform: "ios",
@@ -842,14 +811,7 @@ describe("navigation tool session graph selection", () => {
     ).mockReturnValue(undefined);
 
     try {
-      const handler = (
-        ToolRegistry as unknown as {
-          tools: Map<
-            string,
-            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
-          >;
-        }
-      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = ToolRegistry.getRegisteredTool("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 
@@ -914,14 +876,7 @@ describe("navigation tool session graph selection", () => {
     } as never);
 
     try {
-      const handler = (
-        ToolRegistry as unknown as {
-          tools: Map<
-            string,
-            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
-          >;
-        }
-      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = ToolRegistry.getRegisteredTool("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 
@@ -975,9 +930,7 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
     const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(manager);
 
     try {
-      const handler = (ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }).tools.get(
-        "getNavigationGraph",
-      )!.deviceAwareHandler!;
+      const handler = ToolRegistry.getRegisteredTool("getNavigationGraph")!.deviceAwareHandler!;
 
       const response = await handler(device, { platform: "android", appId: APP });
 

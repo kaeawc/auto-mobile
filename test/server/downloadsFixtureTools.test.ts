@@ -19,7 +19,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
     });
   });
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
     // The tool is now device-aware, so its wrapped handler records a tool call
     // via the ToolRegistry's repository/timer. Stub both so the fast unit test
     // never resolves the real file-backed getDatabase() (issue #3067) and stays
@@ -32,7 +32,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
   afterEach(() => {
     (ToolRegistry as any).timer = originalTimer;
     (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearToolsForTesting();
   });
 
   test("registers a discoverable, opt-in, device-aware, strict schema", () => {

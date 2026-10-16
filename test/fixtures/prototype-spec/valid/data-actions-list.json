@@ -1,0 +1,80 @@
+{
+  "id": "data-actions-list",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "draft": "New item"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "label": "Add",
+        "onTap": [
+          {
+            "type": "appendData",
+            "path": "/data/items",
+            "value": {
+              "value": {
+                "name": "new"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Reset title",
+        "onTap": [
+          {
+            "type": "setData",
+            "path": "/data/title",
+            "value": {
+              "value": "Items"
+            }
+          }
+        ]
+      },
+      {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/items"
+          },
+          "as": "item"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "Row"
+          },
+          {
+            "type": "button",
+            "label": "Delete",
+            "onTap": [
+              {
+                "type": "removeData",
+                "path": "/data/items/{index}"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "title": "List",
+    "items": [
+      {
+        "name": "one"
+      },
+      {
+        "name": "two"
+      }
+    ]
+  }
+}

@@ -11,12 +11,6 @@ import {
 } from "../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
 
-// Action types the contract and host know before any device runtime does (#12519). The shared
-// fixtures are decoded by the Kotlin and Swift test suites too, so a fixture for one of these must
-// land with the native runtime that decodes it; their host coverage is in
-// test/features/prototype/prototypeDataActions.test.ts. Remove an entry when its fixture lands.
-const HOST_ONLY_ACTION_TYPES: readonly string[] = ["setData", "appendData", "removeData"];
-
 const fixtures = join(import.meta.dir, "../fixtures/prototype-spec");
 function files(kind: string): string[] {
   return readdirSync(join(fixtures, kind))
@@ -85,7 +79,7 @@ describe("shared prototype contract", () => {
     }
     for (const type of [
       ...PROTOTYPE_NODE_TYPES,
-      ...PROTOTYPE_ACTION_TYPES.filter((type) => !HOST_ONLY_ACTION_TYPES.includes(type)),
+      ...PROTOTYPE_ACTION_TYPES,
       ...PROTOTYPE_PLACEMENT_TYPES,
     ]) {
       expect(found.has(type)).toBe(true);

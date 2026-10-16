@@ -648,13 +648,12 @@ export class CtrlProxyHierarchy {
     }
 
     try {
-      const result = await this.context.adb.executeCommand(
-        "shell dumpsys activity processes",
+      const result = await this.context.adb.executeCommand("shell dumpsys activity processes", {
         timeoutMs,
-        DUMPSYS_MAX_BUFFER,
-        true,
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       return isAndroidPackageRunning(result.stdout, packageName, cachedHierarchy.hierarchy.userId);
     } catch (error) {
       if (signal?.aborted) {
@@ -1138,10 +1137,7 @@ export class CtrlProxyHierarchy {
         await perf.track("sendBroadcast", async () => {
           await this.context.adb.executeCommand(
             `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid} --ez disableAllFiltering ${disableAllFiltering}"`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
+            { signal },
           );
         });
       }

@@ -5,7 +5,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ensureAndroidRoot } from "../../utils/android-cmdline-tools/ensureAndroidRoot";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -234,7 +234,7 @@ export async function prepareDeviceClock(
 /** All clock device command strings are owned by this adapter. */
 export class AndroidDeviceClockAdapter implements DeviceClockAdapter {
   constructor(
-    private readonly adb: Pick<AdbExecutor, "executeCommand">,
+    private readonly adb: AdbCommandRunner,
     private readonly signal?: AbortSignal,
   ) {}
   async canRoot(): Promise<boolean> {
@@ -279,7 +279,11 @@ export class AndroidDeviceClockAdapter implements DeviceClockAdapter {
   }
   private async command(command: string, timeoutMs = 30_000): Promise<string> {
     this.signal?.throwIfAborted();
-    const result = await this.adb.executeCommand(command, timeoutMs, undefined, true, this.signal);
+    const result = await this.adb.executeCommand(command, {
+      timeoutMs,
+      noRetry: true,
+      signal: this.signal,
+    });
     this.signal?.throwIfAborted();
     if (
       result.error ||

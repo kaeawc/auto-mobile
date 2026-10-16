@@ -10,7 +10,11 @@ import {
   WINDOW_MANAGER_ROTATION_COMMAND,
   WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
 } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecuteOptions,
+  AdbExecutor,
+} from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { resolveExecuteCommandOptions } from "../../../src/utils/android-cmdline-tools/executeCommandArgs";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -31,20 +35,16 @@ class DeadlineAdbExecutor extends FakeAdbExecutor {
 
   override async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
+    timeoutMsOrOptions?: number | AdbExecuteOptions,
+    ...rest: [
+      maxBuffer?: number,
+      noRetry?: boolean,
+      signal?: AbortSignal,
+      waitForProcessSettlementAfterAbort?: boolean,
+    ]
   ) {
-    const result = await super.executeCommand(
-      command,
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      signal,
-      waitForProcessSettlementAfterAbort,
-    );
+    const { timeoutMs } = resolveExecuteCommandOptions(timeoutMsOrOptions, ...rest);
+    const result = await super.executeCommand(command, timeoutMsOrOptions, ...rest);
     if (this.consumeBudgetFor(command)) {
       if (this.waitForTimeout) {
         await this.timer.sleep(timeoutMs ?? 0);
@@ -68,20 +68,16 @@ class CancellingAdbExecutor extends FakeAdbExecutor {
 
   override async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
+    timeoutMsOrOptions?: number | AdbExecuteOptions,
+    ...rest: [
+      maxBuffer?: number,
+      noRetry?: boolean,
+      signal?: AbortSignal,
+      waitForProcessSettlementAfterAbort?: boolean,
+    ]
   ) {
-    const result = await super.executeCommand(
-      command,
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      signal,
-      waitForProcessSettlementAfterAbort,
-    );
+    const { signal } = resolveExecuteCommandOptions(timeoutMsOrOptions, ...rest);
+    const result = await super.executeCommand(command, timeoutMsOrOptions, ...rest);
     if (this.cancelFor(command)) {
       this.controller.abort(this.reason);
       signal?.throwIfAborted();

@@ -501,9 +501,7 @@ export class AppPermissions {
       });
       const result = await adb.executeCommand(
         `shell dumpsys package ${shellQuote(normalizedAppId)}`,
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+        { maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true },
       );
       const stdout = result.stdout;
       if (outputReportsMissingPackage(stdout)) {

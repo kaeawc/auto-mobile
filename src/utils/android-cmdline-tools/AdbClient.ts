@@ -37,6 +37,7 @@ import {
   type AdbSpawnOptions,
   type DeviceTimestampResult,
 } from "./interfaces/AdbExecutor";
+import { resolveExecuteCommandOptions } from "./executeCommandArgs";
 import { runWithAbortSignal, getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
@@ -638,10 +639,13 @@ export class AdbClient implements AdbExecutor {
   /**
    * Execute an ADB command
    * @param command - The ADB command to execute
-   * @param timeoutMs - Optional timeout in milliseconds
-   * @param maxBuffer - Optional maximum buffer size for command output
-   * @param noRetry - Optional flag to disable retry logic for commands expected to fail
+   * @param options - Timeout, buffer, retry (`noRetry` for commands expected to fail), cancellation
+   *   and streaming options
    * @returns Promise with command output
+   */
+  async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult>;
+  /**
+   * @deprecated Pass an {@link AdbExecuteOptions} object instead of positional arguments.
    */
   async executeCommand(
     command: string,
@@ -650,14 +654,25 @@ export class AdbClient implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
+  ): Promise<ExecResult>;
+  async executeCommand(
+    command: string,
+    timeoutMsOrOptions?: number | AdbExecuteOptions,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult> {
-    return this.execute(this.parseCommandArgs(command), {
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      signal,
-      waitForProcessSettlementAfterAbort,
-    });
+    return this.execute(
+      this.parseCommandArgs(command),
+      resolveExecuteCommandOptions(
+        timeoutMsOrOptions,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ),
+    );
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
@@ -829,13 +844,11 @@ export class AdbClient implements AdbExecutor {
     signal?: AbortSignal,
   ): Promise<DeviceTimestampResult> {
     try {
-      const result = await this.executeCommand(
-        "shell date +%s%3N",
+      const result = await this.executeCommand("shell date +%s%3N", {
         timeoutMs,
-        undefined,
-        true,
+        noRetry: true,
         signal,
-      );
+      });
       const trimmed = result.stdout.trim();
       if (/^\d+$/.test(trimmed)) {
         const parsed = Number(trimmed);
@@ -849,13 +862,11 @@ export class AdbClient implements AdbExecutor {
     }
 
     try {
-      const result = await this.executeCommand(
-        "shell date +%s",
+      const result = await this.executeCommand("shell date +%s", {
         timeoutMs,
-        undefined,
-        true,
+        noRetry: true,
         signal,
-      );
+      });
       const trimmed = result.stdout.trim();
       if (/^\d+$/.test(trimmed)) {
         const parsed = Number(trimmed);
@@ -893,13 +904,11 @@ export class AdbClient implements AdbExecutor {
     }
 
     try {
-      const result = await this.executeCommand(
-        "shell getprop ro.build.version.sdk",
+      const result = await this.executeCommand("shell getprop ro.build.version.sdk", {
         timeoutMs,
-        undefined,
-        true,
+        noRetry: true,
         signal,
-      );
+      });
       const parsed = Number.parseInt(result.stdout.trim(), 10);
       this.apiLevelCache = Number.isNaN(parsed) ? null : parsed;
       return this.apiLevelCache;
@@ -1580,7 +1589,7 @@ export class AdbClient implements AdbExecutor {
     logger.debug("Getting list of connected devices");
     let result: ExecResult;
     try {
-      result = await this.executeCommand("devices -l", timeoutMs, undefined, true, signal);
+      result = await this.executeCommand("devices -l", { timeoutMs, noRetry: true, signal });
     } catch (error) {
       if (this.isMissingExecutableError(error)) {
         this.recordMissingAdbProbe();
@@ -1628,13 +1637,11 @@ export class AdbClient implements AdbExecutor {
 
     let result: ExecResult;
     try {
-      result = await this.executeCommand(
-        "devices -l",
-        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
-        undefined,
-        true,
-        options.signal,
-      );
+      result = await this.executeCommand("devices -l", {
+        timeoutMs: options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        noRetry: true,
+        signal: options.signal,
+      });
     } catch (error) {
       if (this.isMissingExecutableError(error)) {
         if (options.throwOnMissingAdb) {
@@ -1693,13 +1700,11 @@ export class AdbClient implements AdbExecutor {
    */
   async getWakefulness(signal?: AbortSignal): Promise<"Awake" | "Asleep" | "Dozing" | null> {
     try {
-      const result = await this.executeCommand(
-        "shell dumpsys power | grep mWakefulness=",
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+      const result = await this.executeCommand("shell dumpsys power | grep mWakefulness=", {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       const match = result.stdout.match(/mWakefulness=(\w+)/);
       if (match) {
         const state = match[1];
@@ -1744,13 +1749,11 @@ export class AdbClient implements AdbExecutor {
   async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {
     let policy: string;
     try {
-      const result = await this.executeCommand(
-        "shell dumpsys window policy",
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+      const result = await this.executeCommand("shell dumpsys window policy", {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       policy = result.stdout;
     } catch {
       logger.debug("[ADB] Failed to read window policy for device lock state");
@@ -1788,13 +1791,11 @@ export class AdbClient implements AdbExecutor {
   async listUsers(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
       // Try dumpsys user first - provides more structured output
-      const result = await this.executeCommand(
-        "shell dumpsys user",
-        undefined,
-        DUMPSYS_MAX_BUFFER,
-        true,
+      const result = await this.executeCommand("shell dumpsys user", {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       const users = parseDumpsysUsers(result.stdout);
 
       if (users.length > 0) {
@@ -1826,13 +1827,7 @@ export class AdbClient implements AdbExecutor {
    */
   private async listUsersLegacy(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
-      const result = await this.executeCommand(
-        "shell pm list users",
-        undefined,
-        undefined,
-        true,
-        signal,
-      );
+      const result = await this.executeCommand("shell pm list users", { noRetry: true, signal });
       const users = parsePmListUsers(result.stdout);
 
       if (users.length > 0) {
@@ -1883,10 +1878,7 @@ export class AdbClient implements AdbExecutor {
     try {
       const result = await this.executeCommand(
         "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
-        timeoutMs,
-        DUMPSYS_MAX_BUFFER,
-        true,
-        signal,
+        { timeoutMs, maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true, signal },
       );
 
       const parsed = parseResumedActivityForDisplay(result.stdout, displayId);

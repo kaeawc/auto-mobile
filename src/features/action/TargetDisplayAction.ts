@@ -1,6 +1,6 @@
 import type { BootedDevice, ObserveResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DaemonState } from "../../daemon/daemonState";
 import { logger } from "../../utils/logger";
@@ -28,18 +28,16 @@ import { INTERMEDIATE_OBSERVATION_OPTIONS } from "./BaseVisualChange";
 export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
 async function readActionDisplayInfos(
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<AndroidDisplayInfo[]> {
   throwIfAborted(signal);
   try {
-    const output = await adb.executeCommand(
-      "shell cmd display get-displays",
-      2000,
-      undefined,
-      true,
+    const output = await adb.executeCommand("shell cmd display get-displays", {
+      timeoutMs: 2000,
+      noRetry: true,
       signal,
-    );
+    });
     throwIfAborted(signal);
     const infos = parseAndroidDisplayInfos(output.stdout);
     if (!infos.length) {
@@ -69,7 +67,7 @@ function connectedActionPanels(infos: readonly AndroidDisplayInfo[], device: Boo
 async function assertActionPanelConnected(
   device: BootedDevice,
   panel: DisplayPanel,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   signal?: AbortSignal,
 ): Promise<void> {
   if (device.platform !== "android" || !device.displays?.panels.length) {
@@ -175,7 +173,7 @@ function targetRevisionFence(
 
 async function inputDisplayId(
   device: BootedDevice,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   key: string,
   signal?: AbortSignal,
 ): Promise<number | undefined> {
@@ -208,7 +206,7 @@ export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
   observe: Pick<ObserveScreen, "execute">,
-  adb: Pick<AdbExecutor, "executeCommand">,
+  adb: AdbCommandRunner,
   lastRenderedObservation: RenderedObservationReader = sessionRenderedObservation,
   signal?: AbortSignal,
   transitions: DisplayTransitionReader = displayTransitions,

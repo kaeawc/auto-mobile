@@ -97,11 +97,9 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<MemorySnapshot> {
     try {
       const { stdout } = await perf.track("adbMeminfo", () =>
-        this.adb.executeCommand(
-          `shell dumpsys meminfo ${shellQuote(packageName)}`,
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys meminfo ${shellQuote(packageName)}`, {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       const metrics = this.parseMeminfo(stdout);
@@ -296,7 +294,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       const { stdout } = await perf.track("adbLogcatGC", () =>
         this.adb.executeCommand(
           `shell logcat -d -v epoch --pid=${shellQuote(resolvedPid)} | grep -iE "GC[_ ].*freed.*paused"`,
-          5000,
+          { timeoutMs: 5000 },
         ),
       );
 
@@ -488,11 +486,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<UnreachableObjectsInfo | null> {
     try {
       const { stdout } = await perf.track("adbMeminfoUnreachable", () =>
-        this.adb.executeCommand(
-          `shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`,
-          10000,
-          DUMPSYS_MAX_BUFFER,
-        ),
+        this.adb.executeCommand(`shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`, {
+          timeoutMs: 10000,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+        }),
       );
 
       return this.parseUnreachableObjects(stdout);

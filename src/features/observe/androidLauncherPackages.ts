@@ -227,13 +227,11 @@ export async function resolveConfiguredHomePackage(
       ? RESOLVE_HOME_TIMEOUT_MS
       : Math.max(1, Math.min(RESOLVE_HOME_TIMEOUT_MS, timeoutMs));
   try {
-    const result = await adb.executeCommand(
-      RESOLVE_HOME_COMMAND,
-      resolveTimeoutMs,
-      undefined,
-      true,
-      combinedSignal,
-    );
+    const result = await adb.executeCommand(RESOLVE_HOME_COMMAND, {
+      timeoutMs: resolveTimeoutMs,
+      noRetry: true,
+      signal: combinedSignal,
+    });
     const packageName = parseResolvedHomePackage(result.stdout);
     if (packageName) {
       resolvedHomePackageCache.set(deviceId, {

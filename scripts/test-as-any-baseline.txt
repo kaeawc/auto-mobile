@@ -204,7 +204,6 @@
 33	test/server/observeWaitForSchema.test.ts
 2	test/server/openLinkWaitFor.test.ts
 6	test/server/planExecutionOrchestrator.integration.test.ts
-2	test/server/platform/PlatformClient.test.ts
 2	test/server/sessionLogTools.test.ts
 7	test/server/sessionPlatformRouting.daemon.integration.test.ts
 7	test/server/sessionPlatformRouting.integration.test.ts

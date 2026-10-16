@@ -1,10 +1,8 @@
 import {
-  DefaultWindowIdentityFreshnessResolver,
   type WindowIdentityFreshnessResolver,
   isStatusBarOnlyHierarchy,
 } from "./WindowIdentityFreshness";
 import {
-  DefaultActiveWindowAttributionReconciler,
   type ActiveWindowAttributionReconciler,
   type PostCaptureForegroundIdentity,
   SYSTEM_UI_WINDOW_PACKAGES,
@@ -24,10 +22,7 @@ import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
 } from "./ScreenshotPathProtection";
-import {
-  createDeviceHierarchyCapture,
-  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
-} from "./DeviceHierarchyCapture";
+import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "./DeviceHierarchyCapture";
 import {
   classifySelectedDisplayReadFailure,
   readSelectedDisplayWithRetry,
@@ -42,7 +37,6 @@ import {
   type HierarchyCapture,
   type HierarchyCaptureRequest,
 } from "./HierarchyCapture";
-import { RealSettleObserve } from "./SettleObserve";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import {
@@ -97,25 +91,16 @@ import type {
 } from "./interfaces/ViewHierarchy";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
-import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
+import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
 import type { RecentObserveCacheEntry } from "./cache/ObserveResultCacheStore";
-import {
-  getScreenshotStateStore,
-  setScreenshotStateStore,
-} from "./screenshot/ScreenshotStateRegistry";
-import {
-  DefaultObserveScreenshotRecorder,
-  ObserveScreenshotRecorder,
-  TrackedScreenshotService,
-} from "./screenshot/ObserveScreenshotRecorder";
-import { HierarchyCollector } from "./collectors/HierarchyCollector";
-import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
-import { findAppWindowBounds, PerformanceAuditor } from "./audits/PerformanceAuditor";
-import {
-  AccessibilityAuditor,
-  resolveObservationScreenshotPath,
-} from "./audits/AccessibilityAuditor";
-import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
+import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
+import { createObserveScreenWiring, installObserveStores } from "./ObserveScreenWiring";
+import type { HierarchyCollector } from "./collectors/HierarchyCollector";
+import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import { findAppWindowBounds, type PerformanceAuditor } from "./audits/PerformanceAuditor";
+import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
+import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
 import { resolveScreenshotMode, type ScreenshotMode } from "./automaticScreenshotPolicy";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -142,7 +127,6 @@ import {
   CLOSE_APP_BUTTON_RESOURCE_ID,
   WAIT_BUTTON_RESOURCE_ID,
 } from "../../utils/androidSystemUiAnr";
-import { DaemonState } from "../../daemon/daemonState";
 import {
   AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
@@ -447,6 +431,25 @@ interface SingleDisplayReconciliationContext extends SingleDisplayStageContext {
   recordProvenance: { revision: number; identityRevision: number };
 }
 
+interface PlatformCollectionContext {
+  result: ObserveResult;
+  queryOptions:
+    | import("../../models/ViewHierarchyQueryOptions").ViewHierarchyQueryOptions
+    | undefined;
+  perf: PerformanceTracker;
+  skipWaitForFresh: boolean;
+  minTimestamp: number;
+  signal: AbortSignal | undefined;
+  readOnly: boolean;
+  capturedHierarchy: ViewHierarchyResult | undefined;
+  readOptions: number | HierarchyReadOptions | undefined;
+}
+
+interface AndroidCollectionContext extends PlatformCollectionContext {
+  skipBackStack: boolean;
+  displayId: number;
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -573,6 +576,23 @@ export class RealObserveScreen implements ObserveScreen {
     this.selectedDisplayRead = dependencies?.selectedDisplayRead ?? {};
     this.idGenerator = idGenerator;
 
+    const wiring = createObserveScreenWiring({
+      device,
+      adb: () => this.adb,
+      adbFactory: () => this.adbFactory,
+      observeScreenProvider: () => this,
+      identity: {
+        device: () => this.device,
+        viewHierarchy: () => this.viewHierarchy,
+        deviceStateCollector: () => this.deviceStateCollector,
+        timer: () => this.timer,
+        platformValidator: () => this.platformValidator,
+        resolveObservationTimestampMs: (result) => this.resolveObservationTimestampMs(result),
+        extractScreenSizeFromHierarchy: (hierarchy) =>
+          this.extractScreenSizeFromHierarchy(hierarchy),
+      },
+    });
+
     // Data sources (either injected or default)
     this.viewHierarchy =
       dependencies?.viewHierarchy ??
@@ -580,13 +600,7 @@ export class RealObserveScreen implements ObserveScreen {
         ? unavailableReadOnlyHierarchy
         : new ViewHierarchy(device, this.adbFactory));
     this.hierarchyCapture =
-      dependencies?.hierarchyCapture ??
-      createDeviceHierarchyCapture(device, {
-        viewHierarchy: this.viewHierarchy,
-        settle: new RealSettleObserve(this, timer),
-        timer,
-        ids: idGenerator,
-      });
+      dependencies?.hierarchyCapture ?? wiring.createHierarchyCapture(timer, idGenerator);
     const window = dependencies?.window ?? new Window(device, this.adbFactory);
     const screenshotUtil =
       dependencies?.screenshot ??
@@ -597,109 +611,31 @@ export class RealObserveScreen implements ObserveScreen {
     const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
     this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
 
-    // Caches: install injected stores into the registry so instance methods AND
-    // the static accessors (used by server resource handlers) share state.
-    // Tests that need isolation should call setObserveCacheStore / setScreenshotStateStore
-    // with a fake in beforeEach and resetObserveCacheStore / resetScreenshotStateStore
-    // in afterEach.
-    if (dependencies?.cacheStore) {
-      setObserveCacheStore(dependencies.cacheStore);
-    }
-    if (dependencies?.screenshotStateStore) {
-      setScreenshotStateStore(dependencies.screenshotStateStore);
-    }
+    installObserveStores(dependencies);
 
     // Composed services
     this.pathProtection = dependencies?.screenshotPathProtection ?? screenshotPathProtection;
     this.screenshotRecorder =
       dependencies?.screenshotRecorder ??
-      new DefaultObserveScreenshotRecorder(
-        device,
-        screenshotUtil as TrackedScreenshotService,
-        getScreenshotStateStore(),
-        this.pathProtection,
-      );
+      wiring.createScreenshotRecorder(screenshotUtil, this.pathProtection);
     this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
     this.hierarchyCollector =
-      dependencies?.hierarchyCollector ??
-      new HierarchyCollector({
-        device,
-        viewHierarchy: this.viewHierarchy,
-        adb: this.adb,
-        adbFactory: this.adbFactory,
-        timer: this.timer,
-        onAvailabilityLost:
-          dependencies?.onAvailabilityLost ??
-          (device.platform === "android"
-            ? (reason) => {
-                const daemonState = dependencies?.daemonState ?? DaemonState.getInstance();
-                if (daemonState.isInitialized()) {
-                  daemonState
-                    .getSessionManager()
-                    .invalidateAutomationReadinessForDevice(device.deviceId, reason);
-                }
-              }
-            : undefined),
-      });
+      dependencies?.hierarchyCollector ?? wiring.createHierarchyCollector(dependencies);
     this.deviceStateCollector =
-      dependencies?.deviceStateCollector ??
-      new DeviceStateCollector({
-        device,
-        window,
-        backStack,
-        adb: this.adb,
-        timer: this.timer,
-      });
+      dependencies?.deviceStateCollector ?? wiring.createDeviceStateCollector(window, backStack);
     this.iosLockStateProbe = dependencies?.iosLockStateProbe ?? new NotifyutilIosLockStateProbe();
-    this.performanceAuditor =
-      dependencies?.performanceAuditor ??
-      new PerformanceAuditor({
-        device,
-        adbFactory: this.adbFactory,
-        // Lazy `() => this`: the auditor re-observes through this same
-        // ObserveScreen to re-validate the synthetic-tap point before each tap
-        // (issue #6228); a provider defers resolving `this` until after
-        // construction completes.
-        observeScreenProvider: () => this,
-      });
+    this.performanceAuditor = dependencies?.performanceAuditor ?? wiring.createPerformanceAuditor();
     this.accessibilityAuditor =
-      dependencies?.accessibilityAuditor ??
-      new AccessibilityAuditor({
-        device,
-        // Only this observation's capture; never the device-wide latest (#10037).
-        screenshotPathResolver: (observationId) =>
-          resolveObservationScreenshotPath(
-            getScreenshotStateStore().getPathForObservation(this.device.deviceId, observationId),
-          ),
-      });
+      dependencies?.accessibilityAuditor ?? wiring.createAccessibilityAuditor();
     this.accessibilityStateDetector =
-      dependencies?.accessibilityStateDetector ??
-      new AccessibilityStateDetector({
-        device,
-        adb: this.adb,
-      });
+      dependencies?.accessibilityStateDetector ?? wiring.createAccessibilityStateDetector();
     this.elementsBuilder = new ObserveElementsBuilder();
     this.platformValidator =
       dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
     this.safeAreaAuditor = new SafeAreaAuditor();
     this.windowIdentity =
-      dependencies?.windowIdentityFreshnessResolver ??
-      new DefaultWindowIdentityFreshnessResolver({
-        deviceStateCollector: () => this.deviceStateCollector,
-        timer: () => this.timer,
-        resolveObservationTimestampMs: (result) => this.resolveObservationTimestampMs(result),
-      });
-    this.reconciler =
-      dependencies?.activeWindowAttributionReconciler ??
-      new DefaultActiveWindowAttributionReconciler({
-        viewHierarchy: () => this.viewHierarchy,
-        deviceStateCollector: () => this.deviceStateCollector,
-        device: () => this.device,
-        platformValidator: () => this.platformValidator,
-        resolveObservationTimestampMs: (result) => this.resolveObservationTimestampMs(result),
-        extractScreenSizeFromHierarchy: (hierarchy) =>
-          this.extractScreenSizeFromHierarchy(hierarchy),
-      });
+      dependencies?.windowIdentityFreshnessResolver ?? wiring.createWindowIdentity();
+    this.reconciler = dependencies?.activeWindowAttributionReconciler ?? wiring.createReconciler();
   }
 
   // ---------- Public API ----------
@@ -2699,7 +2635,7 @@ export class RealObserveScreen implements ObserveScreen {
    * Public + parameterized for back-compat with existing tests and for callers
    * that need to assemble an `ObserveResult` without the full `execute()` pipeline.
    */
-  async collectAllData(
+  collectAllData(
     result: ObserveResult,
     queryOptions?: import("../../models/ViewHierarchyQueryOptions").ViewHierarchyQueryOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
@@ -2714,8 +2650,21 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
-        perf.serial("phase1_hierarchy");
-        await this.hierarchyCollector.collect(
+        return this.collectAndroidData({
+          result,
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+          skipBackStack,
+          readOnly,
+          capturedHierarchy,
+          readOptions,
+          displayId,
+        });
+      case "ios":
+        return this.collectIosData({
           result,
           queryOptions,
           perf,
@@ -2725,170 +2674,197 @@ export class RealObserveScreen implements ObserveScreen {
           readOnly,
           capturedHierarchy,
           readOptions,
-        );
-        perf.end();
-
-        // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.
-        const hierarchy = result.viewHierarchy;
-        if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
-          result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
-          if (hierarchy.rotation !== undefined) {
-            result.rotation = hierarchy.rotation;
-          }
-          if (hierarchy.systemInsets) {
-            result.systemInsets = hierarchy.systemInsets;
-          }
-          if (hierarchy.insets) {
-            result.insets = hierarchy.insets;
-          }
-          if (
-            hierarchy.foregroundActivity &&
-            !isAccessibilityViewClass(hierarchy.foregroundActivity)
-          ) {
-            this.applyAndroidForegroundActivity(result, hierarchy.foregroundActivity);
-          }
-          const parallelTasks: Promise<void>[] = [];
-          if (hierarchy.wakefulness) {
-            result.wakefulness = hierarchy.wakefulness;
-            result.wakefulnessSource = "hierarchy";
-          } else {
-            parallelTasks.push(
-              perf.track("wakefulness", () =>
-                this.deviceStateCollector.collectWakefulness(result, signal),
-              ),
-            );
-          }
-          parallelTasks.push(
-            perf.track("deviceLock", () =>
-              this.deviceStateCollector.collectDeviceLock(result, signal),
-            ),
-          );
-          if (!skipBackStack) {
-            // Fork: collectBackStack's own perf.track() calls run concurrently
-            // with the wakefulness/deviceLock tracks above on this same
-            // Promise.all. A shared tracker's cursor is ambient mutable state,
-            // so without a fork, block-open/close activity deep in the back
-            // stack collector could misparent (or wrongly pop) the sibling
-            // tracks' timings (issue #6706).
-            parallelTasks.push(
-              perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
-              ),
-            );
-          }
-          if (parallelTasks.length > 0) {
-            await Promise.all(parallelTasks);
-          }
-          logger.debug("[OBSERVE] Using device metadata from accessibility service");
-        } else {
-          this.applyKnownPanelScreenSize(result);
-          const tasks: Promise<void>[] = [
-            perf.track("wakefulness", () =>
-              this.deviceStateCollector.collectWakefulness(result, signal),
-            ),
-            perf.track("deviceLock", () =>
-              this.deviceStateCollector.collectDeviceLock(result, signal),
-            ),
-          ];
-          if (!skipBackStack) {
-            // Fork for the same reason as the branch above (issue #6706):
-            // this track runs concurrently with the wakefulness/deviceLock
-            // tracks on the same shared tracker.
-            tasks.push(
-              perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
-              ),
-            );
-          }
-          await Promise.all(tasks);
-        }
-
-        // CtrlProxy is installed lazily. Preserve active-window attribution for
-        // that bootstrap interval only; once CtrlProxy supplied an app/activity
-        // or hierarchy package, never make the legacy Window query.
-        if (!result.activeWindow) {
-          await this.deviceStateCollector.collectActiveWindow(result, readOnly);
-        }
-
-        // Preserve package attribution when the accessibility service did not
-        // provide a usable activity and the legacy window query also failed.
-        // `!result.activeWindow?.appId` (not `!result.activeWindow`): the legacy
-        // query's own failure sentinel is a TRUTHY object with an empty appId
-        // (`Window.getActive`'s catch branch), which would otherwise short-circuit
-        // this fallback and leave a readable, package-attributed capture wrongly
-        // reporting no foreground window (issue #6220 false-positive).
-        if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
-          // Backfill ONLY the missing appId. The legacy query's failure sentinel
-          // is a truthy object that still carries a real `layoutSeqSum` (summed
-          // independently of package/activity parse success) and often an
-          // `activityName`/`type`/`systemOverlay`; replacing the whole object
-          // would zero `layoutSeqSum` and blank those fields, masking
-          // screen-change detection (issue #6320 regression of #6239). Only the
-          // genuinely-absent case constructs a fresh object with empty defaults.
-          result.activeWindow = result.activeWindow
-            ? { ...result.activeWindow, appId: result.viewHierarchy.packageName }
-            : {
-                appId: result.viewHierarchy.packageName,
-                activityName: "",
-                layoutSeqSum: 0,
-              };
-        }
-
-        // CtrlProxy pairs the captured root package with the last window-state
-        // class it heard, which may belong to another display. The back-stack
-        // dump already sampled above scopes its resumed activity to the logical
-        // display mapped from `result.display.key`. Only use it when
-        // the activity belongs to the captured hierarchy's app.
-        this.scopeActiveWindowToBackStack(result);
-        await this.applyAndroidScreenIdentity(result);
-
-        if (result.notificationPermissionDetected && result.activeWindow) {
-          result.activeWindow.type = "notification_permission_dialog";
-        }
-
-        break;
-
-      case "ios": {
-        perf.serial("ios_collect");
-        await this.hierarchyCollector.collect(
-          result,
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          readOnly,
-          capturedHierarchy,
-          readOptions,
-        );
-
-        this.applyIosScreenMetadata(result);
-        this.applyIosInsetsAndRotation(result);
-        this.projectIosObservationHierarchy(result);
-
-        let sdkScreenIdentity: ScreenIdentity | undefined;
-        try {
-          sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(
-            result.viewHierarchy?.packageName,
-          );
-        } catch (error) {
-          // The hierarchy remains valid when the optional SDK refresh fails.
-          logger.debug(
-            `[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`,
-          );
-        }
-        const hierarchyScreenIdentity = deriveIosScreenIdentity(
-          result.viewHierarchy,
-          result.screenSize,
-        );
-        result.screenIdentity = hierarchyScreenIdentity?.components.modalClass
-          ? hierarchyScreenIdentity
-          : (sdkScreenIdentity ?? hierarchyScreenIdentity);
-
-        perf.end();
-        break;
-      }
+        });
+      default:
+        return Promise.resolve();
     }
+  }
+
+  private async collectAndroidData({
+    result,
+    queryOptions,
+    perf,
+    skipWaitForFresh,
+    minTimestamp,
+    signal,
+    skipBackStack,
+    readOnly,
+    capturedHierarchy,
+    readOptions,
+    displayId,
+  }: AndroidCollectionContext): Promise<void> {
+    perf.serial("phase1_hierarchy");
+    await this.hierarchyCollector.collect(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    );
+    perf.end();
+
+    // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.
+    const hierarchy = result.viewHierarchy;
+    if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
+      result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+      if (hierarchy.rotation !== undefined) {
+        result.rotation = hierarchy.rotation;
+      }
+      if (hierarchy.systemInsets) {
+        result.systemInsets = hierarchy.systemInsets;
+      }
+      if (hierarchy.insets) {
+        result.insets = hierarchy.insets;
+      }
+      if (hierarchy.foregroundActivity && !isAccessibilityViewClass(hierarchy.foregroundActivity)) {
+        this.applyAndroidForegroundActivity(result, hierarchy.foregroundActivity);
+      }
+      const parallelTasks: Promise<void>[] = [];
+      if (hierarchy.wakefulness) {
+        result.wakefulness = hierarchy.wakefulness;
+        result.wakefulnessSource = "hierarchy";
+      } else {
+        parallelTasks.push(
+          perf.track("wakefulness", () =>
+            this.deviceStateCollector.collectWakefulness(result, signal),
+          ),
+        );
+      }
+      parallelTasks.push(
+        perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)),
+      );
+      if (!skipBackStack) {
+        // Fork: collectBackStack's own perf.track() calls run concurrently
+        // with the wakefulness/deviceLock tracks above on this same
+        // Promise.all. A shared tracker's cursor is ambient mutable state,
+        // so without a fork, block-open/close activity deep in the back
+        // stack collector could misparent (or wrongly pop) the sibling
+        // tracks' timings (issue #6706).
+        parallelTasks.push(
+          perf.track("backStack", () =>
+            this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
+          ),
+        );
+      }
+      if (parallelTasks.length > 0) {
+        await Promise.all(parallelTasks);
+      }
+      logger.debug("[OBSERVE] Using device metadata from accessibility service");
+    } else {
+      this.applyKnownPanelScreenSize(result);
+      const tasks: Promise<void>[] = [
+        perf.track("wakefulness", () =>
+          this.deviceStateCollector.collectWakefulness(result, signal),
+        ),
+        perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)),
+      ];
+      if (!skipBackStack) {
+        // Fork for the same reason as the branch above (issue #6706):
+        // this track runs concurrently with the wakefulness/deviceLock
+        // tracks on the same shared tracker.
+        tasks.push(
+          perf.track("backStack", () =>
+            this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
+          ),
+        );
+      }
+      await Promise.all(tasks);
+    }
+
+    // CtrlProxy is installed lazily. Preserve active-window attribution for
+    // that bootstrap interval only; once CtrlProxy supplied an app/activity
+    // or hierarchy package, never make the legacy Window query.
+    if (!result.activeWindow) {
+      await this.deviceStateCollector.collectActiveWindow(result, readOnly);
+    }
+
+    // Preserve package attribution when the accessibility service did not
+    // provide a usable activity and the legacy window query also failed.
+    // `!result.activeWindow?.appId` (not `!result.activeWindow`): the legacy
+    // query's own failure sentinel is a TRUTHY object with an empty appId
+    // (`Window.getActive`'s catch branch), which would otherwise short-circuit
+    // this fallback and leave a readable, package-attributed capture wrongly
+    // reporting no foreground window (issue #6220 false-positive).
+    if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
+      // Backfill ONLY the missing appId. The legacy query's failure sentinel
+      // is a truthy object that still carries a real `layoutSeqSum` (summed
+      // independently of package/activity parse success) and often an
+      // `activityName`/`type`/`systemOverlay`; replacing the whole object
+      // would zero `layoutSeqSum` and blank those fields, masking
+      // screen-change detection (issue #6320 regression of #6239). Only the
+      // genuinely-absent case constructs a fresh object with empty defaults.
+      result.activeWindow = result.activeWindow
+        ? { ...result.activeWindow, appId: result.viewHierarchy.packageName }
+        : {
+            appId: result.viewHierarchy.packageName,
+            activityName: "",
+            layoutSeqSum: 0,
+          };
+    }
+
+    // CtrlProxy pairs the captured root package with the last window-state
+    // class it heard, which may belong to another display. The back-stack
+    // dump already sampled above scopes its resumed activity to the logical
+    // display mapped from `result.display.key`. Only use it when
+    // the activity belongs to the captured hierarchy's app.
+    this.scopeActiveWindowToBackStack(result);
+    await this.applyAndroidScreenIdentity(result);
+
+    if (result.notificationPermissionDetected && result.activeWindow) {
+      result.activeWindow.type = "notification_permission_dialog";
+    }
+  }
+
+  private async collectIosData({
+    result,
+    queryOptions,
+    perf,
+    skipWaitForFresh,
+    minTimestamp,
+    signal,
+    readOnly,
+    capturedHierarchy,
+    readOptions,
+  }: PlatformCollectionContext): Promise<void> {
+    perf.serial("ios_collect");
+    await this.hierarchyCollector.collect(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    );
+
+    this.applyIosScreenMetadata(result);
+    this.applyIosInsetsAndRotation(result);
+    this.projectIosObservationHierarchy(result);
+
+    let sdkScreenIdentity: ScreenIdentity | undefined;
+    try {
+      sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(
+        result.viewHierarchy?.packageName,
+      );
+    } catch (error) {
+      // The hierarchy remains valid when the optional SDK refresh fails.
+      logger.debug(`[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`);
+    }
+    const hierarchyScreenIdentity = deriveIosScreenIdentity(
+      result.viewHierarchy,
+      result.screenSize,
+    );
+    result.screenIdentity = hierarchyScreenIdentity?.components.modalClass
+      ? hierarchyScreenIdentity
+      : (sdkScreenIdentity ?? hierarchyScreenIdentity);
+
+    perf.end();
   }
 
   /**

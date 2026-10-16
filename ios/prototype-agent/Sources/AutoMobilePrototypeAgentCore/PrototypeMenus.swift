@@ -115,6 +115,14 @@ enum PrototypeMenus {
                     (number.map { $0 >= 0 && $0 <= 2_147_483_647 && $0.rounded(.down) == $0 } ?? false)
                 else { throw fail("\(path).page", "Invalid value") }
             case "dismiss": keys = ["type"]
+            case "setData", "appendData", "removeData":
+                keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
+                _ = try string(fields["path"], "\(path).path")
+                if type != "removeData" {
+                    guard let binding = fields["value"],
+                          (try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value")) != nil
+                    else { throw fail("\(path).value", "Invalid data write value") }
+                }
             default: throw fail("\(path).type", "Invalid string value")
             }
             try strict(fields, keys, path)

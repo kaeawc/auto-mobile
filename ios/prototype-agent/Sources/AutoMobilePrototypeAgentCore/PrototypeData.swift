@@ -41,25 +41,41 @@ enum PrototypeDataPointer {
 
     static func resolve(_ data: [String: JSONValue]?, pointer: String) -> JSONValue? {
         guard isValid(pointer), let data else { return nil }
-        var value: JSONValue = .object(data)
-        for token in tokens(pointer) {
+        return resolve(.object(data), tokens: tokens(pointer)[...])
+    }
+
+    /// Walks already-decoded pointer tokens from `root`; nil when any step is missing.
+    static func resolve(_ root: JSONValue, tokens: ArraySlice<String>) -> JSONValue? {
+        var value = root
+        for token in tokens {
             switch value {
             case let .object(fields):
-                // Swift strings compare canonically; pointer members require exact UTF-16 keys.
-                guard let index = fields.index(forKey: token),
-                      fields[index].key.utf16.elementsEqual(token.utf16) else { return nil }
-                value = fields[index].value
+                guard let member = exactKey(token, in: fields) else { return nil }
+                value = fields[member].value
             case let .array(items):
-                let digits = Array(token.utf16)
-                guard token == "0" || (
-                    digits.first.map { (49 ... 57).contains($0) } == true &&
-                        digits.allSatisfy { (48 ... 57).contains($0) }
-                ), let index = Int(token), items.indices.contains(index) else { return nil }
+                guard let index = arrayIndex(token), items.indices.contains(index) else { return nil }
                 value = items[index]
             default: return nil
             }
         }
         return value
+    }
+
+    /// Swift strings compare canonically; pointer members require exact UTF-16 keys.
+    static func exactKey(_ token: String, in fields: [String: JSONValue]) -> Dictionary<String, JSONValue>.Index? {
+        guard let index = fields.index(forKey: token),
+              fields[index].key.utf16.elementsEqual(token.utf16) else { return nil }
+        return index
+    }
+
+    /// An RFC 6901 array index: `0` or digits without a leading zero.
+    static func arrayIndex(_ token: String) -> Int? {
+        let digits = Array(token.utf16)
+        guard token == "0" || (
+            digits.first.map { (49 ... 57).contains($0) } == true &&
+                digits.allSatisfy { (48 ... 57).contains($0) }
+        ) else { return nil }
+        return Int(token)
     }
 }
 

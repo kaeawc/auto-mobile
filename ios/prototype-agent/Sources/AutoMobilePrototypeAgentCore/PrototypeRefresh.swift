@@ -13,7 +13,7 @@ enum PrototypeRefresh {
         [
             PrototypeAction(
                 type: "setState", name: nil, payload: nil, context: nil, pager: nil, page: nil,
-                stack: nil, screen: nil, key: refresh.stateKey, value: .bool(true), by: nil,
+                stack: nil, screen: nil, path: nil, key: refresh.stateKey, value: .bool(true), by: nil,
                 requireValid: nil
             ),
         ] + refresh.onRefresh

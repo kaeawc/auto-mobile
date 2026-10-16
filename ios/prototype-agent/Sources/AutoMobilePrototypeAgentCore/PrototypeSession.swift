@@ -81,6 +81,9 @@ struct PrototypeSession {
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
+    /// Device data writes per prototype id (#12519), monotonic like `sequences` and for the same
+    /// reason: a host's `baseRevision` from before a re-show must not look newer than a write after it.
+    private var revisions: [String: Int] = [:]
     /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
@@ -97,6 +100,12 @@ struct PrototypeSession {
 
     var isShown: Bool {
         spec != nil
+    }
+
+    /// The shown prototype's data revision: 0 until a device data action writes it, then one more
+    /// per write. Reported as `revision` in a data write's `change` event.
+    var dataRevision: Int {
+        spec.flatMap { revisions[$0.id] } ?? 0
     }
 
     /// The last event sequence issued for the shown prototype's id (0 before its first event), which
@@ -121,24 +130,37 @@ struct PrototypeSession {
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
         nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
-        let previousStacks = !reset && self.spec?.id == spec.id ? stacks : [:]
-        stackNodes = [:]
-        spec.root.collectStacks(into: &stackNodes)
-        stacks = stackNodes.mapValues { node in
-            let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
-                .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
-            return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
-        }
-        let previous = !reset && self.spec?.id == spec.id ? pages : [:]
-        pageCounts = spec.root.pagerCounts()
-        pages = pageCounts.reduce(into: [:]) { result, entry in
-            result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
-        }
+        let keepNavigation = !reset && self.spec?.id == spec.id
+        rebuildNavigation(
+            for: spec.root,
+            keepingPages: keepNavigation ? pages : [:],
+            keepingStacks: keepNavigation ? stacks : [:]
+        )
         shownErrors = []
         state = spec.state ?? [:]
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark
+    }
+
+    /// Stack and pager bookkeeping for `root`: surviving stack paths drop unknown screens and fall
+    /// back to start when empty; each surviving pager keeps its page, clamped to its page count.
+    private mutating func rebuildNavigation(
+        for root: PrototypeNode,
+        keepingPages previous: [String: Int],
+        keepingStacks previousStacks: [String: PrototypeStackSnapshot]
+    ) {
+        stackNodes = [:]
+        root.collectStacks(into: &stackNodes)
+        stacks = stackNodes.mapValues { node in
+            let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
+                .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
+            return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
+        pageCounts = root.pagerCounts()
+        pages = pageCounts.reduce(into: [:]) { result, entry in
+            result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
+        }
     }
 
     func holds(_ condition: Condition) -> Bool {
@@ -285,6 +307,8 @@ struct PrototypeSession {
                 events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
+            case "setData", "appendData", "removeData":
+                events += runDataWrite(action)
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
@@ -296,6 +320,35 @@ struct PrototypeSession {
         }
         guard isShown else { return events }
         return events + emitStateChange(touched.filter { baseline[$0] != state[$0] })
+    }
+
+    /// A `setData`, `appendData` or `removeData` action (#12519). The write is applied to the shown
+    /// spec's data with `PrototypeDataWrite`, the drawn tree is rebuilt from the changed data so
+    /// bindings and repeat rows refresh, the data revision is bumped, and one `change` event named
+    /// for the written `/data/...` path reports `{op, value?, revision}`. A refused write (any
+    /// `PrototypeDataWriteCode`, or a tree the changed data cannot rebuild within the show's limits)
+    /// changes and emits nothing, and the rest of the action list still runs.
+    private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let spec, let op = PrototypeDataWrite.Op(actionType: action.type), let path = action.path else {
+            return []
+        }
+        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        var value: JSONValue?
+        if op != .remove {
+            guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
+                return []
+            }
+            value = resolved
+        }
+        guard case let .success(data) = PrototypeDataWrite.apply(spec.data, op: op, path: path, value: value),
+              let rebuilt = try? spec.replacingData(data) else { return [] }
+        self.spec = rebuilt
+        rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
+        let revision = dataRevision + 1
+        revisions[rebuilt.id] = revision
+        var payload: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
+        if let value { payload["value"] = value }
+        return emit(kind: "change", name: path, payload: .object(payload))
     }
 
     /// A `setPage` action: `next`/`prev` step from the current page, a number jumps to it.

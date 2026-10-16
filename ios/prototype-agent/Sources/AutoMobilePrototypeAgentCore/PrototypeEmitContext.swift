@@ -132,7 +132,7 @@ struct PrototypeEmitContext: Decodable {
         }
     }
 
-    private static func quotedByteCount(_ value: String) -> Int? {
+    static func quotedByteCount(_ value: String) -> Int? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
         return (try? encoder.encode(value))?.count

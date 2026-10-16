@@ -88,6 +88,9 @@ struct PrototypeSpec: Decodable {
     let motion: String?
     /// The node tree with every `repeat` list template already expanded (see `PrototypeRepeat`).
     let root: PrototypeNode
+    /// The authored `root` before data resolution and repeat expansion, kept so a device data write
+    /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
+    private let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root
@@ -115,27 +118,11 @@ struct PrototypeSpec: Decodable {
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
-        try PrototypeSizeBounds.validate(.object(["root": raw]))
-        try PrototypeLimits.guardAuthoredTree(raw)
-        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
-        try PrototypeMenus.validateAuthoredText(raw)
-        try PrototypeRepeat.validateEmitContexts(raw, data: data)
-        try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
-        try PrototypeLimits.guardTree(resolved)
-        let expanded = PrototypeRepeat.expand(resolved)
-        try PrototypePagerOptions.validate(expanded)
-        try PrototypeCarousel.validate(expanded)
-        try PrototypeRefresh.validate(expanded)
+        authoredRoot = raw
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
-        try PrototypeMenus.validate(expanded, state: menuState ?? [:])
-        root = try JSONDecoder().decode(
-            DecodedRoot.self,
-            from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
-        ).root
-        root.bindValidity(PrototypeChecks.bindings(root: root))
+        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -153,6 +140,57 @@ struct PrototypeSpec: Decodable {
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
         try PrototypeStacks.validate(root: root)
         try PrototypeThemeModes.validate(placement: window.placement, root: root)
+    }
+
+    /// Everything between the authored root and the drawn one, in the order the host reports
+    /// errors. It depends on `data` and the initial state only, so a data write reruns it.
+    private static func buildRoot(
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+    )
+        throws -> PrototypeNode
+    {
+        try PrototypeSizeBounds.validate(.object(["root": raw]))
+        try PrototypeLimits.guardAuthoredTree(raw)
+        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeRepeat.validateEmitContexts(raw, data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        try PrototypeLimits.guardTree(resolved)
+        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypePagerOptions.validate(expanded)
+        try PrototypeCarousel.validate(expanded)
+        try PrototypeRefresh.validate(expanded)
+        try PrototypeMenus.validate(expanded, state: menuState)
+        let root = try JSONDecoder().decode(
+            DecodedRoot.self,
+            from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
+        ).root
+        root.bindValidity(PrototypeChecks.bindings(root: root))
+        return root
+    }
+
+    private init(
+        replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode
+    ) {
+        id = spec.id
+        window = spec.window
+        state = spec.state
+        self.data = data
+        theme = spec.theme
+        motion = spec.motion
+        self.root = root
+        authoredRoot = spec.authoredRoot
+    }
+
+    /// This spec with `data` replaced and the drawn tree rebuilt from the authored one, so text
+    /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
+    /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
+    func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        try PrototypeStacks.validate(root: rebuilt)
+        try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
+        return PrototypeSpec(replacing: self, data: data, root: rebuilt)
     }
 }
 
@@ -447,7 +485,12 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
+    /// repeat row at expansion (#12519).
+    let path: String?
     let key: String?
+    /// `setState`'s literal; for `setData`/`appendData` the binding object (`{value}`, `{state}`,
+    /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
     let by: Double?

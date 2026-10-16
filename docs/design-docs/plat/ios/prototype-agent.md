@@ -501,11 +501,30 @@ substitution to the shared UTF-16 substituted-text limit; literals do not consum
 State interpolation then uses the ordinary expanded tree. `repeat.key` is accepted and kept during
 resolution, but rows retain positional identity until keyed patching (#11675).
 
-Data stays agent-owned and read-only; inspect/status report it next to state, events do not.
+Data stays agent-owned and read-only except through the data actions below; inspect/status report
+it next to state.
 Two data keys that are canonically equivalent Unicode strings collapse into one on iOS because
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
-the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+the host validator's data byte-cost rule at show; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Data actions capability
+
+The agent advertises `prototype_data_actions_v1` for `setData`, `appendData` and `removeData`
+([contract](../android/prototype-ux.md#data-actions-12519)). `PrototypeRepeat` binds a whole `{index}`
+path segment and `{item}`/`{index}` values per row at expansion, so a row's action reaches the session
+already concrete. `PrototypeSession` resolves the `{value}`, `{state}` or `{data}` value at the action,
+applies `PrototypeDataWrite` (a twin of the host's `applyPrototypeDataWrite`, with its `invalid_path`,
+`invalid_value`, `not_found`, `not_array` and `limit_exceeded` codes and `MAX_PROTOTYPE_DATA_WRITE_BYTES`),
+and rebuilds the drawn tree from the spec's authored root with `PrototypeSpec.replacingData`, so data
+text, repeat rows and data conditions refresh and `PrototypeModel` republishes the spec. A write the
+tree cannot be rebuilt for within the show's limits is refused like any other.
+
+A refused write changes nothing, emits nothing and does not stop the rest of the action list. An
+accepted write bumps the shown id's data revision (monotonic per id, never rewound by a re-show, as
+event sequences are) and emits one `change` event whose `name` is the written `/data/...` path (the
+array for an append) and whose payload is `{op, value?, revision}`. The value always travels. The agent
+does not implement `prototype_patch_v1`, so the revision has no patch conflict check on this platform yet.
 
 ## Text field options
 

@@ -24,6 +24,16 @@ import {
   NavigationGraphHistoryPage,
 } from "../../src/utils/interfaces/NavigationGraph";
 
+interface StashedGraph {
+  nodes: Map<string, NavigationNode>;
+  edges: NavigationEdge[];
+  currentScreen: string | null;
+  nodeSummaryIds: Map<string, number>;
+  edgeSummaries: NavigationGraphSummaryEdge[];
+  nextNodeId: number;
+  nextEdgeId: number;
+}
+
 /**
  * Fake implementation of NavigationGraph for testing.
  * Allows full control over navigation graph state and behavior.
@@ -47,6 +57,8 @@ export class FakeNavigationGraphManager
   private nextEdgeId = 1;
   private graphUpdateListeners: Array<() => void> = [];
   private appsWithGraph: NavigationAppSummary[] = [];
+  /** Graphs of the apps that are not current, kept so switching back restores them. */
+  private readonly stashedGraphs = new Map<string, StashedGraph>();
 
   // Call tracking
   private methodCalls: Map<string, any[][]> = new Map();
@@ -181,8 +193,47 @@ export class FakeNavigationGraphManager
 
   async setCurrentApp(appId: string): Promise<void> {
     this.trackCall("setCurrentApp", [appId]);
-    this.currentAppId = appId;
+    this.switchGraphTo(appId);
     this.emitGraphUpdated();
+  }
+
+  /**
+   * Like the real manager, each app owns its graph: leaving an app keeps its nodes and edges,
+   * returning restores them, and tool calls recorded for the app left behind are dropped.
+   */
+  private switchGraphTo(appId: string, fromEvent = false): void {
+    if (this.currentAppId === appId) {
+      return;
+    }
+    if (this.currentAppId === null) {
+      // State scripted before any app was known (addNode, addEdge) belongs to the first app.
+      this.currentAppId = appId;
+      return;
+    }
+    this.stashedGraphs.set(this.currentAppId, {
+      nodes: this.nodes,
+      edges: this.edges,
+      currentScreen: this.currentScreen,
+      nodeSummaryIds: this.nodeSummaryIds,
+      edgeSummaries: this.edgeSummaries,
+      nextNodeId: this.nextNodeId,
+      nextEdgeId: this.nextEdgeId,
+    });
+    const stashed = this.stashedGraphs.get(appId);
+    this.stashedGraphs.delete(appId);
+    this.nodes = stashed?.nodes ?? new Map();
+    this.edges = stashed?.edges ?? [];
+    // An explicit setCurrentApp starts on no screen; only an event restores the app's last one.
+    this.currentScreen = fromEvent ? (stashed?.currentScreen ?? null) : null;
+    this.nodeSummaryIds = stashed?.nodeSummaryIds ?? new Map();
+    this.edgeSummaries = stashed?.edgeSummaries ?? [];
+    this.nextNodeId = stashed?.nextNodeId ?? 1;
+    this.nextEdgeId = stashed?.nextEdgeId ?? 1;
+    if (fromEvent) {
+      // Tool calls issued while another app was in front cannot have caused this event (#10193).
+      this.toolCallHistory = [];
+    }
+    this.currentAppId = appId;
   }
 
   getCurrentAppId(): string | null {
@@ -206,6 +257,10 @@ export class FakeNavigationGraphManager
   async recordNavigationEvent(event: NavigationEvent): Promise<void> {
     this.trackCall("recordNavigationEvent", [event]);
 
+    // The event names its app, which becomes current like in the real manager.
+    if (event.applicationId) {
+      this.switchGraphTo(event.applicationId, true);
+    }
     const previousScreen = this.currentScreen;
 
     // Update current screen
@@ -394,7 +449,8 @@ export class FakeNavigationGraphManager
 
   async clearAllGraphs(): Promise<void> {
     this.trackCall("clearAllGraphs", []);
-    this.clearCurrentGraph();
+    await this.clearCurrentGraph();
+    this.stashedGraphs.clear();
     this.currentAppId = null;
     this.emitGraphUpdated();
   }
@@ -411,6 +467,15 @@ export class FakeNavigationGraphManager
 
   async exportGraphForApp(appId: string | null): Promise<ExportedGraph> {
     this.trackCall("exportGraphForApp", [appId]);
+    const stashed = appId ? this.stashedGraphs.get(appId) : undefined;
+    if (stashed) {
+      return {
+        appId,
+        nodes: Array.from(stashed.nodes.values()),
+        edges: [...stashed.edges],
+        currentScreen: stashed.currentScreen,
+      };
+    }
     return {
       appId,
       nodes: appId && appId === this.currentAppId ? Array.from(this.nodes.values()) : [],

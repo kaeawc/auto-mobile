@@ -442,6 +442,31 @@ class PrototypeRequestTest {
   }
 
   @Test
+  fun `a body that fits without room for the metadata is invalid_response and into stays`() {
+    val data = obj("""{"feed":"o"}""")
+    var low = 0
+    var high = PrototypeSpecValidator.MAX_PROTOTYPE_DATA_WRITE_BYTES
+    while (low < high) {
+      val mid = (low + high + 1) / 2
+      val fits =
+        PrototypeDataWriter.apply(
+          data,
+          PrototypeDataWrite.Set("/data/feed", JsonPrimitive("x".repeat(mid))),
+        ) is PrototypeDataWriteResult.Success
+      if (fits) low = mid else high = mid - 1
+    }
+
+    val result = applied("""{"feed":"o"}""", "/data/feed", received(JsonPrimitive("x".repeat(low))))
+
+    assertFalse(result.result.succeeded)
+    assertFalse(result.result.wroteInto)
+    assertEquals(JsonPrimitive("o"), result.data!!["feed"])
+    val error = result.result.meta.error!!
+    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, error.code)
+    assertEquals("response and metadata exceed the data limit", error.message)
+  }
+
+  @Test
   fun `an empty 2xx body succeeds and writes an empty string`() {
     val result = applied("{}", "/data/t", received(null))
     assertTrue(result.result.succeeded)

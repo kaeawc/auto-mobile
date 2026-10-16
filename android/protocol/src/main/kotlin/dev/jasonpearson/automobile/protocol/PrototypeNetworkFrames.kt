@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonElement
 object PrototypeNetworkFrames {
   const val REQUEST_TYPE = "prototype_request"
   const val RESPONSE_TYPE = "prototype_response"
+  const val CANCEL_TYPE = "prototype_request_cancel"
 
   /** The host serializes its reply with `type` first, which lets the device route it cheaply. */
   const val RESPONSE_PREFIX = "{\"type\":\"$RESPONSE_TYPE\""
@@ -44,6 +45,17 @@ data class PrototypeRequestFrame(
   val body: JsonElement? = null,
   /** Clamped to the maximum by the host; absent means the default. */
   val timeoutMs: Int? = null,
+)
+
+/**
+ * Device to host: the request is no longer wanted (superseded, dismissed, reset or abandoned), so
+ * the host may stop it. The host sends no reply, and a late `prototype_response` is ignored.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeRequestCancelFrame(
+  @EncodeDefault val type: String = PrototypeNetworkFrames.CANCEL_TYPE,
+  val requestId: String,
 )
 
 @Serializable data class PrototypeResponseFrameError(val code: String, val message: String)

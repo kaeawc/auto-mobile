@@ -2,12 +2,14 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeNetworkFrames
+import dev.jasonpearson.automobile.protocol.PrototypeRequestCancelFrame
 import dev.jasonpearson.automobile.protocol.PrototypeRequestError
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestFrame
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import dev.jasonpearson.automobile.protocol.PrototypeResponseFrame
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerializationException
@@ -39,6 +41,8 @@ class HostPrototypeHttpClient(
   private val clock: () -> Long = { System.nanoTime() / NANOS_PER_MILLI },
   private val graceMs: Long = DEFAULT_GRACE_MS,
   private val warn: (String) -> Unit = { Log.w(TAG, it) },
+  /** Sends a frame to the connection a request went to; a no-op if that connection is gone. */
+  private val cancelLink: (target: Any, frame: String) -> Unit = { _, _ -> },
 ) : PrototypeHttpClient {
   private class Pending(val answer: CompletableDeferred<PrototypeRequestResponse>) {
     /** The connection the request frame went to; set once the link accepts it. */
@@ -69,14 +73,33 @@ class HostPrototypeHttpClient(
         )
       entry.target =
         link.send(frame) ?: return failed(PrototypeRequestErrorCode.NETWORK, NO_HOST_MESSAGE)
-      return withTimeoutOrNull(request.timeoutMs + graceMs) { answer.await() }
-        ?: failed(
-          PrototypeRequestErrorCode.TIMEOUT,
-          "The host did not answer within ${request.timeoutMs + graceMs}ms.",
-        )
+      val response =
+        try {
+          withTimeoutOrNull(request.timeoutMs + graceMs) { answer.await() }
+        } catch (error: CancellationException) {
+          // Superseded, dismissed or reset: tell the host it can stop.
+          cancelOnHost(request.requestId, entry.target)
+          throw error
+        }
+      if (response != null) return response
+      cancelOnHost(request.requestId, entry.target)
+      return failed(
+        PrototypeRequestErrorCode.TIMEOUT,
+        "The host did not answer within ${request.timeoutMs + graceMs}ms.",
+      )
     } finally {
       pending.remove(request.requestId)
     }
+  }
+
+  private fun cancelOnHost(requestId: String, target: Any?) {
+    if (target == null) return
+    cancelLink(
+      target,
+      PrototypeNetworkFrames.json.encodeToString(
+        PrototypeRequestCancelFrame(requestId = requestId),
+      ),
+    )
   }
 
   /** A `prototype_response` frame from the host; one for a request no longer waiting is dropped. */

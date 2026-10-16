@@ -199,6 +199,18 @@ class RetrofitPrototypeHttpClientTest {
   }
 
   @Test
+  fun `a declared charset is ignored and the body is decoded as UTF-8`() {
+    server.enqueue(
+      MockResponse.Builder()
+        .addHeader("Content-Type", "text/plain; charset=iso-8859-1")
+        .body(okio.Buffer().writeByte(0xE9))
+        .build(),
+    )
+
+    assertEquals(JsonPrimitive("\uFFFD"), received(execute(request())).body)
+  }
+
+  @Test
   fun `an error status is a response with its headers and no body`() {
     reply("""{"error":"nope"}""", 404, "X-Why" to "missing")
 

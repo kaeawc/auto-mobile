@@ -376,10 +376,13 @@ object PrototypeRequestOutcome {
   inline fun complete(
     into: String?,
     response: PrototypeRequestResponse,
+    /** The data the writes land on, to check that body and metadata fit together first. */
+    data: JsonObject?,
     commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
   ): PrototypeRequestResult {
     var meta = metaOf(response)
     var wroteInto = false
+    var skipBody = false
     if (response is PrototypeRequestResponse.Received && response.body is JsonNull) {
       // A literal JSON `null` body is not an empty one: /data cannot hold it, so `into` stays.
       if (meta.error == null) {
@@ -395,8 +398,22 @@ object PrototypeRequestOutcome {
     } else if (
       response is PrototypeRequestResponse.Received && meta.error == null && into != null
     ) {
-      val refused = commit(PrototypeDataWrite.Set(into, intoValue(response)))
-      if (refused == null) {
+      val refused =
+        if (!bodyAndMetaFit(data, into, response, meta)) {
+          meta =
+            meta.copy(
+              error =
+                PrototypeRequestError(
+                  PrototypeRequestErrorCode.INVALID_RESPONSE,
+                  METADATA_DOES_NOT_FIT,
+                ),
+            )
+          // The body is not written: `into` stays as it was.
+          null.also { skipBody = true }
+        } else commit(PrototypeDataWrite.Set(into, intoValue(response)))
+      if (skipBody) {
+        // Nothing was written to `into`; only the error metadata follows.
+      } else if (refused == null) {
         wroteInto = true
       } else {
         meta =
@@ -416,6 +433,26 @@ object PrototypeRequestOutcome {
     return PrototypeRequestResult(meta.error == null, meta, wroteInto)
   }
 
+  const val METADATA_DOES_NOT_FIT = "response and metadata exceed the data limit"
+
+  /** True when the body write fits and some form of `<into>__meta` still fits after it. */
+  fun bodyAndMetaFit(
+    data: JsonObject?,
+    into: String,
+    response: PrototypeRequestResponse.Received,
+    meta: PrototypeRequestMeta,
+  ): Boolean {
+    val written = PrototypeDataWriter.apply(data, PrototypeDataWrite.Set(into, intoValue(response)))
+    // A refused body write is reported as such by the caller, not as a metadata problem.
+    if (written !is PrototypeDataWriteResult.Success) return true
+    val path = PrototypeRequests.metaPath(into)
+    val attempts = if (meta.headers == null) listOf(true) else listOf(true, false)
+    return attempts.any {
+      PrototypeDataWriter.apply(written.data, PrototypeDataWrite.Set(path, meta.toJson(it))) is
+        PrototypeDataWriteResult.Success
+    }
+  }
+
   /** Pure form over a data object, for tests and for hosts mirroring the device. */
   fun apply(
     data: JsonObject?,
@@ -424,7 +461,7 @@ object PrototypeRequestOutcome {
   ): PrototypeRequestApplied {
     var current = data
     val result =
-      complete(into, response) { write ->
+      complete(into, response, data) { write ->
         when (val written = PrototypeDataWriter.apply(current, write)) {
           is PrototypeDataWriteResult.Success -> {
             current = written.data

@@ -244,7 +244,8 @@ class RetrofitPrototypeHttpClient(
     val source = body.source()
     source.request(maxResponseBytes.toLong() + 1)
     if (source.buffer.size > maxResponseBytes) return BodyRead.TooLarge
-    val text = source.readString(body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8)
+    // Always UTF-8, whatever the declared charset: the host and iOS decode the same way.
+    val text = source.readString(Charsets.UTF_8)
     return BodyRead.Content(if (text.isEmpty()) null else parse(text))
   }
 

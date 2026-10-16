@@ -482,6 +482,43 @@ class PrototypeRequestRuntimeTest {
   }
 
   @Test
+  fun `a response that waits for the lock during a hand-over applies on the new runtime`() =
+    runTest {
+      val actions = request(""""onSuccess":[{"type":"toggle","key":"flag"}]""")
+      lateinit var replacement: PrototypeRuntime
+      lateinit var old: PrototypeRuntime
+      old =
+        PrototypeRuntime(
+          spec(actions),
+          PrototypeEventSink { events += it },
+          { now },
+          { ++sequence },
+          warn = { warnings += it },
+          httpClients = PrototypeHttpClients(host, device),
+          requestScope = backgroundScope,
+          newRequestId = { "r-${++requestIds}" },
+          // The show holds the controller lock: the response waits, the show hands over and closes
+          // the old runtime, and only then does the lock go to the response.
+          exclusively = { block ->
+            old.handOverRequests(replacement)
+            old.close()
+            if (old.current.active) block()
+          },
+        )
+      replacement = runtime(spec(actions))
+      old.handle(tapOf(old))
+      runCurrent()
+
+      host.answer(0, received(json("""{"v":1}""")))
+      runCurrent()
+
+      assertEquals("success", replacement.status())
+      assertEquals(json("""{"v":1}"""), replacement.data("feed"))
+      assertEquals(PrototypeScalar.BooleanValue(true), replacement.current.state["flag"])
+      assertEquals(1, requestEvents().size)
+    }
+
+  @Test
   fun `closing a runtime without a hand-over still cancels its requests`() = runTest {
     val old = runtime(spec(request()))
     old.handle(tapOf(old))

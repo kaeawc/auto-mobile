@@ -1147,6 +1147,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       PrototypeHostLink { frame ->
         if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
       },
+      cancelLink = { target, frame ->
+        // A connection that has since closed is skipped by sendToClient.
+        if (::webSocketServer.isInitialized && target is WebSocketServer.ConnectedClient) {
+          webSocketServer.sendToClient(target, frame)
+        }
+      },
     )
   private val prototypeRefreshCoalescer =
     PrototypeRefreshCoalescer(

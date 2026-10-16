@@ -963,8 +963,12 @@ class PrototypeRuntime(
               ),
             )
           }
-        val owner = started.owner
-        owner.exclusively { owner.settleRequest(started, response) }
+        // A same-id replacement can adopt the request while this waits for the lock: re-read the
+        // owner inside it and, if it changed, settle again on the new one.
+        do {
+          val owner = started.owner
+          owner.exclusively { if (started.owner === owner) owner.settleRequest(started, response) }
+        } while (started.owner !== owner)
       }
     synchronized(inFlight) { inFlight[started.requestId] = started }
     started.job.start()
@@ -1016,7 +1020,7 @@ class PrototypeRuntime(
    */
   private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
     val result =
-      PrototypeRequestOutcome.complete(request.into, response) { write ->
+      PrototypeRequestOutcome.complete(request.into, response, current.spec.data) { write ->
         applyDataWrite(write)?.also {
           warn("Refused request write at ${write.path}: ${it.message}")
         }

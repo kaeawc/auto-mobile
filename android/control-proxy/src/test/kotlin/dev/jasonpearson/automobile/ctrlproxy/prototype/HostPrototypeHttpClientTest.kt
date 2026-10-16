@@ -23,6 +23,7 @@ class HostPrototypeHttpClientTest {
   private val frames = mutableListOf<String>()
   private var connected = true
   private var socket: Any = "A"
+  private val cancels = mutableListOf<Pair<Any, String>>()
   private val warnings = mutableListOf<String>()
   private var now = 0L
 
@@ -36,6 +37,7 @@ class HostPrototypeHttpClientTest {
       clock = { now },
       graceMs = graceMs,
       warn = { warnings += it },
+      cancelLink = { target, frame -> cancels += target to frame },
     )
 
   private fun request(id: String = "r-1", timeoutMs: Int = 10_000) =
@@ -95,6 +97,39 @@ class HostPrototypeHttpClientTest {
     )
     runCurrent()
     assertTrue(toA.await() is PrototypeRequestResponse.Received)
+  }
+
+  @Test
+  fun `a superseded request sends one cancel frame on its own connection`() = runTest {
+    val client = client()
+    socket = "B"
+    val pending = async { client.execute(request("r-old")) }
+    runCurrent()
+    socket = "A"
+
+    pending.cancel()
+    runCurrent()
+
+    assertEquals(
+      listOf<Pair<Any, String>>(
+        "B" to """{"type":"prototype_request_cancel","requestId":"r-old"}""",
+      ),
+      cancels,
+    )
+  }
+
+  @Test
+  fun `an answered request sends no cancel frame`() = runTest {
+    val client = client()
+    val pending = async { client.execute(request("r-1")) }
+    runCurrent()
+    client.onResponse(
+      """{"type":"prototype_response","requestId":"r-1","ok":true,"status":200,"durationMs":1}""",
+    )
+    runCurrent()
+    pending.await()
+
+    assertEquals(emptyList<Pair<Any, String>>(), cancels)
   }
 
   @Test

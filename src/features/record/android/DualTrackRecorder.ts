@@ -1,3 +1,4 @@
+import { recordedSwipeAtParams } from "../swipeAtParams";
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
 import type {
@@ -479,7 +480,7 @@ export class DualTrackRecorder {
     }
 
     const event = this.selectInteraction(pending, interaction);
-    const step = buildMergedStep(pending.gesture, event);
+    const step = buildMergedStep(pending.gesture, event, this.screenSizeAt(pending.gesture));
     pending.step = step ?? undefined;
     this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();
@@ -500,6 +501,24 @@ export class DualTrackRecorder {
         `[DualTrackRecorder] No element match for ${gesture.type} at (${x}, ${y}) — ${outcome}`,
       );
     }
+  }
+
+  /**
+   * The screen the gesture's coordinates were mapped into. The geometry read at recording start
+   * rides on every gesture, so after a rotation it is stale; the timeline knows what was in force
+   * at the finger-down.
+   */
+  private screenSizeAt(gesture: GestureEvent): ScreenSize | undefined {
+    const recorded =
+      gesture.downAt === undefined
+        ? undefined
+        : this.geometry?.timeline.screenSizeAt(gesture.downAt);
+    if (recorded) {
+      return recorded;
+    }
+    return gesture.geometry
+      ? { width: gesture.geometry.deviceWidth, height: gesture.geometry.deviceHeight }
+      : undefined;
   }
 
   private trackGeometrySpan(gesture: GestureEvent, step: PlanStep | null): void {
@@ -848,6 +867,7 @@ export function resolveSwipeDirection(
 function buildMergedStep(
   gesture: GestureEvent,
   event: ReceivedInteraction = { type: "", timestamp: 0 },
+  screenSize?: ScreenSize,
 ): PlanStep | null {
   const selector = buildSelector(event.element);
 
@@ -856,7 +876,7 @@ function buildMergedStep(
     case "doubleTap":
     case "longPress": {
       if (gesture.type !== "doubleTap" && hasUnknownAxes(gesture) && event.type === "scroll") {
-        return buildSwipeStep(gesture, event);
+        return buildSwipeStep(gesture, event, screenSize);
       }
       if (selector) {
         return { tool: "tapOn", params: { action: gesture.type, ...selector } };
@@ -865,7 +885,7 @@ function buildMergedStep(
     }
 
     case "swipe":
-      return buildSwipeStep(gesture, event);
+      return buildSwipeStep(gesture, event, screenSize);
 
     default:
       return null;
@@ -902,36 +922,25 @@ function isDiagonalSwipe({ from, to }: SwipeEndpoints): boolean {
   return Math.min(dx, dy) >= Math.max(dx, dy) * DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO;
 }
 
-/** Four decimals keep a point within a quarter pixel on a 2400 px axis without float noise. */
-function normalizedAxis(value: number, size: number): number {
-  return Math.round(Math.min(1, Math.max(0, value / size)) * 10_000) / 10_000;
-}
+type ScreenSize = { width: number; height: number };
 
-function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): PlanStep {
-  const params: Record<string, unknown> = { from: endpoints.from, to: endpoints.to };
-  const width = gesture.geometry?.deviceWidth;
-  const height = gesture.geometry?.deviceHeight;
-  if (width && height && width > 0 && height > 0) {
-    // Native pixels only replay on a screen of the same size, and a digitizer-edge touch can map
-    // to exactly the display size, which replay refuses. Fractions of the recorded screen adapt to
-    // the replay screen, and 1 resolves to its last pixel.
-    params.from = {
-      x: normalizedAxis(endpoints.from.x, width),
-      y: normalizedAxis(endpoints.from.y, height),
-    };
-    params.to = {
-      x: normalizedAxis(endpoints.to.x, width),
-      y: normalizedAxis(endpoints.to.y, height),
-    };
-    params.coordinateSpace = "normalized";
-  }
+function buildSwipeAtStep(
+  gesture: GestureEvent,
+  endpoints: SwipeEndpoints,
+  screenSize?: ScreenSize,
+): PlanStep {
+  const params = recordedSwipeAtParams(endpoints, screenSize);
   if (gesture.speed === "fast") {
     params.speed = "fast";
   }
   return { tool: "swipeAt", params };
 }
 
-function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
+function buildSwipeStep(
+  gesture: GestureEvent,
+  event: ReceivedInteraction,
+  screenSize?: ScreenSize,
+): PlanStep | null {
   const selector = buildSelector(event.element);
   const direction = hasUnknownAxes(gesture)
     ? selector && resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY)
@@ -940,7 +949,7 @@ function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): Plan
   // dropped; both keep their path as swipeAt.
   const endpoints = swipeEndpoints(gesture);
   if (endpoints && (!direction || isDiagonalSwipe(endpoints))) {
-    return buildSwipeAtStep(gesture, endpoints);
+    return buildSwipeAtStep(gesture, endpoints, screenSize);
   }
   if (!direction) {
     return null;

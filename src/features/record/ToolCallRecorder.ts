@@ -1,3 +1,5 @@
+import { recordedSwipeAtParams } from "./swipeAtParams";
+import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
@@ -80,6 +82,14 @@ const SESSION_SCOPED_PARAMS: Readonly<Record<string, readonly string[]>> = {
   tapAt: ["snapshotId"],
   swipeAt: ["snapshotId"],
 };
+
+/** swipeAt params that say where the swipe goes; a recorded step rewrites them as fractions. */
+const SWIPE_AT_POSITION_PARAMS: ReadonlySet<string> = new Set([
+  "from",
+  "to",
+  "coordinateSpace",
+  "image",
+]);
 
 export function stripSessionScopedParams(
   toolName: string,
@@ -292,6 +302,10 @@ export class ToolCallRecorder {
       logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
     }
+    if (toolName === "swipeAt") {
+      this.recordSwipeAt(recorded, args.__swipeAtRecordingContext);
+      return;
+    }
     if (geometry) {
       const nativeParams = { ...recorded };
       delete nativeParams.image;
@@ -305,6 +319,33 @@ export class ToolCallRecorder {
       this.steps.push({ tool: toolName, params: recorded });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  /**
+   * Record a swipeAt as fractions of the screen it resolved against. Absolute pixels would swipe
+   * the wrong place on another screen size, and unlike tapAt there is no geometry check on replay.
+   */
+  private recordSwipeAt(params: Record<string, unknown>, rawContext: unknown): void {
+    const context = rawContext as SwipeAtRecordingContext | undefined;
+    const resolved = context?.recorded;
+    if (!resolved) {
+      if (context) {
+        const warning =
+          "swipeAt was recorded without screen geometry: its coordinates replay only on a screen of the same size; observe and record again to capture the screen";
+        logger.warn(`[ToolCallRecorder] ${warning}`);
+        this.warnings.push(warning);
+      }
+      this.steps.push({ tool: "swipeAt", params });
+      return;
+    }
+    const rest = Object.fromEntries(
+      Object.entries(params).filter(([key]) => !SWIPE_AT_POSITION_PARAMS.has(key)),
+    );
+    this.steps.push({
+      tool: "swipeAt",
+      params: { ...rest, ...recordedSwipeAtParams(resolved, resolved.screenSize) },
+    });
+    logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: swipeAt`);
   }
 
   private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {

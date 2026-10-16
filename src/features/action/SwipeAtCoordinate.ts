@@ -3,7 +3,7 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { logger } from "../../utils/logger";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ObserveResult, SwipeResult, TapAtOptions } from "../../models";
-import type { SwipeAtOptions } from "../../models/SwipeAtOptions";
+import type { SwipeAtOptions, SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
@@ -27,6 +27,11 @@ export interface SwipeAtCoordinateDependencies extends DisplayFenceDependencies 
   executeGesture?: Pick<ExecuteGesture, "swipe">;
   geometry?: Pick<ElementGeometry, "getSwipeDurationFromSpeed">;
   invalidateIosCache?: () => void;
+}
+
+/** `ActionCall` for swipeAt: also carries the context the tool-call recorder reads back. */
+export interface SwipeAtCall extends ActionCall {
+  recordingContext?: SwipeAtRecordingContext;
 }
 
 type NativePoint = { x: number; y: number };
@@ -122,7 +127,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
   }
 
-  async execute(options: SwipeAtOptions, call: ActionCall = {}): Promise<SwipeResult> {
+  async execute(options: SwipeAtOptions, call: SwipeAtCall = {}): Promise<SwipeResult> {
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);
@@ -160,6 +165,16 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           const resolved = resolveEndpoints(options, observation, this.device.platform);
           if ("error" in resolved) {
             return failure(resolved.error);
+          }
+          if (call.recordingContext) {
+            call.recordingContext.recorded = {
+              screenSize: {
+                width: observation.screenSize.width,
+                height: observation.screenSize.height,
+              },
+              from: resolved.from,
+              to: resolved.to,
+            };
           }
           // Touch routing follows the window under the finger-down point.
           const layerRefusal = layerGestureRefusal(

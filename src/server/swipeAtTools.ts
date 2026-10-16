@@ -3,7 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
-import type { SwipeAtOptions } from "../models/SwipeAtOptions";
+import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
@@ -15,6 +15,8 @@ import {
 } from "./toolSchemaHelpers";
 
 export type SwipeAtArgs = SwipeAtOptions & {
+  /** Created by the registry for tool-call recording; never advertised. */
+  __swipeAtRecordingContext?: SwipeAtRecordingContext;
   platform?: "android" | "ios";
   raw?: boolean;
   project?: "full" | "skeleton";
@@ -167,7 +169,7 @@ export function createSwipeAtHandler({
         speed: args.speed,
         layer: args.layer,
       } as SwipeAtOptions,
-      { progress, signal },
+      { progress, signal, recordingContext: args.__swipeAtRecordingContext },
     );
     const message = result.success
       ? `Swiped from (${result.x1}, ${result.y1}) to (${result.x2}, ${result.y2})`

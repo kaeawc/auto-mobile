@@ -2995,6 +2995,9 @@ function deviceAwareHandlerArgs(
   if (name === "tapAt") {
     handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
   }
+  if (name === "swipeAt") {
+    handlerArgs.__swipeAtRecordingContext = {};
+  }
   return handlerArgs;
 }
 

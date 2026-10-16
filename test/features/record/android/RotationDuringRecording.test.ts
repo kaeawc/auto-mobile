@@ -804,3 +804,124 @@ describe("a superseded geometry refresh is discarded (#10181)", () => {
     expect(inForce()).not.toContain("display size changed");
   });
 });
+
+describe("a recorded diagonal swipe follows the geometry in force at touch-down (#12533)", () => {
+  // The reader attaches the geometry read when recording started to every gesture, while the
+  // timeline maps each touch with the geometry current at its DOWN. A swipe recorded after a
+  // rotation must be normalized against the rotated screen, not the starting one.
+  const STARTUP_GEOMETRY = {
+    platform: "android" as const,
+    deviceWidth: PHYSICAL.width,
+    deviceHeight: PHYSICAL.height,
+    orientation: 0,
+  };
+
+  class GestureSource {
+    private onGesture?: (event: never) => void;
+    start(onGesture: (event: never) => void): void {
+      this.onGesture = onGesture;
+    }
+    stop(): void {
+      this.onGesture = undefined;
+    }
+    emit(event: Record<string, unknown>): void {
+      this.onGesture?.(event as never);
+    }
+  }
+
+  async function recording() {
+    const timer = new FakeTimer();
+    timer.advanceTime(1000);
+    const probe = new FakeProbe();
+    const source = new FakeDisplaySource();
+    const timeline = new ScreenGeometryTimeline(
+      AXES,
+      { rotation: 0, display: PHYSICAL },
+      timer.now(),
+    );
+    const tracker = new DisplayGeometryTracker(timeline, probe, timer);
+    const gestures = new GestureSource();
+    const recorder = new DualTrackRecorder(
+      device,
+      gestures,
+      new FakeA11y(),
+      timer,
+      tracker,
+      source,
+    );
+    await recorder.start();
+    return { timer, probe, source, gestures, recorder };
+  }
+
+  function swipe(r: Awaited<ReturnType<typeof recording>>, points: number[]): void {
+    const [startX, startY, endX, endY] = points;
+    r.gestures.emit({
+      type: "swipe",
+      arrivedAt: r.timer.now(),
+      downAt: r.timer.now() - 200,
+      geometry: STARTUP_GEOMETRY,
+      direction: "right",
+      startX,
+      startY,
+      endX,
+      endY,
+    });
+    r.timer.advanceTime(1_000);
+  }
+
+  test("in portrait it normalizes against the portrait screen", async () => {
+    const r = await recording();
+    r.timer.advanceTime(2_000);
+    swipe(r, [108, 480, 972, 1680]);
+
+    const { steps } = await r.recorder.stop();
+
+    expect(steps).toEqual([
+      {
+        tool: "swipeAt",
+        params: {
+          from: { x: 0.1, y: 0.2 },
+          to: { x: 0.9, y: 0.7 },
+          coordinateSpace: "normalized",
+        },
+      },
+    ]);
+  });
+
+  test("after a rotation to landscape it normalizes against the landscape screen", async () => {
+    const r = await recording();
+    rotate(r, 1);
+    r.timer.advanceTime(2_000);
+    // Landscape is 2400x1080: these points are (0.1, 0.1) -> (0.7, 0.9) of that screen.
+    swipe(r, [240, 108, 1680, 972]);
+
+    const { steps } = await r.recorder.stop();
+
+    expect(steps).toEqual([
+      {
+        tool: "swipeAt",
+        params: {
+          from: { x: 0.1, y: 0.1 },
+          to: { x: 0.7, y: 0.9 },
+          coordinateSpace: "normalized",
+        },
+      },
+    ]);
+  });
+
+  test("gestures on both sides of a rotation each use their own screen", async () => {
+    const r = await recording();
+    r.timer.advanceTime(2_000);
+    swipe(r, [108, 480, 972, 1680]);
+    rotate(r, 1);
+    r.timer.advanceTime(2_000);
+    swipe(r, [240, 108, 1680, 972]);
+
+    const { steps } = await r.recorder.stop();
+
+    expect(steps.map((step) => step.params)).toEqual([
+      { from: { x: 0.1, y: 0.2 }, to: { x: 0.9, y: 0.7 }, coordinateSpace: "normalized" },
+      { from: { x: 0.1, y: 0.1 }, to: { x: 0.7, y: 0.9 }, coordinateSpace: "normalized" },
+    ]);
+  });
+});

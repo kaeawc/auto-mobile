@@ -34,3 +34,15 @@ export type SwipeAtOptions = SwipeAtGestureOptions &
       }
     | { image: ImageRelativeSwipe; from?: never; to?: never; coordinateSpace?: never }
   );
+
+/**
+ * Filled by the action while it resolves a swipe, for the tool-call recorder: the native endpoints
+ * and the screen they were resolved against. Internal; never part of the public tool schema.
+ */
+export interface SwipeAtRecordingContext {
+  recorded?: {
+    screenSize: { width: number; height: number };
+    from: SwipeAtPoint;
+    to: SwipeAtPoint;
+  };
+}

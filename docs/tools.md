@@ -417,6 +417,12 @@ replay adapts to a different screen size. Straighter swipes stay `swipeOn` with 
 direction. Replay on a different orientation maps the same fractions onto the rotated
 screen.
 
+`recordToolCalls` records a `swipeAt` call the same way: its resolved endpoints become
+`coordinateSpace: "normalized"` fractions of the screen it ran on, whether it was given
+absolute, percent, or image-relative points, and `snapshotId` is not recorded. A call that
+never resolved its screen is recorded as given, with a warning that it replays only on a
+screen of the same size.
+
 `tapAt`, `tapOn`, `tapAny`, `swipeOn`, `swipeAt`, `dragAndDrop`, and `pinchOn` fence
 coordinates when the display transitions after the caller's observation or while
 the action is preparing or dispatching. These failures include `staleDisplay`

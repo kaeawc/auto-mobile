@@ -261,6 +261,26 @@ describe("prototype request host", () => {
     });
   });
 
+  test("closing one host leaves another host's request on the same device running", async () => {
+    const executor = new PendingExecutor();
+    const coordinator = new PrototypeRequestCoordinator(executor);
+    const older = createPrototypeRequestHost("d", coordinator);
+    const current = createPrototypeRequestHost("d", coordinator);
+    const sentByCurrent: PrototypeResponseMessage[] = [];
+    const olderDone = older.handleRequest(frame, () => undefined);
+    const currentDone = current.handleRequest({ ...frame, requestId: "r2" }, (r) =>
+      sentByCurrent.push(r),
+    );
+    older.handleDisconnect();
+    await olderDone;
+    expect(executor.signals.map((s) => s.aborted)).toEqual([true, false]);
+    expect(coordinator.inFlightCount("d")).toBe(1);
+    expect(sentByCurrent).toEqual([]);
+    current.handleDisconnect();
+    await currentDone;
+    expect(coordinator.inFlightCount()).toBe(0);
+  });
+
   test("disconnect cancels the device's requests and a failed reply is swallowed", async () => {
     const coordinator = new PrototypeRequestCoordinator(new PendingExecutor());
     const host = createPrototypeRequestHost("d", coordinator);

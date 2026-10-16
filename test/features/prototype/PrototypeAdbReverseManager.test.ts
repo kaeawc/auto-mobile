@@ -38,7 +38,10 @@ class FakeReverseAdb implements PrototypeReverseAdb {
 }
 
 const spec = (...urls: string[]) => ({
-  root: urls.map((url) => ({ type: "request", via: "device", url })),
+  root: {
+    type: "box",
+    onTap: urls.map((url) => ({ type: "request", via: "device", url })),
+  },
 });
 
 describe("PrototypeAdbReverseManager", () => {

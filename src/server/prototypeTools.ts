@@ -23,6 +23,7 @@ import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import * as requestWiring from "../features/prototype/prototypeRequestWiring";
 import { PrototypeEventCoordinator } from "../features/prototype/PrototypeEventCoordinator";
 import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
@@ -2671,6 +2672,7 @@ function subscribePrototypeCleanup(
 interface PrototypeTransportCache {
   android: WeakMap<PrototypeClient, AndroidPrototypeTransport>;
   ios: WeakMap<PrototypeAgentClient, IosPrototypeTransport>;
+  requests?: requestWiring.PrototypeRequestCoordinator;
 }
 
 /**
@@ -2691,6 +2693,7 @@ function prototypeTargets(
     if (transport === undefined) {
       transport = new AndroidPrototypeTransport(client);
       transports.android.set(client, transport);
+      requestWiring.attachAndroidPrototypeRequests(client, device.deviceId, transports.requests);
     }
     return { transport, android: transport };
   };
@@ -2731,10 +2734,14 @@ interface PrototypeHost {
 function createPrototypeHost(dependencies: PrototypeToolDependencies): PrototypeHost {
   const store =
     dependencies.store ?? new InMemoryPrototypeStatusStore(prototypeClock(dependencies));
+  const requests = requestWiring.createPrototypeRequestCoordinator(
+    dependencies.timer ?? defaultTimer,
+  );
   const events = new PrototypeEventCoordinator(
     dependencies.timer ?? defaultTimer,
     store,
     TelemetryRecorder.getInstance(),
+    requests,
   );
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
@@ -2746,7 +2753,7 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     events,
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
-    transports: { android: new WeakMap(), ios: new WeakMap() },
+    transports: { android: new WeakMap(), ios: new WeakMap(), requests },
     ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {

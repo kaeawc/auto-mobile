@@ -31,7 +31,8 @@ export type AndroidPrototypeClient = Pick<
   | "requestRemovePrototypeAsset"
   | "onPrototypeEvent"
   | "supportsCommand"
->;
+> &
+  Partial<Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost">>;
 
 /**
  * Forwards every call to CtrlProxy unchanged. `inspect` and `supportsCommand` are Android-only extras outside

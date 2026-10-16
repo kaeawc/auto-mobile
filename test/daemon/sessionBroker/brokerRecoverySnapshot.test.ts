@@ -73,8 +73,8 @@ describe("broker recovery acts on current request state, not its snapshot", () =
     const pending = broker.prepare(config("mid-pass"), "owner-token");
     await entered.promise;
 
-    const list = options.store.listRequests.bind(options.store);
-    spyOn(options.store, "listRequests").mockImplementationOnce(async () => {
+    const list = options.store.listRecoverableRequests.bind(options.store);
+    spyOn(options.store, "listRecoverableRequests").mockImplementationOnce(async () => {
       const snapshot = await list();
       // The preparation finishes while this pass is still walking earlier requests.
       complete.resolve();

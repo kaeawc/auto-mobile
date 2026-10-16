@@ -172,6 +172,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.deleteResult;
   }
 
+  readonly clearStorageRequests: string[] = [];
+  private clearStorageResult: PrototypeResult = { success: true, cleared: 0 };
+  setClearStorageResult(result: PrototypeResult): void {
+    this.clearStorageResult = result;
+  }
+  async requestClearPrototypeStorage(
+    id: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.clearStorageRequests.push(id);
+    this.checkFailure("requestClearPrototypeStorage");
+    return this.clearStorageResult;
+  }
+
   readonly patchRequests: PrototypePatchRequest[] = [];
   private patchResult: PrototypePatchReply = { success: true, delivery: "answered" };
   private patchHold?: Promise<PrototypeResult>;

@@ -337,6 +337,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"delete_saved_prototype","requestId":"r12","id":"panel"}',
     },
     {
+      builder: "clearPrototypeStorage",
+      name: "clear storage",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.clearPrototypeStorage({ requestId: "r13", id: "panel" }),
+      ),
+      expected: '{"type":"clear_prototype_storage","requestId":"r13","id":"panel"}',
+    },
+    {
       builder: "patchPrototype",
       name: "patch (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
@@ -1052,9 +1060,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 53", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 54", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(53);
+    expect(builderNames.length).toBe(54);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

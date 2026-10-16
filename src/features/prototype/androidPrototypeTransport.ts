@@ -7,7 +7,9 @@ import type {
   PrototypeEvent,
   PrototypeResult,
 } from "../observe/android/ctrlProxyProtocol";
+import { ActionableError } from "../../models/ActionableError";
 import { withParsedAppearance } from "./prototypeAppearance";
+import { prototypeClearStorageUnsupportedMessage } from "./prototypeStorage";
 import type { PrototypeAssetUpload } from "./prototypeAssets";
 import type { PrototypeSpec } from "./prototypeSpec";
 import type {
@@ -32,7 +34,9 @@ export type AndroidPrototypeClient = Pick<
   | "onPrototypeEvent"
   | "supportsCommand"
 > &
-  Partial<Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost">>;
+  Partial<
+    Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost" | "requestClearPrototypeStorage">
+  >;
 
 /**
  * Forwards every call to CtrlProxy unchanged. `inspect` and `supportsCommand` are Android-only extras outside
@@ -84,6 +88,14 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestDismissPrototype(target, timeoutMs);
+  }
+
+  /** Wipes the values CtrlProxy stored for `id` (#12522); needs prototype_storage_v1. */
+  clearStorage(id: string, timeoutMs?: number): Promise<PrototypeResult> {
+    if (!this.client.requestClearPrototypeStorage) {
+      throw new ActionableError(prototypeClearStorageUnsupportedMessage("android"));
+    }
+    return this.client.requestClearPrototypeStorage(id, timeoutMs);
   }
 
   putAsset(

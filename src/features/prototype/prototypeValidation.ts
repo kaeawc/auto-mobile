@@ -11,6 +11,7 @@ import {
 } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
+import { prototypeStorageError } from "./prototypeStorage";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -1162,6 +1163,7 @@ function validateValue(value: unknown): PrototypeValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     gridSpanErrors(context) ??
     repeatErrors(value, repeats) ??
+    prototypeStorageError(value) ??
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     pagerErrors(context) ??
     stackErrors(context) ??

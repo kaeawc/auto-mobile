@@ -48,6 +48,8 @@ export type PrototypeAgentRequestType =
   | "show_prototype"
   | "patch_prototype"
   | "dismiss_prototype"
+  // Wipes a prototype's stored `storage` values (#12522), advertised as `prototype_storage_v1`.
+  | "clear_prototype_storage"
   | "put_prototype_asset"
   | "remove_prototype_asset"
   | "get_prototype_status"

@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { parseGuardSource } from "../../lint/astGuard";
+import { collectSourceFacts } from "../../lint/sourceFacts";
 
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 
 describe("loadJimp", () => {
   test("does not load the WASM WebP plugin", () => {
-    const source = readFileSync(path.join(repoRoot, "src/utils/image/loadJimp.ts"), "utf8");
+    const file = path.join(repoRoot, "src/utils/image/loadJimp.ts");
+    const { moduleSpecifiers } = collectSourceFacts(
+      parseGuardSource(file, readFileSync(file, "utf8")),
+    );
 
-    expect(source).not.toContain("@jimp/wasm-webp");
+    // Non-vacuous: the loader still imports the plugins it does use.
+    expect(moduleSpecifiers).toContain("@jimp/core");
+    expect(moduleSpecifiers).not.toContain("@jimp/wasm-webp");
   });
 });

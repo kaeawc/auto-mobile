@@ -36,6 +36,19 @@ describe("isPathInside", () => {
     });
   }
 
+  test("a relative root and relative target resolve against the cwd", () => {
+    expect(isPathInside("rel/root", "child")).toBe(true);
+    expect(isPathInside("rel/root", "../sibling")).toBe(false);
+    expect(isPathInside("rel/root", path.resolve("rel/root/deep"))).toBe(true);
+  });
+
+  test("posix flavour stays posix for iOS fixture paths even on a win32 host", () => {
+    const opts = { paths: path.posix, allowEqual: false };
+    expect(isPathInside("/Users/x/Library/ns", "/Users/x/Library/ns", opts)).toBe(false);
+    expect(isPathInside("/Users/x/Library/ns", "/Users/x/Library/ns/a/b.txt", opts)).toBe(true);
+    expect(isPathInside("/Users/x/Library/ns", "/Users/x/Library/ns/../other", opts)).toBe(false);
+  });
+
   test("allowEqual false rejects the root itself only", () => {
     expect(isPathInside("/a/b", "/a/b", { ...posix, allowEqual: false })).toBe(false);
     expect(isPathInside("/a/b", "c", { ...posix, allowEqual: false })).toBe(true);

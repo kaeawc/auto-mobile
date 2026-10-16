@@ -37,7 +37,7 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
     } else {
       process.env[FLAG] = original;
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
   });
 
   test('advertises _meta.anthropic/alwaysLoad when the flag is exactly "true"', () => {

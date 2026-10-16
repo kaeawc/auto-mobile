@@ -3,11 +3,7 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import {
-  SessionManager,
-  type Session,
-  type SessionReleaseSnapshot,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -122,10 +118,7 @@ export function releasingSessionHarness() {
     },
     holdTerminalFence(session: Session) {
       // Model a failed terminal persistence attempt awaiting retry, with no release in flight.
-      const internals = manager as unknown as {
-        terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot>;
-      };
-      internals.terminalReleaseSnapshots.set(session.sessionId, {
+      manager["sessionSlots"].setTerminalSnapshot(session.sessionId, {
         sessionId: session.sessionId,
         deviceId: session.assignedDevice!,
         releaseReason: "heartbeat-timeout",

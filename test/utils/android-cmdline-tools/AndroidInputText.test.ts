@@ -1,10 +1,12 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
+  INPUT_TEXT_HOST_WAIT_PER_CHAR_MS,
   INPUT_TEXT_SETTLEMENT_BASE_MS,
   INPUT_TEXT_SETTLEMENT_PER_CHAR_MS,
 } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
 import { buildAndroidInputTextCommand } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { logger } from "../../../src/utils/logger";
 import {
   AdbClient,
@@ -22,7 +24,12 @@ describe("tracked Android input text", () => {
   afterEach(() => warn.mockClear());
   afterAll(() => warn.mockRestore());
 
-  function start(chunks?: string[], apiLevel: number | null = 30, textLength = 5) {
+  function start(
+    chunks?: string[],
+    apiLevel: number | null = 30,
+    textLength = 5,
+    timeoutMs?: number,
+  ) {
     const adb = new FakeGuestInputAdb();
     adb.setAndroidApiLevel(apiLevel);
     if (chunks) {
@@ -35,6 +42,7 @@ describe("tracked Android input text", () => {
     const result = executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("a b'$"), {
       apiLevel,
       textLength,
+      timeoutMs,
       noRetry: false,
       signal: controller.signal,
       logLabel: "shell input <password key event>",
@@ -53,32 +61,124 @@ describe("tracked Android input text", () => {
       controller.abort(error);
       adb.host.reject(error);
     };
-    return { adb, timer, controller, error, result, outcome, abort, settled: () => settled };
+    // API 31+: a request cancel must not reach the host adb client (killing it kills `cmd`).
+    const cancel = () => controller.abort(error);
+    return {
+      adb,
+      timer,
+      controller,
+      error,
+      result,
+      outcome,
+      abort,
+      cancel,
+      settled: () => settled,
+    };
   }
 
   test.each([31, 34, null])(
-    "API %s waits for natural exit without killing the binder client",
+    "API %s cancel keeps the host client attached and settles when typing completes",
     async (apiLevel) => {
       const h = start(undefined, apiLevel);
       h.adb.setTypingDuration(h.timer, 150);
       await h.adb.entered.promise;
-      h.abort();
-      await drainUntil(() => h.timer.getPendingSleepCount() > 0, {
-        description: "natural exit poll",
-      });
-      expect(h.adb.cleanupCalls.some(({ args }) => args[1].includes("kill "))).toBe(false);
+      // The host adb client is the only handle on the binder client: it must not see the abort.
+      const hostSignal = h.adb.dispatchOptions[0].signal;
+      expect(hostSignal).not.toBe(h.controller.signal);
+      h.cancel();
+      await drainMicrotasks(50);
+      expect(h.settled()).toBe(false);
       expect(h.adb.isTyping()).toBe(true);
+      expect(hostSignal?.aborted).toBe(false);
+      h.timer.advanceTime(149);
+      await drainMicrotasks(50);
       expect(h.settled()).toBe(false);
-      h.timer.advanceTime(75);
-      await drainUntil(() => h.timer.getPendingSleepCount() > 0, {
-        description: "second natural exit poll",
-      });
-      expect(h.settled()).toBe(false);
-      h.timer.advanceTime(75);
+      h.timer.advanceTime(1);
       expect(await h.outcome).toBe(h.error);
       expect(h.adb.isTyping()).toBe(false);
+      expect(h.adb.cleanupCalls).toEqual([]);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
     },
   );
+
+  test("API 31+ command timeout also waits for the host and keeps the timeout error type", async () => {
+    const h = start(undefined, 34, 5, 1000);
+    h.adb.setTypingDuration(h.timer, 2000);
+    await h.adb.entered.promise;
+    // Never the adb client's 15 s default: that would kill `cmd` while it is still typing.
+    expect(h.adb.dispatchOptions[0].timeoutMs).toBe(
+      1000 + 3000 + 5 * INPUT_TEXT_HOST_WAIT_PER_CHAR_MS,
+    );
+    h.timer.advanceTime(1000);
+    await drainMicrotasks(50);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1000);
+    expect(await h.outcome).toBeInstanceOf(AdbCommandTimeoutError);
+  });
+
+  test("API 31+ cancel before the guest starts aborts the host so it cannot type late", async () => {
+    const h = start([], 34);
+    await h.adb.entered.promise;
+    h.cancel();
+    expect(await h.outcome).toBe(h.error);
+    expect(h.adb.dispatchOptions[0].signal?.aborted).toBe(true);
+  });
+
+  test("API 31+ stuck host is aborted once the hold expires", async () => {
+    const h = start(undefined, 34);
+    await h.adb.entered.promise;
+    h.cancel();
+    await drainMicrotasks(50);
+    const hostSignal = h.adb.dispatchOptions[0].signal;
+    expect(hostSignal?.aborted).toBe(false);
+    h.timer.advanceTime(3000 + 5 * INPUT_TEXT_HOST_WAIT_PER_CHAR_MS);
+    expect(await h.outcome).toBe(h.error);
+    expect(hostSignal?.aborted).toBe(true);
+  });
+
+  test("API 31+ dispatch runs outside the ambient request signal", async () => {
+    const request = new AbortController();
+    const adb = new FakeGuestInputAdb();
+    adb.setAndroidApiLevel(34);
+    const done = runWithAbortSignal(request.signal, () =>
+      executeAndroidInputText(adb, new FakeTimer(), buildAndroidInputTextCommand("abc"), {
+        apiLevel: 34,
+        textLength: 3,
+      }),
+    );
+    await adb.entered.promise;
+    expect(adb.ambientSignals).toEqual([undefined]);
+    adb.host.resolve({ stdout: "", stderr: "" });
+    await done;
+  });
+
+  test("API 31+ host failure on its own is rethrown without a settlement wait", async () => {
+    const h = start(undefined, 34);
+    await h.adb.entered.promise;
+    const failure = new Error("adb transport died");
+    h.adb.host.reject(failure);
+    expect(await h.outcome).toBe(failure);
+    expect(h.adb.cleanupCalls).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("API 31+ pre-aborted signal never dispatches", async () => {
+    const adb = new FakeGuestInputAdb();
+    const reason = new Error("already cancelled");
+    const controller = new AbortController();
+    controller.abort(reason);
+    const failure = await executeAndroidInputText(
+      adb,
+      new FakeTimer(),
+      buildAndroidInputTextCommand("abc"),
+      { apiLevel: 34, textLength: 3, signal: controller.signal },
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBe(reason);
+    expect(adb.getExecutedArgv()).toEqual([]);
+  });
 
   test.each(["throw", "timeout"])("pre-31 kill is retried after probe %s", async (failure) => {
     const h = start();
@@ -105,11 +205,29 @@ describe("tracked Android input text", () => {
   });
 
   test.each([
+    [1, 3000 + INPUT_TEXT_HOST_WAIT_PER_CHAR_MS],
+    [1000, 3000 + 1000 * INPUT_TEXT_HOST_WAIT_PER_CHAR_MS],
+    [100000, 60000],
+  ])("API 31+ length %s gets a %sms host wait deadline", async (length, cap) => {
+    const h = start(undefined, 34, length);
+    await h.adb.entered.promise;
+    h.cancel();
+    await drainMicrotasks(50);
+    expect(h.timer.getPendingTimeouts()).toContain(cap);
+    h.timer.advanceTime(cap - 1);
+    await drainMicrotasks(20);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1);
+    expect(await h.outcome).toBe(h.error);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`after ${cap}ms`), expect.any(Error));
+  });
+
+  test.each([
     [1, 3004],
     [1000, 7000],
     [100000, 30000],
-  ])("length %s gets a %sms settlement deadline", async (length, cap) => {
-    const h = start(undefined, 34, length);
+  ])("pre-31 length %s gets a %sms settlement deadline", async (length, cap) => {
+    const h = start(undefined, 30, length);
     await h.adb.entered.promise;
     h.abort();
     await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "scaled deadline" });
@@ -346,7 +464,7 @@ describe("tracked Android input text", () => {
     adb.setCommandError("echo $$", error);
     expect(
       await executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("abc"), {
-        apiLevel: 34,
+        apiLevel: 30,
         textLength: 3,
       }).then(
         () => undefined,

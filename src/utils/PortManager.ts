@@ -1,5 +1,6 @@
+import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "./logger";
-import { parseStrictPositiveInteger, readEnvPositiveInteger } from "./envNumbers";
+import { parseStrictPositiveInteger, readEnvInt } from "./envNumbers";
 import { defaultTimer, type Timer } from "./SystemTimer";
 
 export const IOS_SDK_HIERARCHY_SERVER_PORT = 8766;
@@ -412,19 +413,14 @@ export class PortManager {
   public static readonly DEVICE_PORT = 8765;
 
   static resolveBasePort(env: NodeJS.ProcessEnv = process.env): number {
-    return readEnvPositiveInteger(
-      "AUTOMOBILE_PORT_RANGE_START",
-      "AUTO_MOBILE_PORT_RANGE_START",
-      { fallback: this.DEFAULT_BASE_PORT },
-      env,
-    );
+    return readEnvInt(ENV.PORT_RANGE_START, env, { fallback: this.DEFAULT_BASE_PORT });
   }
 
   static resolveMaxDevices(
     env: NodeJS.ProcessEnv = process.env,
     basePort: number = this.basePort,
   ): number {
-    const endValue = env.AUTOMOBILE_PORT_RANGE_END ?? env.AUTO_MOBILE_PORT_RANGE_END;
+    const endValue = readEnvRaw(ENV.PORT_RANGE_END, env);
     if (endValue) {
       const parsedEnd = parseStrictPositiveInteger(endValue.trim());
       if (parsedEnd !== undefined && parsedEnd >= basePort) {
@@ -436,7 +432,7 @@ export class PortManager {
       return this.DEFAULT_MAX_DEVICES;
     }
 
-    const sizeValue = env.AUTOMOBILE_PORT_RANGE_SIZE ?? env.AUTO_MOBILE_PORT_RANGE_SIZE;
+    const sizeValue = readEnvRaw(ENV.PORT_RANGE_SIZE, env);
     if (!sizeValue) {
       return this.DEFAULT_MAX_DEVICES;
     }
@@ -463,8 +459,8 @@ export class PortManager {
   private static resolveConfiguredScanEnd(): number | undefined {
     return computeConfiguredScanEnd(
       this.basePort,
-      process.env.AUTOMOBILE_PORT_RANGE_END ?? process.env.AUTO_MOBILE_PORT_RANGE_END,
-      process.env.AUTOMOBILE_PORT_RANGE_SIZE ?? process.env.AUTO_MOBILE_PORT_RANGE_SIZE,
+      readEnvRaw(ENV.PORT_RANGE_END),
+      readEnvRaw(ENV.PORT_RANGE_SIZE),
     );
   }
 }

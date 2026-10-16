@@ -100,6 +100,7 @@
     "check:ios-ctrl-proxy-process-boundary": "bash scripts/check-ios-ctrl-proxy-process-boundary.sh",
     "dead-code:ts": "bash scripts/detect-dead-code-ts.sh",
     "dead-code:ts:knip": "bunx knip",
+    "dead-code:ts:production": "bunx knip -c knip.production.json --include files",
     "prepack": "bun scripts/release/trim-bundled-deps.ts prepack && bun scripts/release/write-build-info.ts",
     "qualify:identity": "bun scripts/qualification/artifactIdentity.ts",
     "qualify:run-case": "bun scripts/qualification/runCase.ts",

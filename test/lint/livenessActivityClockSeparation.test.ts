@@ -294,7 +294,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Binding: a configured --initial-session-uuid, or a managed execution's held session " +
       "(#11176), starts its replay lease.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindResultMintedDeviceSession": {
+  "src/daemon/proxy/SessionBinding.ts SessionBinding.bindResultMintedDeviceSession": {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
@@ -361,7 +361,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Rollback: a latest binding resumed after a daemon_stalled handover gets back the replay " +
       "lease it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
+  "src/daemon/proxy/SessionBinding.ts SessionBinding.updateBoundSessionUuid": {
     writes: 1,
     reason: "Tool usage: a forwarded call (explicit or injected sessionUuid) renews the lease.",
   },

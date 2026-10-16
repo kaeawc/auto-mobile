@@ -278,6 +278,7 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
@@ -667,18 +668,6 @@ interface BoundMcpClient {
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
-}
-
-/**
- * Bounds how long a forward may park on another forward's execution-key chain. Without it a
- * waiter is only timed out after it acquires the key, so a stuck holder parks it (and its
- * socket's admission queue) forever (issue #6388).
- */
-interface McpForwardChainWait {
-  /** Milliseconds this waiter may still spend waiting, read at each acquisition. */
-  remainingMs: () => number;
-  /** Error to reject with once that budget is spent. */
-  timeoutError: (executionKey: string) => Error;
 }
 
 /** One keyed attempt either ran the forward or found its route moved to another key. */
@@ -2744,65 +2733,19 @@ export class UnixSocketServer {
     idleCloseKey?: string,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    if (idleCloseKey) {
-      const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
-      idleCloseKeys.add(idleCloseKey);
-      this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
-    }
-    const heldTail = this.mcpForwardTails.get(executionKey);
-    const previous = heldTail ?? Promise.resolve();
-    // Only a contended acquisition needs a bound; an idle key is taken immediately.
-    const acquired =
-      heldTail && chainWait
-        ? this.waitForMcpForwardChain(executionKey, heldTail, chainWait)
-        : previous;
-    const run = acquired.then(() => {
-      if (idleCloseKey) {
-        this.clearMcpClientIdleTimer(idleCloseKey);
-      }
-      return fn();
-    });
-    // The tail also waits for `previous`: a waiter that gave up must not let the next
-    // waiter run concurrently with the forward still holding this key.
-    const tail = Promise.all([
-      previous,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
-    ]).then(() => undefined);
-    this.mcpForwardTails.set(executionKey, tail);
-    void tail.finally(() => {
-      if (this.mcpForwardTails.get(executionKey) === tail) {
-        this.mcpForwardTails.delete(executionKey);
-        const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey);
-        this.mcpForwardIdleCloseKeys.delete(executionKey);
-        for (const key of idleCloseKeys ?? []) {
-          this.scheduleMcpClientIdleClose(key);
-        }
-      }
-    });
-    return run;
-  }
-
-  private async waitForMcpForwardChain(
-    executionKey: string,
-    heldTail: Promise<void>,
-    chainWait: McpForwardChainWait,
-  ): Promise<void> {
-    try {
-      await raceWithDeadline(heldTail, {
+    return runKeyedSerial(
+      {
+        tails: this.mcpForwardTails,
+        idleCloseKeys: this.mcpForwardIdleCloseKeys,
         timer: this.timer,
-        timeoutMs: Math.max(0, chainWait.remainingMs()),
-        label: `MCP forward wait for ${executionKey}`,
-      });
-    } catch (error) {
-      // Tails never reject, so only the wait bound lands here (issue #6388).
-      logger.warn(
-        `[McpForward] chain wait expired executionKey=${executionKey}: ${errorMessage(error)}`,
-      );
-      throw chainWait.timeoutError(executionKey);
-    }
+        onAcquired: (key) => this.clearMcpClientIdleTimer(key),
+        onDrained: (key) => this.scheduleMcpClientIdleClose(key),
+      },
+      executionKey,
+      fn,
+      idleCloseKey,
+      chainWait,
+    );
   }
 
   private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {

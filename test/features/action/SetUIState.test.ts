@@ -2001,6 +2001,19 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     expect(result.error).toContain("NeverPresent");
   });
 
+  test("the caller's abort signal reaches the off-screen search swipe", async () => {
+    const controller = new AbortController();
+    await build().execute(
+      { fields: [{ selector: { text: "NeverPresent" }, value: "x" }] },
+      undefined,
+      controller.signal,
+    );
+
+    const calls = fakeSwipe.getCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].call?.signal).toBe(controller.signal);
+  });
+
   test("the search is bounded — it does not scroll indefinitely", async () => {
     await build().execute({
       fields: [{ selector: { text: "NeverPresent" }, value: "x" }],

@@ -28,7 +28,11 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
-import { isToolUnavailableWireError } from "../server/toolUnavailableError";
+import {
+  isSessionNotActiveWireError,
+  isToolUnavailableWireError,
+  unknownToolWireName,
+} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
@@ -43,6 +47,8 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_SESSION_SUSPECT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
+  DAEMON_SESSION_NOT_ACTIVE_CODE,
+  DAEMON_UNKNOWN_TOOL_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -469,6 +475,11 @@ function refusalFrameFields(error: unknown): RefusalFrameFields {
   };
 }
 
+function unknownToolFrameFields(error: unknown): Pick<DaemonResponse, "code" | "details"> {
+  const toolName = unknownToolWireName(error);
+  return toolName === undefined ? {} : { code: DAEMON_UNKNOWN_TOOL_CODE, details: { toolName } };
+}
+
 export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
@@ -500,6 +511,8 @@ export function mcpRequestFailureDetails(
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
+    ...unknownToolFrameFields(error),
+    ...(isSessionNotActiveWireError(error) ? { code: DAEMON_SESSION_NOT_ACTIVE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -5615,6 +5628,7 @@ export class UnixSocketServer {
       case "ide/status": {
         return {
           structuredSessionNotFound: true,
+          structuredToolErrorCodes: true,
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).

@@ -681,12 +681,19 @@ The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it f
 iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
 `pinned:false` and no `savedAt` because the simulator cannot recover the save time.
 `deleteSaved` also accepts the authored prototype id on iOS.
-Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
-not available yet: save still succeeds with `pinned:"unsupported"`. iOS places the app icon
-on the home screen; deleting the prototype removes it, and `removeIcon:true` warns that
-separate icon removal does not apply. On Android deletion warns that
-an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
-home-screen icon may remain. Store failures return actionable errors with `errorCode`:
+On Android, `save` with `pin:true` then asks the launcher to pin a home-screen shortcut and
+reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher's "Add to home
+screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
+signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
+`device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
+the same save is safe. `autoConfirm:true` (needs `pin`) only adds a reminder: accepting the launcher
+dialog automatically is tracked in #12266. `deleteSaved` disables the shortcut; the disabled icon
+stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
+CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
+shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,
+`pin` is ignored (`pinned:"unsupported"`): the app icon is on the home screen, deleting the
+prototype removes it, and `removeIcon:true` warns that separate icon removal does not apply.
+Store failures return actionable errors with `errorCode`:
 `invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
 `duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
 `total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,

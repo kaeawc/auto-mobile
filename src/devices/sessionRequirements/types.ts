@@ -1,5 +1,3 @@
-export type DevicePlatform = "ios" | "android";
-
 export type IosArchetype = "phone" | "tablet" | "duo";
 export type AndroidArchetype = "phone" | "tablet";
 

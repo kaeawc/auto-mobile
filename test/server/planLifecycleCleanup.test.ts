@@ -370,7 +370,7 @@ describe("executePlan cleans every acquired device before release", () => {
       test("identity replacement drops deferred app cleanup without commands or quarantine", async () => {
         await acquire([devices[0]], false);
         await lifecycle.afterExecution(holdWithCleanup());
-        await sessionManager.releaseSession("base", "client-release", false, undefined, {
+        await sessionManager.releaseSession("base", "client-release", {
           deviceIdentityReplaced: true,
         });
         await flush();

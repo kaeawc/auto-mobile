@@ -590,7 +590,7 @@ describe("managed ownership release", () => {
     expect(h.reowner.ownershipState(SESSION)).toBe("lost");
     expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
     expect(h.reowner.releaseDeviceHold(SESSION)).toEqual({ skipDeviceWrites: true });
-    await h.manager.releaseSession(SESSION, "binding-ownership-lost", true);
+    await h.manager.releaseSession(SESSION, "binding-ownership-lost", { allowExpired: true });
     await h.drain.whenIdle();
     expect(h.writes).toEqual([]);
     expect(h.reowner.ownershipState(SESSION)).toBeUndefined();
@@ -628,7 +628,9 @@ describe("managed ownership release", () => {
           expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
         }
         expect(h.manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
-        const release = h.manager.releaseSession(SESSION, "heartbeat-timeout", true);
+        const release = h.manager.releaseSession(SESSION, "heartbeat-timeout", {
+          allowExpired: true,
+        });
         await drainMicrotasks(40);
         expect(h.writes).toEqual([]);
         expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
@@ -665,11 +667,9 @@ describe("managed ownership release", () => {
       const h = await harness();
       h.behavior.busy = true;
       await h.reowner.reown([SESSION], { rehydrated: true });
-      const release = h.manager.releaseSessionUnlessSuperseded(
-        SESSION,
-        "explicit-release",
-        () => false,
-      );
+      const release = h.manager.releaseSessionUnlessSuperseded(SESSION, "explicit-release", {
+        commitFence: () => false,
+      });
       await drainUntilQuiescent(h.timer);
       // Admission checks during releasing must not prune the mark.
       expect(h.reowner.automationRefusal(SESSION)).toBeDefined();

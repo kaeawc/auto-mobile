@@ -212,7 +212,7 @@ for (const replaced of [true, false]) {
       const rebind = h.sessions.rebindSession("holder", "emulator-5556", "android");
       await drainMicrotasks(40);
       const release = replaced
-        ? h.sessions.releaseSession("holder", "device-restart:AVD-A", false, undefined, {
+        ? h.sessions.releaseSession("holder", "device-restart:AVD-A", {
             deviceIdentityReplaced: true,
           })
         : null;
@@ -251,7 +251,7 @@ for (const replaced of [true, false]) {
         });
         await drainMicrotasks(40);
         const release = replaced
-          ? h.sessions.releaseSession("holder", "device-restart:AVD-A", false, undefined, {
+          ? h.sessions.releaseSession("holder", "device-restart:AVD-A", {
               deviceIdentityReplaced: true,
             })
           : null;
@@ -467,15 +467,9 @@ for (const forced of [false, true]) {
       try {
         const rebind = h.sessions.rebindSession("holder", "emulator-5556", "android");
         await drainMicrotasks(40);
-        const release = h.sessions.releaseSession(
-          "holder",
-          "device-restart:AVD-A",
-          false,
-          undefined,
-          {
-            deviceIdentityReplaced: true,
-          },
-        );
+        const release = h.sessions.releaseSession("holder", "device-restart:AVD-A", {
+          deviceIdentityReplaced: true,
+        });
         expect(h.sessions["identityReplacementFences"].has(original.deviceId)).toBe(true);
         if (forced) {
           expect(h.sessions.forceStuckRelease("holder")?.stage).toBe("awaiting-rebind");
@@ -516,9 +510,7 @@ for (const outcome of ["persist-throw", "recovery-expiry", "forced-teardown"] as
       if (outcome === "persist-throw") {
         h.persistence.failure = "release";
         await expect(
-          h.sessions.releaseSession("holder", "explicit-release", false, undefined, {
-            deviceIdentityReplaced: true,
-          }),
+          h.sessions.releaseSession("holder", "explicit-release", { deviceIdentityReplaced: true }),
         ).rejects.toThrow("persist release failed");
       } else {
         if (outcome === "recovery-expiry") {
@@ -527,7 +519,7 @@ for (const outcome of ["persist-throw", "recovery-expiry", "forced-teardown"] as
           });
         }
         const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
-        const release = h.sessions.releaseSession("holder", "heartbeat-timeout", false, undefined, {
+        const release = h.sessions.releaseSession("holder", "heartbeat-timeout", {
           deviceIdentityReplaced: true,
         });
         await drainMicrotasks(80);
@@ -740,7 +732,7 @@ warmedTest("an identity-replaced join without a commit fence remains final", asy
     const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
     const ordinary = h.sessions.releaseSession("holder", "explicit-release");
     await drainMicrotasks(40);
-    const joined = h.sessions.releaseSession("holder", "device-restart:AVD-A", false, undefined, {
+    const joined = h.sessions.releaseSession("holder", "device-restart:AVD-A", {
       deviceIdentityReplaced: true,
     });
     gate.resolve();

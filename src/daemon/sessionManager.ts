@@ -21,6 +21,7 @@ import {
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
+import type { ReleaseSessionRequest } from "./releaseSessionRequest";
 import {
   defaultBiometricEnrollmentRestorer,
   defaultClockRestorerFactory,
@@ -4490,7 +4491,8 @@ export class SessionManager {
     logger.info(`Session ${sessionId} has expired, found by lookup, releasing`);
     const releaseReason = this.expiredSessionReleaseReason(session);
     this.cancelExecutionsOverriddenByExpiry(session, releaseReason, callerExecutionId);
-    const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+    const release = this.releaseSession(sessionId, releaseReason, {
+      allowExpired: true,
       expiryOrigin: "lazy-expiry",
     });
     void this.getBarrier()
@@ -6549,18 +6551,10 @@ export class SessionManager {
   releaseSession(
     sessionId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
-    allowExpired: boolean = false,
-    shouldCommit?: ReleaseCommitFence,
-    options: SessionReleaseOptions = {},
+    request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
     // Not async: a pass-through, so it adds no microtask to the release's settled budget.
-    return this.releaseSessionForReason(
-      sessionId,
-      releaseReason,
-      allowExpired,
-      shouldCommit,
-      options,
-    );
+    return this.releaseSessionForReason(sessionId, releaseReason, request);
   }
 
   /**
@@ -6570,17 +6564,16 @@ export class SessionManager {
   private async releaseSessionForReason(
     sessionId: string,
     releaseReason: string,
-    allowExpired: boolean = false,
-    shouldCommit?: ReleaseCommitFence,
-    options: SessionReleaseOptions = {},
+    request: ReleaseSessionRequest = {},
   ): Promise<string | null> {
-    const releaseOptions = { ...options };
+    const { allowExpired = false, commitFence, ...options } = request;
+    const releaseOptions: SessionReleaseOptions = options;
     const attempt = () =>
       this.releaseSessionAttempt(
         sessionId,
         releaseReason,
         allowExpired,
-        shouldCommit,
+        commitFence,
         releaseOptions,
       );
     if (isExpiryReleaseReason(releaseReason)) {
@@ -6739,10 +6732,9 @@ export class SessionManager {
   async releaseSessionUnlessSuperseded(
     sessionId: string,
     releaseReason: SessionReleaseReason,
-    shouldCommit: ReleaseCommitFence | undefined,
-    allowExpired: boolean = false,
-    options: SessionReleaseOptions = {},
+    request: ReleaseSessionRequest = {},
   ): Promise<ConditionalSessionRelease> {
+    const { commitFence: shouldCommit, ...rest } = request;
     let superseded = false;
     const fence: ReleaseCommitFence | undefined =
       shouldCommit === undefined
@@ -6754,13 +6746,10 @@ export class SessionManager {
             }
             return true;
           };
-    const deviceId = await this.releaseSession(
-      sessionId,
-      releaseReason,
-      allowExpired,
-      fence,
-      options,
-    );
+    const deviceId = await this.releaseSession(sessionId, releaseReason, {
+      ...rest,
+      commitFence: fence,
+    });
     return superseded ? { superseded: true } : { superseded: false, deviceId };
   }
 
@@ -7028,7 +7017,7 @@ export class SessionManager {
         unref: true,
         label: "Release of a session still being created",
       });
-      return await this.releaseSessionForReason(sessionId, reason.value, allowExpired);
+      return await this.releaseSessionForReason(sessionId, reason.value, { allowExpired });
     } catch (error) {
       logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
       return null;
@@ -12521,7 +12510,8 @@ export class SessionManager {
     // Cut what the scan's reap would cut, through the routine it uses: a read still in flight is
     // answered with the typed release instead of being left running on a freed device (#11400).
     this.cancelExecutionsCutByRelease(session.sessionId, "heartbeat-timeout", callerExecutionId);
-    await this.releaseSession(session.sessionId, "heartbeat-timeout", true, undefined, {
+    await this.releaseSession(session.sessionId, "heartbeat-timeout", {
+      allowExpired: true,
       expiryOrigin: "lazy-expiry",
     });
     const terminalRelease =
@@ -13336,7 +13326,8 @@ export class SessionManager {
           logger.info(`Session ${sessionId} idle release cut in-flight reads`);
         }
       }
-      const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+      const release = this.releaseSession(sessionId, releaseReason, {
+        allowExpired: true,
         expiryOrigin: "cleanup-expired",
       });
       void this.getBarrier()
@@ -13808,7 +13799,8 @@ export class SessionManager {
       if (isTaggedTerminalReleaseReason(releaseReason)) {
         this.cancelExecutionsCutByRelease(sessionId, releaseReason);
       }
-      await this.releaseSessionForReason(sessionId, releaseReason, true, undefined, {
+      await this.releaseSessionForReason(sessionId, releaseReason, {
+        allowExpired: true,
         expiryOrigin: "lazy-expiry",
       });
     }

@@ -163,7 +163,7 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
       manager,
       () => false,
       async (sessionId, reason) => {
-        await manager.releaseSession(sessionId, reason, true);
+        await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );

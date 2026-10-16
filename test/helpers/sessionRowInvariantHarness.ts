@@ -428,7 +428,7 @@ export async function runSessionRowInterleaving(
     background(
       "device-loss release",
       manager
-        .releaseSessionUnlessSuperseded(sessionId, deviceLoss, () => !superseded)
+        .releaseSessionUnlessSuperseded(sessionId, deviceLoss, { commitFence: () => !superseded })
         .then(
           (release) => {
             if (!release.superseded && release.deviceId !== null) {

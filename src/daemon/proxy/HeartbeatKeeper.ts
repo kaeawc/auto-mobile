@@ -2,7 +2,6 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { LatestHeartbeatAsk } from "../daemonMcpProxy";
 import type { SessionReleaseSnapshot } from "../sessionManager";
 import {
   DAEMON_STALLED_CODE,
@@ -13,7 +12,7 @@ import {
 } from "../proxyLivenessRecovery";
 import { LifecycleConnectionInFlightError } from "./daemonErrors";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
-import type { ProxySessionState } from "./ProxySessionState";
+import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
 
 /**
  * Proxy operations shared with routing, reconnects, release handling and recovery:

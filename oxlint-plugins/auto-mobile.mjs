@@ -961,12 +961,24 @@ const noCaughtErrorInterpolationRule = {
 
 // Scope-aware syntactic backstop for raw capture nodes. Typed Element results and
 // request DTOs are intentionally distinct from raw any/unknown/Record boundaries.
+const RAW_ACCESSOR_NAMES = new Set([
+  "rawText",
+  "rawContentDesc",
+  "rawResourceId",
+  "rawNodeString",
+  "rawNodeValue",
+]);
+// Files whose raw-accessor use is hint extraction / diagnostics, not selection.
+const RAW_ACCESSOR_ALLOWED_FILES =
+  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|systemTrayHelpers)|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
 const noRawSelectorFieldReadRule = {
   meta: {
     type: "problem",
     messages: {
       rawSelector:
         "Resolve selectors through ElementResolver/SearchableNode instead of reading raw capture text, content-desc, or resource-id fields.",
+      rawAccessor:
+        "Raw-node accessors (rawText, rawContentDesc, rawResourceId, rawNodeString, rawNodeValue) are for diagnostics and hint extraction only; resolve selectors through ElementResolver/SearchableNode. Add the file to RAW_ACCESSOR_ALLOWED_FILES in oxlint-plugins/auto-mobile.mjs if the use is not selection.",
     },
   },
   create(context) {
@@ -980,6 +992,24 @@ const noRawSelectorFieldReadRule = {
     )
       return {};
     return {
+      // Importing a raw accessor is the only way to read a raw field without a
+      // `.text`-style member read, so gate the import with an allow-list.
+      ImportDeclaration(node) {
+        if (
+          node.importKind === "type" ||
+          !/(?:^|\/)elementProperties$/.test(String(node.source?.value ?? "")) ||
+          RAW_ACCESSOR_ALLOWED_FILES.test(filename)
+        )
+          return;
+        for (const specifier of node.specifiers ?? []) {
+          if (
+            specifier.type === "ImportSpecifier" &&
+            specifier.importKind !== "type" &&
+            RAW_ACCESSOR_NAMES.has(propertyName(specifier.imported))
+          )
+            context.report({ node: specifier, messageId: "rawAccessor" });
+        }
+      },
       Program(program) {
         const fields = new Set(["text", "content-desc", "resource-id"]);
         const rawType = (annotation, env, seen = new Set()) => {

@@ -9,6 +9,10 @@ import threading
 import time
 from typing import Any
 try:
+    from mcp.types import CallToolResult, TextContent
+except ImportError:
+    from mcp_types import CallToolResult, TextContent
+try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     from mcp.server.mcpserver import MCPServer as FastMCP
@@ -98,6 +102,21 @@ def sendKeys(commands: list[dict[str, Any]], device: str = "") -> dict[str, Any]
 @server.tool()
 def observe(deviceId: str = "", device: str = "") -> dict[str, str]:
     return {"deviceId": deviceId, "device": device, "status": "fake editor focused"}
+
+# Mirrors DeviceOutsideBrokerGrantError.toPayload() in
+# src/daemon/sessionBroker/connectionRefusal.ts: a broker connection controls only
+# its granted devices. FAKE_GRANTED_DEVICES is a comma list; unset disables the check.
+GRANT_CODE = "device_outside_broker_grant"
+
+@server.tool()
+def tapOn(deviceId: str = "", text: str = "") -> CallToolResult:
+    granted = os.environ.get("FAKE_GRANTED_DEVICES")
+    if granted is not None and deviceId not in [d for d in granted.split(",") if d]:
+        payload = {"code": GRANT_CODE, "action": "tapOn", "reason": "device", "scopeKey": "fake",
+                   "deviceId": deviceId, "retryable": False}
+        # The SDK hides raised exception text; a returned error result keeps the code on the wire.
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))], isError=True)
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps({"deviceId": deviceId, "tapped": text}))])
 
 @server.resource("automobile:devices/booted")
 def booted() -> str:

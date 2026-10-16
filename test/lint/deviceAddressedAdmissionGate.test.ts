@@ -335,8 +335,8 @@ describe("device-addressed admission gate (issue #6863)", () => {
     // device-addressed feature actions still bind through the gated factory.
     expect(unadmittedFactoryUsers).toEqual([
       "src/daemon/devicePool.ts",
+      "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/bootedDeviceResources.ts",
-      "src/server/deviceTools.ts",
       "src/server/resourceDeviceResolver.ts",
       "src/utils/android-cmdline-tools/AdbClientFactory.ts",
       "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",

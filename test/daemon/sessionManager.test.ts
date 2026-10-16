@@ -25,6 +25,7 @@ import {
   type NetworkConditionRestorer,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import type { SessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -308,10 +309,8 @@ test("a same-UUID resume discards a failed non-terminal release snapshot", async
     await expect(manager.releaseSession("reused-session", "allocation-rollback")).resolves.toBe(
       "emulator-old",
     );
-    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
-      string,
-      SessionReleaseSnapshot
-    >;
+    const writer = Reflect.get(manager, "rowWriter") as SessionRowWriter;
+    const pending = writer.pendingNonTerminalReleases();
     const staleSnapshot = pending.get("reused-session")!;
     persistence.failure = null;
     const resumed = await manager.createSession("reused-session", "emulator-new", "android");
@@ -357,10 +356,8 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     await expect(manager.releaseSession("racing-session", "allocation-rollback")).resolves.toBe(
       "emulator-old",
     );
-    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
-      string,
-      SessionReleaseSnapshot
-    >;
+    const writer = Reflect.get(manager, "rowWriter") as SessionRowWriter;
+    const pending = writer.pendingNonTerminalReleases();
     expect(pending.has("racing-session")).toBe(true);
 
     persistence.failure = null;
@@ -405,10 +402,8 @@ test("pending non-terminal releases evict the oldest snapshot at 256 entries", a
     await manager.createSession("bounded-0", "emulator-5554", "android");
     persistence.failure = "release";
     await manager.releaseSession("bounded-0", PLAN_AUTO_RELEASE_REASON);
-    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
-      string,
-      SessionReleaseSnapshot
-    >;
+    const writer = Reflect.get(manager, "rowWriter") as SessionRowWriter;
+    const pending = writer.pendingNonTerminalReleases();
     const initial = pending.get("bounded-0")!;
     const writeRelease = Reflect.get(manager, "persistSessionRelease") as (
       snapshot: SessionReleaseSnapshot,
@@ -433,10 +428,8 @@ test("shutdown hooks clear pending non-terminal release snapshots", async () => 
   await manager.createSession("drain-session", "emulator-5554", "android");
   persistence.failure = "release";
   await manager.releaseSession("drain-session", PLAN_AUTO_RELEASE_REASON);
-  const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
-    string,
-    SessionReleaseSnapshot
-  >;
+  const writer = Reflect.get(manager, "rowWriter") as SessionRowWriter;
+  const pending = writer.pendingNonTerminalReleases();
   expect(pending.size).toBe(1);
   await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
   expect(pending.size).toBe(0);

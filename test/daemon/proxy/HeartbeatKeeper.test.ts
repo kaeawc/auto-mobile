@@ -411,7 +411,7 @@ describe("HeartbeatKeeper", () => {
     expect(proxy["heartbeatWithStallDetection"]("held", () => result)).toBe(result);
     // The port was constructed before this replacement and must still look it up at call time.
     let called = false;
-    proxy["runLatestBindingHeartbeatTick"] = () => {
+    proxy["latestBindingKeeper"].runLatestBindingHeartbeatTick = () => {
       called = true;
       return result;
     };

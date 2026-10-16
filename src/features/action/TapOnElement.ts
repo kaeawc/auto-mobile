@@ -6,12 +6,9 @@ import {
   type TapFocusFailure,
 } from "./tapTargetSupport";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
-import {
-  ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-  describeFocusTarget,
-  requireTestTag,
-} from "./tapFocusIdentity";
+import { ANDROID_PRE_TAP_BOUNDS_EPSILON_PX, describeFocusTarget } from "./tapFocusIdentity";
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
+import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
 import { FocusVerifier } from "./tapFocusVerifier";
 import { pollSearchUntil } from "./searchUntilPoller";
@@ -20,11 +17,10 @@ import {
   assertLongPressWithinHardMax,
   containerSelectorError,
   failedTapResult,
-  isContainerAvailable,
   resolveSearchUntilDuration,
   throwIfLongPressInterrupted,
 } from "./tapSharedHelpers";
-import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -41,7 +37,6 @@ import {
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
-import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   assertLongPressFitsRequestBudget,
   resolveVoiceOverActivateCtrlProxyTimeoutMs,
@@ -89,7 +84,6 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { isElementKeyboardFocused } from "../utility/FocusedInput";
@@ -210,14 +204,6 @@ type ResolvedAndroidTapOptions = DisplayFenceOption & {
 /** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
 type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
-
-const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
-  {
-    tap: "tap",
-    doubleTap: "tap",
-    longPress: "tap",
-    focus: "focus-input",
-  };
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -394,6 +380,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     device: this.device,
     geometry: () => this.geometry,
     strategy: () => this.strategy,
+  });
+  private readonly finder = new TapElementFinder({
+    device: this.device,
+    elementSelector: () => this.elementSelector,
+    tapPoints: this.tapPoints,
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
@@ -1264,36 +1255,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
   }
 
-  private selectVariantOrSiblingOrMiss(
-    options: TapVerificationOptions,
-    select: () => ElementSelectionResult,
-  ): ElementSelectionResult {
-    try {
-      return select();
-    } catch (error) {
-      if (!(error instanceof ActionableError)) {
-        throw error;
-      }
-      const expectedMissing =
-        (options.verification !== undefined && error.message === "Sibling row not found") ||
-        (options.textAny !== undefined &&
-          options.selectionStrategy === "unique" &&
-          error.message.startsWith("Target not found"));
-      if (!expectedMissing) {
-        throw error;
-      }
-      // Missing ordered text variants and polling display siblings are expected;
-      // keep all lookups scoped and propagate container errors and ambiguity.
-      logger.debug("[TapOnElement] Text variant or display sibling not found yet", error);
-      return {
-        element: null,
-        totalMatches: 0,
-        indexInMatches: -1,
-        strategy: options.selectionStrategy ?? "first",
-      };
-    }
-  }
-
   private withObservationScreenSize(
     options: TapVerificationOptions,
     observation: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
@@ -1314,225 +1275,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     try {
-      return this.selectElementInHierarchy(options, viewHierarchy);
+      return this.finder.selectElementInHierarchy(options, viewHierarchy);
     } catch (error) {
       if (
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
         (!isStrictlyScoped(options) && options.index === undefined) ||
-        !this.isContainerAvailable(viewHierarchy, options.container)
+        !this.finder.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
       }
-      return this.classifyFocusSelectionFailure(options, viewHierarchy, error);
+      return this.finder.classifyFocusSelectionFailure(options, viewHierarchy, error);
     }
-  }
-
-  private classifyFocusSelectionFailure(
-    options: TapVerificationOptions,
-    viewHierarchy: ViewHierarchyResult,
-    error: ActionableError,
-  ): never {
-    // Strict selection may throw before handleElementNotFound. Inspect the same
-    // hierarchy with first-match selection to distinguish absence from ambiguity
-    // using selection evidence, while preserving the original diagnostic.
-    const inspected = this.selectElementInHierarchy(
-      { ...options, selectionStrategy: "first", index: undefined },
-      viewHierarchy,
-    ).selection;
-    if (inspected.totalMatches === 0 && !inspected.matchedElement) {
-      throw new TapTargetUnavailableError(error.message, "not-found");
-    }
-    const target = inspected.element ?? inspected.matchedElement;
-    if (
-      inspected.totalMatches === 1 &&
-      target &&
-      isFocusEditableElement(target) &&
-      this.isElementTapTargetOffScreen(
-        inspected,
-        viewHierarchy,
-        this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
-        options,
-      )
-    ) {
-      throw new TapTargetUnavailableError(
-        error.message,
-        this.tapPoints.isCoveredByNavigationBar(
-          inspected,
-          viewHierarchy,
-          this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
-        )
-          ? "navigation-bar"
-          : "no-visible-tap-area",
-      );
-    }
-    throw error;
-  }
-
-  private selectElementInHierarchy(
-    options: TapVerificationOptions,
-    viewHierarchy: ViewHierarchyResult,
-  ): { selection: ElementSelectionResult; containerFound: boolean } {
-    const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
-    const intentAction =
-      options.action === "longPress"
-        ? "long-press"
-        : options.action === "focus"
-          ? "focus-input"
-          : "tap";
-    const lookupAction = options.subtext
-      ? "inspect"
-      : isStrictlyScoped(options)
-        ? intentAction
-        : options.action === "focus"
-          ? "focus-input"
-          : "inspect";
-    const selectionIntent = this.selectionIntentFor(options);
-
-    const text = options.text;
-    if (text) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              fuzzyMatch: true,
-              caseSensitive: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              selectionIntent,
-              index: options.index,
-            }),
-          ),
-          containerFound,
-        };
-      }
-
-      return {
-        selection: this.elementSelector.selectByText(viewHierarchy, text, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: true,
-          caseSensitive: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          allowHintFallback: options.action === "tap" || options.action === "focus",
-          index: options.index,
-          selectionIntent,
-        }),
-        containerFound,
-      };
-    }
-
-    if (options.textAny) {
-      let lastSelection: ElementSelectionResult | null = null;
-      let offScreenSelection: ElementSelectionResult | null = null;
-      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions);
-      for (const text of options.textAny) {
-        const selection = options.sibling
-          ? this.selectVariantOrSiblingOrMiss(options, () =>
-              this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                fuzzyMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction,
-                selectionIntent,
-                index: options.index,
-              }),
-            )
-          : this.selectVariantOrSiblingOrMiss(options, () =>
-              this.elementSelector.selectByText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                partialMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction: lookupAction,
-                allowHintFallback: options.action === "tap" || options.action === "focus",
-                index: options.index,
-                selectionIntent,
-              }),
-            );
-        lastSelection = selection;
-        if (selection.element) {
-          if (this.isElementTapTargetOffScreen(selection, viewHierarchy, screenSize, options)) {
-            offScreenSelection = selection;
-            continue;
-          }
-          return { selection, containerFound };
-        }
-      }
-
-      if (offScreenSelection) {
-        return {
-          selection: { ...offScreenSelection, element: null },
-          containerFound,
-        };
-      }
-
-      if (lastSelection) {
-        if (options.selectionStrategy === "unique") {
-          throw new TapTargetUnavailableError(
-            `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
-            "not-found",
-          );
-        }
-        return { selection: lastSelection, containerFound };
-      }
-    }
-
-    const elementId = options.elementId;
-    if (elementId) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              partialMatch: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              index: options.index,
-            }),
-          ),
-          containerFound,
-        };
-      }
-
-      return {
-        selection: this.elementSelector.selectByResourceId(viewHierarchy, elementId, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          index: options.index,
-        }),
-        containerFound,
-      };
-    }
-
-    return {
-      selection: this.elementSelector.selectByTestTag(viewHierarchy, requireTestTag(options), {
-        container: options.container,
-        screenSizeOptions: options.screenSizeOptions,
-        strategy: options.selectionStrategy,
-        intentAction: lookupAction,
-        selectionIntent,
-        index: options.index,
-      }),
-      containerFound,
-    };
-  }
-
-  private selectionIntentFor(options: TapOnElementOptions): TextSelectionIntent {
-    return options.ensureChecked !== undefined && options.index === undefined && !options.elementId
-      ? "toggle"
-      : TEXT_SELECTION_INTENT_BY_ACTION[options.action];
   }
 
   /**
@@ -1566,6 +1321,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
     return this.tapPoints.resolveTapPoint(...args);
+  }
+
+  private resolveContainerElement(
+    ...args: Parameters<TapElementFinder["resolveContainerElement"]>
+  ) {
+    return this.finder.resolveContainerElement(...args);
   }
 
   private readonly isElementTapTargetOffScreen: TapPointPlanner["isElementTapTargetOffScreen"] = (
@@ -2340,51 +2101,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
 
     throw new TapTargetUnavailableError(baseError, "not-found");
-  }
-
-  private isContainerAvailable(
-    viewHierarchy: ViewHierarchyResult,
-    container?: ElementContainerSelector,
-  ): boolean {
-    return isContainerAvailable(this.elementSelector, viewHierarchy, container);
-  }
-
-  private resolveContainerElement(
-    viewHierarchy: ViewHierarchyResult,
-    options: TapVerificationOptions,
-  ): Element | undefined {
-    const container = options.container;
-    if (!container) {
-      return undefined;
-    }
-    if (this.elementSelector.resolveContainer) {
-      return this.elementSelector.resolveContainer(
-        viewHierarchy,
-        container,
-        options.selectionStrategy,
-      );
-    }
-    const scopedOptions = {
-      container: container.container,
-      index: container.index,
-      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
-    };
-    if (container.elementId) {
-      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-      }).element as Element | undefined;
-    }
-    if (container.text) {
-      return this.elementSelector.selectByText(viewHierarchy, container.text, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-        caseSensitive: false,
-      }).element as Element | undefined;
-    }
-    return undefined;
   }
 
   private isClickableElement(element: Element): boolean {
@@ -4352,7 +4068,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
       reResolve: hasSelector
         ? (hierarchy) => {
-            const selection = this.selectElementInHierarchy(
+            const selection = this.finder.selectElementInHierarchy(
               options,
               scopeHierarchyForSelector(hierarchy, options.layer),
             ).selection;

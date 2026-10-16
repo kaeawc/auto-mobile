@@ -17,6 +17,14 @@ describe("parseAvdConfig", () => {
     expect(config.screenDensity).toBe(420);
   });
 
+  it("parses a dotted android-37.0 sysdir to API 37 / Android 17 (#12788)", () => {
+    const config = parseAvdConfig(
+      "image.sysdir.1=system-images/android-37.0/google_apis/arm64-v8a/",
+    );
+    expect(config.apiLevel).toBe(37);
+    expect(config.osVersion).toBe("17");
+  });
+
   it("parses API level from image.sysdir.1", () => {
     const content = "image.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";
     const config = parseAvdConfig(content);
@@ -186,7 +194,7 @@ describe("parseAvdConfig", () => {
 
 describe("apiLevelToVersion", () => {
   // PARAM-10: pin the entire API-level -> version map, not a sample of five, so
-  // a drifted or removed entry is caught. The map runs contiguously 21..36.
+  // a drifted or removed entry is caught. The map runs contiguously 21..37.
   const mapRows: Array<[number, string]> = [
     [21, "5.0"],
     [22, "5.1"],
@@ -204,6 +212,7 @@ describe("apiLevelToVersion", () => {
     [34, "14"],
     [35, "15"],
     [36, "16"],
+    [37, "17"],
   ];
 
   for (const [apiLevel, version] of mapRows) {
@@ -213,7 +222,7 @@ describe("apiLevelToVersion", () => {
   }
 
   // Boundaries just outside the map, plus clearly-out-of-range values.
-  const unknownRows = [20, 37, 0, -1, 99];
+  const unknownRows = [20, 38, 0, -1, 99];
   for (const apiLevel of unknownRows) {
     it(`returns undefined for unmapped API ${apiLevel}`, () => {
       expect(apiLevelToVersion(apiLevel)).toBeUndefined();
@@ -224,7 +233,7 @@ describe("apiLevelToVersion", () => {
 describe("versionToApiLevelRange", () => {
   // Inverse of apiLevelToVersion for the release-version bounds startDevice
   // documents (#6132). Every table row must round-trip.
-  for (const apiLevel of Array.from({ length: 16 }, (_, index) => 21 + index)) {
+  for (const apiLevel of Array.from({ length: 17 }, (_, index) => 21 + index)) {
     it(`round-trips API ${apiLevel} through its release version`, () => {
       const version = apiLevelToVersion(apiLevel);
       expect(version).toBeDefined();
@@ -265,7 +274,7 @@ describe("versionToApiLevelRange", () => {
     expect(versionToApiLevelRange(" 14 ")).toEqual({ min: 34, max: 34 });
   });
 
-  for (const unknown of ["17", "4.4", "8.2", "", "abc", "14-QPR1"]) {
+  for (const unknown of ["18", "4.4", "8.2", "", "abc", "14-QPR1"]) {
     it(`returns undefined for unmapped release version '${unknown}'`, () => {
       expect(versionToApiLevelRange(unknown)).toBeUndefined();
     });

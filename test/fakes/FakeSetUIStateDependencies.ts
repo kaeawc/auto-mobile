@@ -65,6 +65,7 @@ interface InputTextCall {
  */
 interface SwipeCall {
   options: { direction: string; lookFor?: { text?: string; elementId?: string } };
+  call?: ActionCall;
 }
 
 /**
@@ -203,9 +204,9 @@ export class FakeSwipeOn implements SwipeOnLike {
 
   async execute(
     options: { direction: string; lookFor?: { text?: string; elementId?: string } },
-    _call?: ActionCall,
+    call?: ActionCall,
   ): Promise<SwipeOnResult> {
-    this.calls.push({ options });
+    this.calls.push({ options, call });
     this.swipeCount++;
 
     // Check if lookFor element should appear after this swipe

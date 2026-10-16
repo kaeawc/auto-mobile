@@ -189,6 +189,28 @@ export function isGatedToolErrorCode(error: unknown): boolean {
   );
 }
 
+/**
+ * The daemon does not register the requested tool at all (as opposed to registering it behind an
+ * availability gate, {@link DAEMON_TOOL_UNAVAILABLE_CODE}). The frame's `details.toolName` names it.
+ * Proxies classify by this code; the message prose is parsed only for daemons that predate it
+ * (no `structuredToolErrorCodes` capability).
+ */
+export const DAEMON_UNKNOWN_TOOL_CODE = "daemon_unknown_tool";
+
+/**
+ * A call named a session UUID the daemon never issued or no longer holds, refused before dispatch.
+ * Distinct from {@link DAEMON_SESSION_NOT_FOUND_CODE}, which is the socket connection's own session.
+ */
+export const DAEMON_SESSION_NOT_ACTIVE_CODE = "daemon_session_not_active";
+
+/** The `code` an error carries, whether set directly or on a wire `data` payload. */
+export function errorCodeOf(error: unknown): unknown {
+  if (error === null || typeof error !== "object" || !("code" in error)) {
+    return undefined;
+  }
+  return error.code;
+}
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {
@@ -515,6 +537,11 @@ export interface DaemonStatus {
   activeProvisioning?: boolean;
   /** Missing socket sessions use DAEMON_SESSION_NOT_FOUND_CODE; tool messages are not evidence. */
   structuredSessionNotFound?: boolean;
+  /**
+   * Unknown-tool and not-an-active-session refusals carry DAEMON_UNKNOWN_TOOL_CODE and
+   * DAEMON_SESSION_NOT_ACTIVE_CODE; a proxy reads those, not the message text.
+   */
+  structuredToolErrorCodes?: boolean;
   /** Non-secret fingerprint of the acceptance discovery capability bound at startup. */
   acceptanceCapabilityFingerprint?: string | null;
   /**

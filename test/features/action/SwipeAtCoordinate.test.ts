@@ -99,8 +99,8 @@ describe("swipeAt dispatch", () => {
     [{ durationMs: 0 }, "integer from 1 to 3000"],
     [{ durationMs: 3001 }, "integer from 1 to 3000"],
     [{ durationMs: 1.5 }, "integer from 1 to 3000"],
-  ])("rejects %j before dispatch", async (extra, message) => {
-    const { swipeAt, swipes } = createSwipeAt(androidDevice);
+  ])("rejects %j before observing or dispatching", async (extra, message) => {
+    const { swipeAt, observeScreen, swipes } = createSwipeAt(androidDevice);
 
     const result = await swipeAt.execute({
       from: { x: 10, y: 20 },
@@ -111,6 +111,8 @@ describe("swipeAt dispatch", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain(message);
     expect(swipes).toEqual([]);
+    expect(observeScreen.getExecuteCallCount()).toBe(0);
+    expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(0);
   });
 
   test("reports a failed dispatch without claiming the swipe happened", async () => {

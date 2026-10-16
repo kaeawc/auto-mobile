@@ -55,8 +55,6 @@ import {
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
 
-import { linkWindowRoots } from "../linkWindowRoots";
-
 import type { ScreenIdentity } from "../../../models/ObserveResult";
 
 import {
@@ -75,7 +73,6 @@ import {
   HighlightShape,
   toActionableError,
   ActionableError,
-  nodeAttributes,
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
@@ -97,8 +94,6 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
-import { appWindowsOnly } from "../hierarchyLayer";
-import { isDeepStrictEqual } from "node:util";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
@@ -109,6 +104,7 @@ import {
   OBSERVE_RECOVERY_WAIT_MS,
   type AndroidServiceManagerFactory,
 } from "./AndroidServiceRecovery";
+import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -155,8 +151,6 @@ import {
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
-import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import {
   AndroidAppEventRecorder,
@@ -251,7 +245,6 @@ import type {
   CertificatesDelegateContext,
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
-  AccessibilityNode,
   CachedHierarchy,
   ScreenshotResult,
   A11ySwipeResult,
@@ -879,7 +872,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
-  private lastLayoutTelemetryTimestamp = 0;
 
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
@@ -1512,6 +1504,58 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /** Keep mutable test seams and post-await state live without exposing connection lifecycle. */
+  private hierarchyUpdateHandler: AndroidHierarchyUpdateHandler | undefined;
+  private getHierarchyUpdateHandler(): AndroidHierarchyUpdateHandler {
+    if (!this.hierarchyUpdateHandler) {
+      const client = this;
+      this.hierarchyUpdateHandler = new AndroidHierarchyUpdateHandler({
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get transientObserver() {
+          return client.transientObserver;
+        },
+        get hierarchy() {
+          return client.hierarchy;
+        },
+        get observerHierarchyRequestIds() {
+          return client.observerHierarchyRequestIds;
+        },
+        get hierarchyObservationStreamSuppressions() {
+          return client.hierarchyObservationStreamSuppressions;
+        },
+        get sdkNavigationAppIds() {
+          return client.sdkNavigationAppIds;
+        },
+        get cachedHierarchy() {
+          return client.cachedHierarchy;
+        },
+        set cachedHierarchy(value) {
+          client.cachedHierarchy = value;
+        },
+        get lastForegroundPackage() {
+          return client.lastForegroundPackage;
+        },
+        set lastForegroundPackage(value) {
+          client.lastForegroundPackage = value;
+        },
+        removeHierarchyObservationStreamSuppression: (requestId) =>
+          client.removeHierarchyObservationStreamSuppression(requestId),
+        updateCachedScreenDimensions: (hierarchy) => client.updateCachedScreenDimensions(hierarchy),
+        pushHierarchyToObservationStream: (hierarchy, frameContext) =>
+          client.pushHierarchyToObservationStream(hierarchy, frameContext),
+        startScreenshotBackoff: () => client.startScreenshotBackoff(),
+        getNavigationGraphManager: () => client.getNavigationGraphManager(),
+        ensureBuildContext: (packageName) => client.ensureBuildContext(packageName),
+        getHierarchyNavigationDetector: () => client.getHierarchyNavigationDetector(),
+      });
+    }
+    return this.hierarchyUpdateHandler;
+  }
+
   private getServiceRecovery(): AndroidServiceRecovery {
     if (!this.serviceRecovery) {
       const client = this;
@@ -4534,208 +4578,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     frameContext?: string,
     requestId?: string | null,
   ): void {
-    const now = this.timer.now();
-    logger.debug(
-      `[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`,
-    );
-
-    const incomingHierarchy: CachedHierarchy = {
-      hierarchy: data,
-      receivedAt: now,
-      fresh: true,
-      requestId,
-      perfTiming,
-      frameContext,
-    };
-    // A must-deliver correlated frame can leave the runner after a newer coalesced push.
-    // Complete its own waiter, but do not regress the shared cache or observation stream.
-    const observerResponse = !!requestId && this.observerHierarchyRequestIds.has(requestId);
-    const isolatedObserverResponse =
-      observerResponse && this.observerHierarchyRequestIds.get(requestId!) === true;
-    this.hierarchy.resolvePendingHierarchy(requestId, incomingHierarchy);
-    // Consume correlated responses even when too old for the shared cache or observer-only.
-    let suppressObservationStreamPush =
-      !!requestId && this.removeHierarchyObservationStreamSuppression(requestId);
-    if (observerResponse) {
-      this.observerHierarchyRequestIds.delete(requestId);
-      if (
-        this.transientObserver ||
-        // Aggregate and explicit-panel observer frames cannot seed the owner's active frame.
-        isolatedObserverResponse ||
-        (this.cachedHierarchy !== null &&
-          isDeepStrictEqual(
-            {
-              hierarchy: data.hierarchy,
-              packageName: data.packageName,
-              windows: data.windows,
-              screenWidth: data.screenWidth,
-              screenHeight: data.screenHeight,
-              rotation: data.rotation,
-              displayId: data.displayId,
-            },
-            {
-              hierarchy: this.cachedHierarchy.hierarchy.hierarchy,
-              packageName: this.cachedHierarchy.hierarchy.packageName,
-              windows: this.cachedHierarchy.hierarchy.windows,
-              screenWidth: this.cachedHierarchy.hierarchy.screenWidth,
-              screenHeight: this.cachedHierarchy.hierarchy.screenHeight,
-              rotation: this.cachedHierarchy.hierarchy.rotation,
-              displayId: this.cachedHierarchy.hierarchy.displayId,
-            },
-          ))
-      ) {
-        return;
-      }
-    }
-    if (this.transientObserver) {
-      return;
-    }
-    if (this.cachedHierarchy && data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt) {
-      return;
-    }
-
-    // Mark previous cache as stale
-    if (this.cachedHierarchy) {
-      this.cachedHierarchy.fresh = false;
-    }
-
-    // Update cache with fresh data
-    this.cachedHierarchy = incomingHierarchy;
-
-    // Update cached screen dimensions
-    this.updateCachedScreenDimensions(data);
-
-    // Old APKs have no echo capability advertisement. Until the first correlated frame on a
-    // fresh connection, an idless broadcast can still consume the oldest token (legacy behavior).
-    // Once ANY echoed id is seen, idless/foreign frames never consume another request's token.
-    // Keep legacy consumption after the cache/observer guards, exactly as the anonymous Set was.
-    if (!requestId && !this.hierarchy.hasSeenCorrelatedFrames()) {
-      const oldestId = this.hierarchyObservationStreamSuppressions.keys().next().value;
-      suppressObservationStreamPush =
-        oldestId !== undefined && this.removeHierarchyObservationStreamSuppression(oldestId);
-    }
-    if (!suppressObservationStreamPush) {
-      // Push to observation stream
-      this.pushHierarchyToObservationStream(data, frameContext);
-
-      // Start screenshot backoff
-      this.startScreenshotBackoff();
-    } else {
-      logger.debug(
-        "[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request",
-      );
-    }
-
-    // Track foreground package for context and start performance monitoring
-    if (data.packageName && data.packageName !== this.lastForegroundPackage) {
-      this.lastForegroundPackage = data.packageName;
-      // Start performance monitoring for this device/package
-      const monitor = getPerformanceMonitor();
-      monitor.startMonitoring(this.device.deviceId, data.packageName);
-    }
-
-    // Record layout telemetry (throttled to max 1 per 500ms)
-    if (now - this.lastLayoutTelemetryTimestamp >= 500) {
-      this.lastLayoutTelemetryTimestamp = now;
-      const recorder = TelemetryRecorder.getInstance();
-      recorder.setContext(this.device.deviceId, null);
-      const screenName = data.foregroundActivity ?? data.packageName ?? null;
-      const windowCount = data.windows?.length ?? 0;
-      // Include a compact hierarchy tree (~2-5KB) with just the display properties.
-      // The full hierarchy (~10-50KB with bounds/states/extras) is available via
-      // the observation stream and would cause excessive traffic at 500ms intervals.
-      const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
-      recorder
-        .recordLayoutEvent({
-          timestamp: now,
-          applicationId: data.packageName ?? null,
-          subType: "hierarchy_change",
-          composableName: null,
-          composableId: null,
-          recompositionCount: null,
-          durationMs: null,
-          likelyCause: null,
-          detailsJson: JSON.stringify({
-            screenName,
-            windowCount,
-            foregroundActivity: data.foregroundActivity ?? null,
-            hierarchy: compactHierarchy,
-          }),
-          screenName,
-        })
-        .catch((error) => {
-          logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
-        });
-    }
-
-    // Notify hierarchy navigation detector. Screen identity follows the app windows only
-    // (#9305): AutoMobile's own prototype is removed and the capture attributed to the app behind it,
-    // so showing, paging or dismissing a prototype records no navigation.
-    const appCapture = appWindowsOnly(data);
-    const navigationPackage = this.resolveHierarchyPackage(appCapture);
-    if (!appCapture.hierarchy) {
-      logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
-    } else if (data.error) {
-      logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
-    } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
-      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
-      // The app may be back in front without a navigation event (#10193). The signal names this
-      // device: on the shared global manager another device's tick must not switch the app.
-      if (navigationPackage) {
-        this.getNavigationGraphManager()
-          .recordAppForeground(navigationPackage, this.device.deviceId)
-          .catch((error) =>
-            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
-          );
-      }
-    } else {
-      // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
-      // non-SDK apps never emit navigation_event, so this is the only path that gives
-      // them a real build key instead of the default/legacy one.
-      if (navigationPackage) {
-        this.ensureBuildContext(navigationPackage);
-      }
-      this.getHierarchyNavigationDetector().onHierarchyUpdate({
-        ...appCapture,
-        packageName: navigationPackage,
-      });
-    }
-  }
-
-  private resolveHierarchyPackage(data: AccessibilityHierarchy): string | undefined {
-    if (data.packageName?.trim()) {
-      return data.packageName.trim();
-    }
-    const windows = (linkWindowRoots(data.hierarchy, data.windows) ?? []).filter(
-      (window) =>
-        data.displayId === undefined ||
-        data.displayId === null ||
-        window.displayId === undefined ||
-        window.displayId === null ||
-        window.displayId === data.displayId,
-    );
-    // An IME can own focus above the app. Prefer a focused non-IME surface
-    // (including system dialogs), then the active/top application window.
-    const appWindows = windows.filter((entry) => entry.type === 1);
-    const window =
-      windows.find((entry) => entry.isFocused && entry.type !== 2) ??
-      appWindows.find((entry) => entry.isActive) ??
-      appWindows.sort((left, right) => (right.windowLayer ?? 0) - (left.windowLayer ?? 0))[0];
-    const attributes = window?.hierarchy ? nodeAttributes(window.hierarchy) : {};
-    // Do not borrow a different root's identity when the selected window is unknown.
-    const candidates = window
-      ? [window.packageName, attributes.packageName, attributes.package]
-      : [data.hierarchy?.packageName];
-    return candidates
-      .flatMap((value) => (typeof value === "string" ? [value.trim()] : []))
-      .find((value) => value.length > 0);
-  }
-
-  private shouldUseHierarchyNavigation(packageName?: string): boolean {
-    if (!packageName) {
-      return true;
-    }
-    return !this.sdkNavigationAppIds.has(packageName);
+    this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
   }
 
   private pushHierarchyToObservationStream(
@@ -5216,36 +5059,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private markInstalledAppsStale(reason: string): Promise<void> {
     return this.getAppEventRecorder().markInstalledAppsStale(reason);
   }
-}
-
-/**
- * Create a compact representation of an AccessibilityNode tree for telemetry.
- * Strips bounds, states, extras — keeps only className, resource-id, text,
- * content-desc, scrollable, and children. Typically ~2-5KB vs 10-50KB full.
- */
-function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
-  const compact: Record<string, unknown> = {};
-  if (node.className) {
-    compact.className = node.className;
-  }
-  if (node["resource-id"]) {
-    compact["resource-id"] = node["resource-id"];
-  }
-  if (node.text) {
-    compact.text = node.text;
-  }
-  if (node["content-desc"]) {
-    compact["content-desc"] = node["content-desc"];
-  }
-  if (node.scrollable === "true") {
-    compact.scrollable = "true";
-  }
-
-  if (node.node) {
-    const children = Array.isArray(node.node) ? node.node : [node.node];
-    compact.node = children.map(compactifyNode);
-  }
-  return compact;
 }
 
 registerDeviceIncarnationListener({

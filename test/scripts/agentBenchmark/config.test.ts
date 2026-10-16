@@ -183,6 +183,29 @@ describe("agent benchmark suite config", () => {
     }
   });
 
+  test("settle and timeout delays must be finite and timer-safe", () => {
+    for (const preflight of [{ settleSeconds: Infinity }, { settleSeconds: 3_000_000 }]) {
+      expect(() =>
+        parseSuiteDefinition({ ...MINIMAL, preflight: preflight }, "demo.yml"),
+      ).toThrow();
+    }
+    expect(() =>
+      parseSuiteDefinition({ ...MINIMAL, claude: { timeoutSeconds: 3_000_000 } }, "demo.yml"),
+    ).toThrow();
+  });
+
+  test("blank match strings are rejected", () => {
+    expect(() =>
+      parseSuiteDefinition(
+        { ...MINIMAL, verify: { ...MINIMAL.verify, screenIncludes: [" "] } },
+        "demo.yml",
+      ),
+    ).toThrow(/must not be blank/);
+    expect(() => parseSuiteDefinition({ ...MINIMAL, failurePatterns: ["\t"] }, "demo.yml")).toThrow(
+      /must not be blank/,
+    );
+  });
+
   test("every committed suite loads and its name matches its file", () => {
     // The same predicate --all discovery uses, so a .yaml suite cannot skip this guard.
     const files = readdirSync(SUITES_DIR).filter((file) => /\.ya?ml$/.test(file));

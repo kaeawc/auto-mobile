@@ -232,7 +232,7 @@ export function killProcessTree(
   }
 }
 
-function createLauncher(timer: Timer): ClaudeLauncher {
+export function createLauncher(timer: Timer): ClaudeLauncher {
   return {
     launch(spec) {
       const stdout = openSync(spec.stdoutPath, "w");
@@ -249,14 +249,31 @@ function createLauncher(timer: Timer): ClaudeLauncher {
           killProcessTree(child.pid, signal);
         }
       };
-      // A separate group no longer receives the terminal's Ctrl+C, so forward an interrupt
-      // or termination to the group, then let the signal end the harness as usual.
-      const forward = (signal: NodeJS.Signals) => {
-        killTree("SIGTERM");
+      // A separate group no longer receives the terminal's Ctrl+C, so an interrupt or
+      // termination is forwarded to the group: SIGTERM first, SIGKILL once the group exits or
+      // the grace period ends (or on a second signal), and only then does the signal end the
+      // harness as usual, so nothing in the group outlives it.
+      let interrupted: NodeJS.Signals | undefined;
+      let graceHandle: NodeJS.Timeout | undefined;
+      const finishInterrupt = () => {
+        if (graceHandle) {
+          timer.clearTimeout(graceHandle);
+          graceHandle = undefined;
+        }
+        killTree("SIGKILL");
         process.off("SIGINT", forward);
         process.off("SIGTERM", forward);
-        process.kill(process.pid, signal);
+        process.kill(process.pid, interrupted ?? "SIGTERM");
       };
+      function forward(signal: NodeJS.Signals) {
+        if (interrupted) {
+          finishInterrupt();
+          return;
+        }
+        interrupted = signal;
+        killTree("SIGTERM");
+        graceHandle = timer.setTimeout(finishInterrupt, KILL_GRACE_MS);
+      }
       process.on("SIGINT", forward);
       process.on("SIGTERM", forward);
       // Claude can exit before reading stdin (bad flag, auth failure); the resulting
@@ -295,6 +312,11 @@ function createLauncher(timer: Timer): ClaudeLauncher {
         });
         child.once("close", (code) => {
           if (settle()) {
+            if (interrupted) {
+              // The wrapper exited; kill any straggler in its group, then end the harness.
+              finishInterrupt();
+              return;
+            }
             resolveExit({ exitCode: code, timedOut });
           }
         });

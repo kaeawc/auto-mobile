@@ -98,9 +98,9 @@ export function createKillDeviceResponse(
   if (alreadyStoppedMessage !== undefined) {
     if (args.device.platform === "ios") {
       return createStructuredToolResponse({
-        message: `ios '${args.device.name}' already shut down`,
+        message: `ios '${deviceDisplayName(args.device)}' already shut down`,
         udid: args.device.deviceId,
-        name: args.device.name,
+        name: deviceDisplayName(args.device),
         timing,
         platform: args.device.platform,
       });
@@ -109,9 +109,9 @@ export function createKillDeviceResponse(
   }
 
   return createStructuredToolResponse({
-    message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
+    message: `${args.device.platform} '${deviceDisplayName(args.device)}' shutdown successfully`,
     udid: args.device.deviceId,
-    name: args.device.name,
+    name: deviceDisplayName(args.device),
     timing,
     platform: args.device.platform,
   });
@@ -685,7 +685,21 @@ async function resolvePooledAvdKillTarget(
   }
   return confirmation.kind === "skipped"
     ? device
-    : { ...device, name: confirmation.confirmedAvdName };
+    : withConfirmedName(device, confirmation.confirmedAvdName);
+}
+
+/**
+ * The kill target renamed to a confirmed identity. A blank confirmation is no identity at all,
+ * so the caller's own target stays: renaming to '' made the kill report "Emulator '' is not
+ * running" and defeated the name comparison downstream.
+ */
+export function withConfirmedName(device: BootedDevice, confirmed: string): BootedDevice {
+  return confirmed.trim() === "" ? device : { ...device, name: confirmed };
+}
+
+/** A name for messages: the caller's name, or the serial when the name is blank. */
+function deviceDisplayName(device: BootedDevice): string {
+  return device.name.trim() === "" ? device.deviceId : device.name;
 }
 
 interface KillProcessAndRetireOwnershipOptions {
@@ -1137,7 +1151,7 @@ async function resolveRestartStopKillTarget(
     stopIdentity &&
     "confirmed" in stopIdentity &&
     (options.pooledAvdIdentity?.force || isUnknownAndroidRuntimeName(pooledKillTarget))
-      ? { ...pooledKillTarget, name: stopIdentity.confirmed }
+      ? withConfirmedName(pooledKillTarget, stopIdentity.confirmed)
       : pooledKillTarget;
   return { killTarget, stopIdentity };
 }

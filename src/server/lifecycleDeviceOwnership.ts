@@ -68,7 +68,7 @@ export async function resolveRestartStopIdentity(input: {
   }
   const known =
     stoppedStableId ?? pool.restartStopConfirmedPooledIdentity?.(device.deviceId, device.platform);
-  if (known !== undefined) {
+  if (known !== undefined && known.trim() !== "") {
     return { confirmed: known };
   }
   const timeoutMs = Math.min(

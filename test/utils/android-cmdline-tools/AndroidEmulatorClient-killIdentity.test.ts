@@ -753,3 +753,55 @@ for (const signalled of [false, true]) {
     });
   }
 }
+
+// An emulator process can be alive while the daemon's adb server does not list its serial
+// (a different adb server, a dropped registration). The adb view alone must not answer
+// "not running" for it: the process table is the second witness.
+function absentFromAdbFixture() {
+  const { client, adb } = offlineFixture([]);
+  const stopper = new FakeEmulatorProcessStopper();
+  stopper.candidates = [
+    { pid: 83205, command: "qemu-system-aarch64-headless -avd Pixel_8 -port 5554" },
+  ];
+  stopper.outcome = { kind: "stopped", pid: 83205, signal: "SIGTERM" };
+  return { client, adb, stopper };
+}
+
+test("a serial absent from adb but present in the process table is stopped through the process stopper", async () => {
+  const { client, adb, stopper } = absentFromAdbFixture();
+
+  await expect(client.killDevice(original, { processStop: { stopper } })).resolves.toMatchObject(
+    original,
+  );
+
+  expect(stopper.stopCalls[0][0]).toEqual({ serial: original.deviceId, avdName: original.name });
+  expect(emuKillArgv(adb)).toEqual([]);
+});
+
+test("a serial absent from adb with a live process and no known AVD name is a precise error, not 'not running'", async () => {
+  const { client, stopper } = absentFromAdbFixture();
+  const nameless = { ...original, name: "" };
+
+  const failure = await client
+    .killDevice(nameless, { processStop: { stopper } })
+    .catch((error: unknown) => error);
+
+  const message = (failure as Error).message;
+  expect(message).not.toContain("is not running");
+  expect(message).toContain("emulator-5554");
+  expect(message).toContain("83205");
+  expect(message).not.toContain("''");
+});
+
+test("a serial absent from adb and the process table is still not running, and names the serial when the AVD name is blank", async () => {
+  const { client, stopper } = absentFromAdbFixture();
+  stopper.candidates = [];
+
+  const failure = await client
+    .killDevice({ ...original, name: "" }, { processStop: { stopper } })
+    .catch((error: unknown) => error);
+
+  expect((failure as Error).message).toContain("is not running");
+  expect((failure as Error).message).not.toContain("''");
+  expect((failure as Error).message).toContain("emulator-5554");
+});

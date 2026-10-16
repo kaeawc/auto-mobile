@@ -2361,11 +2361,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       : options;
     const attachedState = await this.readAttachedStateForKill(device, stateOptions);
     if (attachedState === undefined) {
-      throw new ActionableError(`Emulator '${device.name}' is not running`);
+      return await this.killEmulatorAbsentFromAdb(device, options);
     }
+    const label = this.emulatorLabel(device);
     if (!options.force) {
       throw new ActionableError(
-        `Emulator '${device.name}' (${device.deviceId}) is attached to adb but reported in state ` +
+        `Emulator '${label}' (${device.deviceId}) is attached to adb but reported in state ` +
           `'${attachedState}', so the daemon cannot tell whether it has stopped and has left its ` +
           `session and pool entry untouched. Retry killDevice with force: true to send the ` +
           `emulator console kill to ${device.deviceId} anyway.`,
@@ -2376,10 +2377,52 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         `'${attachedState}'; dispatching the console kill without a booted-device match.`,
     );
     await this.dispatchEmulatorConsoleKill(device, options);
-    logger.info(
-      `Requested termination of emulator '${device.name}' (adb state '${attachedState}')`,
-    );
+    logger.info(`Requested termination of emulator '${label}' (adb state '${attachedState}')`);
     return device;
+  }
+
+  /** The AVD name, or the serial when the caller's target carries no usable name. */
+  private emulatorLabel(device: BootedDevice): string {
+    return device.name.trim() === "" ? device.deviceId : device.name;
+  }
+
+  /**
+   * adb lists no row for the serial. That only proves the daemon's adb server does not know
+   * it, not that the emulator exited: the emulator process can outlive its adb registration
+   * (a different adb server, a dropped transport). The process table is the second witness;
+   * only when it also has no process for the serial is the emulator "not running".
+   */
+  private async killEmulatorAbsentFromAdb(
+    device: BootedDevice,
+    options: EmulatorKillOptions,
+  ): Promise<BootedDevice> {
+    const stopper = options.processStop?.stopper;
+    const candidates = stopper
+      ? await stopper.describeSerial(device.deviceId, {
+          deadlineMs: options.deadlineMs ?? this.timer.now(),
+          signal: options.signal,
+        })
+      : [];
+    if (candidates.length === 0) {
+      throw new ActionableError(`Emulator '${this.emulatorLabel(device)}' is not running`);
+    }
+    const label = this.emulatorLabel(device);
+    if (this.processStopAvdName(device, options)) {
+      logger.warn(
+        `[AndroidEmulatorClient] '${device.deviceId}' is absent from adb but its emulator process is ` +
+          `alive; stopping it through the process table.`,
+      );
+      await this.stopEmulatorProcess(
+        device,
+        options,
+        new ActionableError(`Emulator '${label}' is absent from adb`),
+      );
+      return device;
+    }
+    throw new ActionableError(
+      `Emulator '${label}' (${device.deviceId}) has a live process but adb does not list it, and ` +
+        `no AVD name was given to verify its identity. ${emulatorProcessEscapeHint(device.deviceId, candidates)}`,
+    );
   }
 
   private async readAttachedStateForKill(

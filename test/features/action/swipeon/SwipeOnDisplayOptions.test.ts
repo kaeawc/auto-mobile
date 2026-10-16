@@ -486,3 +486,27 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     expect(result.warning).toContain("inside the scrollable");
   });
 }
+
+for (const route of ["ctrlproxy", "adb"] as const) {
+  test(`fromEdge starts at the selected panel's physical edge and ignores autoTarget: ${route}`, async () => {
+    const h = optionsHarness({ route });
+    const result = await h.action.execute({
+      direction: "right",
+      display: "external",
+      fromEdge: "left",
+      at: 0,
+      edgeInset: 2,
+    });
+    expect(result).toMatchObject({ success: true, targetType: "screen" });
+    const { x1, y1, x2, y2 } = h.legs()[0];
+    expect([x1, y1, x2, y2]).toEqual([2, 0, 142, 0]);
+  });
+}
+
+test("fromEdge on a display rejects a wrong-way direction before dispatch", async () => {
+  const h = optionsHarness({ route: "adb" });
+  const result = await h.action.execute({ direction: "up", display: "external", fromEdge: "left" });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("fromEdge");
+  expect(h.legs()).toEqual([]);
+});

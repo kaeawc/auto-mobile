@@ -24,7 +24,9 @@ describe("ObserverSessionRegistry", () => {
     timer = new FakeTimer();
     registry = new ObserverSessionRegistry(timer, 10000);
     const barrier = new FakeDbWriteBarrier();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => barrier);
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => barrier,
+    });
     manager.setObserverSessionRegistry(registry);
   });
   afterEach(() => {
@@ -134,8 +136,8 @@ describe("ObserverSessionRegistry", () => {
   test("rehydration also promotes the observer before publishing a device session", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const barrier = new FakeDbWriteBarrier();
-    const prior = new SessionManager(timer, persistence, () => barrier);
-    const restarted = new SessionManager(timer, persistence, () => barrier);
+    const prior = new SessionManager(timer, persistence, { barrier: () => barrier });
+    const restarted = new SessionManager(timer, persistence, { barrier: () => barrier });
     restarted.setObserverSessionRegistry(registry);
     try {
       await prior.createSession(sessionId, "device-a", "android");

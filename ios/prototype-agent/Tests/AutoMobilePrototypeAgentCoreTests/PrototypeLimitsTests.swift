@@ -383,6 +383,12 @@ final class PrototypeLimitsTests: XCTestCase {
             (.object(["type": .string("box"), "onTap": .array([
                 .object(["type": .string("toggle"), "key": .string("{i.b}")]),
             ])]), "onTap[0].key"),
+            (.object(["type": .string("box"), "onLongPress": .array([
+                .object(["type": .string("emit"), "name": .string("{i.b}")]),
+            ])]), "onLongPress[0].name"),
+            (.object(["type": .string("box"), "onDoubleTap": .array([
+                .object(["type": .string("setState"), "key": .string("k"), "value": .string("{i.b}")]),
+            ])]), "onDoubleTap[0].value"),
             (.object(["type": .string("topAppBar"), "actions": .array([
                 .object(["label": .string("{i.b}")]),
             ])]), "actions[0].label"),

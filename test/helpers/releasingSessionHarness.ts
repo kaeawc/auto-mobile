@@ -55,11 +55,9 @@ export function releasingSessionHarness() {
   const finishRestore = Promise.withResolvers<void>();
   const restores: string[] = [];
   const poolReleases: Array<[string, string]> = [];
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => barrier,
-    (device) => ({
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => barrier,
+    keepScreenAwakeRestorer: (device) => ({
       restore: async () => {
         restores.push(device.deviceId);
         restoreStarted.resolve();
@@ -67,7 +65,7 @@ export function releasingSessionHarness() {
         return { status: "restored" as const };
       },
     }),
-  );
+  });
   const observers = new ObserverSessionRegistry(timer, 10000);
   manager.setObserverSessionRegistry(observers);
   const state: DaemonStateAccess = {

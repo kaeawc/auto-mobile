@@ -141,6 +141,30 @@ describe("prototype tool platform notes", () => {
       }),
     );
   });
+  test("iOS carousel show explains the fixed-width substitution", async () => {
+    agent.handshake.capabilities = [...agent.handshake.capabilities, "prototype_carousel_v1"];
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        root: {
+          type: "carousel",
+          variant: "hero",
+          itemWidth: 200,
+          children: [{ type: "text", text: "One" }],
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "carousel",
+        effect: "substituted",
+        paths: ["root"],
+        detail: expect.stringContaining("fixed-width items"),
+      }),
+    );
+  });
   test("Android show retains its exact result shape", async () => {
     const { raw, payload } = await call({ action: "show", spec }, android);
     expect(raw).not.toHaveProperty("platformNotes");

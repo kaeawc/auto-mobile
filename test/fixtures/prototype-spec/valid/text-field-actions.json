@@ -1,0 +1,50 @@
+{
+  "id": "text-actions",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "query": "coffee"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "query",
+        "label": "Search",
+        "variant": "outlined",
+        "trailingIcon": {
+          "icon": "close",
+          "label": "Clear",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "query",
+              "value": ""
+            }
+          ]
+        },
+        "imeAction": "search",
+        "onSubmit": [
+          {
+            "type": "emit",
+            "name": "search"
+          }
+        ]
+      },
+      {
+        "type": "textField",
+        "stateKey": "query",
+        "placeholder": "Decorative",
+        "trailingIcon": {
+          "icon": "search",
+          "label": "Search"
+        },
+        "imeAction": "next"
+      }
+    ]
+  }
+}

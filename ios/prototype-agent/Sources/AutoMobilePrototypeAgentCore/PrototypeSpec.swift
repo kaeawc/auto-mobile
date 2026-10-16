@@ -125,6 +125,8 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
+        try PrototypeCarousel.validate(expanded)
+        try PrototypeRefresh.validate(expanded)
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
@@ -639,12 +641,18 @@ final class PrototypeNode: Decodable {
     let pageSpacing: Double?
     let peek: PrototypePagerPeek?
     let pageSize: PrototypePagerPageSize?
+    /// Pager page dots (`none` or `dots`, #12071) and the `carousel` node's item sizing.
+    let indicator: String?
+    let itemWidth: Double?
+    let itemSpacing: Double?
     let items: [NavItem]?
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
     let scrollable: Bool?
     let openWhen: Condition?
+    /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
+    let refresh: PrototypeScrollRefresh?
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
@@ -682,6 +690,9 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+    /// Text field trailing icon button and keyboard action key (`prototype_text_field_actions_v1`).
+    let trailingIcon: PrototypeAppBarAction?
+    let imeAction: String?
     /// Text field input and supporting-line options (#12066); cross-field rules belong to the host.
     let supportingText: String?
     let keyboardType: String?
@@ -703,9 +714,11 @@ final class PrototypeNode: Decodable {
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing
+        case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
-             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, dismissOnSwipe, supportingText,
-             keyboardType, secure, multiline, minLines, maxLength
+             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
+             dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
+             imeAction
     }
 
     init(from decoder: Decoder) throws {
@@ -743,6 +756,7 @@ final class PrototypeNode: Decodable {
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
+        refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)
         scrim = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .scrim)
         dragHandle = try container.decodeIfPresent(Bool.self, forKey: .dragHandle)
@@ -784,6 +798,9 @@ final class PrototypeNode: Decodable {
         pageSpacing = try container.decodeIfPresent(Double.self, forKey: .pageSpacing)
         peek = try container.decodeIfPresent(PrototypePagerPeek.self, forKey: .peek)
         pageSize = try container.decodeIfPresent(PrototypePagerPageSize.self, forKey: .pageSize)
+        indicator = try container.decodeIfPresent(String.self, forKey: .indicator)
+        itemWidth = try container.decodeIfPresent(Double.self, forKey: .itemWidth)
+        itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
         dismissOnSwipe = try container.decodeIfPresent(Bool.self, forKey: .dismissOnSwipe)
         supportingText = try container.decodeIfPresent(String.self, forKey: .supportingText)
         keyboardType = try container.decodeIfPresent(String.self, forKey: .keyboardType)
@@ -791,6 +808,8 @@ final class PrototypeNode: Decodable {
         multiline = try container.decodeIfPresent(Bool.self, forKey: .multiline)
         minLines = try container.decodeIfPresent(Int.self, forKey: .minLines)
         maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
+        trailingIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .trailingIcon)
+        imeAction = try container.decodeIfPresent(String.self, forKey: .imeAction)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

@@ -30,6 +30,9 @@ enum PrototypeStateValidator {
         for node in nodes {
             if let message = openWhenError(node, state) { return message }
         }
+        for node in nodes {
+            if let message = refreshError(node, state) { return message }
+        }
         for action in actions {
             if let message = stateActionError(action, state) { return message }
         }
@@ -58,6 +61,8 @@ enum PrototypeStateValidator {
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += node.trailingIcon?.onTap ?? []
+        actions += node.refresh?.onRefresh ?? []
         actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
         actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
@@ -204,6 +209,12 @@ enum PrototypeStateValidator {
         let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
+    }
+
+    /// Pull-to-refresh binds a boolean key, like the other controls.
+    private static func refreshError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+        guard node.type == "scroll", let key = node.refresh?.stateKey, let stored = state[key] else { return nil }
+        return stored.boolValue == nil ? "Refresh requires a boolean state key" : nil
     }
 
     // MARK: State actions

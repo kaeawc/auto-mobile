@@ -34,7 +34,7 @@ describe("liveness handoff through the real repository without a schema change",
     await repo.markReleased("handoff", "expired", timer.now(), "daemon-restart");
     manager.stopCleanupTimer();
     timer.advanceTime(1_000);
-    manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     expect(
       await manager.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) => {
@@ -58,7 +58,7 @@ describe("liveness handoff through the real repository without a schema change",
     timer = new FakeTimer();
     db = await createTestDatabase();
     repo = new DeviceSessionRepository(db, timer);
-    manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     await manager.createSession("handoff", "emulator-5554", "android", 60_000, undefined, "Pixel");
     await manager.claimLivenessOwnership("handoff", "owner");
   });

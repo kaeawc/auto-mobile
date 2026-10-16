@@ -18,7 +18,10 @@ final class ResponseModelParityTests: XCTestCase {
         // The handshake also advertises optional runner features (RunnerFeature.allCases,
         // sorted); the daemon reads it to gate feature use, so `display_cutout_info` is a
         // load-bearing wire identifier (#5787).
-        XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info", "double_tap_v1"])
+        XCTAssertEqual(
+            object["supportedFeatures"] as? [String],
+            ["display_cutout_info", "double_tap_v1", "path_gesture_v1"]
+        )
     }
 
     func testSdkCapabilitiesResponseDistinguishesRunnerSupportFromForegroundSdkAvailability() {

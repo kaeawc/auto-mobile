@@ -702,4 +702,101 @@ describe("PinchOn", () => {
     expect(result.success).toBe(true);
     expect(result.warning).toBeUndefined();
   });
+
+  describe("rotation without zooming (#12536)", () => {
+    const container = { elementId: "container-id" };
+
+    test.each([
+      ["scale 1", { scale: 1 }],
+      ["equal explicit distances", { distanceStart: 80, distanceEnd: 80 }],
+      ["scale 1 with only distanceStart", { scale: 1, distanceStart: 80 }],
+      ["scale 1 with only distanceEnd", { scale: 1, distanceEnd: 80 }],
+    ])("Android %s keeps a constant finger distance for either direction", async (_, distances) => {
+      for (const direction of ["in", "out"] as const) {
+        fakeA11yService.clearPinchHistory?.();
+        const result = await pinchOn.execute({
+          direction,
+          container,
+          rotationDegrees: 90,
+          ...distances,
+        });
+        expect(result.success).toBe(true);
+        expect(result.scale).toBe(1);
+        expect(result.distanceStart).toBe(result.distanceEnd);
+        const call = fakeA11yService.getPinchHistory().at(-1);
+        expect(call?.distanceStart).toBe(call?.distanceEnd);
+        expect(call?.rotationDegrees).toBe(90);
+      }
+    });
+
+    test.each([-90, 450, 720, 0.5])(
+      "forwards rotation %p unchanged without changing the distance",
+      async (rotationDegrees) => {
+        await pinchOn.execute({ direction: "out", container, scale: 1, rotationDegrees });
+        const call = fakeA11yService.getPinchHistory().at(-1);
+        expect(call?.rotationDegrees).toBe(rotationDegrees);
+        expect(call?.distanceStart).toBe(call?.distanceEnd);
+      },
+    );
+
+    test("equal distances are clamped together, so an oversize request stays a rotation", async () => {
+      const result = await pinchOn.execute({
+        direction: "in",
+        container,
+        distanceStart: 5000,
+        distanceEnd: 5000,
+        rotationDegrees: 30,
+      });
+      expect(result.distanceStart).toBe(180);
+      expect(result.distanceEnd).toBe(180);
+      expect(result.scale).toBe(1);
+    });
+
+    test("a real zoom still follows the direction", async () => {
+      await pinchOn.execute({ direction: "out", container, distanceStart: 60, distanceEnd: 60.5 });
+      const call = fakeA11yService.getPinchHistory().at(-1);
+      expect(call?.distanceEnd).toBeGreaterThan(call?.distanceStart ?? 0);
+    });
+
+    test("iOS rounds equal fractional distances together and keeps scale at 1", async () => {
+      const iosDevice: BootedDevice = {
+        deviceId: "11111111-2222-3333-4444-555555555555",
+        platform: "ios",
+        name: "iPhone 16 Pro",
+      };
+      fakeObserveScreen.setObserveResult(() => ({
+        updatedAt: Date.now(),
+        screenSize: { width: 393, height: 852 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: createHierarchy(),
+      }));
+      fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
+      pinchOn = new PinchOn(iosDevice, null, {
+        timer: fakeTimer,
+        capture: new FakeHierarchyCapture(
+          async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+          "ios",
+        ),
+      });
+      pinchOn.observeScreen = fakeObserveScreen;
+      pinchOn.awaitIdle = fakeAwaitIdle;
+      pinchOn.window = fakeWindow;
+      pinchOn.adb = fakeAdb;
+
+      const result = await pinchOn.execute({
+        direction: "in",
+        autoTarget: false,
+        distanceStart: 100.4,
+        distanceEnd: 100.4,
+        rotationDegrees: 45,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.scale).toBe(1);
+      const [call] = fakeIosService.getPinchHistory();
+      expect(call.distanceStart).toBe(100);
+      expect(call.distanceEnd).toBe(100);
+      expect(call.rotationDegrees).toBe(45);
+    });
+  });
 });

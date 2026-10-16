@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
 import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
@@ -78,6 +79,7 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     is PrototypeColumnNode -> repeat
     is PrototypeFlowNode -> repeat
     is PrototypeGridNode -> repeat
+    is PrototypeCarouselNode -> repeat
     else -> null
   }
 
@@ -174,6 +176,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
+    is PrototypeCarouselNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
     is PrototypeStackNode ->
       copy(
         onTap = onTap,
@@ -218,6 +227,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
+        refresh =
+          refresh?.let {
+            it.copy(
+              stateKey = instance.interpolate(it.stateKey),
+              onRefresh = it.onRefresh.map { action -> action.bound(instance) },
+            )
+          },
         child = child.bound(instance),
       )
     is PrototypeBottomSheetNode ->
@@ -259,6 +275,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeTextFieldNode ->
       copy(
+        trailingIcon = trailingIcon?.bound(instance),
+        onSubmit = onSubmit?.map { it.bound(instance) },
         checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,

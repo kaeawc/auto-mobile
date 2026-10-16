@@ -3759,11 +3759,9 @@ test("idle expiry consumes a recovery capture and preserves its prior terminal r
 
 test("failed-release expiry preserves a declined commit fence", async () => {
   const { sessions, pool, record } = await setupFailedReleaseFence();
-  const release = await sessions.releaseSessionUnlessSuperseded(
-    "session",
-    "heartbeat-timeout",
-    () => false,
-  );
+  const release = await sessions.releaseSessionUnlessSuperseded("session", "heartbeat-timeout", {
+    commitFence: () => false,
+  });
   expect(release).toEqual({ superseded: true });
   expect(record.reservations.has("failed-release")).toBe(true);
   expect(record.failedReleaseAttempts).toBeUndefined();
@@ -3786,7 +3784,9 @@ test("failed-release retry flight excludes overlapping expiry releases", async (
   const release = sessions.releaseSession("session", "heartbeat-timeout");
   await started.promise;
   expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
-  expect(await sessions.releaseSession("session", "cleanup-expired", true)).toBeNull();
+  expect(
+    await sessions.releaseSession("session", "cleanup-expired", { allowExpired: true }),
+  ).toBeNull();
   expect(attempts).toBe(1);
   finish.resolve();
   await release;

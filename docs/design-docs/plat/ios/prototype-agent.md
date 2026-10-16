@@ -550,6 +550,52 @@ the first fully visible page; page events, placeholders and navigation bindings 
 their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 Indicator and carousel remain deferred.
 
+## Carousel and pager indicator (not device-verified)
+
+`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
+(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
+end edge for a vertical pager) with the current page filled. The dots are decoration and add no
+semantics node.
+
+A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
+`repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
+`multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` is dp >= 0. It has no page index,
+event or `setPage` target; use a `pager` when the page matters. The host refuses a show on a
+CtrlProxy or iOS agent without the capability before sending it, and the iOS result carries a
+`carousel` platform note.
+
+iOS draws every variant as fixed-width (`itemWidth`) items in a horizontal `ScrollView` with
+`scrollTargetBehavior(.viewAligned)`; there are no multi-browse or hero size changes, and every
+item stays in the accessibility tree. The indicator dots are plain circles (no icons), hidden from
+accessibility.
+
+## Pull-to-refresh (`scroll.refresh`, not device-verified)
+
+A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions in `onRefresh`, the
+same union as `onTap`). `stateKey` names a boolean state key that shows the refresh indicator
+while it is true; it must be boolean if declared, and a horizontal scroll with `refresh` is
+rejected at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
+runs `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with a
+`baseRevision`, writes false to end it. A pull while the key is already true is ignored. Repeat
+and component placeholders bind in the key and the actions like `onTap`. The capability is
+`prototype_refresh_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it.
+
+iOS draws it with `refreshable` on the `ScrollView`: the closure sets the key, runs the actions
+and stays open until the key is false (or the view goes away). A key set true without a pull shows
+a plain `ProgressView` at the top, since SwiftUI cannot start `refreshable` programmatically.
+Android uses Material `PullToRefreshBox`.
+
+## Text field trailing icon and IME action (not device-verified)
+
+`prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
+(`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
+action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
+accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
+`IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

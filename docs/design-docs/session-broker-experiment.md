@@ -245,7 +245,11 @@ The daemon protocol is:
 - `daemon/prepareSession`: `{config, livenessOwnerToken}`.
 - `daemon/sessionRequestStatus`: `{requestId, livenessOwnerToken}`.
 - `daemon/abandonSessionRequest`: `{requestId, livenessOwnerToken}`.
-- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken}`.
+- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken, reason?}`.
+  A client release omits `reason` and ends `released`. A proxy whose execution
+  owner died sends `reason: "session_owner_exited"`: the daemon commits the
+  terminal `failed`/`session_owner_exited` receipt, answers `cleanup_pending`,
+  and finishes the drain and device destruction as tracked release work (#12791).
 - Reconnect registration: `{sessionId, clientName, sessionBroker:
   {requestId, livenessOwnerToken}}`.
 

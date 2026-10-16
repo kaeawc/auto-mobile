@@ -29,19 +29,17 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
           started.resolve();
           await finished.promise;
         };
-        const manager = new SessionManager(
-          timer,
-          new FakeDeviceSessionPersistence(),
-          () => new FakeDbWriteBarrier(),
-          () => ({
+        const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
             restore: async () => {
               await restore();
               return { status: "restored" as const };
             },
           }),
-          () => ({ restore }),
-          () => ({ restore }),
-        );
+          biometricEnrollmentRestorer: () => ({ restore }),
+          restorers: { networkCondition: () => ({ restore }) },
+        });
         const utils = new FakeDeviceUtils();
         const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
         utils.setBootedDevices("android", [device]);
@@ -75,7 +73,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
           if (phase === "release-in-flight") {
             timer.setCurrentTime(31 * 60 * 1000);
           }
-          release = manager.releaseSession("old-owner", "lazy-expiry", true);
+          release = manager.releaseSession("old-owner", "lazy-expiry", { allowExpired: true });
           await started.promise;
           if (phase === "release-in-flight") {
             expect(manager.getSession("old-owner")).toBeNull();
@@ -158,11 +156,9 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
 
 test("a bind during a capped pending cleanup is refused with the cleanup's remaining time (#10960)", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const utils = new FakeDeviceUtils();
   const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
   utils.setBootedDevices("android", [device]);
@@ -178,7 +174,7 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", true);
+    await manager.releaseSession("test-1", "released", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
     timer.advanceTime(2_000);
 
@@ -210,11 +206,9 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
 // initializeWithDevices overwriting an entry mid-deferral is the way to reach this.
 test("a deferred release never frees a same-id replacement entry after late teardown", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const utils = new FakeDeviceUtils();
   const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
   utils.setBootedDevices("android", [device]);
@@ -229,7 +223,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     manager.onSessionRelease((_sessionId, deviceId) => {
       manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
     });
-    await manager.releaseSession("test-1", "released", true);
+    await manager.releaseSession("test-1", "released", { allowExpired: true });
     await pool.releaseDevice(device.deviceId, "test-1");
 
     const original = pool.getDevice(device.deviceId)!;

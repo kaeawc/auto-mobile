@@ -89,12 +89,10 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     manager.setDeviceImages("android", [image]);
     manager.setMockChildProcess(device.name, null);
     const persistence = new FakeDeviceSessionPersistence();
-    const sessions = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-    );
+    const sessions = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    });
     sessions.attachDaemonSessionId("restart-start-daemon");
     sessions.stopCleanupTimer();
     const pool = new DevicePool(

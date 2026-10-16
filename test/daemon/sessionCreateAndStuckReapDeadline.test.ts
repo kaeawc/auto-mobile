@@ -74,7 +74,9 @@ async function harness() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
   const persistence = new ParkablePersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [first, second]);

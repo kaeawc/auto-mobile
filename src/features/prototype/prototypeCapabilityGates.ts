@@ -5,6 +5,9 @@ import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
+  PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
+  PROTOTYPE_CAROUSEL_CAPABILITY,
+  PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
@@ -19,6 +22,8 @@ import {
 import { prototypeDataModelFields, prototypeDataModelUnsupportedMessage } from "./prototypeData";
 import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
+  prototypeTextFieldActionFields,
+  prototypeTextFieldActionsUnsupportedMessage,
   prototypeTextFieldOptionFields,
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
@@ -28,6 +33,8 @@ import {
   prototypePagerOptionsUnsupportedMessage,
 } from "./prototypePagerOptions";
 import { prototypeGestureFields, prototypeGesturesUnsupportedMessage } from "./prototypeGestures";
+import { prototypeCarouselFields, prototypeCarouselUnsupportedMessage } from "./prototypeCarousel";
+import { prototypeRefreshFields, prototypeRefreshUnsupportedMessage } from "./prototypeRefresh";
 import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
@@ -67,6 +74,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeTextFieldOptionsUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
+    fields: prototypeTextFieldActionFields,
+    unsupportedMessage: prototypeTextFieldActionsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
     fields: prototypeFlowGridFields,
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
@@ -80,6 +92,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_GESTURES_CAPABILITY,
     fields: prototypeGestureFields,
     unsupportedMessage: prototypeGesturesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CAROUSEL_CAPABILITY,
+    fields: prototypeCarouselFields,
+    unsupportedMessage: prototypeCarouselUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_REFRESH_CAPABILITY,
+    fields: prototypeRefreshFields,
+    unsupportedMessage: prototypeRefreshUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,

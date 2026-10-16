@@ -33,6 +33,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     stateKey: "name",
     label: "Liked",
   }),
+  prototype_text_field_actions_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    trailingIcon: { icon: "close", label: "Clear" },
+  }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
   prototype_pager_options_v1: {
     ...fixture({
@@ -47,6 +53,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onLongPress: [{ type: "emit", name: "long" }],
     onDoubleTap: [{ type: "emit", name: "double" }],
+  }),
+  prototype_carousel_v1: fixture({
+    type: "carousel",
+    id: "label",
+    itemWidth: 120,
+    children: [{ type: "spacer" }],
+  }),
+  prototype_refresh_v1: fixture({
+    type: "scroll",
+    id: "label",
+    refresh: { stateKey: "liked", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
   }),
   prototype_search_bar_v1: fixture({
     type: "searchBar",

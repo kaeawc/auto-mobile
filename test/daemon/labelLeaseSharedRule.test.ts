@@ -33,17 +33,13 @@ describe("shared label owner lease (#11722)", () => {
     timer.setCurrentTime(0);
     persistence = new FakeDeviceSessionPersistence();
     restoreMs = 0;
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => {} }),
         clock: () => ({ restore: () => (restoreMs ? timer.sleep(restoreMs) : Promise.resolve()) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     base = await manager.createSession(BASE, "fake-base-device", "android");
     expect(await manager.claimLivenessOwnership(BASE, OWNER)).toBe("claimed");

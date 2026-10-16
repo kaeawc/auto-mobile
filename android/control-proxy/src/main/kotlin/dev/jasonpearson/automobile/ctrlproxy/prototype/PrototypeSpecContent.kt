@@ -19,6 +19,8 @@ import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActionScope
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -29,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -49,6 +52,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -604,6 +609,8 @@ private fun RenderPrototypeNodeContent(
           }
         }
       }
+    "carousel" ->
+      RenderPrototypeCarousel(node, containerModifier) { RenderPrototypeNode(it, interact) }
     "text" -> {
       val source = node.style.source
       val role = prototypeTextRole(MaterialTheme.typography, source.textStyle)
@@ -698,12 +705,19 @@ private fun RenderPrototypeNodeContent(
     "scroll" -> {
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
+      val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       val scrolling =
         if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
+        else if (refresh != null) Modifier.verticalScroll(scroll)
         else modifier.verticalScroll(scroll)
-      Box(scrolling) {
+      val content: @Composable BoxScope.() -> Unit = {
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
+      if (refresh != null) {
+        PrototypeRefreshBox(refresh, node.checked, modifier, interact) {
+          Box(scrolling, content = content)
+        }
+      } else Box(scrolling, content = content)
     }
     "stack" ->
       Box(modifier, contentAlignment = node.style.alignment) {
@@ -810,12 +824,35 @@ private fun RenderPrototypeTextField(
           }
         }
       } else null
+    val ime = prototypeTextFieldImeAction(source.imeAction, !source.onSubmit.isNullOrEmpty())
     val keyboardOptions =
-      if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
+      if (source.keyboardType == null && source.secure != true && ime == ImeAction.Default)
+        KeyboardOptions.Default
       else
         KeyboardOptions(
           keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
+          imeAction = ime,
         )
+    val focus = LocalFocusManager.current
+    val submit: KeyboardActionScope.() -> Unit = {
+      if (ime == ImeAction.Next) focus.moveFocus(FocusDirection.Next)
+      val actions = source.onSubmit.orEmpty()
+      if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions))
+    }
+    val keyboardActions =
+      if (ime == ImeAction.Default) KeyboardActions.Default
+      else
+        KeyboardActions(
+          onDone = submit,
+          onNext = submit,
+          onSearch = submit,
+          onSend = submit,
+          onGo = submit,
+        )
+    val trailingIcon: (@Composable () -> Unit)? =
+      source.trailingIcon?.let { action ->
+        { PrototypeTextFieldTrailingIcon(node, action, interact) }
+      }
     val visualTransformation =
       if (prototypeTextFieldSecure(source.secure, source.keyboardType))
         PasswordVisualTransformation()
@@ -835,6 +872,8 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
       } else {
@@ -849,6 +888,8 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
           minLines = source.minLines ?: 1,
@@ -868,6 +909,8 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
       } else {
@@ -882,6 +925,8 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
           minLines = source.minLines ?: 1,
@@ -972,11 +1017,18 @@ private fun RenderPrototypePager(
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   var boundedHeight by remember { mutableStateOf(false) }
-  val pagerModifier = modifier.layout { measurable, constraints ->
-    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
-    val placeable = measurable.measure(constraints)
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-  }
+  val pagerModifier =
+    modifier
+      .layout { measurable, constraints ->
+        if (boundedHeight != constraints.hasBoundedHeight)
+          boundedHeight = constraints.hasBoundedHeight
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+      }
+      .then(
+        if (source.indicator == "dots") Modifier.pagerIndicator(pager, source.axis == "vertical")
+        else Modifier,
+      )
   // Preserve the horizontal pager's retention rule; vertical pages fill across the width.
   val keepNeighbours =
     if (source.axis == "vertical") fill.width && boundedHeight else fill.height && boundedHeight
@@ -1363,6 +1415,7 @@ private val SEMANTICS_FREE_CONTAINERS =
     "column",
     "flow",
     "grid",
+    "carousel",
     "scroll",
     "pager",
     "stack",
@@ -1404,7 +1457,8 @@ internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Bo
 
 private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
 
-private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "flow", "grid", "card")
+private val MERGEABLE_TAP_CONTAINERS =
+  setOf("box", "row", "column", "flow", "grid", "carousel", "card")
 
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {

@@ -1,5 +1,6 @@
 import { registerObserveTools } from "./observeTools";
 import { registerInteractionTools } from "./interactionTools";
+import { registerMultiTouchTools } from "./multiTouchTools";
 import { registerSwipeAtTools } from "./swipeAtTools";
 import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
@@ -56,6 +57,7 @@ export interface RegisterAllToolsOptions {
 export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerObserveTools();
   registerInteractionTools();
+  registerMultiTouchTools();
   registerSwipeAtTools();
   registerAppTools();
   registerUtilityTools();

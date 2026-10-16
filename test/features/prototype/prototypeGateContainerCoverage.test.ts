@@ -23,9 +23,21 @@ const fixtures: Record<string, Node> = {
   },
   prototype_data_model_v1: { ...label, text: "{data:/x}" },
   prototype_text_field_options_v1: { type: "textField", stateKey: "name", label: "Name" },
+  prototype_text_field_actions_v1: {
+    type: "textField",
+    stateKey: "name",
+    imeAction: "done",
+    onSubmit: [{ type: "emit", name: "submit" }],
+  },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
+  prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
+  prototype_refresh_v1: {
+    type: "scroll",
+    refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  },
   prototype_search_bar_v1: {
     type: "searchBar",
     stateKey: "query",
@@ -64,7 +76,7 @@ const containers: {
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",

@@ -30,11 +30,9 @@ afterEach(() => {
 async function harness(held = false, incarnation: number | undefined = 1) {
   const timer = new FakeTimer();
   const repo = new FakeVideoRecordingRepository();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const holder = spyOn(manager, "getSessionForDevice").mockReturnValue(held ? "holder" : null);

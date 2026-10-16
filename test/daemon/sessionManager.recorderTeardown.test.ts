@@ -18,11 +18,9 @@ let recoverable: boolean;
 let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
 beforeEach(() => {
   timer = new FakeTimer();
-  manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   markers = new InMemoryDeviceHealthMarkers(timer);
   incarnation = 1;

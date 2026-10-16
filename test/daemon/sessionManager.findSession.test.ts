@@ -66,7 +66,8 @@ test("getSession expires the same session synchronously and starts exactly one l
   expect(rig.manager.findSession(session.sessionId)).toBeNull();
   expectNoRelease();
   expect(rig.manager.getSession(session.sessionId)).toBeNull();
-  expect(releaseSpy).toHaveBeenCalledWith(session.sessionId, "cleanup-expired", true, undefined, {
+  expect(releaseSpy).toHaveBeenCalledWith(session.sessionId, "cleanup-expired", {
+    allowExpired: true,
     expiryOrigin: "lazy-expiry",
   });
   expect(slots.releaseOps.get(session.sessionId)?.session).toBe(session);

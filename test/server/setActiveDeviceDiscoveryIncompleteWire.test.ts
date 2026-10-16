@@ -24,11 +24,9 @@ const spies: Array<{ mockRestore(): void }> = [];
 
 beforeEach(async () => {
   const timer = new FakeTimer();
-  sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   sessions.stopCleanupTimer();
   pool = new DevicePool(
     createDevicePoolDependencies(sessions, "hunt-daemon", {

@@ -137,7 +137,10 @@ import {
 } from "./constants";
 import { getSessionIdleTimeoutMs } from "./sessionLivenessWindows";
 import {
+  DAEMON_SESSION_NOT_ACTIVE_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_UNKNOWN_TOOL_CODE,
+  errorCodeOf,
   releaseReasonFromError,
   daemonInstanceFromError,
   DAEMON_TOOL_UNAVAILABLE_CODE,
@@ -196,9 +199,11 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
 } from "./sessionBrokerProxyAcquisition";
 import type { SessionConfig } from "../devices/sessionConfig";
-import type {
-  SessionBrokerReleaseResult,
-  SessionBrokerResult,
+import {
+  SESSION_OWNER_EXITED_CODE,
+  type SessionBrokerReleaseReason,
+  type SessionBrokerReleaseResult,
+  type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
@@ -565,6 +570,14 @@ const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
 /** A hint or backoff near zero must not busy-poll the daemon (#11900). */
 const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
 
+export interface DaemonMcpProxyCloseOptions {
+  /**
+   * The proxy shuts down because its execution owner died (#12791): broker sessions are ended as
+   * `session_owner_exited`, not as the client's release.
+   */
+  executionOwnerLost?: boolean;
+}
+
 export class DaemonMcpProxy {
   private readonly sessionState = new ProxySessionState();
   private readonly lifecycleReconciler: DaemonLifecycleReconciler;
@@ -579,6 +592,7 @@ export class DaemonMcpProxy {
   private reconciliationSnapshot?: Promise<DaemonStatus>;
   // Connection-scoped: tools/list_changed invalidates status, but does not replace its daemon.
   private structuredSessionNotFound = false;
+  private structuredToolErrorCodes = false;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
   private readonly proxyHeartbeatKeeper: HeartbeatKeeper;
@@ -1251,7 +1265,10 @@ export class DaemonMcpProxy {
     return this.sessionBrokerResult;
   }
 
-  private async callBrokerRelease(sessionUuid: string): Promise<unknown> {
+  private async callBrokerRelease(
+    sessionUuid: string,
+    reason?: SessionBrokerReleaseReason,
+  ): Promise<unknown> {
     const client = this.client;
     if (!client) {
       throw new DaemonUnavailableError("Cannot release broker session without a daemon connection");
@@ -1260,7 +1277,11 @@ export class DaemonMcpProxy {
       () =>
         client.callDaemonMethod(
           DAEMON_RELEASE_BROKER_SESSION_METHOD,
-          { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
+          {
+            sessionId: sessionUuid,
+            livenessOwnerToken: this.livenessOwnerToken,
+            ...(reason ? { reason } : {}),
+          },
           { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
         ),
       {
@@ -1298,14 +1319,18 @@ export class DaemonMcpProxy {
     }
   }
 
-  /** Broker teardown remains durable in the daemon even when this bounded call cannot confirm it. */
-  private async releaseBrokerSessions(): Promise<void> {
+  /**
+   * Broker teardown remains durable in the daemon even when this bounded call cannot confirm it.
+   * An execution-owner loss reports `session_owner_exited` (#12791): the daemon records that
+   * terminal receipt and answers before device destruction, which outlasts this bound.
+   */
+  private async releaseBrokerSessions(reason?: SessionBrokerReleaseReason): Promise<void> {
     const sessions = [...this.sessionBrokerSessions.keys()];
     this.sessionBrokerBinding = undefined;
     await Promise.all(
       sessions.map(async (sessionUuid) => {
         try {
-          const result = await this.callBrokerRelease(sessionUuid);
+          const result = await this.callBrokerRelease(sessionUuid, reason);
           const release = result as Partial<SessionBrokerReleaseResult> | undefined;
           if (
             release?.sessionUuid !== sessionUuid ||
@@ -1643,6 +1668,7 @@ export class DaemonMcpProxy {
     this.throwIfClosing();
     this.reconciliationSnapshot = undefined;
     this.structuredSessionNotFound = false;
+    this.structuredToolErrorCodes = false;
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe (issue #6140: isAvailable never touches
@@ -1668,6 +1694,7 @@ export class DaemonMcpProxy {
     if (this.daemonStatusProbe) {
       const status = await this.reconciliationStatus();
       this.structuredSessionNotFound = status.structuredSessionNotFound === true;
+      this.structuredToolErrorCodes = status.structuredToolErrorCodes === true;
     }
 
     // Create and connect client
@@ -2909,13 +2936,41 @@ export class DaemonMcpProxy {
   private isPreDispatchDaemonSessionError(error: unknown): boolean {
     return (
       this.isUnknownToolError(error) ||
-      errorMessage(error).includes("is not an active daemon session")
+      errorCodeOf(error) === DAEMON_SESSION_NOT_ACTIVE_CODE ||
+      this.matchesLegacyMessage(error, "is not an active daemon session")
     );
   }
 
   private isUnknownToolError(error: unknown): boolean {
-    const message = errorMessage(error);
-    return this.isGatedToolError(error) || message.includes("Unknown tool:");
+    return (
+      this.isGatedToolError(error) ||
+      errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE ||
+      this.matchesLegacyMessage(error, "Unknown tool:")
+    );
+  }
+
+  /**
+   * Message-text classification, kept only for daemons that predate the structured codes: a daemon
+   * advertising `structuredToolErrorCodes` always sends the code, so its prose is never evidence.
+   */
+  private matchesLegacyMessage(error: unknown, text: string): boolean {
+    return !this.structuredToolErrorCodes && errorMessage(error).includes(text);
+  }
+
+  /** The tool an unknown-tool refusal names, from the frame's evidence or (old daemons) its prose. */
+  private unknownToolName(error: unknown): string | undefined {
+    if (errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE) {
+      const details: unknown = error instanceof Error ? Reflect.get(error, "details") : undefined;
+      const toolName: unknown =
+        details !== null && typeof details === "object"
+          ? Reflect.get(details, "toolName")
+          : undefined;
+      return typeof toolName === "string" ? toolName : "";
+    }
+    if (this.structuredToolErrorCodes) {
+      return undefined;
+    }
+    return errorMessage(error).match(/Unknown tool:\s*(\S+)/)?.[1];
   }
 
   /**
@@ -2936,11 +2991,11 @@ export class DaemonMcpProxy {
     if (this.isGatedToolError(error)) {
       return false;
     }
-    const match = errorMessage(error).match(/Unknown tool:\s*(\S+)/);
-    if (!match) {
+    const rawName = this.unknownToolName(error);
+    if (rawName === undefined) {
       return this.isUnknownToolError(error);
     }
-    const name = match[1].replace(/[.,;:!?]+$/, "");
+    const name = rawName.replace(/[.,;:!?]+$/, "");
     return name.length === 0 || this.frontendRegistersTool(name);
   }
 
@@ -6209,12 +6264,12 @@ export class DaemonMcpProxy {
    * EOF hard bound, `OutputGatedTransport` still writes received answers while dropping all
    * unsolicited output; a stdout write error closes that gate fully at once (#11951).
    */
-  close(): Promise<void> {
+  close(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.
-    return (this.closePromise ??= this.closeOnce());
+    return (this.closePromise ??= this.closeOnce(options));
   }
 
-  private async closeOnce(): Promise<void> {
+  private async closeOnce(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     const connectedClient = this.connected ? this.client : null;
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
@@ -6228,6 +6283,7 @@ export class DaemonMcpProxy {
     this.resourceSubscriptions.clear();
     this.resourceUpdatedListeners.clear();
     this.structuredSessionNotFound = false;
+    this.structuredToolErrorCodes = false;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
@@ -6235,7 +6291,9 @@ export class DaemonMcpProxy {
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
-      this.releaseBrokerSessions(),
+      this.releaseBrokerSessions(
+        options?.executionOwnerLost ? SESSION_OWNER_EXITED_CODE : undefined,
+      ),
       this.joinConnectionAttempt(),
     ]);
     await this.latestBindingKeeper.stopBoundSessionHeartbeat();

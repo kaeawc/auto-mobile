@@ -1,4 +1,27 @@
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
+import {
+  parseInputGestureParams,
+  parseInputKeyParams,
+  parseInputPressButtonParams,
+  parseInputSwipeParams,
+  parseInputTapParams,
+  parseInputTypeTextParams,
+  type InputGestureParams,
+  type InputKeyParams,
+  type InputPressButtonParams,
+  type InputSwipeParams,
+  type InputTapParams,
+  type InputTypeTextParams,
+} from "./inputRouteParams";
+import { IDE_DEVICE_MUTATION_METHODS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import {
+  DISPATCH_HELD_INPUT_METHODS,
+  GESTURE_FRAME_METHODS,
+  inputRouteFor,
+  type GestureFrameKind,
+  type InputRouteEntry,
+  type InputRouteMethod,
+} from "./inputRoutes";
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
@@ -28,7 +51,11 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
-import { isToolUnavailableWireError } from "../server/toolUnavailableError";
+import {
+  isSessionNotActiveWireError,
+  isToolUnavailableWireError,
+  unknownToolWireName,
+} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
@@ -43,6 +70,8 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_SESSION_SUSPECT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
+  DAEMON_SESSION_NOT_ACTIVE_CODE,
+  DAEMON_UNKNOWN_TOOL_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -202,8 +231,6 @@ import { PressButton } from "../features/action/PressButton";
 import {
   INPUT_KEY_IOS_UNSUPPORTED_ERROR,
   InputKey,
-  SUPPORTED_INPUT_KEYS,
-  isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
 import {
@@ -288,7 +315,6 @@ export const MCP_FORWARD_START_HEADROOM_MS = 100;
  */
 export const MAX_MCP_FORWARD_REROUTES = 3;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
-const STARTUP_PROBE_METHODS = new Set(["ide/status", "ide/ping"]);
 
 function socketRequestId(parsed: unknown): string | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -469,6 +495,11 @@ function refusalFrameFields(error: unknown): RefusalFrameFields {
   };
 }
 
+function unknownToolFrameFields(error: unknown): Pick<DaemonResponse, "code" | "details"> {
+  const toolName = unknownToolWireName(error);
+  return toolName === undefined ? {} : { code: DAEMON_UNKNOWN_TOOL_CODE, details: { toolName } };
+}
+
 export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
@@ -500,6 +531,8 @@ export function mcpRequestFailureDetails(
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
+    ...unknownToolFrameFields(error),
+    ...(isSessionNotActiveWireError(error) ? { code: DAEMON_SESSION_NOT_ACTIVE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -915,25 +948,6 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
-// Stroke frames need no extra hold: no signal reaches their atomic runner command;
-// stroke lift handles cancellation. IDE writes run outside the input queue and remain
-// tracked until their atomic command replies, with no abort listener after send.
-const DISPATCH_HELD_INPUT_METHODS: ReadonlySet<string> = new Set([
-  "input/typeText",
-  "input/key",
-  "input/pressButton",
-  "input/tap",
-  "input/swipe",
-]);
-
-/** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
-const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
-  "ide/updateService",
-  "ide/setKeyValue",
-  "ide/removeKeyValue",
-  "ide/clearKeyValueFile",
-]);
-
 /** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
 interface IdeMutationCall {
   /**
@@ -999,13 +1013,6 @@ interface InputDeviceGate {
   /** Who sent the frame; only the device's holder may drive a held device (#10698). */
   requester?: () => string | undefined;
 }
-
-/** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
-const GESTURE_FRAME_METHODS = {
-  start: "input/gestureStart",
-  move: "input/gestureMove",
-  end: "input/gestureEnd",
-} as const;
 
 /** What held the device when a `gestureStart` was admitted (#11541). */
 export interface StrokeAdmission {
@@ -1146,15 +1153,46 @@ interface AndroidAppendTextOptions {
   signal?: AbortSignal;
 }
 
-type InputTargetAction =
-  | "input/tap"
-  | "input/swipe"
-  | "input/typeText"
-  | "input/pressButton"
-  | "input/key"
-  | "input/gestureStart"
-  | "input/gestureMove"
-  | "input/gestureEnd";
+/** What every input device write settles with. */
+interface InputRouteResult {
+  success: boolean;
+  error?: string;
+}
+
+interface InputRouteArgs {
+  platform: "android" | "ios";
+  deviceId?: string;
+  frameContext?: string;
+}
+
+/** What `runInputRoute` hands a route's dispatch once every pre-dispatch check has passed. */
+interface InputRouteStep {
+  targetDevice: BootedDevice;
+  /** The device the write targets: the target, or its re-resolved transport. */
+  executionDevice: BootedDevice;
+  signal: AbortSignal | undefined;
+  /** Stamps the session's idle window; call it only when the device write starts. */
+  dispatching: (() => void) | undefined;
+  remainingTimeoutMs: number;
+  queueEnterMs: number;
+  totalTimeoutMs: number;
+}
+
+interface InputRouteRun<A extends InputRouteArgs, R extends InputRouteResult> {
+  action: InputTargetAction;
+  origin: string;
+  args: A;
+  bypassAndroidDeviceListCache?: boolean;
+  /** Re-reads the device inside the keyed callback (typeText append). */
+  reresolve?: (device: BootedDevice) => Promise<BootedDevice>;
+  /** Whether the args' frameContext must still be the device's current frame. */
+  checksFrame: boolean;
+  /** Wraps the whole tracked run (gesture stroke lifting on a session refusal). */
+  around?: (device: BootedDevice, run: () => Promise<R>) => Promise<R>;
+  dispatch: (step: InputRouteStep) => Promise<R>;
+}
+
+type InputTargetAction = InputRouteMethod;
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
@@ -5478,31 +5516,34 @@ export class UnixSocketServer {
         ? this.inputRequester(request, socketSessionId)
         : undefined,
     };
-    if (request.method === "input/tap") {
-      return await this.handleInputTap(request, socketSessionId, input);
-    }
-    if (request.method === "input/swipe") {
-      return await this.handleInputSwipe(request, socketSessionId, input);
-    }
-    if (request.method === "input/typeText") {
-      return await this.handleInputTypeText(request, socketSessionId, input);
-    }
-    if (request.method === "input/pressButton") {
-      return await this.handleInputPressButton(request, socketSessionId, input);
-    }
-    if (request.method === "input/key") {
-      return await this.handleInputKey(request, socketSessionId, input);
-    }
-    if (request.method === "input/gestureStart") {
-      return await this.handleInputGesture(request, "start", socketSessionId, input);
-    }
-    if (request.method === "input/gestureMove") {
-      return await this.handleInputGesture(request, "move", socketSessionId, input);
-    }
-    if (request.method === "input/gestureEnd") {
-      return await this.handleInputGesture(request, "end", socketSessionId, input);
+    const route = inputRouteFor(request.method);
+    if (route) {
+      return await this.dispatchInputRoute(route, request, socketSessionId, input);
     }
     return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
+  }
+
+  /** Runs the handler an `input/*` route table entry names. */
+  private async dispatchInputRoute(
+    route: InputRouteEntry,
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    input: InputRequestContext,
+  ): Promise<any | undefined> {
+    switch (route.handler) {
+      case "tap":
+        return await this.handleInputTap(request, socketSessionId, input);
+      case "swipe":
+        return await this.handleInputSwipe(request, socketSessionId, input);
+      case "typeText":
+        return await this.handleInputTypeText(request, socketSessionId, input);
+      case "pressButton":
+        return await this.handleInputPressButton(request, socketSessionId, input);
+      case "key":
+        return await this.handleInputKey(request, socketSessionId, input);
+      case "gesture":
+        return await this.handleInputGesture(request, route.gestureKind, socketSessionId, input);
+    }
   }
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
@@ -5615,6 +5656,7 @@ export class UnixSocketServer {
       case "ide/status": {
         return {
           structuredSessionNotFound: true,
+          structuredToolErrorCodes: true,
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).
@@ -6410,107 +6452,185 @@ export class UnixSocketServer {
     }
   }
 
+  /** When an `input/*` request entered the queue and the whole budget it was given. */
+  private inputRouteClock(
+    request: DaemonRequest,
+    input: InputRequestContext | undefined,
+  ): { queueEnterMs: number; totalTimeoutMs: number } {
+    return {
+      queueEnterMs: input?.receivedAtMs ?? this.timer.now(),
+      totalTimeoutMs: resolveMcpRequestTimeoutMs(request),
+    };
+  }
+
+  /**
+   * Time left in an input request's budget after its wait in the device queue; the one copy of the
+   * check every `input/*` route makes once it reaches the front of the queue (#11814).
+   */
+  private remainingInputBudgetMs(
+    toolName: string,
+    origin: string,
+    queueEnterMs: number,
+    totalTimeoutMs: number,
+  ): number {
+    const queueWaitMs = this.timer.now() - queueEnterMs;
+    const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+    if (remainingTimeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin,
+        detail: `spent ${queueWaitMs}ms waiting in queue`,
+      });
+    }
+    return remainingTimeoutMs;
+  }
+
+  /**
+   * The one skeleton every `input/*` route runs: resolve the target device, run the route's
+   * dispatch as a tracked keyed device input, and inside that callback check, in this order, the
+   * owner has not gone, (typeText append) re-resolve the device, the frame context is current, and
+   * the budget survived the queue wait. Only then does `dispatch` run, so the idle stamp
+   * (`dispatching`) a route passes to its device write can never precede a pre-dispatch refusal.
+   */
+  private async runInputRoute<A extends InputRouteArgs, R extends InputRouteResult>(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    input: InputRequestContext | undefined,
+    route: InputRouteRun<A, R>,
+  ): Promise<{ targetDevice: BootedDevice; result: R }> {
+    const { queueEnterMs, totalTimeoutMs } = this.inputRouteClock(request, input);
+    const { args } = route;
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      route.action,
+      route.bypassAndroidDeviceListCache ?? false,
+      input?.requester,
+    );
+    const keyed = () =>
+      this.runTrackedKeyedDeviceInput(
+        request.method,
+        targetDevice,
+        async (signal, dispatching) => {
+          assertSocketInputNotAborted(signal);
+          const executionDevice = route.reresolve
+            ? await route.reresolve(targetDevice)
+            : targetDevice;
+          if (route.checksFrame) {
+            this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, route.action);
+          }
+          const remainingTimeoutMs = this.remainingInputBudgetMs(
+            request.method,
+            route.origin,
+            queueEnterMs,
+            totalTimeoutMs,
+          );
+          return await route.dispatch({
+            targetDevice,
+            executionDevice,
+            signal,
+            dispatching,
+            remainingTimeoutMs,
+            queueEnterMs,
+            totalTimeoutMs,
+          });
+        },
+        this.inputDeviceGate(request.method, route.origin, totalTimeoutMs, queueEnterMs, input),
+      );
+    const result = await (route.around ? route.around(targetDevice, keyed) : keyed());
+    return { targetDevice, result };
+  }
+
   private async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputTapParams(request.params);
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
+    const { targetDevice, result: gestureResult } = await this.runInputRoute(
+      request,
       socketSessionId,
-      "input/tap",
-      false,
-      input?.requester,
-    );
-    const gestureResult = await this.runTrackedKeyedDeviceInput(
-      request.method,
-      targetDevice,
-      async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputTap",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-
-        if (args.platform === "android") {
-          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-          this.requireCoordinatesWithinKnownScreenGeometry(
+      input,
+      {
+        action: "input/tap",
+        origin: "UnixSocketServer.handleInputTap",
+        args,
+        checksFrame: true,
+        dispatch: async ({
+          targetDevice,
+          signal,
+          dispatching,
+          remainingTimeoutMs,
+          queueEnterMs,
+          totalTimeoutMs,
+        }) => {
+          if (args.platform === "android") {
+            const client = AndroidCtrlProxyClient.getInstance(
+              targetDevice,
+              defaultAdbClientFactory,
+            );
+            this.requireCoordinatesWithinKnownScreenGeometry(
+              [args.x, args.y],
+              client.getScreenScaleMetadata?.() ?? null,
+            );
+            // The signal reaches the send step itself, so an owner that went away while the client
+            // was still connecting never has its tap written to the device (#10006).
+            return await this.dispatchFencedInput(
+              "Tap",
+              signal,
+              remainingTimeoutMs,
+              (fenced, onDispatch) =>
+                client.requestTapCoordinates(
+                  args.x,
+                  args.y,
+                  args.duration,
+                  remainingTimeoutMs,
+                  undefined,
+                  args.frameContext,
+                  onDispatch,
+                  fenced,
+                ),
+              dispatching,
+            );
+          }
+          const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
+          const [x, y] = await this.toIosRunnerCoordinates(
+            iosClient,
+            targetDevice.deviceId,
             [args.x, args.y],
-            client.getScreenScaleMetadata?.() ?? null,
+            remainingTimeoutMs,
+            (geometry) =>
+              this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], geometry),
           );
-          // The signal reaches the send step itself, so an owner that went away while the client
-          // was still connecting never has its tap written to the device (#10006).
+          const gestureTimeoutMs = this.remainingBudgetAfterProbe(
+            queueEnterMs,
+            totalTimeoutMs,
+            request.method,
+            "handleInputTap",
+          );
+          // The scale probe awaited the runner; the owner may have left meanwhile.
+          assertSocketInputNotAborted(signal);
           return await this.dispatchFencedInput(
             "Tap",
             signal,
-            remainingTimeoutMs,
+            gestureTimeoutMs,
             (fenced, onDispatch) =>
-              client.requestTapCoordinates(
-                args.x,
-                args.y,
+              iosClient.requestTapCoordinates(
+                x,
+                y,
                 args.duration,
-                remainingTimeoutMs,
+                gestureTimeoutMs,
                 undefined,
                 args.frameContext,
-                onDispatch,
                 fenced,
+                onDispatch,
               ),
             dispatching,
           );
-        }
-        const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
-        const [x, y] = await this.toIosRunnerCoordinates(
-          iosClient,
-          targetDevice.deviceId,
-          [args.x, args.y],
-          remainingTimeoutMs,
-          (geometry) =>
-            this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], geometry),
-        );
-        const gestureTimeoutMs = this.remainingBudgetAfterProbe(
-          queueEnterMs,
-          totalTimeoutMs,
-          request.method,
-          "handleInputTap",
-        );
-        // The scale probe awaited the runner; the owner may have left meanwhile.
-        assertSocketInputNotAborted(signal);
-        return await this.dispatchFencedInput(
-          "Tap",
-          signal,
-          gestureTimeoutMs,
-          (fenced, onDispatch) =>
-            iosClient.requestTapCoordinates(
-              x,
-              y,
-              args.duration,
-              gestureTimeoutMs,
-              undefined,
-              args.frameContext,
-              fenced,
-              onDispatch,
-            ),
-          dispatching,
-        );
+        },
       },
-      this.inputDeviceGate(
-        request.method,
-        "UnixSocketServer.handleInputTap",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
     );
 
     if (!gestureResult.success) {
@@ -6531,98 +6651,85 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputSwipeParams(request.params);
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
+    const { targetDevice, result: gestureResult } = await this.runInputRoute(
+      request,
       socketSessionId,
-      "input/swipe",
-      false,
-      input?.requester,
-    );
-    const gestureResult = await this.runTrackedKeyedDeviceInput(
-      request.method,
-      targetDevice,
-      async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputSwipe",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-
-        if (args.platform === "android") {
-          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+      input,
+      {
+        action: "input/swipe",
+        origin: "UnixSocketServer.handleInputSwipe",
+        args,
+        checksFrame: true,
+        dispatch: async ({
+          targetDevice,
+          signal,
+          dispatching,
+          remainingTimeoutMs,
+          queueEnterMs,
+          totalTimeoutMs,
+        }) => {
+          if (args.platform === "android") {
+            const client = AndroidCtrlProxyClient.getInstance(
+              targetDevice,
+              defaultAdbClientFactory,
+            );
+            return await this.dispatchFencedInput(
+              "Swipe",
+              signal,
+              remainingTimeoutMs,
+              (fenced, onDispatch) =>
+                client.requestSwipe(
+                  args.startX,
+                  args.startY,
+                  args.endX,
+                  args.endY,
+                  args.durationMs,
+                  remainingTimeoutMs,
+                  undefined,
+                  args.frameContext,
+                  onDispatch,
+                  fenced,
+                ),
+              dispatching,
+            );
+          }
+          const client = IOSCtrlProxyClient.getInstance(targetDevice);
+          const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
+            client,
+            targetDevice.deviceId,
+            [args.startX, args.startY, args.endX, args.endY],
+            remainingTimeoutMs,
+          );
+          const gestureTimeoutMs = this.remainingBudgetAfterProbe(
+            queueEnterMs,
+            totalTimeoutMs,
+            request.method,
+            "handleInputSwipe",
+          );
+          assertSocketInputNotAborted(signal);
           return await this.dispatchFencedInput(
             "Swipe",
             signal,
-            remainingTimeoutMs,
+            gestureTimeoutMs,
             (fenced, onDispatch) =>
-              client.requestSwipe(
-                args.startX,
-                args.startY,
-                args.endX,
-                args.endY,
+              client.requestDrag(
+                startX,
+                startY,
+                endX,
+                endY,
+                0,
                 args.durationMs,
-                remainingTimeoutMs,
-                undefined,
+                0,
+                gestureTimeoutMs,
                 args.frameContext,
-                onDispatch,
                 fenced,
+                onDispatch,
               ),
             dispatching,
           );
-        }
-        const client = IOSCtrlProxyClient.getInstance(targetDevice);
-        const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
-          client,
-          targetDevice.deviceId,
-          [args.startX, args.startY, args.endX, args.endY],
-          remainingTimeoutMs,
-        );
-        const gestureTimeoutMs = this.remainingBudgetAfterProbe(
-          queueEnterMs,
-          totalTimeoutMs,
-          request.method,
-          "handleInputSwipe",
-        );
-        assertSocketInputNotAborted(signal);
-        return await this.dispatchFencedInput(
-          "Swipe",
-          signal,
-          gestureTimeoutMs,
-          (fenced, onDispatch) =>
-            client.requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
-              0,
-              args.durationMs,
-              0,
-              gestureTimeoutMs,
-              args.frameContext,
-              fenced,
-              onDispatch,
-            ),
-          dispatching,
-        );
+        },
       },
-      this.inputDeviceGate(
-        request.method,
-        "UnixSocketServer.handleInputSwipe",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
     );
 
     if (!gestureResult.success) {
@@ -6652,64 +6759,36 @@ export class UnixSocketServer {
    */
   private async handleInputGesture(
     request: DaemonRequest,
-    kind: "start" | "move" | "end",
+    kind: GestureFrameKind,
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
     const method = GESTURE_FRAME_METHODS[kind];
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputGestureParams(request.params, method);
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
-      socketSessionId,
-      method,
-      false,
-      input?.requester,
-    );
     let startAdmission: StrokeAdmission | undefined;
-    const gestureResult = await this.liftingStrokeOnSessionRefusal(
-      kind,
+    const { targetDevice, result: gestureResult } = await this.runInputRoute(
+      request,
       socketSessionId,
-      targetDevice,
-      args.gestureId,
-      () =>
-        this.runTrackedKeyedDeviceInput(
-          method,
-          targetDevice,
-          async (signal, dispatching) => {
-            assertSocketInputNotAborted(signal);
-            const queueWaitMs = this.timer.now() - queueEnterMs;
-            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-            if (remainingTimeoutMs <= 0) {
-              throw new McpTimeoutError({
-                toolName: method,
-                timeoutMs: totalTimeoutMs,
-                origin: "UnixSocketServer.handleInputGesture",
-                detail: `spent ${queueWaitMs}ms waiting in queue`,
-              });
-            }
-            // Before the start's admission is captured: it reads the session this frame uses.
-            dispatching?.();
-            const client = AndroidCtrlProxyClient.getInstance(
-              targetDevice,
-              defaultAdbClientFactory,
-            );
-            if (kind !== "start") {
-              return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
-            }
-            startAdmission = this.captureStrokeAdmission(targetDevice.deviceId, signal);
-            return this.forwardGestureStart(client, args, remainingTimeoutMs, startAdmission);
-          },
-          this.inputDeviceGate(
-            method,
-            "UnixSocketServer.handleInputGesture",
-            totalTimeoutMs,
-            queueEnterMs,
-            input,
-          ),
-        ),
+      input,
+      {
+        action: method,
+        origin: "UnixSocketServer.handleInputGesture",
+        args,
+        // Frame-identity-free: no frameContext is required or checked.
+        checksFrame: false,
+        around: (device, run) =>
+          this.liftingStrokeOnSessionRefusal(kind, socketSessionId, device, args.gestureId, run),
+        dispatch: async ({ targetDevice, signal, dispatching, remainingTimeoutMs }) => {
+          // Before the start's admission is captured: it reads the session this frame uses.
+          dispatching?.();
+          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          if (kind !== "start") {
+            return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+          }
+          startAdmission = this.captureStrokeAdmission(targetDevice.deviceId, signal);
+          return this.forwardGestureStart(client, args, remainingTimeoutMs, startAdmission);
+        },
+      },
     );
 
     if (!gestureResult.success) {
@@ -6951,150 +7030,86 @@ export class UnixSocketServer {
     }
   }
 
-  private parseInputGestureParams(
-    params: unknown,
-    method: string,
-  ): {
-    platform: "android";
-    deviceId?: string;
-    gestureId: string;
-    x: number;
-    y: number;
-    cancel: boolean;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error(`${method} requires params object`);
-    }
-    const args = params as Record<string, unknown>;
-    // Streaming gestures have no XCUITest equivalent, so the wire is Android-only. A client that
-    // reaches here for iOS bypassed the tool-selection check; reject rather than silently degrade.
-    if (args.platform !== "android") {
-      throw new Error(`${method} is only supported on platform 'android'`);
-    }
-    if (typeof args.gestureId !== "string" || args.gestureId.length === 0) {
-      throw new Error(`${method} requires a non-empty gestureId`);
-    }
-    const x = this.requireGestureCoordinate(args.x, method);
-    const y = this.requireGestureCoordinate(args.y, method);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error(`${method} deviceId must be a string when provided`);
-    }
-    if (args.cancel !== undefined && typeof args.cancel !== "boolean") {
-      throw new Error(`${method} cancel must be a boolean when provided`);
-    }
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      gestureId: args.gestureId,
-      x,
-      y,
-      cancel: args.cancel === true,
-    };
-  }
-
-  private requireGestureCoordinate(value: unknown, method: string): number {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`${method} requires numeric x and y params`);
-    }
-    return value;
-  }
-
   private async handleInputTypeText(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputTypeTextParams(request.params);
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
-      socketSessionId,
-      "input/typeText",
-      args.append,
-      input?.requester,
-    );
     let confirmedAppendCharsSent: number | undefined;
     const recordConfirmedAppendCharsSent = (charsSent: number): void => {
       confirmedAppendCharsSent = charsSent;
     };
-    const inputResult = await this.runTrackedKeyedDeviceInput(
-      request.method,
-      targetDevice,
-      async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
+    const { targetDevice, result: inputResult } = await this.runInputRoute(
+      request,
+      socketSessionId,
+      input,
+      {
+        action: "input/typeText",
+        origin: "UnixSocketServer.handleInputTypeText",
+        args,
+        bypassAndroidDeviceListCache: args.append,
         // A same-serial emulator may reconnect while this request waits behind an
         // earlier input. Re-read its ADB transport inside the keyed callback so the
         // append-helper lookup cannot reuse a capability from that older instance.
-        const executionTargetDevice =
+        reresolve: async (device) =>
           args.append && args.platform === "android"
             ? await this.resolveInputTargetDevice(
                 args.platform,
-                targetDevice.deviceId,
+                device.deviceId,
                 socketSessionId,
                 "input/typeText",
                 true,
                 input?.requester,
               )
-            : targetDevice;
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputTypeText",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-
-        const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
-        let dispatched = false;
-        const onDispatch = () => {
-          input?.onDispatch?.();
-          dispatched = true;
-          dispatching?.();
-        };
-        try {
-          return await this.runInputOperationWithTimeout(
-            request.method,
-            totalTimeoutMs,
-            remainingTimeoutMs,
-            "UnixSocketServer.handleInputTypeText",
-            () =>
-              this.executeInputTypeText(
-                args.platform,
-                executionTargetDevice,
-                args.text,
-                imeAction,
-                remainingTimeoutMs,
-                args.append,
-                args.frameContext,
-                recordConfirmedAppendCharsSent,
-                signal,
-                onDispatch,
-              ),
-            (timeoutError) =>
-              args.append && confirmedAppendCharsSent !== undefined
-                ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
-                : undefined,
-          );
-        } catch (error) {
-          if (dispatched && signal?.aborted) {
-            throw this.indeterminateTextError(error, signal.reason, confirmedAppendCharsSent);
+            : device,
+        checksFrame: true,
+        dispatch: async ({
+          executionDevice: executionTargetDevice,
+          signal,
+          dispatching,
+          remainingTimeoutMs,
+          totalTimeoutMs,
+        }) => {
+          const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+          let dispatched = false;
+          const onDispatch = () => {
+            input?.onDispatch?.();
+            dispatched = true;
+            dispatching?.();
+          };
+          try {
+            return await this.runInputOperationWithTimeout(
+              request.method,
+              totalTimeoutMs,
+              remainingTimeoutMs,
+              "UnixSocketServer.handleInputTypeText",
+              () =>
+                this.executeInputTypeText(
+                  args.platform,
+                  executionTargetDevice,
+                  args.text,
+                  imeAction,
+                  remainingTimeoutMs,
+                  args.append,
+                  args.frameContext,
+                  recordConfirmedAppendCharsSent,
+                  signal,
+                  onDispatch,
+                ),
+              (timeoutError) =>
+                args.append && confirmedAppendCharsSent !== undefined
+                  ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
+                  : undefined,
+            );
+          } catch (error) {
+            if (dispatched && signal?.aborted) {
+              throw this.indeterminateTextError(error, signal.reason, confirmedAppendCharsSent);
+            }
+            throw error;
           }
-          throw error;
-        }
+        },
       },
-      this.inputDeviceGate(
-        request.method,
-        "UnixSocketServer.handleInputTypeText",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
     );
 
     if (!inputResult.success) {
@@ -7122,71 +7137,51 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputPressButtonParams(request.params);
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
+    const { targetDevice, result: buttonResult } = await this.runInputRoute(
+      request,
       socketSessionId,
-      "input/pressButton",
-      false,
-      input?.requester,
-    );
-    const buttonResult = await this.runTrackedKeyedDeviceInput(
-      request.method,
-      targetDevice,
-      async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(
-          targetDevice.deviceId,
-          args.frameContext,
-          "input/pressButton",
-        );
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputPressButton",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-
-        // Forward the execution tracker's abort signal (this bound-session path
-        // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
-        // press to pick up): without it, session teardown mid-home-press leaves
-        // the ADB dispatch and foreground-verification reads running (issue #6289).
-        const pressButton = new PressButton(
+      input,
+      {
+        action: "input/pressButton",
+        origin: "UnixSocketServer.handleInputPressButton",
+        args,
+        checksFrame: true,
+        dispatch: async ({
           targetDevice,
-          null,
-          this.timer,
-          undefined,
-          (signal, _timeoutMs, send, onDispatch) =>
-            this.holdDispatchedInputRequest(
-              signal,
-              queueEnterMs + totalTimeoutMs - this.timer.now(),
-              send,
-              onDispatch,
-              "Button press request",
-            ),
-        );
-        return await pressButton.press(
-          args.button,
-          remainingTimeoutMs,
-          args.frameContext,
           signal,
           dispatching,
-        );
+          remainingTimeoutMs,
+          queueEnterMs,
+          totalTimeoutMs,
+        }) => {
+          // Forward the execution tracker's abort signal (this bound-session path
+          // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
+          // press to pick up): without it, session teardown mid-home-press leaves
+          // the ADB dispatch and foreground-verification reads running (issue #6289).
+          const pressButton = new PressButton(
+            targetDevice,
+            null,
+            this.timer,
+            undefined,
+            (signal, _timeoutMs, send, onDispatch) =>
+              this.holdDispatchedInputRequest(
+                signal,
+                queueEnterMs + totalTimeoutMs - this.timer.now(),
+                send,
+                onDispatch,
+                "Button press request",
+              ),
+          );
+          return await pressButton.press(
+            args.button,
+            remainingTimeoutMs,
+            args.frameContext,
+            signal,
+            dispatching,
+          );
+        },
       },
-      this.inputDeviceGate(
-        request.method,
-        "UnixSocketServer.handleInputPressButton",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
     );
 
     if (!buttonResult.success) {
@@ -7207,56 +7202,40 @@ export class UnixSocketServer {
     socketSessionId?: string,
     input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputKeyParams(request.params);
     if (args.platform === "ios") {
       throw new Error(INPUT_KEY_IOS_UNSUPPORTED_ERROR);
     }
-    const targetDevice = await this.resolveInputTargetDevice(
-      args.platform,
-      args.deviceId,
+    const { targetDevice, result: keyResult } = await this.runInputRoute(
+      request,
       socketSessionId,
-      "input/key",
-      false,
-      input?.requester,
-    );
-    const keyResult = await this.runTrackedKeyedDeviceInput(
-      request.method,
-      targetDevice,
-      async (signal, dispatching) => {
-        assertSocketInputNotAborted(signal);
-        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: request.method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputKey",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-
-        return await this.executeSocketInputKey(
-          new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer),
-          {
-            key: args.key,
-            frameContext: args.frameContext,
-            totalTimeoutMs,
-            remainingTimeoutMs,
-            signal,
-            dispatching,
-          },
-        );
+      input,
+      {
+        action: "input/key",
+        origin: "UnixSocketServer.handleInputKey",
+        args,
+        checksFrame: true,
+        dispatch: async ({
+          targetDevice,
+          signal,
+          dispatching,
+          remainingTimeoutMs,
+          queueEnterMs,
+          totalTimeoutMs,
+        }) => {
+          return await this.executeSocketInputKey(
+            new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer),
+            {
+              key: args.key,
+              frameContext: args.frameContext,
+              totalTimeoutMs,
+              remainingTimeoutMs,
+              signal,
+              dispatching,
+            },
+          );
+        },
       },
-      this.inputDeviceGate(
-        request.method,
-        "UnixSocketServer.handleInputKey",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
     );
 
     if (!keyResult.success) {
@@ -7766,299 +7745,28 @@ export class UnixSocketServer {
     }
   }
 
-  private parseInputTapParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    x: number;
-    y: number;
-    duration?: number;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/tap requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/tap requires platform 'android' or 'ios'");
-    }
-    // Reject NaN AND ±Infinity (finiteness), matching parseInputSwipeParams. Number.isNaN
-    // alone lets ±Infinity through, violating the "numeric x and y" contract (#3615).
-    if (
-      typeof args.x !== "number" ||
-      !Number.isFinite(args.x) ||
-      typeof args.y !== "number" ||
-      !Number.isFinite(args.y)
-    ) {
-      throw new Error("input/tap requires numeric x and y params");
-    }
-    this.validateInputTapOptions(args);
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      x: args.x,
-      y: args.y,
-      duration: args.duration,
-      frameContext: args.frameContext,
-    };
+  private parseInputTapParams(params: unknown): InputTapParams {
+    return parseInputTapParams(params);
   }
 
-  private validateInputTapOptions(args: Record<string, unknown>): asserts args is Record<
-    string,
-    unknown
-  > & {
-    duration?: number;
-    deviceId?: string;
-    frameContext?: string;
-  } {
-    if (
-      args.duration !== undefined &&
-      (typeof args.duration !== "number" || !Number.isInteger(args.duration))
-    ) {
-      throw new Error("input/tap duration must be an integer number of milliseconds when provided");
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/tap deviceId must be a string when provided");
-    }
-    if (
-      args.frameContext !== undefined &&
-      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
-    ) {
-      throw new Error("input/tap frameContext must be a non-empty string when provided");
-    }
+  private parseInputSwipeParams(params: unknown): InputSwipeParams {
+    return parseInputSwipeParams(params);
   }
 
-  private parseInputSwipeParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    startX: number;
-    startY: number;
-    endX: number;
-    endY: number;
-    durationMs: number;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/swipe requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/swipe requires platform 'android' or 'ios'");
-    }
-    this.validateInputSwipeGeometry(args);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/swipe deviceId must be a string when provided");
-    }
-    if (
-      args.frameContext !== undefined &&
-      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
-    ) {
-      throw new Error("input/swipe frameContext must be a non-empty string when provided");
-    }
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      startX: args.startX,
-      startY: args.startY,
-      endX: args.endX,
-      endY: args.endY,
-      durationMs: args.durationMs ?? 300,
-      frameContext: args.frameContext,
-    };
+  private parseInputTypeTextParams(params: unknown): InputTypeTextParams {
+    return parseInputTypeTextParams(params);
   }
 
-  private validateInputSwipeCoordinates(args: Record<string, unknown>): void {
-    if (
-      typeof args.startX !== "number" ||
-      !Number.isFinite(args.startX) ||
-      typeof args.startY !== "number" ||
-      !Number.isFinite(args.startY) ||
-      typeof args.endX !== "number" ||
-      !Number.isFinite(args.endX) ||
-      typeof args.endY !== "number" ||
-      !Number.isFinite(args.endY)
-    ) {
-      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
-    }
+  private parseInputPressButtonParams(params: unknown): InputPressButtonParams {
+    return parseInputPressButtonParams(params);
   }
 
-  private validateInputSwipeGeometry(args: Record<string, unknown>): asserts args is Record<
-    string,
-    unknown
-  > & {
-    startX: number;
-    startY: number;
-    endX: number;
-    endY: number;
-    durationMs?: number;
-  } {
-    this.validateInputSwipeCoordinates(args);
-    if (
-      args.durationMs !== undefined &&
-      (typeof args.durationMs !== "number" ||
-        !Number.isInteger(args.durationMs) ||
-        args.durationMs < 1 ||
-        args.durationMs > 60_000)
-    ) {
-      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
-    }
+  private parseInputKeyParams(params: unknown): InputKeyParams {
+    return parseInputKeyParams(params);
   }
 
-  private parseInputTypeTextParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    text: string;
-    submit: boolean;
-    append: boolean;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/typeText requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    const supportedParams = new Set([
-      "platform",
-      "deviceId",
-      "text",
-      "submit",
-      "mode",
-      "frameContext",
-      "sessionUuid",
-    ]);
-    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
-    if (unsupportedParams.length > 0) {
-      throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
-    }
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/typeText requires platform 'android' or 'ios'");
-    }
-    this.validateInputTypeTextContent(args);
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/typeText deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/typeText");
-    // "append" adds to the focused field instead of replacing it, which is what
-    // an interactive client mirroring one keystroke at a time needs: the default
-    // replace semantics would leave only the last character typed (#3351).
-    if (args.mode !== undefined && args.mode !== "append") {
-      throw new Error('input/typeText mode must be "append" when provided');
-    }
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      text: args.text,
-      submit: args.submit ?? false,
-      append: args.mode === "append",
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private validateInputTypeTextContent(
-    args: Record<string, unknown>,
-  ): asserts args is Record<string, unknown> & { text: string; submit?: boolean } {
-    if (typeof args.text !== "string" || args.text.length === 0) {
-      throw new Error("input/typeText requires non-empty string text param");
-    }
-    if (args.submit !== undefined && typeof args.submit !== "boolean") {
-      throw new Error("input/typeText submit must be a boolean when provided");
-    }
-  }
-
-  private parseInputPressButtonParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    button: string;
-    responseButton: string;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/pressButton requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/pressButton requires platform 'android' or 'ios'");
-    }
-    if (typeof args.button !== "string") {
-      throw new Error("input/pressButton requires button");
-    }
-    const supportedButtons = [
-      "home",
-      "back",
-      "menu",
-      "power",
-      "volume_up",
-      "volume_down",
-      "recent",
-      "app_switch",
-    ];
-    if (!supportedButtons.includes(args.button)) {
-      throw new Error(`input/pressButton button must be one of: ${supportedButtons.join(", ")}`);
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/pressButton deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/pressButton");
-    const button = args.button === "app_switch" ? "recent" : args.button;
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      button,
-      responseButton: args.button,
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private parseInputKeyParams(params: unknown): {
-    platform: "android" | "ios";
-    deviceId?: string;
-    key: InputKeyName;
-    frameContext?: string;
-  } {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw new Error("input/key requires params object");
-    }
-
-    const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "key", "frameContext", "sessionUuid"]);
-    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
-    if (unsupportedParams.length > 0) {
-      throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
-    }
-    if (args.platform !== "android" && args.platform !== "ios") {
-      throw new Error("input/key requires platform 'android' or 'ios'");
-    }
-    if (typeof args.key !== "string") {
-      throw new Error("input/key requires key");
-    }
-    if (!isInputKeyName(args.key)) {
-      throw new Error(`input/key key must be one of: ${SUPPORTED_INPUT_KEYS.join(", ")}`);
-    }
-    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
-      throw new Error("input/key deviceId must be a string when provided");
-    }
-    this.validateFrameContextParam(args.frameContext, "input/key");
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      key: args.key,
-      frameContext: args.frameContext as string | undefined,
-    };
-  }
-
-  private validateFrameContextParam(frameContext: unknown, action: string): void {
-    if (
-      frameContext !== undefined &&
-      (typeof frameContext !== "string" || frameContext.length === 0)
-    ) {
-      throw new Error(`${action} frameContext must be a non-empty string when provided`);
-    }
+  private parseInputGestureParams(params: unknown, method: string): InputGestureParams {
+    return parseInputGestureParams(params, method);
   }
 
   /**

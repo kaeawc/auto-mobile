@@ -207,7 +207,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   beforeEach(async () => {
     const timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [held, other, unheld]);

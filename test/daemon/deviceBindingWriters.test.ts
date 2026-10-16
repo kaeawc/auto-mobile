@@ -65,11 +65,9 @@ describe("device binding writers current behavior (#11802)", () => {
   async function initialize() {
     timer = new FakeTimer();
     timer.setCurrentTime(1000);
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];

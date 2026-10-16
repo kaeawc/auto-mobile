@@ -658,6 +658,19 @@ All these options require `prototype_text_field_options_v1`. A device without th
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with `launchApp prototype: true`, or drop the textField options.
 
+A `textField` may also declare `trailingIcon: {icon, label, onTap?}` (a built-in icon, its
+nonempty accessible `label` and optional 1-32 `onTap` actions, for example a clear button that
+`setState`s the field's key to an empty string; without `onTap` it is decoration),
+`imeAction` (`done`, `next`, `search`, `send` or `go`: the keyboard's action key) and
+`onSubmit` (1-32 actions run when that key is pressed; without `imeAction` the key is
+`done`). Multiline text has no IME action, so `imeAction` and `onSubmit` are refused with
+`multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
+
+Android draws `trailingIcon` as an `IconButton` (its `label` is the content description, its tag is
+`<testTag>.trailingIcon`) in the field's trailing slot and maps `imeAction` to Compose
+`ImeAction` with `KeyboardActions`; `next` also moves focus. iOS maps `imeAction` to `submitLabel`
+and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the field.
+
 Open question: a `secure` field's value still lives in state and in `change` events/`inspect`;
 this slice does not redact it.
 
@@ -1669,6 +1682,42 @@ a child's span does not fit. Optional integer `span >= 1` is valid only on a
 direct grid child and cannot exceed fixed columns; the renderer clamps spans
 to the resolved runtime count. Shared fixtures define host validation behavior.
 
+## Carousel and pager indicator (not device-verified)
+
+`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
+(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
+end edge for a vertical pager) with the current page filled. The dots are decoration and add no
+semantics node.
+
+A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
+`repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
+`multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` is dp >= 0. It has no page index,
+event or `setPage` target; use a `pager` when the page matters. The host refuses a show on a
+CtrlProxy or iOS agent without the capability before sending it, and the iOS result carries a
+`carousel` platform note.
+
+Android maps `multiBrowse`, `hero` and `uncontained` to `HorizontalMultiBrowseCarousel`,
+`HorizontalCenteredHeroCarousel` and `HorizontalUncontainedCarousel`; items are clipped with
+`maskClip` and only the visible items are composed, so off-screen items are absent from `observe`
+until scrolled in. A repeat that expands to no items draws nothing.
+
+## Pull-to-refresh (`scroll.refresh`, not device-verified)
+
+A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions in `onRefresh`, the
+same union as `onTap`). `stateKey` names a boolean state key that shows the refresh indicator
+while it is true; it must be boolean if declared, and a horizontal scroll with `refresh` is
+rejected at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
+runs `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with a
+`baseRevision`, writes false to end it. A pull while the key is already true is ignored. Repeat
+and component placeholders bind in the key and the actions like `onTap`. The capability is
+`prototype_refresh_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it.
+
+Android draws it with Material `PullToRefreshBox` around the scroll; the authored `testTag` and
+size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays open until the key
+is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
+top because SwiftUI cannot start `refreshable` programmatically.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
@@ -1816,8 +1865,8 @@ whole action list atomically, shows errors on every listed field, and sends
 `FLAG_ACTIVITY_NEW_DOCUMENT`. No extras are read: intents select only an id,
 never a spec or assets. `documentLaunchMode="intoExisting"` matches component and
 data via `Intent.filterEquals`, giving each id its own task while reusing the
-same id's task. Shortcut publishing may add flags; shortcut removal is deferred
-to #12265.
+same id's task. Shortcut publishing may add flags; shortcut removal is limited to
+`disableShortcuts` (see "Saved prototypes on the Android home screen").
 
 A document relaunch calls `onNewIntent`, updates the activity's intent and reloads
 the saved entry. It closes the previous runtime without emitting a dismissal,
@@ -1865,3 +1914,25 @@ shown prototype by id, and `inspect` reconciles the full device list. State, pat
 
 Not yet supported in this phase: `stateGroup` / shared state groups, `window.z`, selective
 observe exclusion, cross-window focus, iOS multi-window parity, or `prototype_state_groups_v1`.
+
+## Saved prototypes on the Android home screen
+
+`prototype` `save` (needs `prototype_saved_v1`) stores the validated spec and its assets in
+CtrlProxy's app-private storage. With `pin:true` the host then sends `pin_saved_prototype`, and
+CtrlProxy calls `ShortcutManager.requestPinShortcut` with the stored label and an adaptive icon
+(uploaded `icon` asset, else the label's first letter). The shortcut's intent selects only the
+prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
+
+- Android never pins silently: the default launcher always shows its confirmation dialog, so a
+  fresh pin is reported `pending`. Declining delivers no callback. Automatic acceptance is #12266
+  and is device-verification work (launcher dialogs differ).
+- An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
+  screen-off device reports `device_locked`; the save remains and a retry is safe.
+- The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`
+  runs `cmd shortcut clear-shortcuts` from the host, but only when no saved prototype remains,
+  because the command clears all CtrlProxy shortcuts.
+- Uninstalling or clearing CtrlProxy deletes saved prototypes and every pinned shortcut; the host
+  mirror (#12268) restores the saved content, never the icons.
+- Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
+  shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
+  (#12261).

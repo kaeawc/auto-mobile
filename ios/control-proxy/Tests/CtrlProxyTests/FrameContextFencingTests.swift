@@ -42,6 +42,7 @@ final class FrameContextFencingTests: XCTestCase {
         switch type {
         case .requestMultiFingerSwipe: gestures.multiFingerSwipeCalls
         case .requestPinch: gestures.pinchCalls
+        case .requestPathGesture: gestures.pathCalls.count
         case .requestSetText: gestures.setTextCalls
         case .requestClearText: gestures.clearTextCalls
         case .requestImeAction: gestures.imeActionCalls
@@ -114,6 +115,31 @@ final class FrameContextFencingTests: XCTestCase {
 
     func testPinchAcceptsCurrentContext() async throws {
         try await assertCurrent(.requestPinch, fields: pinchFields)
+    }
+
+    func testPathGestureRejectsStaleContext() async throws {
+        try await assertStale(.requestPathGesture, fields: pathFields)
+    }
+
+    func testPathGestureAcceptsCurrentContext() async throws {
+        try await assertCurrent(.requestPathGesture, fields: pathFields)
+    }
+
+    func testPathGestureForwardsValidatedPointsAndRejectsInvalid() async throws {
+        let (response, gestures) = try await dispatch(type: .requestPathGesture, fields: pathFields, token: nil)
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, ResponseType.pathGestureResult.rawValue)
+        XCTAssertEqual(gestures.pathCalls.first?.count, 3)
+        XCTAssertEqual(gestures.pathCalls.first?.last, PathGesturePoint(x: 30, y: 40, offsetMs: 400))
+
+        let (bad, badGestures) = try await dispatch(
+            type: .requestPathGesture,
+            fields: ["points": [["x": 1.0, "y": 2.0, "offsetMs": 0]]],
+            token: nil
+        )
+        XCTAssertEqual(bad.success, false)
+        XCTAssertTrue(bad.error?.contains("at least 2 points") == true)
+        XCTAssertTrue(badGestures.pathCalls.isEmpty)
     }
 
     func testSetTextRejectsStaleContext() async throws {
@@ -248,6 +274,16 @@ final class FrameContextFencingTests: XCTestCase {
     }
 
     private var swipeFields: Fields { ["x1": 1, "y1": 2, "x2": 3, "y2": 4] }
+    private var pathFields: Fields {
+        [
+            "points": [
+                ["x": 10.0, "y": 20.0, "offsetMs": 0],
+                ["x": 10.0, "y": 20.0, "offsetMs": 200],
+                ["x": 30.0, "y": 40.0, "offsetMs": 400],
+            ],
+        ]
+    }
+
     private var pinchFields: Fields {
         ["centerX": 1, "centerY": 2, "distanceStart": 10, "distanceEnd": 20]
     }

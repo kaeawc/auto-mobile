@@ -12,6 +12,16 @@ Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\
 by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is
 the system's. The host refuses unsupported agents before sending a show.
+
+### Pull-to-refresh
+
+A vertical \`scroll\` may declare \`refresh: {stateKey, onRefresh}\` (needs
+\`prototype_refresh_v1\`). \`stateKey\` names a boolean state key: the platform's refresh indicator
+shows while it is true. A pull sets the key to true and runs \`onRefresh\` like a tap; the prototype
+(an \`onRefresh\` \`setState\`, or the agent through \`patch\` on \`/state/<key>\` with a
+\`baseRevision\`) sets it back to false to hide the indicator. Declare the key in \`state\` as a
+boolean; a horizontal scroll with \`refresh\` is rejected. The pull is a swipe down from the top of
+the scroll (\`swipeOn\` with the prototype layer) and \`observe\` reports the scroll as usual.
 `;
 
 /**
@@ -72,6 +82,14 @@ value cannot exceed it (UTF-16 length).
 All these options require \`prototype_text_field_options_v1\`. A device without the capability
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with \`launchApp prototype: true\`, or drop the textField options.
+
+A \`textField\` may also declare \`trailingIcon: {icon, label, onTap?}\` (a built-in icon, its
+nonempty accessible \`label\` and optional 1-32 \`onTap\` actions, for example a clear button that
+\`setState\`s the field's key to an empty string; without \`onTap\` it is decoration),
+\`imeAction\` (\`done\`, \`next\`, \`search\`, \`send\` or \`go\`: the keyboard's action key) and
+\`onSubmit\` (1-32 actions run when that key is pressed; without \`imeAction\` the key is
+\`done\`). Multiline text has no IME action, so \`imeAction\` and \`onSubmit\` are refused with
+\`multiline: true\`. These need \`prototype_text_field_actions_v1\`, with the same refusal.
 
 Open question: a \`secure\` field's value still lives in state and in \`change\` events/\`inspect\`;
 this slice does not redact it.
@@ -172,7 +190,16 @@ Children are placed row-major; a span that does not fit the row starts a new row
 \`span\` is an integer >= 1 on any node shape, but is valid only on a direct grid child;
 it must not exceed fixed columns. Adaptive runtime spans are clamped to the resolved count.
 
-A \`box\`, \`row\`, \`column\`, \`flow\` or \`grid\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
+A \`carousel\` (\`prototype_carousel_v1\`) is a horizontally scrolling row of items, one per child
+(at least one), that snaps to items and may declare \`repeat\` like \`row\`. \`itemWidth\` (dp, > 0)
+is required. \`variant\` is \`multiBrowse\` (default; items change width as they scroll, Android
+Material), \`hero\` (centered large item) or \`uncontained\` (fixed-width items). \`itemSpacing\`
+is dp >= 0. iOS draws every variant as fixed-width snapping items. A pager may also declare
+\`indicator: "dots"\` (default \`none\`): page dots below the pages, with the current page filled;
+they need the same capability. A carousel has no page index, event or \`setPage\` target; use a
+\`pager\` when the page matters.
+
+A \`box\`, \`row\`, \`column\`, \`flow\`, \`grid\` or \`carousel\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
 are instantiated once per item, in order, as siblings inside the same container (the container
 itself is not repeated). A list is a \`column\` with \`repeat\` whose single child is the row template.
 

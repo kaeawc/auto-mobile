@@ -234,7 +234,12 @@ export class DaemonLifecycleReconciler {
       recorded.entryScript === actualBuild.entryScript;
     // Only the socket owner can advertise support, even when PID metadata matches.
     return matchesRecord
-      ? { ...recorded, ...actual, structuredSessionNotFound: actual.structuredSessionNotFound }
+      ? {
+          ...recorded,
+          ...actual,
+          structuredSessionNotFound: actual.structuredSessionNotFound,
+          structuredToolErrorCodes: actual.structuredToolErrorCodes,
+        }
       : actual;
   }
 

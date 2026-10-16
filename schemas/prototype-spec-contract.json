@@ -2189,6 +2189,147 @@
             }
           }
         },
+        "carousel": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["carousel"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 1,
+                "unique": false
+              },
+              "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["multiBrowse", "hero", "uncontained"]
+              },
+              "optional": true
+            },
+            "itemWidth": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1e-6,
+                "max": 10000
+              },
+              "optional": false
+            },
+            "itemSpacing": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerDp"
+              },
+              "optional": true
+            }
+          }
+        },
         "text": {
           "kind": "object",
           "fields": {
@@ -2884,6 +3025,33 @@
                 "integer": true,
                 "min": 1,
                 "max": 10000
+              },
+              "optional": true
+            },
+            "trailingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "appBarAction"
+              },
+              "optional": true
+            },
+            "imeAction": {
+              "rule": {
+                "kind": "enum",
+                "values": ["done", "next", "search", "send", "go"]
+              },
+              "optional": true
+            },
+            "onSubmit": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
               },
               "optional": true
             },
@@ -5739,6 +5907,13 @@
               },
               "optional": true
             },
+            "refresh": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollRefresh"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -5897,6 +6072,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerPageSize"
+              },
+              "optional": true
+            },
+            "indicator": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "dots"]
               },
               "optional": true
             }
@@ -9586,6 +9768,30 @@
             "max": 32
           },
           "optional": true
+        }
+      }
+    },
+    "scrollRefresh": {
+      "kind": "object",
+      "fields": {
+        "stateKey": {
+          "rule": {
+            "kind": "boundKey"
+          },
+          "optional": false
+        },
+        "onRefresh": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": false
         }
       }
     },

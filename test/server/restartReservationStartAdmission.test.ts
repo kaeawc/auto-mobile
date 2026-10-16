@@ -113,12 +113,10 @@ describe("start admission and owner resume for restart reservations", () => {
     const persistence = new FakeDeviceSessionPersistence();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
     const autolockWrites: Array<{ sessionId: string; mcpSessionId: string | null }> = [];
-    const sessions = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-    );
+    const sessions = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    });
     sessions.attachDaemonSessionId("restart-start-daemon");
     sessions.stopCleanupTimer();
     const pool = new DevicePool(

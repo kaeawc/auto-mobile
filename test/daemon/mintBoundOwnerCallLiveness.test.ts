@@ -22,7 +22,9 @@ const test = warmedTests(() => {});
 function setup(markAutolockSession: () => Promise<void> = async () => {}) {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const devices = new FakeDeviceUtils();

@@ -133,6 +133,8 @@ enum PrototypeRepeat {
             string("title", in: &fields)
             part("navigationIcon", in: &fields)
             list("actions", in: &fields)
+        case .string("textField")?:
+            part("trailingIcon", in: &fields)
         case .string("searchBar")?:
             string("placeholder", in: &fields)
             list("trailingActions", in: &fields)
@@ -297,6 +299,10 @@ private struct Instance {
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)
+        if case var .object(refresh)? = fields["refresh"], case let .array(actions)? = refresh["onRefresh"] {
+            refresh["onRefresh"] = .array(actions.map(bindAction))
+            fields["refresh"] = .object(refresh)
+        }
         for key in ["visibleWhen", "enabledWhen"] {
             if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
@@ -324,6 +330,11 @@ private struct Instance {
         case "topAppBar":
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "textField":
+            bindPart("trailingIcon", in: &fields)
+            if case let .array(actions)? = fields["onSubmit"] {
+                fields["onSubmit"] = .array(actions.map(bindAction))
+            }
         case "searchBar":
             bindList("trailingActions", in: &fields) { bindPartFields(&$0) }
             if case let .array(actions)? = fields["onSubmit"] {
@@ -347,7 +358,7 @@ private struct Instance {
         for key in ["stateKey", "hourKey", "minuteKey", "activeKey"] {
             bindString(key, in: &fields)
         }
-        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key")] {
+        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key"), ("refresh", "stateKey")] {
             guard case var .object(partFields)? = fields[part] else { continue }
             bindString(key, in: &partFields)
             fields[part] = .object(partFields)

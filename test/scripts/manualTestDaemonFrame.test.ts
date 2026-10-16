@@ -1615,6 +1615,7 @@ posixTest("expected refusal recognizes product messages and structured refusal c
       content: [{ type: "text", text: JSON.stringify({ code: "device_outside_broker_grant" }) }],
     },
     { isError: true, structuredContent: { code: "device_outside_broker_grant" } },
+    { isError: true, structuredContent: { code: "device_outside_bound_session" } },
   ]) {
     const f = batchFixture();
     const respond = f.connection.respond;

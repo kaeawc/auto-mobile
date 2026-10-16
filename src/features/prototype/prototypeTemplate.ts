@@ -261,6 +261,10 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapObject(node, "navigationIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "actions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  textField: (node, path, visit) => {
+    mapObject(node, "trailingIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
+    mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   searchBar: (node, path, visit) => {
     mapField(node, "placeholder", path, "text", visit);
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
@@ -296,9 +300,9 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
   for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
     mapField(node, field, path, "key", visit);
   }
-  for (const part of ["trailing", "openWhen"]) {
+  for (const part of ["trailing", "openWhen", "refresh"]) {
     mapObject(node, part, path, (entry, entryPath) => {
-      mapField(entry, part === "trailing" ? "stateKey" : "key", entryPath, "key", visit);
+      mapField(entry, part === "openWhen" ? "key" : "stateKey", entryPath, "key", visit);
       return entry;
     });
   }
@@ -334,6 +338,12 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
     return entry;
   });
   mapActions(copy, path, visit);
+  mapObject(copy, "refresh", path, (entry, entryPath) => {
+    mapList(entry, "onRefresh", entryPath, (action, actionPath) =>
+      mapAction(action, actionPath, visit),
+    );
+    return entry;
+  });
   mapNodeKeys(copy, path, visit);
   return copy;
 }
@@ -376,6 +386,7 @@ export function checkedKeyValues(value: Raw): unknown[] {
     value.minuteKey,
     record(value.trailing)?.stateKey,
     record(value.openWhen)?.key,
+    record(value.refresh)?.stateKey,
   ];
 }
 
@@ -402,6 +413,10 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
   const openWhen = record(copy.openWhen);
   if (openWhen?.key !== undefined) {
     copy.openWhen = { ...openWhen, key: bind(openWhen.key) };
+  }
+  const refresh = record(copy.refresh);
+  if (refresh?.stateKey !== undefined) {
+    copy.refresh = { ...refresh, stateKey: bind(refresh.stateKey) };
   }
   return copy;
 }

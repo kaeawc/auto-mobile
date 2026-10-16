@@ -1487,6 +1487,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "fingerCount",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": true
         }
       ]
     },
@@ -4942,6 +4948,104 @@
         "hasDefault": false
       }
     ],
+    "carousel": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "children",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "repeat",
+        "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "variant",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "itemWidth",
+        "type": "double",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "itemSpacing",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "checkbox": [
       {
         "name": "id",
@@ -6445,6 +6549,20 @@
       },
       {
         "name": "types",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh": [
+      {
+        "name": "stateKey",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "onRefresh",
         "type": "list",
         "nullable": false,
         "hasDefault": false
@@ -8484,6 +8602,12 @@
         "type": "object:PrototypePagerPageSize",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "indicator",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "pop": [
@@ -8885,6 +9009,12 @@
         "name": "axis",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "refresh",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh",
+        "nullable": true,
         "hasDefault": true
       },
       {
@@ -9896,6 +10026,24 @@
       {
         "name": "maxLength",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "trailingIcon",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAppBarAction",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "imeAction",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onSubmit",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       },

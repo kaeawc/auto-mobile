@@ -271,27 +271,9 @@ export interface CrashAppToolDependencies {
   createCrashApp(device: BootedDevice): CrashAppExecutor;
 }
 
-let crashAppToolDependencies: CrashAppToolDependencies | null = null;
-
-function getCrashAppToolDependencies(): CrashAppToolDependencies {
-  if (!crashAppToolDependencies) {
-    crashAppToolDependencies = {
-      createCrashApp: (device) => new CrashApp(device),
-    };
-  }
-  return crashAppToolDependencies;
-}
-
-export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependencies>): void {
-  const currentDeps = getCrashAppToolDependencies();
-  crashAppToolDependencies = {
-    createCrashApp: deps.createCrashApp ?? currentDeps.createCrashApp,
-  };
-}
-
-export function resetCrashAppToolDependencies(): void {
-  crashAppToolDependencies = null;
-}
+const defaultCrashAppToolDependencies: CrashAppToolDependencies = {
+  createCrashApp: (device) => new CrashApp(device),
+};
 
 export interface AppLifecycleExecutor {
   execute(
@@ -305,24 +287,9 @@ export interface AppLifecycleToolDependencies {
   createAppLifecycle(device: BootedDevice): AppLifecycleExecutor;
 }
 
-let appLifecycleToolDependencies: AppLifecycleToolDependencies | null = null;
-
-function getAppLifecycleToolDependencies(): AppLifecycleToolDependencies {
-  return (appLifecycleToolDependencies ??= {
-    createAppLifecycle: (device) => new AppLifecycle(device),
-  });
-}
-
-export function setAppLifecycleToolDependencies(deps: Partial<AppLifecycleToolDependencies>): void {
-  const current = getAppLifecycleToolDependencies();
-  appLifecycleToolDependencies = {
-    createAppLifecycle: deps.createAppLifecycle ?? current.createAppLifecycle,
-  };
-}
-
-export function resetAppLifecycleToolDependencies(): void {
-  appLifecycleToolDependencies = null;
-}
+const defaultAppLifecycleToolDependencies: AppLifecycleToolDependencies = {
+  createAppLifecycle: (device) => new AppLifecycle(device),
+};
 
 export interface InstallAppExecutor {
   execute(
@@ -381,27 +348,9 @@ export interface InspectPackageSigningToolDependencies {
   createInspectPackageSigning(device: BootedDevice): InspectPackageSigningExecutor;
 }
 
-let inspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies | null = null;
-
-function getInspectPackageSigningToolDependencies(): InspectPackageSigningToolDependencies {
-  return (inspectPackageSigningToolDependencies ??= {
-    createInspectPackageSigning: (device) => new InspectPackageSigning(device),
-  });
-}
-
-export function setInspectPackageSigningToolDependencies(
-  deps: Partial<InspectPackageSigningToolDependencies>,
-): void {
-  inspectPackageSigningToolDependencies = {
-    createInspectPackageSigning:
-      deps.createInspectPackageSigning ??
-      getInspectPackageSigningToolDependencies().createInspectPackageSigning,
-  };
-}
-
-export function resetInspectPackageSigningToolDependencies(): void {
-  inspectPackageSigningToolDependencies = null;
-}
+const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies = {
+  createInspectPackageSigning: (device) => new InspectPackageSigning(device),
+};
 
 let installAppToolDependencies: InstallAppToolDependencies | null = null;
 
@@ -1028,18 +977,9 @@ export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 // that can leak into unrelated tests running in the same process).
 export type AppPermissionsLike = Pick<AppPermissions, "setPermissions">;
 
-let appPermissionsFactory: (device: BootedDevice) => AppPermissionsLike = (device) =>
-  new AppPermissions(device);
+export type AppPermissionsFactory = (device: BootedDevice) => AppPermissionsLike;
 
-export function setAppPermissionsFactory(
-  factory: (device: BootedDevice) => AppPermissionsLike,
-): void {
-  appPermissionsFactory = factory;
-}
-
-export function resetAppPermissionsFactory(): void {
-  appPermissionsFactory = (device) => new AppPermissions(device);
-}
+const defaultAppPermissionsFactory: AppPermissionsFactory = (device) => new AppPermissions(device);
 
 function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsResult): string {
   if (result.warnings?.length) {
@@ -1050,34 +990,33 @@ function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsR
     : `Applied ${result.changedCount} app permission change(s) for ${appId}`;
 }
 
-export const setAppPermissionsHandler = async (
-  device: BootedDevice,
-  args: SetAppPermissionsArgs,
-) => {
-  const permissions = appPermissionsFactory(device);
-  const result = await permissions.setPermissions(args.appId, {
-    action: args.action,
-    permissions: args.permissions,
-    userId: args.userId,
-    notificationsEnabled: args.notificationsEnabled,
-    notificationPolicyAccess: args.notificationPolicyAccess,
-    scheduleExactAlarm: args.scheduleExactAlarm,
-  });
+export const createSetAppPermissionsHandler =
+  (permissionsFactory: AppPermissionsFactory = defaultAppPermissionsFactory) =>
+  async (device: BootedDevice, args: SetAppPermissionsArgs) => {
+    const permissions = permissionsFactory(device);
+    const result = await permissions.setPermissions(args.appId, {
+      action: args.action,
+      permissions: args.permissions,
+      userId: args.userId,
+      notificationsEnabled: args.notificationsEnabled,
+      notificationPolicyAccess: args.notificationPolicyAccess,
+      scheduleExactAlarm: args.scheduleExactAlarm,
+    });
 
-  const response = createJSONToolResponse({
-    message: result.success
-      ? describeSetPermissionsSuccess(args.appId, result)
-      : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
-    ...result,
-  });
-  // `result.success` requires every requested change to have applied, so a
-  // partial success (some permissions changed, others didn't) already
-  // reports per-operation status via `operations`/`changedCount` and may
-  // stay isError:false. But when NOTHING applied, the primary operation did
-  // not succeed and must be reported as such (#6200, #6251).
-  const wholeOperationFailed = !result.success && result.changedCount === 0;
-  return wholeOperationFailed ? { ...response, isError: true as const } : response;
-};
+    const response = createJSONToolResponse({
+      message: result.success
+        ? describeSetPermissionsSuccess(args.appId, result)
+        : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
+      ...result,
+    });
+    // `result.success` requires every requested change to have applied, so a
+    // partial success (some permissions changed, others didn't) already
+    // reports per-operation status via `operations`/`changedCount` and may
+    // stay isError:false. But when NOTHING applied, the primary operation did
+    // not succeed and must be reported as such (#6200, #6251).
+    const wholeOperationFailed = !result.success && result.changedCount === 0;
+    return wholeOperationFailed ? { ...response, isError: true as const } : response;
+  };
 
 /**
  * Says which filters were applied and how many apps they hid. The previous
@@ -1389,77 +1328,80 @@ const terminateAppHandler = async (
   }
 };
 
-const crashAppHandler = async (
-  device: BootedDevice,
-  args: CrashAppActionArgs,
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  const dependencies = getCrashAppToolDependencies();
-  let mutationMayHaveHappened = false;
-  try {
-    signal?.throwIfAborted();
-    mutationMayHaveHappened = true;
-    const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
-    signal?.throwIfAborted();
+const createCrashAppHandler =
+  (dependencies: CrashAppToolDependencies) =>
+  async (
+    device: BootedDevice,
+    args: CrashAppActionArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      mutationMayHaveHappened = true;
+      const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
+      signal?.throwIfAborted();
 
-    const message = result.success
-      ? `Crashed app ${args.appId} via ${result.mechanism}${
-          result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
-        }`
-      : (result.error ?? `Failed to crash app ${args.appId}`);
-    const response = createStructuredToolResponse({ message, ...result });
-    return withIsErrorOnFailure(response, result.success);
-  } catch (error) {
-    if (isDeviceLostError(error) || error instanceof ActionableError) {
-      throw error;
+      const message = result.success
+        ? `Crashed app ${args.appId} via ${result.mechanism}${
+            result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
+          }`
+        : (result.error ?? `Failed to crash app ${args.appId}`);
+      const response = createStructuredToolResponse({ message, ...result });
+      return withIsErrorOnFailure(response, result.success);
+    } catch (error) {
+      if (isDeviceLostError(error) || error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, `Failed to crash app`);
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-    throw toActionableError(error, `Failed to crash app`);
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
-    }
-  }
-};
+  };
 
-const appLifecycleHandler = async (
-  device: BootedDevice,
-  args: { appId: string; action: AppLifecycleAction },
-  _progress?: unknown,
-  signal?: AbortSignal,
-) => {
-  let mutationMayHaveHappened = false;
-  try {
-    signal?.throwIfAborted();
-    const result = await getAppLifecycleToolDependencies()
-      .createAppLifecycle(device)
-      .execute(args.appId, args.action, {
-        signal,
-        onMutation: () => {
-          mutationMayHaveHappened = true;
-        },
-      });
-    signal?.throwIfAborted();
-    const message = result.success
-      ? (result.message ??
-        (args.action === "background"
-          ? `Backgrounded app ${args.appId}`
-          : `Completed background kill request for ${args.appId}`))
-      : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
-    const response = createStructuredToolResponse({ ...result, message });
-    return withIsErrorOnFailure(response, result.success);
-  } catch (error) {
-    signal?.throwIfAborted();
-    if (isDeviceLostError(error) || error instanceof ActionableError) {
-      throw error;
+const createAppLifecycleHandler =
+  (dependencies: AppLifecycleToolDependencies) =>
+  async (
+    device: BootedDevice,
+    args: { appId: string; action: AppLifecycleAction },
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      const result = await dependencies
+        .createAppLifecycle(device)
+        .execute(args.appId, args.action, {
+          signal,
+          onMutation: () => {
+            mutationMayHaveHappened = true;
+          },
+        });
+      signal?.throwIfAborted();
+      const message = result.success
+        ? (result.message ??
+          (args.action === "background"
+            ? `Backgrounded app ${args.appId}`
+            : `Completed background kill request for ${args.appId}`))
+        : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
+      const response = createStructuredToolResponse({ ...result, message });
+      return withIsErrorOnFailure(response, result.success);
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (isDeviceLostError(error) || error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, "Failed to perform app lifecycle action");
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
     }
-    throw toActionableError(error, "Failed to perform app lifecycle action");
-  } finally {
-    if (mutationMayHaveHappened) {
-      await refreshInstalledAppResources(device.deviceId);
-    }
-  }
-};
+  };
 
 function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undefined {
   if (args.expectedSigningSha256 === undefined && args.allowDestructiveRecovery === undefined) {
@@ -1584,7 +1526,30 @@ function subscribePrototypeAgentLifecycle(): () => void {
   return () => cleanups.forEach((cleanup) => cleanup());
 }
 
-export function registerAppTools() {
+/** Overrides for the collaborators `registerAppTools` wires into its handlers (tests, embedders). */
+export interface AppToolsDependencies {
+  crashApp?: Partial<CrashAppToolDependencies>;
+  appLifecycle?: Partial<AppLifecycleToolDependencies>;
+  inspectPackageSigning?: Partial<InspectPackageSigningToolDependencies>;
+  appPermissionsFactory?: AppPermissionsFactory;
+}
+
+export function registerAppTools(dependencies: AppToolsDependencies = {}) {
+  const crashAppHandler = createCrashAppHandler({
+    ...defaultCrashAppToolDependencies,
+    ...dependencies.crashApp,
+  });
+  const appLifecycleHandler = createAppLifecycleHandler({
+    ...defaultAppLifecycleToolDependencies,
+    ...dependencies.appLifecycle,
+  });
+  const inspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies = {
+    ...defaultInspectPackageSigningToolDependencies,
+    ...dependencies.inspectPackageSigning,
+  };
+  const setAppPermissionsHandler = createSetAppPermissionsHandler(
+    dependencies.appPermissionsFactory,
+  );
   unsubscribePrototypeAgentLifecycle?.();
   unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle();
   const inspectPackageSigningHandler = async (
@@ -1594,7 +1559,7 @@ export function registerAppTools() {
     signal?: AbortSignal,
   ) => {
     try {
-      const inspection = await getInspectPackageSigningToolDependencies()
+      const inspection = await inspectPackageSigningToolDependencies
         .createInspectPackageSigning(device)
         .execute(args.appId, { userId: args.userId, signal });
       return createJSONToolResponse({ ...inspection });

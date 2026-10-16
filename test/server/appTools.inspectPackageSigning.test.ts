@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  inspectPackageSigningSchema,
-  registerAppTools,
-  resetInspectPackageSigningToolDependencies,
-  setInspectPackageSigningToolDependencies,
-} from "../../src/server/appTools";
+import { inspectPackageSigningSchema, registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { PackageSigningInspection } from "../../src/models/PackageSigningInspection";
 
@@ -32,7 +27,6 @@ describe("inspectPackageSigning tool", () => {
   });
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetInspectPackageSigningToolDependencies();
   });
 
   test("is registered read-only and off by default", () => {
@@ -49,13 +43,16 @@ describe("inspectPackageSigning tool", () => {
 
   test("passes appId, userId and the abort signal to the inspector", async () => {
     const calls: unknown[] = [];
-    setInspectPackageSigningToolDependencies({
-      createInspectPackageSigning: () => ({
-        execute: async (appId, options) => {
-          calls.push({ appId, userId: options?.userId, signal: options?.signal });
-          return inspection;
-        },
-      }),
+    ToolRegistry.clearTools();
+    registerAppTools({
+      inspectPackageSigning: {
+        createInspectPackageSigning: () => ({
+          execute: async (appId, options) => {
+            calls.push({ appId, userId: options?.userId, signal: options?.signal });
+            return inspection;
+          },
+        }),
+      },
     });
     const controller = new AbortController();
     const handler = ToolRegistry.getTool("inspectPackageSigning")?.deviceAwareHandler;

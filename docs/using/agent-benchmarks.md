@@ -226,7 +226,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (a wrapper script by content), and a non-secret provider identity
-(Bedrock/Vertex selection, base URL and proxy hosts, proxy bypass list, region, and model-routing variables). A stale build or changed scoring code is
+(Bedrock/Vertex selection, base URL and proxy hosts with a digest of each path, proxy bypass list, region, and model-routing variables). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

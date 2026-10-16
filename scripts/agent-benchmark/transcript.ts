@@ -82,12 +82,26 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function contentBlocks(event: JsonRecord): JsonRecord[] {
+/**
+ * The content blocks of an assistant or user event. Plain-text content (a string) has no
+ * blocks; any other shape could hide tool calls or results, so it is a parse error.
+ */
+function contentBlocks(event: JsonRecord, line: number, state: AuditState): JsonRecord[] {
   const message = event.message;
-  if (!isRecord(message) || !Array.isArray(message.content)) {
+  const content = isRecord(message) ? message.content : undefined;
+  if (typeof content === "string") {
     return [];
   }
-  return message.content.filter(isRecord);
+  if (!Array.isArray(content)) {
+    state.audit.parseErrors.push(`line ${line}: ${String(event.type)} event has malformed content`);
+    return [];
+  }
+  if (!content.every(isRecord)) {
+    state.audit.parseErrors.push(
+      `line ${line}: ${String(event.type)} event has a non-object block`,
+    );
+  }
+  return content.filter(isRecord);
 }
 
 /** tool_result content is either a string or an array of `{type:"text", text}` blocks. */
@@ -146,7 +160,7 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     state.audit.observedModel ??= identity(message.model);
   }
   const isSubagent = event.parent_tool_use_id !== null && event.parent_tool_use_id !== undefined;
-  for (const block of contentBlocks(event)) {
+  for (const block of contentBlocks(event, line, state)) {
     if (block.type !== "tool_use") {
       continue;
     }
@@ -173,8 +187,8 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
   }
 }
 
-function handleUser(event: JsonRecord, state: AuditState): void {
-  for (const block of contentBlocks(event)) {
+function handleUser(event: JsonRecord, line: number, state: AuditState): void {
+  for (const block of contentBlocks(event, line, state)) {
     if (block.type !== "tool_result") {
       continue;
     }
@@ -267,7 +281,7 @@ function handleEvent(event: JsonRecord, line: number, state: AuditState): void {
       handleAssistant(event, line, state);
       return;
     case "user":
-      handleUser(event, state);
+      handleUser(event, line, state);
       return;
     case "result":
       handleResult(event, state);

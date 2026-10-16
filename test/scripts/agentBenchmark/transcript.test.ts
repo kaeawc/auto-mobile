@@ -139,6 +139,23 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result?.finalText).toBe("first");
   });
 
+  test("malformed message content fails the transcript instead of hiding blocks", () => {
+    const event = (type: string, content: unknown) =>
+      JSON.stringify({ type, message: { content } });
+    const lines = [
+      event("assistant", { type: "tool_use", id: "toolu_hidden", name: "mcp__auto-mobile__tapOn" }),
+      JSON.stringify({ type: "assistant" }),
+      event("user", ["stray"]),
+      event("user", "plain text is fine"),
+    ];
+    const audit = auditTranscript(`${lines.join("\n")}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([
+      "line 1: assistant event has malformed content",
+      "line 2: assistant event has malformed content",
+      "line 3: user event has a non-object block",
+    ]);
+  });
+
   test("a second init event fails the transcript and keeps the first status", () => {
     const init = (status: string) =>
       JSON.stringify({

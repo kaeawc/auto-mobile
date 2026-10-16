@@ -180,7 +180,7 @@ also applies to the display-aware gestures, `hitTest`, `sendKeys`, observation
 screenshot captures, and `videoRecording` starts; stopping a recording is permitted even if its panel
 has disappeared.
 
-`tapOn`, `tapAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
+`tapOn`, `tapAt`, `swipeAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
 same optional `display` selector. First observe the target panel, then pass the
 same panel to the action. An explicit action rejects coordinates from another
 panel and asks you to re-observe the target. A display-transition refusal carries
@@ -410,9 +410,10 @@ default), or `fast` as in `swipeOn`. `layer` is checked at the `from` point, bec
 finger-down point. `display` (panel key, role, or `active`) swipes on that
 Android panel: points, `coordinateSpace` and `image` resolve against the panel's observed
 `screenSize`, `snapshotId` and `layer` are checked against its observation, and the display fence
-is re-checked before dispatch (a changed or removed display returns `staleDisplay`). A
-non-default panel needs the CtrlProxy `gesture_display_id_v1` capability and otherwise fails with
-an actionable error. iOS refuses `display`.
+is re-checked before dispatch (a changed or removed display returns `staleDisplay`). The default display uses the same injection as a call without `display`; other panels use CtrlProxy
+with the panel's `displayId` (falling back to `input touchscreen -d` if it fails before dispatch, or
+on older APKs). A swipe dispatched but not confirmed returns `outcomeIndeterminate`. iOS refuses
+`display`.
 
 `recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
 half the on-axis travel), or a swipe with a known path but no direction, as

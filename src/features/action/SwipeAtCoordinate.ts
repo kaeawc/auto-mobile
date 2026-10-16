@@ -19,9 +19,18 @@ import { ExecuteGesture } from "./ExecuteGesture";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
-import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
+import {
+  executeTouchscreenInput,
+  inputDurationArgument,
+  supportsCtrlProxyGestureDisplay,
+} from "./touchscreenInput";
+import { isStaleFrameContextRejection } from "./tapAtGesture";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
+import {
+  selectedDisplayPin,
+  unsupportedDisplayOptionMessage,
+} from "../observe/SessionDisplayContext";
 
 const TOOL_NAME = "swipeAt";
 
@@ -176,66 +185,80 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     const { call, perf, failure } = context;
     const { progress, signal } = call;
     if (this.device.platform !== "android") {
-      return failure(`${TOOL_NAME} ${unsupportedDisplayOptionMessage("display")}`);
+      return failure(
+        selectedDisplayPin() === undefined
+          ? "swipeAt `display` is Android-only; omit `display` on iOS"
+          : unsupportedDisplayOptionMessage("swipeAt on iOS"),
+      );
     }
-    const target = await prepareTargetDisplayAction(
-      this.device,
-      display,
-      this.observeScreen,
-      this.adb,
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
-    );
+    let target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    try {
+      target = await prepareTargetDisplayAction(
+        this.device,
+        display,
+        this.observeScreen,
+        this.adb,
+        this.lastRenderedObservation,
+        signal,
+        this.displayTransitionReader,
+      );
+    } catch (error) {
+      if (
+        error instanceof StaleDisplayError ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      logger.warn(`${TOOL_NAME} display routing failed: ${errorMessage(error)}`, error);
+      return failure(errorMessage(error));
+    }
     const checked = this.checkObservation(options, target.observation, failure);
     if ("failure" in checked) {
       return checked.failure;
     }
     const { from, to } = checked.resolved;
     const panel = target.observation.display.key;
-    if (!(await supportsCtrlProxyGestureDisplay(this.androidClient, target.displayId))) {
-      return failure(
-        `${TOOL_NAME} on display "${panel}" requires CtrlProxy capability gesture_display_id_v1. Update CtrlProxy, or use swipeOn with scrollMode "adb".`,
-      );
-    }
-    let dispatched = false;
+    const duration = this.geometry.getSwipeDurationFromSpeed(options.speed);
     const result = await this.observedInteraction(
       async () => {
-        target.assertCurrent();
-        throwIfAborted(signal);
-        const duration = this.geometry.getSwipeDurationFromSpeed(options.speed);
-        const sent = await perf.track("executeSwipe", () =>
-          this.androidClient.requestSwipe(
-            from.x,
-            from.y,
-            to.x,
-            to.y,
-            duration,
-            undefined,
-            undefined,
-            undefined,
-            () => {
-              dispatched = true;
-            },
-            signal,
-            target.displayId === 0 ? undefined : target.displayId,
-            target.assertCurrent,
-          ),
-        );
-        throwIfAborted(signal);
         const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
-        if (sent.success) {
-          return { success: true, ...base, duration };
+        let dispatched = false;
+        try {
+          target.assertCurrent();
+          throwIfAborted(signal);
+          const sent = await perf.track("executeSwipe", () =>
+            this.dispatchOnDisplay({
+              from,
+              to,
+              duration,
+              target,
+              perf,
+              signal,
+              onDispatch: () => {
+                dispatched = true;
+              },
+            }),
+          );
+          return sent.success ? { ...sent, ...base } : { ...sent, ...base, duration: 0 };
+        } catch (error) {
+          if (
+            error instanceof StaleDisplayError ||
+            error instanceof DispatchedObservationError ||
+            (error instanceof Error && error.name === "AbortError")
+          ) {
+            throw error;
+          }
+          logger.warn(`${TOOL_NAME} display dispatch failed: ${errorMessage(error)}`, error);
+          return {
+            success: false,
+            ...base,
+            duration: 0,
+            error: dispatched
+              ? `${errorMessage(error)} (the swipe was dispatched and may have been applied; do not retry automatically)`
+              : errorMessage(error),
+            ...(dispatched ? { outcomeIndeterminate: true } : {}),
+          };
         }
-        const reason = sent.error ?? "Android swipe failed";
-        return {
-          success: false,
-          ...base,
-          duration: 0,
-          error: dispatched
-            ? `${reason} (the swipe was dispatched and may have been applied; do not retry automatically)`
-            : reason,
-        };
       },
       {
         ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
@@ -249,6 +272,88 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     );
     this.annotateDeviceLock(result, target.observation);
     return result;
+  }
+
+  /**
+   * Default display: the same injection as the no-display path. Other panels: CtrlProxy with the
+   * panel's displayId when advertised (falling back to adb if it fails before dispatch), else adb
+   * `input touchscreen -d`.
+   */
+  private async dispatchOnDisplay(input: {
+    from: NativePoint;
+    to: NativePoint;
+    duration: number;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    perf: ReturnType<typeof createGlobalPerformanceTracker>;
+    signal?: AbortSignal;
+    onDispatch: () => void;
+  }): Promise<SwipeResult> {
+    const { from, to, duration, target, perf, signal, onDispatch } = input;
+    const { displayId } = target;
+    if (displayId === undefined || displayId === 0) {
+      onDispatch();
+      return this.executeGesture.swipe(
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        { duration, displayFence: { assertCurrent: target.assertCurrent } },
+        perf,
+        signal,
+      );
+    }
+    if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
+      let dispatched = false;
+      const result = await this.androidClient.requestSwipe(
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        duration,
+        undefined,
+        perf,
+        undefined,
+        () => {
+          dispatched = true;
+          onDispatch();
+        },
+        signal,
+        displayId,
+        target.assertCurrent,
+      );
+      throwIfAborted(signal);
+      if (result.success) {
+        return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
+      }
+      if (dispatched) {
+        return {
+          success: false,
+          x1: from.x,
+          y1: from.y,
+          x2: to.x,
+          y2: to.y,
+          duration: 0,
+          error: `${result.error ?? "Android swipe failed"} (the swipe was dispatched and may have been applied; do not retry automatically)`,
+          outcomeIndeterminate: true,
+        };
+      }
+      if (isStaleFrameContextRejection(result.error)) {
+        throw new ActionableError(result.error ?? "Stale frame context");
+      }
+      logger.warn(
+        `${TOOL_NAME} CtrlProxy swipe failed (${result.error}), falling back to ADB input`,
+      );
+    }
+    throwIfAborted(signal);
+    await executeTouchscreenInput(
+      this.adb,
+      `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
+      displayId,
+      signal,
+      target.assertCurrent,
+      { onDispatch },
+    );
+    return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
 
   async execute(options: SwipeAtOptions, call: ActionCall = {}): Promise<SwipeResult> {

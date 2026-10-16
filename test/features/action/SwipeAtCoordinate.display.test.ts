@@ -40,6 +40,7 @@ function setup(
     width = 400,
     height = 800,
   } = options;
+  const gestureSwipes: Array<[number, number, number, number, boolean]> = [];
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse("cmd display get-displays", {
     stdout:
@@ -63,6 +64,13 @@ function setup(
   const swipeAt = new SwipeAtCoordinate(target, adb, {
     timer,
     androidClient: ctrl,
+    executeGesture: {
+      swipe: async (x1, y1, x2, y2, opts) => {
+        opts?.displayFence?.assertCurrent();
+        gestureSwipes.push([x1, y1, x2, y2, opts?.displayFence !== undefined]);
+        return { success: true, x1, y1, x2, y2, duration: opts?.duration ?? 0 };
+      },
+    },
     displayTransitions: transitions,
     lastRenderedObservation: () => ({
       display: { key: panel, generation: 7 },
@@ -71,7 +79,7 @@ function setup(
   });
   swipeAt.window = new FakeWindow();
   swipeAt.observeScreen = observe;
-  return { swipeAt, ctrl, adb, transitions, observe };
+  return { swipeAt, ctrl, adb, transitions, observe, gestureSwipes };
 }
 
 afterEach(() => displayTransitions.reset(device.deviceId));
@@ -93,8 +101,8 @@ describe("swipeAt display", () => {
     ]);
   });
 
-  test("a default-display panel omits the display id", async () => {
-    const { swipeAt, ctrl } = setup({ panel: "internal", width: 100, height: 200 });
+  test("the default display uses the same injection as the no-display path", async () => {
+    const { swipeAt, ctrl, gestureSwipes } = setup({ panel: "internal", width: 100, height: 200 });
 
     const result = await swipeAt.execute({
       display: "internal",
@@ -103,11 +111,73 @@ describe("swipeAt display", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(ctrl.getSwipeHistory()[0]).not.toHaveProperty("displayId");
+    expect(gestureSwipes).toEqual([[10, 20, 10, 150, true]]);
+    expect(ctrl.getSwipeHistory()).toEqual([]);
   });
 
-  test("a CtrlProxy without gesture_display_id_v1 fails before any dispatch", async () => {
-    const { swipeAt, ctrl } = setup({ capable: false });
+  test("a CtrlProxy without gesture_display_id_v1 falls back to adb touchscreen routing", async () => {
+    const { swipeAt, ctrl, adb } = setup({ capable: false });
+
+    const result = await swipeAt.execute({
+      display: "external",
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(ctrl.getSwipeHistory()).toEqual([]);
+    expect(adb.getExecutedCommands().join("\n")).toContain(
+      "input touchscreen -d 2 swipe 10 20 10 150 300",
+    );
+  });
+
+  test("a CtrlProxy failure before dispatch falls back to adb", async () => {
+    const { swipeAt, ctrl, adb } = setup();
+    ctrl.setSwipeResult({ success: false, error: "gesture rejected", totalTimeMs: 0 });
+
+    const result = await swipeAt.execute({
+      display: "external",
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(adb.getExecutedCommands().join("\n")).toContain("input touchscreen -d 2 swipe");
+  });
+
+  test("a swipe dispatched but reported failed is indeterminate and not retried", async () => {
+    const { swipeAt, ctrl, adb } = setup();
+    ctrl.setSwipeDispatchesBeforeResult(true);
+    ctrl.setSwipeResult({ success: false, error: "no ack", totalTimeMs: 0 });
+
+    const result = await swipeAt.execute({
+      display: "external",
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+    });
+
+    expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+    expect(result.error).toContain("do not retry automatically");
+    expect(adb.getExecutedCommands().join("\n")).not.toContain("touchscreen");
+  });
+
+  test("a non-stale dispatch rejection becomes a structured failure", async () => {
+    const { swipeAt, ctrl } = setup();
+    ctrl.requestSwipe = async () => {
+      throw new Error("socket closed");
+    };
+
+    const result = await swipeAt.execute({
+      display: "external",
+      from: { x: 10, y: 20 },
+      to: { x: 10, y: 150 },
+    });
+
+    expect(result).toMatchObject({ success: false, error: "socket closed" });
+  });
+
+  test("a panel without a prior observation returns a failure result", async () => {
+    const { swipeAt } = setup({ panel: "internal" });
 
     const result = await swipeAt.execute({
       display: "external",
@@ -116,8 +186,7 @@ describe("swipeAt display", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("gesture_display_id_v1");
-    expect(ctrl.getSwipeHistory()).toEqual([]);
+    expect(result.error).toContain("require a prior observation");
   });
 
   test("a display transition mid-call returns the typed staleDisplay failure", async () => {
@@ -158,14 +227,15 @@ describe("swipeAt display", () => {
   test("points resolve against the selected panel's screen size", async () => {
     const { swipeAt, ctrl } = setup();
 
+    // x 350 is outside the 100 px wide default display but inside the 400 px selected panel.
     const result = await swipeAt.execute({
       display: "external",
-      from: { x: 399, y: 10 },
-      to: { x: 450, y: 10 },
+      from: { x: 350, y: 700 },
+      to: { x: 50, y: 700 },
     });
 
-    expect(result.success).toBe(false);
-    expect(ctrl.getSwipeHistory()).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(ctrl.getSwipeHistory()).toMatchObject([{ x1: 350, y1: 700, x2: 50, y2: 700 }]);
   });
 
   test("a stale snapshot reference is refused", async () => {
@@ -192,7 +262,7 @@ describe("swipeAt display", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("not supported");
+    expect(result.error).toContain("Android-only");
     expect(ctrl.getSwipeHistory()).toEqual([]);
   });
 });

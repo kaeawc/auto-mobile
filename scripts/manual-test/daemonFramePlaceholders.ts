@@ -1,30 +1,35 @@
-export interface ManagedFrameIdentity {
-  sessionIds: string[];
-  slots: Map<number, string>;
+export interface BrokerFrameIdentity {
+  sessionId?: string;
   token: string;
+  clients: Map<string, string>;
 }
 /** Walk parsed JSON values, never its serialized syntax; keys remain literal. */
 export function substituteFramePlaceholders(
   value: unknown,
-  identity?: ManagedFrameIdentity,
+  identity?: BrokerFrameIdentity,
 ): unknown {
   if (typeof value === "string") {
     return value.replace(
-      /\{\{(ownSessionId[^}]*|ownLivenessOwnerToken[^}]*)\}\}/g,
+      /\{\{(ownSessionId[^}]*|ownLivenessOwnerToken[^}]*|clientSessionId[^}]*)\}\}/g,
       (_match, name: string) => {
+        if (name.startsWith("ownSessionId:")) {
+          throw new Error(
+            "Indexed ownSessionId placeholders were removed; use {{clientSessionId:<name>}}.",
+          );
+        }
         if (!identity) {
-          throw new Error("Own-session placeholders require --managed-binding.");
+          throw new Error("Session placeholders require --broker-binding.");
         }
-        if (!/^(ownSessionId(?::(?:0|[1-9]\d*))?|ownLivenessOwnerToken)$/.test(name)) {
-          throw new Error(`Cannot resolve {{${name}}} from this managed binding.`);
-        }
-        const sessionId =
+        const replacement =
           name === "ownSessionId"
-            ? identity.sessionIds[0]
-            : identity.slots.get(Number(name.slice("ownSessionId:".length)));
-        const replacement = name === "ownLivenessOwnerToken" ? identity.token : sessionId;
+            ? identity.sessionId
+            : name === "ownLivenessOwnerToken"
+              ? identity.token
+              : /^clientSessionId:[a-z0-9-]{1,32}$/.test(name)
+                ? identity.clients.get(name.slice("clientSessionId:".length))
+                : undefined;
         if (!replacement) {
-          throw new Error(`Cannot resolve {{${name}}} from this managed binding.`);
+          throw new Error(`Cannot resolve {{${name}}} from this broker binding.`);
         }
         return replacement;
       },

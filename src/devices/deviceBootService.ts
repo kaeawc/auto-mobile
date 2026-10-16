@@ -425,12 +425,12 @@ export interface DeviceBootRequest {
   matchExactName?: boolean;
   /**
    * Recovery snapshots keep preserved Android AVDs out of a concurrent startup match; managed
-   * slots keep their AVDs out of generic starts (#11174).
+   * bindings keep their AVDs out of generic starts (#11174).
    */
   excludeDeviceNames?: ReadonlySet<string>;
   /**
    * Recovery snapshots keep preserved Android serials out of a concurrent startup match; managed
-   * slots keep their simulator UDIDs out of generic starts (#11174). Matched against both booted
+   * bindings keep their simulator UDIDs out of generic starts (#11174). Matched against both booted
    * devices and images.
    */
   excludeDeviceIds?: ReadonlySet<string>;

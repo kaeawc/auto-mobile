@@ -1,6 +1,8 @@
 """Bounded fake stdio server using the installed SDK's server API."""
 from __future__ import annotations
+import argparse
 import asyncio
+import json
 import os
 import signal
 import threading
@@ -106,6 +108,25 @@ def status() -> str:
     return "ready"
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--advertise-session", type=json.loads)
+    args = parser.parse_args()
+    if args.advertise_session is not None:
+        if not isinstance(args.advertise_session, dict):
+            parser.error("--advertise-session requires a JSON object")
+        # Preserve the installed SDK's normal capability calculation and add the
+        # same experimental key used by the broker proxy at initialize.
+        # MCPServer (SDK 2.x) renamed FastMCP's low-level server attribute.
+        lowlevel_server = getattr(server, "_lowlevel_server", None)
+        if lowlevel_server is None:
+            lowlevel_server = server._mcp_server
+        original_capabilities = lowlevel_server.get_capabilities
+        def capabilities(*positional: Any, **keyword: Any) -> Any:
+            result = original_capabilities(*positional, **keyword)
+            result.experimental = dict(result.experimental or {})
+            result.experimental["automobile/session"] = args.advertise_session
+            return result
+        lowlevel_server.get_capabilities = capabilities
     try:
         server.run()
     finally:

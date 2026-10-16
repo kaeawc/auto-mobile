@@ -107,7 +107,7 @@
     {
       // Newly in scope for no-raw-selector-field-read with pre-existing reads, so the
       // rule is WARN here and gated by the count ratchet (scripts/oxlint-baseline.sh).
-      // Drop this override once the remaining chooser reads move to the resolver or SearchableNode.
+      // Drop this override once findButtonByText and the chooser reads move to the resolver.
       "files": ["src/features/utility/DeepLinkManager.ts"],
       "rules": {
         "auto-mobile/no-raw-selector-field-read": "warn"

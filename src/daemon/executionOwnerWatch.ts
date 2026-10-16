@@ -1,7 +1,7 @@
 /**
- * Watches the process that owns a managed slot execution (epic #11172, #11176).
+ * Watches the process that owns a broker binding execution (epic #11172, #11176).
  *
- * The stdio proxy launched with a managed-slot config holds its sessions for the execution's
+ * The stdio proxy launched with a broker binding config holds its sessions for the execution's
  * lifetime, renewing their owner lease every 2 s. A living orphan proxy must not keep renewing after
  * the execution it served is gone, so the proxy checks, on its own short cadence, that:
  *

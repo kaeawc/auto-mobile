@@ -31,7 +31,6 @@ import { nodeBounds } from "../../models/ViewHierarchyResult";
 import type { Timer } from "../../utils/interfaces/Timer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DefaultElementParser } from "./ElementParser";
-import { isButtonLikeWithText, toSearchable } from "./SearchableNode";
 import { DefaultElementGeometry } from "./ElementGeometry";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import {
@@ -1167,14 +1166,15 @@ export class DeepLinkManager implements DeepLinkManager {
         return;
       } // Already found
 
-      // Only the Android `class` field names the widget here, so drop `className`.
-      const searchable = toSearchable({
-        ...this.parser.extractNodeProperties(currentNode),
-        className: undefined,
-      });
+      const properties = this.parser.extractNodeProperties(currentNode);
+      const text = properties.text || properties["content-desc"] || "";
+      const className = properties.class || "";
 
       // Check if this is a button-like element with matching text
-      if (isButtonLikeWithText(searchable, textOptions)) {
+      if (
+        (className.includes("Button") || className.includes("TextView")) &&
+        textOptions.some((option) => text.toLowerCase().includes(option.toLowerCase()))
+      ) {
         foundElement = currentNode;
       }
     });

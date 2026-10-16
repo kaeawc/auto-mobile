@@ -15,7 +15,7 @@ import type {
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { SlotProcessIdentity } from "../managedSlots/slotRegistry";
+import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { BrokerLimits } from "./admission";
 import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
 import type { SessionLiveness } from "./sessionDisposition";
@@ -34,7 +34,7 @@ import {
 export interface SessionBrokerOptions {
   store: SqliteSessionBrokerStore;
   devices: SessionBrokerDevicePort;
-  owner: SlotProcessIdentity;
+  owner: BindingProcessIdentity;
   limits: BrokerLimits;
   catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
   defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
@@ -73,7 +73,7 @@ function failedResult(config: SessionConfig, failure: SessionBrokerFailure): Ses
   };
 }
 
-function sameProcess(left: SlotProcessIdentity, right: SlotProcessIdentity): boolean {
+function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
   return (
     left.daemonId === right.daemonId &&
     left.pid === right.pid &&

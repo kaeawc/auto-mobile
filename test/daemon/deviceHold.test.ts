@@ -45,9 +45,9 @@ const kinds = {
   identity: { facts: { identityUnresolved: true }, answers: [false, "free", "idle", true, false] },
   cleanup: { facts: { cleanupInProgress: true }, answers: [false, "free", "idle", false, false] },
   health: { facts: { healthMarker: true }, answers: [false, "free", "assigned", true, false] },
-  "managed-slot": {
-    facts: { managedSlot: true },
-    answers: [true, "managed_slot", "assigned", true, false],
+  "broker-binding": {
+    facts: { brokerBinding: true },
+    answers: [true, "session_broker", "assigned", true, false],
   },
   "foreign-daemon": {
     facts: { foreignDaemon: true },
@@ -141,9 +141,9 @@ const variants: Array<Row & { name: string; kind: DeviceHold["kind"] }> = [
 const precedence: Array<Row & { name: string; kind: DeviceHold["kind"] }> = [
   {
     name: "managed slot precedes foreign claim and reservation; error still wins the bucket",
-    kind: "managed-slot",
-    facts: { managedSlot: true, foreignDaemon: true, readinessById: true, status: "error" },
-    answers: [false, "managed_slot", "error", false, true],
+    kind: "broker-binding",
+    facts: { brokerBinding: true, foreignDaemon: true, readinessById: true, status: "error" },
+    answers: [false, "session_broker", "error", false, true],
   },
   {
     name: "foreign claim precedes readiness",
@@ -176,9 +176,9 @@ const precedence: Array<Row & { name: string; kind: DeviceHold["kind"] }> = [
   },
   {
     name: "managed slot retains independent pending cleanup",
-    kind: "managed-slot",
-    facts: { managedSlot: true, cleanupInProgress: true },
-    answers: [false, "managed_slot", "assigned", false, false],
+    kind: "broker-binding",
+    facts: { brokerBinding: true, cleanupInProgress: true },
+    answers: [false, "session_broker", "assigned", false, false],
   },
   {
     name: "foreign claim retains independent identity fence",

@@ -19,7 +19,7 @@ import {
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
   isSameHolderSession,
 } from "./inputDeviceOwnership";
-import type { ManagedSlotExclusion } from "./managedSlots/managedSlotExclusion";
+import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { isDeviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
@@ -74,7 +74,7 @@ export interface DeviceReservationsPort {
   readonly recoveryCoordinator: Pick<DeviceRecoveryCoordinator, "isAndroidRecoveryHandoffReserved">;
   readonly autolockManager: Pick<DeviceAutolockManager, "getOwnedAutolockSession">;
   readonly runtimeIdentity: Pick<DeviceRuntimeIdentity, "hasUnresolvedEmulatorName">;
-  readonly managedSlotExclusion: Pick<ManagedSlotExclusion, "refresh" | "holderOf"> | undefined;
+  readonly bindingExclusion: Pick<BindingExclusion, "refresh" | "holderOf"> | undefined;
   readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   reserveDeviceForReadiness: DeviceReservations["reserveDeviceForReadiness"];
   assertCallerOwnsDeviceSession(
@@ -90,7 +90,7 @@ export interface DeviceReservationsPort {
   getDevicesByPlatform(platform: Platform): PooledDevice[];
   getRecoveringAndroidTargets(): { names: Set<string>; serials: Set<string> };
   isReservedForShutdown(device: PooledDevice): boolean;
-  isManagedSlotDevice(device: PooledDevice): boolean;
+  isBindingDevice(device: PooledDevice): boolean;
   isPooledAndroidEmulator(deviceId: string): boolean;
   stableDeviceIdFor(device: PooledDevice): string | undefined;
   restartReservationsForStop(
@@ -335,7 +335,7 @@ export class DeviceReservations {
    * Hold each persisted row's device for that row while daemon restart recovery works through
    * the rows (#11294), so an allocation arriving meanwhile cannot take a device a row is about
    * to recover onto. The reservation is by identity, so it also covers a device discovery has
-   * not listed yet. A device a managed slot holds is not reserved: the slot wins, and the row
+   * not listed yet. A device a broker binding holds is not reserved: the binding wins, and the row
    * recovers or fails through the normal path. When two rows name one device the first keeps it.
    */
   async reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
@@ -350,11 +350,11 @@ export class DeviceReservations {
     if (rows.length === 0) {
       return;
     }
-    if (this.port.managedSlotExclusion) {
+    if (this.port.bindingExclusion) {
       try {
-        await this.port.managedSlotExclusion.refresh({ requireCurrent: true });
+        await this.port.bindingExclusion.refresh({ requireCurrent: true });
       } catch (error) {
-        // Which devices managed slots hold is unknown, and they win: reserve nothing.
+        // Which devices broker bindings hold is unknown, and they win: reserve nothing.
         logger.warn(
           `[DevicePool] Not reserving devices for restart recovery: ${errorMessage(error)}`,
           error,
@@ -366,7 +366,7 @@ export class DeviceReservations {
       return;
     }
     for (const { sessionId, target } of rows) {
-      const managed = this.port.managedSlotExclusion?.holderOf({
+      const managed = this.port.bindingExclusion?.holderOf({
         platform: target.platform,
         stableIds: [target.stableDeviceId, target.deviceId],
       });
@@ -528,11 +528,11 @@ export class DeviceReservations {
 
   /**
    * The session whose restart recovery `device` is reserved for, if any (#11294). A device a
-   * managed slot holds is never reserved, whenever the slot took it: the slot wins, and the row
-   * recovers or fails (target-busy once the slot's execution is bound) through the normal path.
+   * broker binding holds is never reserved, whenever the binding took it: the binding wins, and the row
+   * recovers or fails (target-busy once the binding's execution is bound) through the normal path.
    */
   rehydrationReservationHolder(device: PooledDevice): string | undefined {
-    if (this.port.rehydrationReservations.size === 0 || this.port.isManagedSlotDevice(device)) {
+    if (this.port.rehydrationReservations.size === 0 || this.port.isBindingDevice(device)) {
       return undefined;
     }
     const stableId = this.port.stableDeviceIdFor(device);
@@ -554,7 +554,7 @@ export class DeviceReservations {
     return holder !== undefined && holder !== forSessionId;
   }
 
-  /** Read-only pre-boot admission, including stopped images; managed slots retain priority. */
+  /** Read-only pre-boot admission, including stopped images; broker bindings retain priority. */
   restartReservationForStart(
     platform: Platform,
     identities: readonly string[],
@@ -573,7 +573,7 @@ export class DeviceReservations {
       if (
         target.platform !== platform ||
         !this.startMatchesRestartReservation(platform, identities, sessionUuid, target) ||
-        this.port.managedSlotExclusion?.holderOf({
+        this.port.bindingExclusion?.holderOf({
           platform,
           stableIds: [target.stableDeviceId, target.deviceId],
         })

@@ -331,36 +331,6 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     await expectDefaultRoute(ANDROID);
   });
 
-  test("a managed binding keeps platform-only control on its default beside a same-platform sibling", async () => {
-    daemonMethodResults.set(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
-      sessions: [
-        {
-          sessionId: "managed-1",
-          deviceId: "emulator-5554",
-          platform: "android",
-          lastUsedAt: timer.now(),
-        },
-        {
-          sessionId: "sibling-2",
-          deviceId: "emulator-5556",
-          platform: "android",
-          lastUsedAt: timer.now(),
-        },
-      ],
-    });
-    await proxy.holdManagedExecutionSession("managed-1");
-    expect(client.callDaemonMethodCalls).toContainEqual({
-      method: DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
-      params: { livenessOwnerToken: "stable-owner-token" },
-    });
-    await proxy.callTool("homeScreen", { platform: "android" });
-    expect(forwarded).toHaveLength(1);
-    expect(forwarded[0]).toMatchObject({
-      name: "homeScreen",
-      params: { platform: "android", sessionUuid: "managed-1" },
-    });
-  });
-
   test("6: the older android platform uses its held session beside the ios default", async () => {
     await acquire("getAndroid", ANDROID);
     await acquire("getApple", IOS);
@@ -797,40 +767,6 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     expect(lastParams()).toMatchObject({ platform: "android" });
     expect(lastParams()).not.toHaveProperty("sessionUuid");
     expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
-  });
-
-  test("PIN: a managed android binding keeps the ios selector on its default", async () => {
-    daemonMethodResults.set(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
-      sessions: [
-        {
-          sessionId: ANDROID.sessionUuid,
-          deviceId: ANDROID.deviceId,
-          platform: "android",
-          lastUsedAt: timer.now(),
-        },
-        {
-          sessionId: IOS.sessionUuid,
-          deviceId: IOS.deviceId,
-          platform: "ios",
-          lastUsedAt: timer.now(),
-        },
-      ],
-    });
-    await proxy.holdManagedExecutionSession(ANDROID.sessionUuid);
-    for (const name of ["homeScreen", "observe"]) {
-      await proxy.callTool(name, { platform: "ios" });
-      expect(lastParams()).toEqual(
-        withProxyOwnerToken(
-          {
-            platform: "ios",
-            sessionUuid: ANDROID.sessionUuid,
-            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
-          },
-          "stable-owner-token",
-        ),
-      );
-    }
-    expect(forwarded).toHaveLength(2);
   });
 
   test("D PIN: an expired replay lease refuses a matching platform like untargeted control", async () => {

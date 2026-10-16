@@ -1,4 +1,4 @@
-import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -105,7 +105,7 @@ export type ProvisionDeviceFailureCode =
   | "device_cleanup_in_progress"
   | "session_creation_timeout"
   | "device_shutting_down"
-  | "device_assigned_to_managed_slot"
+  | "device_assigned_to_binding"
   | "device_offline"
   | "discovery_incomplete"
   | "capacity_exhausted"
@@ -133,7 +133,7 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   // Transient: the kill reservation clears once the shutdown finishes.
   device_shutting_down: true,
   // An idle assigned device stays assigned; only a scope reset frees it (#11174).
-  device_assigned_to_managed_slot: false,
+  device_assigned_to_binding: false,
   device_offline: true,
   discovery_incomplete: true,
   // Transient: capacity frees when another device shuts down (#11236).
@@ -163,8 +163,8 @@ interface ProvisionDeviceErrorDiagnostics {
   runtimeCompatibility?: IosRuntimeIncompatibility;
   /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
   recovery?: ProvisionDeviceRecoveryEvidence;
-  /** The managed slot holding the device (`device_assigned_to_managed_slot`); no credentials. */
-  managedSlot?: { scopeKey: string; declaredSlot: number | null; stableId: string };
+  /** The broker binding holding the device (`device_assigned_to_binding`); no credentials. */
+  binding?: { scopeKey: string; declaredBinding: number | null; stableId: string };
   /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
   capacity?: ProvisionDeviceCapacityDetails;
 }
@@ -369,8 +369,8 @@ export interface DefaultExactDeviceProvisionerDependencies {
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
   /**
-   * Refuses adopting an existing device a managed slot holds (#11174): generic provisioning must
-   * never take over a slot's device, idle or not. Throws to refuse; absent means no slots.
+   * Refuses adopting an existing device a broker binding holds (#11174): generic provisioning must
+   * never take over a binding's device, idle or not. Throws to refuse; absent means no bindings.
    */
   assertAdoptable?: ExactDeviceAdoptionGuard;
 }
@@ -381,20 +381,20 @@ export type ExactDeviceAdoptionGuard = (device: {
   stableId: string;
 }) => Promise<void>;
 
-/** The provisionDevice failure for a device a managed slot holds (non-retryable). */
-export function managedSlotProvisionError(
-  error: DeviceAssignedToManagedSlotError,
+/** The provisionDevice failure for a device a broker binding holds (non-retryable). */
+export function bindingProvisionError(
+  error: DeviceAssignedToBindingError,
   context: string,
 ): ProvisionDeviceError {
   return new ProvisionDeviceError(
-    "device_assigned_to_managed_slot",
+    "device_assigned_to_binding",
     `${context}: ${error.message}`,
     false,
     {
       deviceId: error.deviceId,
-      managedSlot: {
+      binding: {
         scopeKey: error.scopeKey,
-        declaredSlot: error.declaredSlot,
+        declaredBinding: error.declaredBinding,
         stableId: error.stableId,
       },
     },
@@ -493,7 +493,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
   }
 
-  /** Refuse adopting a device a managed slot holds, before reading or touching it (#11174). */
+  /** Refuse adopting a device a broker binding holds, before reading or touching it (#11174). */
   private async assertAdoptable(
     request: ExactDeviceProvisionRequest,
     existing: DeviceInfo,
@@ -505,8 +505,8 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     try {
       await this.dependencies.assertAdoptable({ platform: existing.platform, stableId });
     } catch (error) {
-      if (error instanceof DeviceAssignedToManagedSlotError) {
-        throw managedSlotProvisionError(
+      if (error instanceof DeviceAssignedToBindingError) {
+        throw bindingProvisionError(
           error,
           `Cannot adopt existing ${request.platform} device '${request.name}'`,
         );

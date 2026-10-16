@@ -7,7 +7,7 @@ import {
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// #11176: a managed slot proxy must not renew its sessions after its execution owner is gone.
+// #11176: a broker binding proxy must not renew its sessions after its execution owner is gone.
 
 const PARENT = 4100;
 const SUPERVISOR = 4200;

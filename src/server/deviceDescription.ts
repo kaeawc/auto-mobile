@@ -62,7 +62,7 @@ export type DeviceDescriptionInput =
       adbOfflineState?: string;
       /** `simctl` lists the held simulator `Booting` or `Shutting Down` (#11573). */
       simulatorState?: TransitionalSimulatorState;
-      /** The pool refuses generic allocation of this device: a managed slot or another daemon holds it. */
+      /** The pool refuses generic allocation of this device: a broker binding or another daemon holds it. */
       heldBy?: DeviceHeldBy;
       /** A readiness, shutdown or recovery reservation keeps allocation off this idle device. */
       reserved?: boolean;
@@ -338,7 +338,7 @@ function poolStatus(
 
 /**
  * The one projection of the pool's {@link GenericAvailability} into description inputs, shared by
- * `listDevices` and the booted-device resources. A managed-slot or other-daemon hold publishes
+ * `listDevices` and the booted-device resources. A broker binding or other-daemon hold publishes
  * `heldBy`; a reservation reports `assigned` without it. Both read `assigned`, as `getStats()` does.
  */
 export function poolHoldFor(
@@ -346,8 +346,8 @@ export function poolHoldFor(
   deviceId: string,
 ): { heldBy?: DeviceHeldBy; reserved?: boolean } {
   const availability = devicePool?.genericAvailability(deviceId);
-  if (availability === "managed_slot") {
-    return { heldBy: "managed_slot" };
+  if (availability === "session_broker") {
+    return { heldBy: "session_broker" };
   }
   if (availability === "foreign_daemon") {
     return { heldBy: "other_daemon" };
@@ -494,7 +494,7 @@ export const deviceDescriptionSchema = z
         lifecycle: lifecycleSchema,
         readiness: readinessSchema,
         poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
-        heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
+        heldBy: z.enum(["session_broker", "other_daemon"]).optional(),
         session: z
           .object({
             sessionUuid: nullableString,

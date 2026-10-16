@@ -1,23 +1,19 @@
+import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/deviceNaming";
+import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  type SessionBrokerDevicePort,
-  SessionDevicePreparationOptions,
-} from "../../../src/daemon/sessionBroker/devicePort";
-import { nativeProfile } from "../../../src/daemon/sessionBroker/profile";
-import type { BrokerResourceRecord } from "../../../src/daemon/sessionBroker/store";
-import {
-  openSqliteSlotRegistry,
-  type SqliteSlotRegistry,
-} from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { SlotProcessIdentity } from "../../../src/daemon/managedSlots/slotRegistry";
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { parseSessionConfig, type SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
-const OWNER: SlotProcessIdentity = {
+const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "start-a",
@@ -36,128 +32,8 @@ function config(requestId: string): SessionConfig {
   };
 }
 
-/** Real registry ownership with fake platform operations; does not claim native reset coverage. */
-class FakeNativePort implements SessionBrokerDevicePort {
-  readonly prepared: string[] = [];
-  readonly destroyed: string[] = [];
-  readonly released: string[] = [];
-  readonly resetResources: string[] = [];
-  readonly dirty = new Set<string>();
-  readonly sessions = new Map<string, BrokerResourceRecord>();
-  readonly sessionIds = new CountingIdGenerator("session");
-  canDestroy = true;
-  canRelease = true;
-  canReset = true;
-  prepareError: Error | undefined;
-  resetError: Error | undefined;
-  prepareHook: ((options: SessionDevicePreparationOptions) => Promise<void>) | undefined;
-  releaseHook: (() => Promise<void>) | undefined;
-
-  constructor(private readonly registry: SqliteSlotRegistry) {}
-
-  async prepare(resource: BrokerResourceRecord, options: SessionDevicePreparationOptions) {
-    this.prepared.push(resource.resourceId);
-    await this.prepareHook?.(options);
-    const key = { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
-    const profile = nativeProfile(resource);
-    await this.registry.initSlot(key, {
-      platform: profile.platform,
-      role: "primary",
-      requestedSpec: profile,
-    });
-    let assignment = await this.registry.getAssignment(key);
-    if (!assignment) {
-      throw new Error("Missing fake binding");
-    }
-    if (!assignment.stableDeviceId) {
-      const bound = await this.registry.commitBinding(key, assignment, {
-        stableDeviceId: `device-${resource.resourceId}`,
-        deviceName: `device-${resource.resourceId}`,
-        resolvedSpec: profile,
-        specFingerprint: "fake-native",
-        state: "ready",
-      });
-      if (bound.kind !== "committed") {
-        throw new Error(`Fake binding failed: ${bound.kind}`);
-      }
-      assignment = bound.assignment;
-    }
-    const sessionId = this.sessionIds.next();
-    const claimed = await this.registry.claimExecution(key, assignment, {
-      ...OWNER,
-      sessionUuid: sessionId,
-    });
-    if (claimed.kind !== "claimed") {
-      throw new Error(`Fake execution claim failed: ${claimed.kind}`);
-    }
-    this.sessions.set(sessionId, resource);
-    if (this.prepareError) {
-      throw this.prepareError;
-    }
-    return { sessionId, profile };
-  }
-
-  async release(sessionId: string) {
-    this.released.push(sessionId);
-    await this.releaseHook?.();
-    if (!this.canRelease) {
-      return { settled: false };
-    }
-    const resource = this.sessions.get(sessionId);
-    if (resource) {
-      await this.registry.releaseExecution(
-        { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex },
-        sessionId,
-      );
-      this.sessions.delete(sessionId);
-    }
-    return { settled: true };
-  }
-
-  async destroy(resource: BrokerResourceRecord): Promise<"absent" | "pending"> {
-    if (!this.canDestroy) {
-      return "pending";
-    }
-    const key = { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
-    let assignment = await this.registry.getAssignment(key);
-    if (assignment?.execOwner) {
-      if (!(await this.release(assignment.execOwner.sessionUuid)).settled) {
-        return "pending";
-      }
-      assignment = await this.registry.getAssignment(key);
-    }
-    if (assignment?.stableDeviceId) {
-      const cleared = await this.registry.commitBinding(key, assignment, {
-        stableDeviceId: null,
-        deviceName: null,
-        resolvedSpec: null,
-        specFingerprint: null,
-        state: "ready",
-      });
-      if (cleared.kind !== "committed") {
-        return "pending";
-      }
-    }
-    this.destroyed.push(resource.resourceId);
-    this.dirty.delete(resource.resourceId);
-    return "absent";
-  }
-
-  async reset(resource: BrokerResourceRecord): Promise<"clean" | "pending"> {
-    this.resetResources.push(resource.resourceId);
-    if (this.resetError) {
-      throw this.resetError;
-    }
-    if (!this.canReset) {
-      return "pending";
-    }
-    this.dirty.delete(resource.resourceId);
-    return "clean";
-  }
-}
-
 describe("session-only broker lifecycle", () => {
-  let registry: SqliteSlotRegistry;
+  let registry: SqliteBindingRegistry;
   let devices: FakeNativePort;
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
@@ -165,13 +41,13 @@ describe("session-only broker lifecycle", () => {
 
   beforeAll(async () => {
     // Warm SQLite/migration setup outside the per-test budget, as the shared DB harness does.
-    const warm = await openSqliteSlotRegistry({ dbPath: ":memory:" });
+    const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
     await warm.close();
   });
 
   beforeEach(async () => {
     ownerLive = true;
-    registry = await openSqliteSlotRegistry({
+    registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => ownerLive,
     });
@@ -206,6 +82,12 @@ describe("session-only broker lifecycle", () => {
     if (!result.sessionUuid) {
       throw new Error(JSON.stringify(result));
     }
+    const resource = devices.sessions.get(result.sessionUuid)!;
+    const assignment = await registry.getAssignment({
+      scopeKey: resource.scopeKey,
+      bindingIndex: resource.allocationIndex,
+    });
+    expect(isSessionBrokerDeviceName(assignment!.deviceName!)).toBe(true);
     return result.sessionUuid;
   }
 
@@ -344,7 +226,12 @@ describe("session-only broker lifecycle", () => {
 
   test("consumer configuration rejects slot, scope, lane and capacity inputs", () => {
     expect(parseSessionConfig(config("plain"))).toEqual(config("plain"));
-    for (const field of ["slotIndex", "managedHostScope", "localSlotCapacity", "runnerNamespace"]) {
+    for (const field of [
+      "bindingIndex",
+      "managedHostScope",
+      "localSlotCapacity",
+      "runnerNamespace",
+    ]) {
       expect(() => parseSessionConfig({ ...config("bad"), [field]: 1 })).toThrow(
         "Invalid session configuration",
       );
@@ -352,7 +239,7 @@ describe("session-only broker lifecycle", () => {
     expect(() =>
       parseSessionConfig({
         ...config("bad"),
-        device: { ...config("bad").device, slotIndex: 0 },
+        device: { ...config("bad").device, bindingIndex: 0 },
       }),
     ).toThrow("invalid_request");
   });

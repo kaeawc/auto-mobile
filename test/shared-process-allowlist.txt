@@ -122,6 +122,7 @@ test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
 test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
+test/daemon/extractionRoot.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
 test/daemon/finalizeWaitBudgetContract.test.ts
@@ -547,6 +548,7 @@ test/features/observe/AndroidCtrlProxyClientSettingsSendCommand.test.ts
 test/features/observe/AndroidMultiDisplayActivity.test.ts
 test/features/observe/ConditionPredicates.test.ts
 test/features/observe/ConditionResolver.test.ts
+test/features/observe/CtrlProxyDelegatesSendCommand.test.ts
 test/features/observe/DeviceServiceClient.realWebSocketGuard.test.ts
 test/features/observe/DeviceServiceClientConcurrentConnect.test.ts
 test/features/observe/DeviceServiceClientCooldown.test.ts

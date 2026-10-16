@@ -1666,6 +1666,7 @@ export class SessionManager {
   private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
+  private readonly volatileTerminalReleaseIntents = new Map<string, string>();
   /**
    * The owning daemon's id, stamped on every persisted active row so a peer daemon sharing the
    * database can tell this daemon's live rows from a dead predecessor's (#11114).
@@ -1712,6 +1713,7 @@ export class SessionManager {
   private readonly supersededReleaseReasons = new WeakMap<Session, Set<string>>();
   /** The row generation a non-terminal release snapshot may overwrite (#11129). */
   private readonly releaseRowGenerations = new WeakMap<SessionReleaseSnapshot, number>();
+  private readonly releaseRowSessions = new WeakMap<SessionReleaseSnapshot, WeakRef<Session>>();
   /** Only the exact earlier reasons of this release may be replaced by its committed upgrade. */
   private readonly releaseReasonPredecessors = new WeakMap<
     SessionReleaseSnapshot,
@@ -7290,6 +7292,7 @@ export class SessionManager {
           ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
         },
       };
+      this.releaseRowSessions.set(releaseSnapshot, new WeakRef(session));
       this.captureReleaseRowGeneration(releaseSnapshot, this.persistedRowGenerations.get(session));
 
       // A non-terminal release must not yield after freezing its reason: a
@@ -7806,6 +7809,13 @@ export class SessionManager {
         throw error;
       }
       const fenced = this.terminalReleaseSnapshots.get(snapshot.sessionId) ?? snapshot;
+      if (this.volatileTerminalReleaseIntents.get(fenced.sessionId) === fenced.releaseReason) {
+        logger.warn(
+          `Terminal release of session ${fenced.sessionId} has no crash-safe intent (volatile); ` +
+            "freeing its device before the row lands can revive the UUID after a crash",
+          error,
+        );
+      }
       logger.warn(
         `Freeing device ${fenced.deviceId} of session ${fenced.sessionId} before its terminal ` +
           `release row was written (reason=${RELEASE_PERSIST_TIMEOUT_REASON}); the session stays ` +
@@ -7825,6 +7835,7 @@ export class SessionManager {
     if (liftTerminalFence) {
       this.terminalReleaseSnapshots.delete(sessionId);
       // The session lives on; a restart must not terminalize it from this release's intent.
+      this.volatileTerminalReleaseIntents.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
     }
     if (pendingCleanup.length > 0) {
@@ -7985,17 +7996,30 @@ export class SessionManager {
       guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     ) => Promise<T>,
     releaseReason?: string,
-    unlessDaemonShutdown?: boolean,
+    releaseOptions: {
+      unlessDaemonShutdown?: boolean;
+      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
+    } = {},
   ): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const row = await this.deviceSessionRepository.getSession(sessionId);
-      if (this.rowWritePermanentlyRefused(row, guard, releaseReason, unlessDaemonShutdown)) {
+      const currentGuard = releaseOptions.resolveRowGeneration
+        ? { ...guard, expectedRowGeneration: releaseOptions.resolveRowGeneration(row) }
+        : guard;
+      if (
+        this.rowWritePermanentlyRefused(
+          row,
+          currentGuard,
+          releaseReason,
+          releaseOptions.unlessDaemonShutdown,
+        )
+      ) {
         throw error;
       }
       if (row?.daemon_session_id && row.daemon_session_id !== this.daemonSessionId) {
         // Discovery errors propagate as transient failures; an empty fallback could erase a peer.
         return await write({
-          ...guard,
+          ...currentGuard,
           ownDaemonSessionId: undefined,
           livePeerDaemonSessionIds: this.rowWriteLivePeerDaemonSessionIds(),
         });
@@ -8006,7 +8030,7 @@ export class SessionManager {
       // Expected hand-back race: the read now shows a row the first statement would write.
       logger.debug(`[SessionManager] Retrying writable row after statement miss for ${sessionId}`);
       try {
-        return await write(guard);
+        return await write(currentGuard);
       } catch (retryError) {
         if (
           !(retryError instanceof DeviceSessionRowNotRewritableError) &&
@@ -8631,6 +8655,10 @@ export class SessionManager {
           : snapshot.heartbeat.timeoutMs,
       },
     };
+    const incarnation = this.releaseRowSessions.get(snapshot);
+    if (incarnation) {
+      this.releaseRowSessions.set(upgraded, incarnation);
+    }
     this.captureReleaseRowGeneration(upgraded, this.releaseRowGenerations.get(snapshot));
     this.releaseReasonPredecessors.set(upgraded, [
       ...(this.releaseReasonPredecessors.get(snapshot) ?? []),
@@ -8650,16 +8678,14 @@ export class SessionManager {
 
   /**
    * A release never replaces a live peer's row or an unrelated terminal reason (#11557).
-   * A non-terminal one also applies only to its captured incarnation (#11129). A committed
+   * A release also applies only to its captured generation, when known (#11129). A committed
    * terminal release can replace this incarnation's own known superseded terminal reason.
    * A parked non-terminal write also preserves the shutdown handoff of its incarnation.
    */
   private releaseWritePrecondition(snapshot: SessionReleaseSnapshot): MarkReleasedOptions {
-    // A refused creation's shutdown fence retires only the generation its upsert wrote.
-    const expectedRowGeneration =
-      snapshot.terminal && snapshot.releaseReason !== "daemon-shutdown"
-        ? undefined
-        : this.releaseRowGenerations.get(snapshot);
+    // ORCHESTRATOR-CHOSEN: the terminal guard applies only when a generation was captured;
+    // strict always would refuse legitimate writes for sessions with no captured generation.
+    const expectedRowGeneration = this.releaseRowGenerations.get(snapshot);
     const held = this.sessions.get(snapshot.sessionId);
     const supersededReasons = held ? this.supersededReleaseReasons.get(held) : undefined;
     return {
@@ -8682,6 +8708,50 @@ export class SessionManager {
             : [],
       },
     };
+  }
+
+  private async resolveTerminalReleaseWrite(
+    snapshot: SessionReleaseSnapshot,
+    precondition: MarkReleasedOptions,
+    write: (options: MarkReleasedOptions) => Promise<void>,
+    error: DeviceSessionRowNotReleasableError,
+  ): Promise<void> {
+    const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
+    return await this.retryRefusedRowWrite(
+      error,
+      snapshot.sessionId,
+      {
+        ...guard,
+        supersededReasons: guard.supersededReasons ?? [],
+        expectedRowGeneration: precondition.expectedRowGeneration,
+      },
+      (next) =>
+        write({
+          ...precondition,
+          expectedRowGeneration: next.expectedRowGeneration,
+          unlessTerminalOrOwnedByLivePeer: next,
+        }),
+      snapshot.releaseReason,
+      {
+        unlessDaemonShutdown: precondition.unlessDaemonShutdown,
+        resolveRowGeneration: (row) => {
+          const incarnation = this.releaseRowSessions.get(snapshot)?.deref();
+          const held = this.sessions.get(snapshot.sessionId);
+          // A rewrite/rebind by the SAME Session may advance its own generation during release.
+          // Re-evaluate on every miss: only that Session's recorded generation may replace the
+          // capture. A different held/pending incarnation (#12515), an untracked generation,
+          // or a live peer stays protected by the conditioned statement and refusal classifier.
+          const ownAdvance =
+            incarnation !== undefined &&
+            (!held || held === incarnation) &&
+            !this.pendingSessionCreations.has(snapshot.sessionId) &&
+            !this.pendingSessionAssignments.has(snapshot.sessionId) &&
+            row?.stable_identity_generation !== undefined &&
+            this.persistedRowGenerations.get(incarnation) === row.stable_identity_generation;
+          return ownAdvance ? row!.stable_identity_generation : precondition.expectedRowGeneration;
+        },
+      },
+    );
   }
 
   private async completeReleasePersistence(
@@ -8823,13 +8893,18 @@ export class SessionManager {
     }
     try {
       if (snapshot.terminal) {
-        // Durable before the write is issued: a crash while it is parked must not revive the UUID.
-        this.terminalReleaseJournal.record({
+        // Record before issuing the row write; volatile intents cannot protect a crash at timeout.
+        const durability = this.terminalReleaseJournal.record({
           sessionId: snapshot.sessionId,
           reason: snapshot.releaseReason,
           // Read back by the next daemon on its own session clock: stored as wall ms (#11162).
           at: this.sessionClockToWall(snapshot.releasedAtMs),
         });
+        if (durability === "volatile") {
+          this.volatileTerminalReleaseIntents.set(snapshot.sessionId, snapshot.releaseReason);
+        } else {
+          this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
+        }
       }
       const precondition = { ...this.releaseWritePrecondition(snapshot), ...statementConditions };
       const issueWrite = (options: MarkReleasedOptions) =>
@@ -8843,10 +8918,18 @@ export class SessionManager {
       const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
       let refusedWrite: Promise<void> | undefined;
       const fallback = (error: unknown) => {
-        if (
-          !(error instanceof DeviceSessionRowNotReleasableError) ||
-          guard.ownDaemonSessionId === undefined
-        ) {
+        if (!(error instanceof DeviceSessionRowNotReleasableError)) {
+          throw error;
+        }
+        if (snapshot.terminal) {
+          return (refusedWrite ??= this.resolveTerminalReleaseWrite(
+            snapshot,
+            precondition,
+            issueWrite,
+            error,
+          ));
+        }
+        if (guard.ownDaemonSessionId === undefined) {
           throw error;
         }
         // A deadline and the first refusal can settle in the same turn; resume only once.
@@ -8860,7 +8943,7 @@ export class SessionManager {
           },
           (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
           snapshot.releaseReason,
-          precondition.unlessDaemonShutdown,
+          { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
         ));
       };
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();
@@ -8994,6 +9077,9 @@ export class SessionManager {
    */
   private confirmReleaseWrite(snapshot: SessionReleaseSnapshot): void {
     if (snapshot.terminal) {
+      if (this.volatileTerminalReleaseIntents.get(snapshot.sessionId) === snapshot.releaseReason) {
+        this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
+      }
       this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
     } else if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
       this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
@@ -9019,6 +9105,9 @@ export class SessionManager {
     }
     this.forgetSupersededRowUnder(snapshot);
     if (snapshot.terminal) {
+      if (this.volatileTerminalReleaseIntents.get(snapshot.sessionId) === snapshot.releaseReason) {
+        this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
+      }
       this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
     }
   }
@@ -9131,10 +9220,18 @@ export class SessionManager {
       const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
       let refusedWrite: Promise<void> | undefined;
       const fallback = (error: unknown) => {
-        if (
-          !(error instanceof DeviceSessionRowNotReleasableError) ||
-          guard.ownDaemonSessionId === undefined
-        ) {
+        if (!(error instanceof DeviceSessionRowNotReleasableError)) {
+          throw error;
+        }
+        if (snapshot.terminal) {
+          return (refusedWrite ??= this.resolveTerminalReleaseWrite(
+            snapshot,
+            precondition,
+            issueWrite,
+            error,
+          ));
+        }
+        if (guard.ownDaemonSessionId === undefined) {
           throw error;
         }
         // A deadline and the first refusal can settle in the same turn; resume only once.
@@ -9148,7 +9245,7 @@ export class SessionManager {
           },
           (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
           snapshot.releaseReason,
-          precondition.unlessDaemonShutdown,
+          { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
         ));
       };
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();
@@ -9316,7 +9413,7 @@ export class SessionManager {
       }
       this.forgetSupersededRowUnder(snapshot);
     }
-    // A terminal write preserves peer/terminal rows; a non-terminal one also names its incarnation.
+    // Every release preserves peer/terminal rows and names its captured generation, when known.
     const precondition = await this.retriedReleaseWritePrecondition(snapshot);
     return this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry
       ? precondition
@@ -11715,6 +11812,7 @@ export class SessionManager {
     this.endedLabelBases.delete(sessionId);
     if (this.terminalReleaseSnapshots.delete(sessionId)) {
       this.terminalReleaseReasonStates.delete(sessionId);
+      this.volatileTerminalReleaseIntents.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
     }
   }
@@ -13475,16 +13573,17 @@ export class SessionManager {
         this.sessionNow(),
         options,
       );
-      if (upsertSettled) {
-        // Clear once at the statement boundary, before ownership work or refusal classification.
-        void statement.then(closeJoinableFlight, closeJoinableFlight);
-      }
+      void statement.then((rowGeneration) => {
+        // Record at statement settlement, before release/refusal continuations can observe the
+        // advance, even if the later ownership write fails. Retries use this same boundary.
+        this.recordPersistedRowGeneration(incarnation, rowGeneration);
+        closeJoinableFlight();
+      }, closeJoinableFlight);
       return statement;
     };
     const guard = upsertOptions?.rewriteOverSupersededRelease;
-    let rowGeneration: number | void;
     try {
-      rowGeneration = await write(upsertOptions);
+      await write(upsertOptions);
     } catch (error) {
       if (
         !(error instanceof DeviceSessionRowNotRewritableError) ||
@@ -13492,12 +13591,10 @@ export class SessionManager {
       ) {
         throw error;
       }
-      rowGeneration = await this.retryRefusedRowWrite(error, session.sessionId, guard, (next) =>
+      await this.retryRefusedRowWrite(error, session.sessionId, guard, (next) =>
         write({ ...upsertOptions, rewriteOverSupersededRelease: next }),
       );
     }
-    // Recorded before the ownership write, which can fail after the row already advanced.
-    this.recordPersistedRowGeneration(incarnation, rowGeneration);
     await this.deviceSessionRepository.replaceLivenessOwnership(
       session.sessionId,
       session.livenessOwnerToken ?? null,

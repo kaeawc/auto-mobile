@@ -171,8 +171,6 @@ before uploads or show, with an update/relaunch hint. `status` reports the last 
 data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
 clears it. Events never carry data.
 
-
-
 `repeat.items` accepts a strict `{ "path": pointer }` alongside the unchanged literal list.
 The path must statically resolve to an array of objects within the literal repeat's item maximum.
 Empty arrays produce zero instances. Each item is projected to scalar members whose names match
@@ -228,24 +226,24 @@ state, omitting it when absent.
 Data is walked depth-first, with sorted object keys and array index order. At each container,
 depth precedes array length, then children; the byte check runs last.
 
-| Path | Message |
-| --- | --- |
-| `data` | `Expected object` when the root is not a plain object |
-| Offending data container | `Data depth limit exceeded` or `Data array limit exceeded` |
-| Offending value, e.g. `data.orders[0].title` or `data["a b"]` | `Invalid data value` |
-| `data` after the walk | `Data byte limit exceeded` |
-| Pointer field | `Invalid pointer value` |
-| `<node>.repeat.items` | `Invalid union value` for neither array nor object |
-| `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
-| Bindable field | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`) |
-| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
-| Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
-| `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
-| `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |
-| Condition `.key` | `Exactly one of key, data, all, any, not is required` |
-| Condition comparison field | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required` |
-| Condition `.equals` / `.notEquals` in bindable visiting order | `Repeat placeholder in a data condition operand is not supported` |
-| `<node>.repeat` | Existing expanded node/image limit errors |
+| Path                                                                                      | Message                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                                                                                    | `Expected object` when the root is not a plain object                                                                                                                 |
+| Offending data container                                                                  | `Data depth limit exceeded` or `Data array limit exceeded`                                                                                                            |
+| Offending value, e.g. `data.orders[0].title` or `data["a b"]`                             | `Invalid data value`                                                                                                                                                  |
+| `data` after the walk                                                                     | `Data byte limit exceeded`                                                                                                                                            |
+| Pointer field                                                                             | `Invalid pointer value`                                                                                                                                               |
+| `<node>.repeat.items`                                                                     | `Invalid union value` for neither array nor object                                                                                                                    |
+| `<node>.repeat.items.path` (in this order)                                                | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Bindable field                                                                            | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`)                         |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks)                                                            |
+| Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                       |
+| `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
+| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
+| Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
+| Condition comparison field                                                                | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required`                                                                                        |
+| Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
+| `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
 All data-model uses require `prototype_data_model_v1`: top-level data, path items, repeat.key,
 data conditions or recognised text placeholders. The host refuses before any asset upload or
@@ -469,40 +467,40 @@ layout room.
 
 ## Nodes
 
-| `type`            | Node-specific properties                                                                                                                                                                                                                    |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `box`             | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                    |
-| `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                 |
-| `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                   |
-| `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                     |
-| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
-| `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
-| `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                         |
-| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options).                                                                                                                                 |
-| `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
-| `radioGroup`      | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
-| `listItem`        | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
-| `slider`          | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
-| `chip`            | Required nonempty `label`; optional `variant`: `assist`, `filter`, `input`, `suggestion`; optional `stateKey` naming a boolean (a filter chip only).                                                                                        |
-| `card`            | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
-| `iconButton`      | Required built-in `icon`; optional `variant`: `standard` (default), `filled`, `tonal`, `outlined`. Taps run `onTap`.                                                                                                                        |
-| `fab`             | Required built-in `icon`; optional nonempty `label` (an extended FAB); optional `size`: `small`, `regular` (default), `large`, only without a `label`. Taps run `onTap`.                                                                    |
-| `segmentedButton` | Required `stateKey` naming an initialized string state value; required `options`, 2 to 5 `{value, label}` entries with nonempty, unique `value`s. Single select.                                                                            |
-| `topAppBar`       | Required nonempty `title`; optional `variant`: `small` (default), `centerAligned`, `medium`, `large`; optional `navigationIcon` and 1 to 3 `actions`, each `{icon, label, onTap?}`.                                                         |
-| `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                 |
-| `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                  |
-| `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                          |
-| `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                       |
-| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                           |
-| `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
-| `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
-| `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
-| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                                                                                                       |
-| `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
-| `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
-| `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
+| `type`            | Node-specific properties                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box`             | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                               |
+| `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                            |
+| `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                              |
+| `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                                |
+| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                              |
+| `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                              |
+| `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                                    |
+| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options). |
+| `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
+| `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
+| `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                                 |
+| `radioGroup`      | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                                     |
+| `listItem`        | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`.            |
+| `slider`          | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                                       |
+| `chip`            | Required nonempty `label`; optional `variant`: `assist`, `filter`, `input`, `suggestion`; optional `stateKey` naming a boolean (a filter chip only).                                                                                                   |
+| `card`            | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                             |
+| `iconButton`      | Required built-in `icon`; optional `variant`: `standard` (default), `filled`, `tonal`, `outlined`. Taps run `onTap`.                                                                                                                                   |
+| `fab`             | Required built-in `icon`; optional nonempty `label` (an extended FAB); optional `size`: `small`, `regular` (default), `large`, only without a `label`. Taps run `onTap`.                                                                               |
+| `segmentedButton` | Required `stateKey` naming an initialized string state value; required `options`, 2 to 5 `{value, label}` entries with nonempty, unique `value`s. Single select.                                                                                       |
+| `topAppBar`       | Required nonempty `title`; optional `variant`: `small` (default), `centerAligned`, `medium`, `large`; optional `navigationIcon` and 1 to 3 `actions`, each `{icon, label, onTap?}`.                                                                    |
+| `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
+| `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
+| `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
+| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
+| `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
+| `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                                        |
+| `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                                   |
+| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                           |
+| `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                                     |
+| `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                              |
+| `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                                  |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -759,7 +757,6 @@ uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage`
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
 stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
 
-
 ## Icons and images
 
 Built-in Material names are the 2,075 icons of `material-icons-extended`, written
@@ -778,7 +775,6 @@ shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
 use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
-
 
 ### Asset transport (#9301, first slice)
 
@@ -893,15 +889,15 @@ scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
 ## Actions and state
 
-| Action `type` | Properties                                                                                                                                                 |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
-| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
-| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
-| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
-| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
-| `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                 |
-| `dismiss`     | No additional properties.                                                                                                                                  |
+| Action `type` | Properties                                                                                                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed). |
+| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.                                                           |
+| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                                                                         |
+| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                                                                     |
+| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored.                                                  |
+| `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                                                                  |
+| `dismiss`     | No additional properties.                                                                                                                                                                                   |
 
 ### Emit context
 
@@ -933,7 +929,6 @@ devices are refused before upload, display or patch dispatch. The `prototype_eve
 `payload` only if the emit declared context (including an empty object). It has
 `contextTruncated: true` only when truncated; otherwise the field is omitted, never false.
 `awaitEvent` and host status preserve these fields.
-
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
@@ -1036,10 +1031,10 @@ checks the rest, with the path of the first problem:
 - The values the spec itself holds for the listed keys, counted per entry as the UTF-8 bytes of the
   storage key plus the compact JSON of the value, must fit `MAX_PROTOTYPE_STORAGE_BYTES` (262144).
 
-| Constant                     | Value  | Counting rule                                                                          |
-| ---------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| Constant                      | Value  | Counting rule                                                                             |
+| ----------------------------- | ------ | ----------------------------------------------------------------------------------------- |
 | `MAX_PROTOTYPE_STORAGE_BYTES` | 262144 | Stored bytes per prototype id: sum over stored entries of key bytes + compact JSON bytes. |
-| `MAX_PROTOTYPE_STORAGE_KEYS`  | 64     | Entries in `storage.keys`.                                                             |
+| `MAX_PROTOTYPE_STORAGE_KEYS`  | 64     | Entries in `storage.keys`.                                                                |
 
 **What is stored.** After every write the device saves the listed keys under the spec `id`: a user
 write (a tap, a text edit), a device data action (`setData`, `appendData`, `removeData`) or a `request`

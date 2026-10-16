@@ -51,6 +51,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     new Map();
   private commandSequenceCursor: Map<string, number> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  private commandStdoutChunks = new Map<string, string[]>();
   // Models failures before ADB can dispatch, so beforeDispatch must not run.
   private preDispatchErrors: Map<string, Error> = new Map();
   private foregroundApp: { packageName: string; userId: number } | null = null;
@@ -87,6 +88,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     noRetry?: boolean,
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
+    onStdout?: (chunk: string) => void,
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -104,19 +106,6 @@ export class FakeAdbClient implements FakeAdbClientContract {
     });
     this.interactionLog.push({ kind: "command", text: command });
 
-    const error = this.commandErrors.get(command);
-    if (error) {
-      throw error;
-    }
-
-    // A hanging command never resolves — used to let a racing timeout win
-    // deterministically (e.g. an adb backup the user never confirms). Safe
-    // because the caller races it against a FakeTimer setTimeout, so nothing
-    // actually blocks the test.
-    if (this.hangingCommandPatterns.some((pattern) => command.includes(pattern))) {
-      return new Promise(() => {});
-    }
-
     // A scripted sequence takes precedence: each call to the same command returns
     // the next entry, and the final entry repeats once exhausted. This lets a
     // pre/post-uninstall re-check observe a state transition without monkeypatching.
@@ -129,6 +118,21 @@ export class FakeAdbClient implements FakeAdbClientContract {
     } else {
       // Return configured result or default success
       result = this.commandResults.get(command) || { stdout: "", stderr: "" };
+    }
+    const chunks = this.commandStdoutChunks.get(command) ?? [result.stdout];
+    for (const chunk of chunks) {
+      onStdout?.(chunk);
+    }
+    const error = this.commandErrors.get(command);
+    if (error) {
+      throw error;
+    }
+    // A hanging command never resolves — used to let a racing timeout win
+    // deterministically (e.g. an adb backup the user never confirms). Safe
+    // because the caller races it against a FakeTimer setTimeout, so nothing
+    // actually blocks the test.
+    if (this.hangingCommandPatterns.some((pattern) => command.includes(pattern))) {
+      return new Promise(() => {});
     }
     return {
       stdout: result.stdout,
@@ -159,6 +163,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       options?.noRetry,
       options?.signal,
       options?.waitForProcessSettlementAfterAbort,
+      options?.onStdout,
     );
   }
 
@@ -289,6 +294,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setCommandError(command: string, error: Error): void {
     this.commandErrors.set(command, error);
+  }
+
+  /** Stream partial output before either successful completion or host failure. */
+  setCommandStdoutChunks(command: string, chunks: string[]): void {
+    this.commandStdoutChunks.set(command, chunks);
   }
 
   /** Configure an error before {@link AdbExecuteOptions.beforeDispatch} can run. */
@@ -461,6 +471,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Reset fake state
    */
   reset(): void {
+    this.commandStdoutChunks.clear();
     this.commandCalls = [];
     this.commandResults.clear();
     this.commandErrors.clear();

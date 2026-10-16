@@ -1,4 +1,9 @@
 import {
+  DefaultWindowIdentityFreshnessResolver,
+  type WindowIdentityFreshnessResolver,
+  isStatusBarOnlyHierarchy,
+} from "./WindowIdentityFreshness";
+import {
   DefaultActiveWindowAttributionReconciler,
   type ActiveWindowAttributionReconciler,
   type PostCaptureForegroundIdentity,
@@ -128,12 +133,9 @@ import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLo
 import {
   computeFreshness,
   inheritWrongWindowEvidence,
-  maxObservationAgeMs,
   recordWrongWindowEvidence,
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
-import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { PROTOTYPE_WINDOW_TYPE, isOwnPrototypeFocused } from "./ownWindowFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -144,6 +146,7 @@ import { DaemonState } from "../../daemon/daemonState";
 import {
   AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
+  type ObservedAndroidDisplay,
   observedIosDisplay,
 } from "./ObservationDisplay";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
@@ -236,70 +239,6 @@ const unavailableReadOnlyHierarchy: ViewHierarchyInterface = {
   findAccessibilityFocusedElement: () => null,
   filterOffscreenNodes: (hierarchy) => hierarchy,
 };
-
-function isStatusBarOnlyCandidate(
-  hierarchy: ObserveResult["viewHierarchy"],
-  foreground: string | undefined,
-): foreground is string {
-  const observed = hierarchy?.packageName;
-  return (
-    foreground !== undefined &&
-    !SYSTEM_UI_WINDOW_PACKAGES.has(foreground) &&
-    (observed === undefined
-      ? hierarchy?.ctrlProxyIncomplete === true
-      : SYSTEM_UI_WINDOW_PACKAGES.has(observed))
-  );
-}
-
-/**
- * A focused window that legitimately differs from the resumed activity: a
- * system-UI panel (a window, not an ActivityRecord), or the product's own
- * focusable prototype, which owns focus while the app stays resumed behind it
- * (issue #10000). Neither is a stale wrong-window capture. The prototype case is
- * judged from the capture's own windows, so it only counts when the capture is
- * current (`ownWindowEvidenceCurrent`): a stale capture taken while the prototype
- * had focus says nothing about the device now.
- */
-function isExpectedFocusDivergence(
-  hierarchy: ObserveResult["viewHierarchy"],
-  observed: string,
-  foreground: string,
-  ownWindowEvidenceCurrent: boolean,
-): boolean {
-  return (
-    SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
-    SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
-    (ownWindowEvidenceCurrent && isOwnPrototypeFocused(hierarchy))
-  );
-}
-
-function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
-  const statusBarHeight = result.systemInsets.top;
-  const root = result.viewHierarchy?.hierarchy.node;
-  if (statusBarHeight <= 0 || !root) {
-    return false;
-  }
-
-  let hasBounds = false;
-  const nodes = Array.isArray(root) ? [...root] : [root];
-  while (nodes.length > 0) {
-    const node = nodes.pop();
-    if (!node) {
-      continue;
-    }
-    if (node.bounds) {
-      hasBounds = true;
-      if (node.bounds.bottom > statusBarHeight) {
-        return false;
-      }
-    }
-    const children = node.node;
-    if (children) {
-      nodes.push(...(Array.isArray(children) ? children : [children]));
-    }
-  }
-  return hasBounds;
-}
 
 function isEmptyFocusedWindow(result: ObserveResult): boolean {
   if (!result.activeWindow?.appId || !result.elements) {
@@ -416,28 +355,6 @@ export function resolveMissingForegroundWindow(
 }
 
 /**
- * The status-bar-only verdict inputs (issue #6151): whether the service itself
- * reported the focused window as unreadable, and the device API level that
- * decides whether that can be Android 14+ data-sensitive withholding.
- */
-function describeStatusBarOnlyCapture(
-  hierarchy: ObserveResult["viewHierarchy"],
-  foreground: string,
-): {
-  foreground: string;
-  ctrlProxyIncomplete: boolean;
-  sdkInt: number | undefined;
-  accessibilityTool: boolean | undefined;
-} {
-  return {
-    foreground,
-    ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true,
-    sdkInt: hierarchy?.sdkInt,
-    accessibilityTool: hierarchy?.accessibilityTool,
-  };
-}
-
-/**
  * The service's own incomplete-capture signal (issue #6151), scoped to whether it
  * actually pertains to the SELECTED/focused window.
  *
@@ -499,6 +416,37 @@ function describeIncompleteCapture(
   };
 }
 
+interface SingleDisplayStageContext {
+  result: ObserveResult;
+}
+
+interface SingleDisplayTargetContext extends SingleDisplayStageContext {
+  displayRequest: string | undefined;
+  observedAndroid: ObservedAndroidDisplay | undefined;
+}
+
+interface SingleDisplayCaptureContext extends SingleDisplayStageContext {
+  options: ObserveScreenExecuteOptions | undefined;
+  queryOptions: ObserveScreenExecuteOptions["queryOptions"];
+  perf: PerformanceTracker;
+  skipWaitForFresh: boolean;
+  minTimestamp: number;
+  signal: AbortSignal | undefined;
+  skipBackStack: boolean;
+  observerMode: boolean;
+  preserveDisplayState: boolean;
+  capturedHierarchy: ViewHierarchyResult | undefined;
+  requestedDisplayId: number | undefined;
+  observedAndroid: ObservedAndroidDisplay | undefined;
+}
+
+interface SingleDisplayReconciliationContext extends SingleDisplayStageContext {
+  observerMode: boolean;
+  preserveDisplayState: boolean;
+  explicitlyRouted: boolean;
+  recordProvenance: { revision: number; identityRevision: number };
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -526,6 +474,7 @@ export class RealObserveScreen implements ObserveScreen {
   private accessibilityStateDetector: AccessibilityStateDetector;
   private elementsBuilder: ObserveElementsBuilder;
   private readonly reconciler: ActiveWindowAttributionReconciler;
+  private readonly windowIdentity: WindowIdentityFreshnessResolver;
   private platformValidator: HierarchyPlatformValidator;
   private safeAreaAuditor: SafeAreaAuditor;
 
@@ -733,6 +682,13 @@ export class RealObserveScreen implements ObserveScreen {
     this.platformValidator =
       dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
     this.safeAreaAuditor = new SafeAreaAuditor();
+    this.windowIdentity =
+      dependencies?.windowIdentityFreshnessResolver ??
+      new DefaultWindowIdentityFreshnessResolver({
+        deviceStateCollector: () => this.deviceStateCollector,
+        timer: () => this.timer,
+        resolveObservationTimestampMs: (result) => this.resolveObservationTimestampMs(result),
+      });
     this.reconciler =
       dependencies?.activeWindowAttributionReconciler ??
       new DefaultActiveWindowAttributionReconciler({
@@ -1100,7 +1056,7 @@ export class RealObserveScreen implements ObserveScreen {
         // was verified when stored. Recompute its age in the host clock domain.
         const freshness = computeFreshness({
           actualTimestamp: this.resolveObservationTimestampMs(cached),
-          hostAgeBasisMs: this.resolveHostReceivedAtMs(cached),
+          hostAgeBasisMs: this.windowIdentity.resolveHostReceivedAtMs(cached),
           now: this.timer.now(),
         });
         freshness.requestedAfter = cached.freshness?.requestedAfter;
@@ -1294,6 +1250,107 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
+  private resolveSingleDisplayTarget(context: SingleDisplayTargetContext) {
+    const { result, displayRequest, observedAndroid } = context;
+
+    const explicitlyRouted = displayRequest !== undefined && displayRequest !== "active";
+    const requestedPanel = explicitlyRouted
+      ? resolveTargetDisplay(this.device.displays, displayRequest, {
+          activePanelKey: observedAndroid?.display.key,
+          posture: result.display.posture,
+        })
+      : undefined;
+    return { explicitlyRouted, requestedPanel };
+  }
+
+  private captureSingleDisplayData(context: SingleDisplayCaptureContext): Promise<void> {
+    const {
+      result,
+      options,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      skipBackStack,
+      observerMode,
+      preserveDisplayState,
+      capturedHierarchy,
+      requestedDisplayId,
+      observedAndroid,
+    } = context;
+
+    // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
+    return this.collectAllData(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      skipBackStack,
+      observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
+      capturedHierarchy,
+      this.device.platform === "android" && options?.requireFreshExtraction
+        ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
+        : options?.timeoutMs,
+      requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
+    );
+  }
+
+  private enrichSingleDisplayElements(context: SingleDisplayStageContext): void {
+    const { result } = context;
+
+    // Hierarchy collection and accepted recaptures each replace `screenSize`.
+    // Stamp its output-only unit marker after all of them, before the result is
+    // cached, so every served and cached observation uses one platform source
+    // of truth without changing the platform-native numeric coordinates.
+    this.stampScreenSizeUnits(result);
+
+    // Uncapped here; the output boundary (sanitizeObserveResult / the observe
+    // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
+    // in-scope warning is never lost to a cap taken against the full tree (#5074).
+    result.layoutWarnings = { scope: "full", warnings: this.safeAreaAuditor.inspect(result) };
+
+    if (result.viewHierarchy) {
+      result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
+    }
+  }
+
+  private recordSingleDisplayTransition(context: SingleDisplayReconciliationContext) {
+    const { result, observerMode, preserveDisplayState, explicitlyRouted, recordProvenance } =
+      context;
+    return (
+      !observerMode &&
+      !preserveDisplayState &&
+      !explicitlyRouted &&
+      displayTransitions.record(
+        this.device.deviceId,
+        result,
+        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
+          ? "ios"
+          : "android",
+        recordProvenance,
+      )
+    );
+  }
+
+  private reconcileSingleDisplayFreshness(context: SingleDisplayReconciliationContext) {
+    const { result, recordProvenance } = context;
+
+    const staleDisplay =
+      displayTransitions.revision(this.device.deviceId) !== recordProvenance.revision;
+    const geometryTransition = this.recordSingleDisplayTransition(context);
+    // Stale coordinates retain this observation's reconciled provenance, never a later push's fence.
+    result.display.generation = staleDisplay
+      ? recordProvenance.identityRevision
+      : displayTransitions.identityRevision(this.device.deviceId);
+    result.displayRevision = staleDisplay
+      ? recordProvenance.revision
+      : displayTransitions.revision(this.device.deviceId);
+    return { staleDisplay, geometryTransition };
+  }
+
   private async executeSingleDisplay(
     options?: ObserveScreenExecuteOptions & { preserveDisplayState?: boolean },
   ): Promise<ObserveResult> {
@@ -1345,14 +1402,11 @@ export class RealObserveScreen implements ObserveScreen {
       if (observedAndroid) {
         result.display = observedAndroid.display;
       }
-
-      const explicitlyRouted = displayRequest !== undefined && displayRequest !== "active";
-      const requestedPanel = explicitlyRouted
-        ? resolveTargetDisplay(this.device.displays, displayRequest, {
-            activePanelKey: observedAndroid?.display.key,
-            posture: result.display.posture,
-          })
-        : undefined;
+      const { explicitlyRouted, requestedPanel } = this.resolveSingleDisplayTarget({
+        result,
+        displayRequest,
+        observedAndroid,
+      });
       const requestedDisplayId =
         requestedPanel && this.device.platform === "android"
           ? await androidDisplayCache.logicalIdForPanel(
@@ -1450,23 +1504,21 @@ export class RealObserveScreen implements ObserveScreen {
         perf.end();
         return result;
       }
-
-      // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
-      await this.collectAllData(
+      await this.captureSingleDisplayData({
         result,
+        options,
         queryOptions,
         perf,
         skipWaitForFresh,
         minTimestamp,
         signal,
         skipBackStack,
-        observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
+        observerMode,
+        preserveDisplayState,
         capturedHierarchy,
-        this.device.platform === "android" && options?.requireFreshExtraction
-          ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
-          : options?.timeoutMs,
-        requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
-      );
+        requestedDisplayId,
+        observedAndroid,
+      });
 
       // A caller may omit back-stack collection for an intermediate capture.
       // Use the sampled display's activity when CtrlProxy's window event came
@@ -1494,7 +1546,7 @@ export class RealObserveScreen implements ObserveScreen {
         !options?.requireFreshExtraction &&
         !options?.skipStaleWindowRecovery;
       const initialMismatch = recoverWrongWindow
-        ? await this.resolveWindowIdentityMismatch(
+        ? await this.windowIdentity.resolveWindowIdentityMismatch(
             result,
             foregroundIdentity,
             { sampled: false, identity: undefined, activityAttributionMismatch: false },
@@ -1705,21 +1757,7 @@ export class RealObserveScreen implements ObserveScreen {
           .filter((panel) => panel.key !== result.display.key)
           .map((panel) => ({ key: panel.key, role: panel.role, size: panel.sizePx }));
       }
-
-      // Hierarchy collection and accepted recaptures each replace `screenSize`.
-      // Stamp its output-only unit marker after all of them, before the result is
-      // cached, so every served and cached observation uses one platform source
-      // of truth without changing the platform-native numeric coordinates.
-      this.stampScreenSizeUnits(result);
-
-      // Uncapped here; the output boundary (sanitizeObserveResult / the observe
-      // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
-      // in-scope warning is never lost to a cap taken against the full tree (#5074).
-      result.layoutWarnings = { scope: "full", warnings: this.safeAreaAuditor.inspect(result) };
-
-      if (result.viewHierarchy) {
-        result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
-      }
+      this.enrichSingleDisplayElements({ result });
 
       // The hierarchy has completed before any capture starts.
       if (screenshotMode !== "none") {
@@ -1802,14 +1840,18 @@ export class RealObserveScreen implements ObserveScreen {
       // phantom hierarchy without its `isFresh: false` signal (issue #5867).
 
       const foregroundUnavailable = routedAggregateSecondary && sampledForeground === null;
-      const statusBarOnlyHierarchy = await this.resolveStatusBarOnlyHierarchy(
+      const statusBarOnlyHierarchy = await this.windowIdentity.resolveStatusBarOnlyHierarchy(
         result,
         foregroundIdentity,
         postCaptureForeground,
         signal,
       );
-      await this.attributeFocusedOwnWindowToForeground(result, foregroundIdentity, minTimestamp);
-      const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
+      await this.windowIdentity.attributeFocusedOwnWindowToForeground(
+        result,
+        foregroundIdentity,
+        minTimestamp,
+      );
+      const windowIdentityMismatch = await this.windowIdentity.resolveWindowIdentityMismatch(
         result,
         foregroundIdentity,
         postCaptureForeground,
@@ -1820,7 +1862,7 @@ export class RealObserveScreen implements ObserveScreen {
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
-        hostAgeBasisMs: this.resolveHostReceivedAtMs(result),
+        hostAgeBasisMs: this.windowIdentity.resolveHostReceivedAtMs(result),
         now: this.timer.now(),
         verified:
           typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
@@ -1859,7 +1901,7 @@ export class RealObserveScreen implements ObserveScreen {
         incompleteCapture: describeIncompleteCapture(
           result.viewHierarchy,
           result.viewHierarchy?.ctrlProxyIncomplete === true
-            ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
+            ? await this.windowIdentity.confirmForegroundIdentity(postCaptureForeground, signal)
             : undefined,
           result.viewHierarchy?.ctrlProxyIncomplete === true
             ? await getConfirmedFrameworkErrorDialog()
@@ -1874,27 +1916,13 @@ export class RealObserveScreen implements ObserveScreen {
       if (observerMode && result.freshness?.unavailableDetail) {
         result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
       }
-      const staleDisplay =
-        displayTransitions.revision(this.device.deviceId) !== recordProvenance.revision;
-      const geometryTransition =
-        !observerMode &&
-        !preserveDisplayState &&
-        !explicitlyRouted &&
-        displayTransitions.record(
-          this.device.deviceId,
-          result,
-          this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
-            ? "ios"
-            : "android",
-          recordProvenance,
-        );
-      // Stale coordinates retain this observation's reconciled provenance, never a later push's fence.
-      result.display.generation = staleDisplay
-        ? recordProvenance.identityRevision
-        : displayTransitions.identityRevision(this.device.deviceId);
-      result.displayRevision = staleDisplay
-        ? recordProvenance.revision
-        : displayTransitions.revision(this.device.deviceId);
+      const { staleDisplay, geometryTransition } = this.reconcileSingleDisplayFreshness({
+        result,
+        observerMode,
+        preserveDisplayState,
+        explicitlyRouted,
+        recordProvenance,
+      });
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
       }
@@ -3007,131 +3035,6 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Compare the app the observed hierarchy was captured from against the
-   * device's ground-truth resumed activity (issue #5867). Returns a mismatch
-   * descriptor only when both are known and their package names differ — the
-   * cross-app stale-window case. A same-package activity change, an unknown
-   * ground truth, or an unknown observed window all yield `undefined` (no
-   * comparison, no false alarm). iOS never supplies a ground truth and so is
-   * always `undefined`.
-   *
-   * A system-UI window (`com.android.systemui`) on either side is excluded: when
-   * the notification shade, quick settings, volume, or power dialog takes
-   * accessibility focus, the a11y active window is systemui while the resumed
-   * activity behind the panel is the underlying app — a legitimate divergence,
-   * not a stale capture. Excluding it keeps first-class shade workflows (the
-   * `systemTray` tool) from misfiring while still catching the app-vs-app case
-   * the issue reported.
-   *
-   * The parallel sample is taken before hierarchy capture, so during an A→B app
-   * transition it can lag the (valid, newer) captured window and read a spurious
-   * mismatch. A detected mismatch is therefore confirmed against a second read
-   * taken now — after capture: freshness is retracted only when the device is
-   * *stably* on a different app (both samples agree, and still differ from the
-   * observed window). The extra dumpsys runs only on the rare mismatch path.
-   *
-   * The observed package is `viewHierarchy.packageName` — the package of the
-   * tree actually being validated — in preference to `activeWindow.appId`. The
-   * latter is derived from the accessibility `foregroundActivity`, which with an
-   * active soft keyboard can be the IME root's package while the captured
-   * hierarchy is the underlying app; comparing the IME package would falsely
-   * retract a valid application hierarchy. Falls back to `activeWindow.appId`
-   * only when the hierarchy carries no package (e.g. the bootstrap path, whose
-   * appId is itself a resumed-activity read in the same domain as the ground truth).
-   */
-  private async resolveWindowIdentityMismatch(
-    result: ObserveResult,
-    foregroundIdentity: Promise<string | undefined>,
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    getConfirmedFrameworkErrorDialog: () => Promise<boolean>,
-    minTimestamp: number,
-    signal?: AbortSignal,
-  ): Promise<{ observed: string; foreground: string } | undefined> {
-    const foreground = await foregroundIdentity;
-    const observed = result.viewHierarchy?.packageName ?? result.activeWindow?.appId;
-    if (!foreground || !observed) {
-      return undefined;
-    }
-    if (
-      isExpectedFocusDivergence(
-        result.viewHierarchy,
-        observed,
-        foreground,
-        this.isOwnWindowEvidenceCurrent(result, minTimestamp),
-      )
-    ) {
-      return undefined;
-    }
-    const confirmed = await this.resolvePostCaptureForegroundIdentity(
-      foreground,
-      observed,
-      postCaptureForeground,
-      signal,
-    );
-    if (!confirmed || confirmed !== foreground || confirmed === observed) {
-      return undefined;
-    }
-    if (await getConfirmedFrameworkErrorDialog()) {
-      return undefined;
-    }
-    return { observed, foreground };
-  }
-
-  /**
-   * Whether the capture is recent enough for its own "prototype holds focus" claim
-   * to describe the device now. That claim is read from the very capture being
-   * validated, so it cannot vouch for itself: a stale capture taken while a
-   * text-field prototype had focus would otherwise be accepted as fresh and
-   * relabelled with whatever app is in front today. The independent evidence is
-   * the capture's own device stamp against the request (`minTimestamp`) and the
-   * freshness age budget; with no stamp the claim cannot be dated and is not
-   * trusted.
-   */
-  private isOwnWindowEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
-    const stamp = this.resolveObservationTimestampMs(result);
-    if (stamp === undefined || (minTimestamp > 0 && stamp < minTimestamp)) {
-      return false;
-    }
-    const ageBasis = this.resolveHostReceivedAtMs(result) ?? stamp;
-    return this.timer.now() - ageBasis <= maxObservationAgeMs();
-  }
-
-  /**
-   * While CtrlProxy's own prototype holds window focus, name the app
-   * behind it as the active app (issue #10000) and keep the prototype's presence
-   * visible through `activeWindow.type`. The device-confirmed resumed app is the
-   * attribution source; with no ground truth, or a SystemUI surface on top, the
-   * window is left as captured.
-   */
-  private async attributeFocusedOwnWindowToForeground(
-    result: ObserveResult,
-    foregroundIdentity: Promise<string | undefined>,
-    minTimestamp: number,
-  ): Promise<void> {
-    const activeWindow = result.activeWindow;
-    if (
-      activeWindow?.appId !== CTRL_PROXY_PACKAGE ||
-      !isOwnPrototypeFocused(result.viewHierarchy) ||
-      !this.isOwnWindowEvidenceCurrent(result, minTimestamp)
-    ) {
-      return;
-    }
-    const foreground = await foregroundIdentity;
-    if (
-      !foreground ||
-      foreground === CTRL_PROXY_PACKAGE ||
-      SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
-    ) {
-      return;
-    }
-    result.activeWindow = {
-      ...activeWindow,
-      appId: foreground,
-      type: activeWindow.type ?? PROTOTYPE_WINDOW_TYPE,
-    };
-  }
-
-  /**
    * `getForegroundApp` reports the resumed activity beneath an AppErrorDialog,
    * while the dialog itself is the focused framework window. Confirm that rare
    * divergence before treating the captured `android` hierarchy as stale.
@@ -3187,120 +3090,8 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
-  /**
-   * Status-bar-only capture gate. The returned `ctrlProxyIncomplete` distinguishes
-   * the two device-side causes so the verdict can name the right recovery:
-   * a stale window the runner keeps serving (home/relaunch recovers it) versus a
-   * focused application window the accessibility service could not read at all
-   * (issue #6151 — an accessibility-data-sensitive surface such as a runtime
-   * permission dialog or the Settings Wi-Fi picker, which Android 14+ withholds
-   * from a service that does not declare `isAccessibilityTool`; only a CtrlProxy
-   * update recovers it, and home/relaunch does not).
-   */
-  private async resolveStatusBarOnlyHierarchy(
-    result: ObserveResult,
-    foregroundIdentity: Promise<string | undefined>,
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    signal?: AbortSignal,
-  ): Promise<ReturnType<typeof describeStatusBarOnlyCapture> | undefined> {
-    const foreground = await foregroundIdentity;
-    const hierarchy = result.viewHierarchy;
-
-    // Two independent entry conditions, both cheap (no device round-trip):
-    //  - package identity: a system-UI or incomplete tree is being served while a
-    //    real app is foregrounded (isStatusBarOnlyCandidate); or
-    //  - geometry: every extracted node lies within the status-bar strip. This is
-    //    the reliable signal after #5976 corrected the reported package to the
-    //    focused application — the label then matches the foreground app while the
-    //    selected window stays status-bar-only (#5981), silencing the identity
-    //    check and leaving the geometry as the only evidence.
-    const geometryStatusBarOnly = isStatusBarOnlyHierarchy(result);
-    if (!isStatusBarOnlyCandidate(hierarchy, foreground) && !geometryStatusBarOnly) {
-      return undefined;
-    }
-    // A real (non-system) app must be the resumed foreground for this to be a
-    // wrong-window capture rather than a legitimate system surface (e.g. an open
-    // notification shade owned by com.android.systemui).
-    if (foreground === undefined || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
-      return undefined;
-    }
-    // When the tree is geometrically status-bar-only it carries no application
-    // content regardless of the package it is labelled with, so the observed/foreground
-    // equality that short-circuits resolvePostCaptureForegroundIdentity is exactly the
-    // #5981 shape (label corrected to the foreground app) and must not block the gate.
-    // Still take the confirming foreground read so a genuine A→B transition reports the
-    // settled app. Otherwise (identity-only candidate) confirm the foreground is stably
-    // a real app before retracting.
-    const confirmed = geometryStatusBarOnly
-      ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
-      : await this.resolvePostCaptureForegroundIdentity(
-          foreground,
-          hierarchy?.packageName ?? "",
-          postCaptureForeground,
-          signal,
-        );
-    if (
-      !confirmed ||
-      SYSTEM_UI_WINDOW_PACKAGES.has(confirmed) ||
-      !isStatusBarOnlyHierarchy(result)
-    ) {
-      return undefined;
-    }
-    return describeStatusBarOnlyCapture(hierarchy, confirmed);
-  }
-
-  /**
-   * The confirming (post-capture) foreground read, without the observed/foreground
-   * equality short-circuit that {@link resolvePostCaptureForegroundIdentity} applies
-   * for the window-identity path. The status-bar geometry gate must fire even when the
-   * capture is labelled with the foreground app itself (#5981), so equality cannot be a
-   * reason to skip confirmation. Reuses an already-sampled read when one exists.
-   */
-  private async confirmForegroundIdentity(
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    if (postCaptureForeground.sampled) {
-      return postCaptureForeground.identity;
-    }
-    return this.deviceStateCollector.collectForegroundIdentity(signal, {
-      displayId: postCaptureForeground.displayId,
-    });
-  }
-
-  private async resolvePostCaptureForegroundIdentity(
-    foreground: string,
-    observed: string,
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    if (postCaptureForeground.sampled) {
-      return postCaptureForeground.identity;
-    }
-    if (foreground === observed) {
-      return undefined;
-    }
-    return this.deviceStateCollector.collectForegroundIdentity(signal, {
-      displayId: postCaptureForeground.displayId,
-    });
-  }
-
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
     return result.viewHierarchy?.updatedAt;
-  }
-
-  /**
-   * Host-clock-domain receipt time for the observed tree, when the delegate
-   * reports one (Android). Used as the age basis so clock skew between a device
-   * and the host is not misreported as observation age (issue #5377). Absent on
-   * iOS (shares the host clock), where age falls back to the device timestamp.
-   */
-  private resolveHostReceivedAtMs(result: ObserveResult): number | undefined {
-    const candidate = result.viewHierarchy?.receivedAt;
-    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
-      return candidate;
-    }
-    return undefined;
   }
 }
 

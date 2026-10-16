@@ -1,3 +1,4 @@
+import { markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -5968,7 +5969,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "error";
+        markDeviceError(unavailable);
       });
 
       await expect(
@@ -8371,7 +8372,7 @@ describe("DevicePool", () => {
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual([
         "sim-replacement",
       ]);
-      expect(devicePool.getDevice("sim-failed")?.status).toBe("error");
+      expect(statusOf(devicePool.getDevice("sim-failed")!)).toBe("error");
     });
 
     test("should boot a criteria replacement when a stale pooled iOS simulator matched first", async () => {
@@ -8446,7 +8447,7 @@ describe("DevicePool", () => {
       for (let i = 0; i < 5; i++) {
         devicePool.recordDeviceError("sim-1");
       }
-      expect(devicePool.getDevice("sim-1")?.status).toBe("error");
+      expect(statusOf(devicePool.getDevice("sim-1")!)).toBe("error");
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [
@@ -8690,7 +8691,7 @@ describe("DevicePool", () => {
         devicePool.recordDeviceError("emulator-5554");
       }
       expect(device?.errorCount).toBe(5);
-      expect(device?.status).toBe("error");
+      expect(statusOf(device!)).toBe("error");
     });
 
     test("should clear error count when device assignment succeeds", async () => {

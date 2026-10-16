@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { describe, expect, spyOn, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
@@ -338,7 +339,7 @@ describe("MissingDeviceLiveness", () => {
     h.delayIncident();
     const checking = h.liveness.ensurePooledDevicePresent(device, false, false, true);
     await flushUntil(() => h.timer.getPendingSleepCount() === 1);
-    expect(device.status).toBe("error");
+    expect(statusOf(device)).toBe("error");
     expect(h.devices.get(deviceId)).toBe(device);
     h.timer.advanceTime(5);
     expect(await checking).toBe(false);
@@ -602,7 +603,7 @@ describe("MissingDeviceLiveness", () => {
     try {
       expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
       await flushUntil(() => h.timer.getPendingSleepCount() === 1);
-      expect(device.status).toBe("error");
+      expect(statusOf(device)).toBe("error");
       h.timer.advanceTime(5);
       await flushUntil(() =>
         warnSpy.mock.calls.some(([message]) =>

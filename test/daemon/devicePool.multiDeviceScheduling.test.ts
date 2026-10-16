@@ -1,3 +1,4 @@
+import { clearDeviceError, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -184,13 +185,13 @@ for (const criteria of [false, true]) {
           (device) => device.deviceId === "a",
         );
         const device = pool.getDevice("a")!;
-        device.status = "error";
+        markDeviceError(device);
         const original = discovery.getBootedDevicesDetailed.bind(discovery);
         const refresh = spyOn(discovery, "getBootedDevicesDetailed").mockImplementation(
           async (platform) => {
             // Model recovery completing during the allocation's inventory refresh.
             if (platform === "either" && restores) {
-              device.status = "idle";
+              clearDeviceError(device);
             }
             return original(platform);
           },
@@ -207,7 +208,7 @@ for (const criteria of [false, true]) {
             expect(String(head.outcome())).toContain(
               criteria ? "No matching devices are currently available" : "no devices available",
             );
-            expect(device.status).toBe("error");
+            expect(statusOf(device)).toBe("error");
           }
           expect(timer.getPendingTimeoutCount()).toBe(0);
         } finally {

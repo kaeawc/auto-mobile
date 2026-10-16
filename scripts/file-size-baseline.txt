@@ -7,7 +7,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
 5652	src/daemon/daemon.ts
-6512	src/daemon/daemonMcpProxy.ts
+6513	src/daemon/daemonMcpProxy.ts
 1691	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts
@@ -16,7 +16,7 @@
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
 2558	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
-1196	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
+1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 13418	src/daemon/sessionManager.ts
 9081	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts

@@ -23,6 +23,10 @@ import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyRe
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandArgs,
+} from "../../../fakes/executeCommandOptionsOf";
 
 interface Harness {
   hierarchy: CtrlProxyHierarchy;
@@ -33,6 +37,7 @@ interface Harness {
   setProcessNameSuffix: (suffix: string) => void;
   setProbeError: (error: Error | undefined) => void;
   getProbeCommand: () => string | undefined;
+  getProbeSignal: () => AbortSignal | undefined;
   setProbeGate: (gate: Promise<void>) => void;
   waitForProbeStart: () => Promise<void>;
   restore: () => void;
@@ -46,6 +51,7 @@ function createHarness(): Harness {
   let processNameSuffix = "";
   let probeError: Error | undefined;
   let probeCommand: string | undefined;
+  let probeSignal: AbortSignal | undefined;
   let probeGate: Promise<void> = Promise.resolve();
   let resolveProbeStart!: () => void;
   const probeStarted = new Promise<void>((resolve) => {
@@ -60,14 +66,11 @@ function createHarness(): Harness {
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {
-      executeCommand: async (
-        command: string,
-        _timeoutMs?: number,
-        _options?: unknown,
-        _synchronous?: boolean,
-        signal?: AbortSignal,
-      ) => {
+      executeCommand: async (...args: ExecuteCommandArgs) => {
+        const command = args[0];
+        const { signal } = executeCommandOptionsOf(args);
         probeCommand = command;
+        probeSignal = signal;
         resolveProbeStart();
         await probeGate;
         if (signal?.aborted) {
@@ -129,6 +132,7 @@ function createHarness(): Harness {
       probeError = error;
     },
     getProbeCommand: () => probeCommand,
+    getProbeSignal: () => probeSignal,
     setProbeGate: (gate) => {
       probeGate = gate;
     },
@@ -426,6 +430,9 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       controller.signal,
     );
     await h.waitForProbeStart();
+    // adb itself must receive the caller's signal so it can stop the probe, not just the caller's
+    // post-probe check.
+    expect(h.getProbeSignal()).toBe(controller.signal);
 
     controller.abort();
     releaseProbe();

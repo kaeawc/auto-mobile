@@ -15,6 +15,7 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTapAt } from "../helpers/tapAtCoordinate";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 const devices = [
   { name: "Android test device", platform: "android", deviceId: "emulator-5554" },
@@ -110,8 +111,8 @@ describe("registered interaction handler cancellation", () => {
   test("tapAt forwards the exact signal to execute", async () => {
     let received: AbortSignal | undefined;
     setTapAtElementFactory(() => ({
-      execute: async (options, _progress, signal) => {
-        received = signal;
+      execute: async (options, call) => {
+        received = (call as ActionCall | undefined)?.signal;
         return { success: true, x: options.x, y: options.y, action: "doubleTap" };
       },
     }));
@@ -128,12 +129,8 @@ describe("registered interaction handler cancellation", () => {
   test.each(["tapOn", "tapAny", "dragAndDrop"])("%s forwards the exact signal", async (name) => {
     let received: AbortSignal | undefined;
     const sentinel = new Error("fake command stopped");
-    const execute = async (
-      _options: unknown,
-      _progress: unknown,
-      signal?: AbortSignal,
-    ): Promise<never> => {
-      received = signal;
+    const execute = async (_options: unknown, call?: ActionCall): Promise<never> => {
+      received = call?.signal;
       throw sentinel;
     };
     if (name === "tapOn") {

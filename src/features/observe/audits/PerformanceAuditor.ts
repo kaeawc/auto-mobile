@@ -23,7 +23,7 @@ import { captureFidelityTruncationReasons } from "../truncationReasons";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utility/elementProperties";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../../utility/ElementParser";
-import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHints";
+import { SYSTEM_TRAY_PACKAGE } from "../../systemTray/notificationHints";
 
 /**
  * `AccessibilityWindowInfo.TYPE_APPLICATION` (Android SDK constant = 1): the

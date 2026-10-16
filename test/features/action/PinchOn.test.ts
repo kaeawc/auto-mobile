@@ -224,7 +224,7 @@ describe("PinchOn", () => {
 
   test("already aborted pinch dispatches no device command", async () => {
     await expect(
-      pinchOn.execute({ direction: "in" }, undefined, AbortSignal.abort()),
+      pinchOn.execute({ direction: "in" }, { signal: AbortSignal.abort() }),
     ).rejects.toThrow("Operation cancelled");
     expect(fakeA11yService.getPinchHistory()).toEqual([]);
   });
@@ -238,7 +238,7 @@ describe("PinchOn", () => {
       }),
     });
     await expect(
-      pinchOn.execute({ direction: "in", autoTarget: false }, undefined, controller.signal),
+      pinchOn.execute({ direction: "in", autoTarget: false }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(fakeA11yService.getPinchHistory()).toEqual([]);
   });

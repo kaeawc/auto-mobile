@@ -12,7 +12,6 @@ import {
   type AppearanceMode,
   type BootedDevice,
 } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
@@ -60,7 +59,7 @@ function harness() {
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
   const configKeys: Array<string | undefined> = [];
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), {
       window,
       ctrlProxyManager: new FakeCtrlProxyManager(),
     }),

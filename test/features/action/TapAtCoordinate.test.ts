@@ -410,8 +410,7 @@ describe("TapAtCoordinate", () => {
     try {
       const result = await tapAt.execute(
         { x: 10, y: 20, action: "doubleTap", display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       if (scenario === "advance" || scenario === "static") {
         expect(result).toMatchObject({ success: true, action: "doubleTap", x: 10, y: 20 });
@@ -576,8 +575,7 @@ describe("TapAtCoordinate", () => {
 
       const result = await tapAt.execute(
         { x: 10, y: 20, action, display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
 
       expect(result).toMatchObject({ success: false, x: 10, y: 20, action });
@@ -688,8 +686,7 @@ describe("TapAtCoordinate", () => {
     try {
       const pending = tapAt.execute(
         { x: 1, y: 2, action: "doubleTap" },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       await started;
       gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
@@ -726,7 +723,7 @@ describe("TapAtCoordinate", () => {
       controller.abort();
       for (const action of ["tap", "longPress", "doubleTap"] as const) {
         expect(
-          await tapAt.execute({ x: 1, y: 2, action, display }, undefined, controller.signal),
+          await tapAt.execute({ x: 1, y: 2, action, display }, { signal: controller.signal }),
         ).toMatchObject({
           success: false,
           x: 1,
@@ -1271,8 +1268,7 @@ describe("TapAtCoordinate", () => {
       }));
       const result = await tapAt.execute(
         { x: 10, y: 20, display: "0" },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(
@@ -1564,16 +1560,21 @@ describe("TapAtCoordinate", () => {
       "ios",
     );
     observeScreen.setObserveResult(observation(951, 669));
-    const result = await tapAt.execute({ x: 700, y: 48 }, async (step) => {
-      if (step === 10) {
-        displayTransitions.checkIosGeometry(
-          iosDevice.deviceId,
-          { width: 951, height: 669 },
-          "test-observation",
-          inner,
-        );
-      }
-    });
+    const result = await tapAt.execute(
+      { x: 700, y: 48 },
+      {
+        progress: async (step) => {
+          if (step === 10) {
+            displayTransitions.checkIosGeometry(
+              iosDevice.deviceId,
+              { width: 951, height: 669 },
+              "test-observation",
+              inner,
+            );
+          }
+        },
+      },
+    );
     expect(result).toMatchObject({ success: true, x: 700, y: 48 });
     expect(iosDispatches).toEqual([
       { kind: "tap", x: 700, y: 48, duration: 50, frameContext: "frame-123" },
@@ -2394,7 +2395,7 @@ describe("TapAtCoordinate TalkBack", () => {
       controller.abort();
       return result;
     });
-    const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+    const result = await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal });
     expect(result.success).toBe(false);
     h.timer.advanceTime(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
     await Promise.resolve();
@@ -2471,7 +2472,7 @@ describe("TapAtCoordinate TalkBack", () => {
       "requestDoubleTapCoordinates",
     ).mockResolvedValue({ success: true, totalTimeMs: 1 });
     try {
-      const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+      const result = await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal });
       expect(result.success).toBe(true);
       expect(frames).toEqual(["epoch:1", "epoch:2"]);
       expect(activation).toHaveBeenCalledTimes(1);
@@ -2504,7 +2505,7 @@ describe("TapAtCoordinate TalkBack", () => {
       h.timer.setTimeout(() => controller.abort(), TALKBACK_PRECISE_FOCUS_SETTLE_MS / 2);
       return result;
     });
-    expect((await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal)).success).toBe(
+    expect((await h.tapAt.execute({ x: 1, y: 2 }, { signal: controller.signal })).success).toBe(
       false,
     );
     expect(h.timer.wasSleepCalled(TALKBACK_PRECISE_FOCUS_SETTLE_MS)).toBe(true);
@@ -2578,7 +2579,10 @@ describe("TapAtCoordinate TalkBack", () => {
         return { success: true, totalTimeMs: 1 };
       });
       try {
-        const result = await h.tapAt.execute({ x: 1, y: 2, display }, undefined, controller.signal);
+        const result = await h.tapAt.execute(
+          { x: 1, y: 2, display },
+          { signal: controller.signal },
+        );
         expect(result.success).toBe(true);
         expect(frames).toEqual(["epoch:1", "epoch:2"]);
         expect(focus).toHaveBeenCalledTimes(2);

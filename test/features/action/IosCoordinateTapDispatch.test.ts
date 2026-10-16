@@ -411,8 +411,7 @@ describe("tapAt on iOS (#9971)", () => {
       const controller = new AbortController();
       const result = await tapAt.execute(
         { x: 10, y: 20, action: "doubleTap", display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       expect(result.success).toBe(true);
       expect(double).toHaveBeenCalledTimes(1);
@@ -442,8 +441,7 @@ describe("tapAt on iOS (#9971)", () => {
       const tapAt = createIosTapAt(client);
       const result = await tapAt.execute(
         { x: 10, y: 20, action: "doubleTap", display },
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain("cancel");
@@ -516,8 +514,7 @@ describe("tapAt on iOS (#9971)", () => {
     const controller = new AbortController();
     const result = await tapAt.execute(
       { x: 10, y: 20, action: "doubleTap" },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     expect(result.success).toBe(true);
     expect(client.signals).toEqual([controller.signal]);

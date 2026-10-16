@@ -14,7 +14,7 @@ import type { SimulatorInventoryEntry } from "../../../src/features/iosSimFleet/
 import { logger } from "../../../src/utils/logger";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const GIB = 1024 ** 3;
@@ -35,7 +35,7 @@ function gateWithFailingPs(os: HostOsInfo): IosSimCapacityGate {
     new FakeHostCommandExecutor(), // empty ps output => the process read fails
     new FakeTimer(),
     os,
-    new FakeSimCtlClient(),
+    new FakeSimctl(),
   );
   const timer = new FakeTimer();
   return new IosSimCapacityGate(

@@ -1,5 +1,10 @@
-import type { DeviceSnapshotConfig, VideoRecordingConfig } from "../../src/models";
+import type {
+  AppearanceConfig,
+  DeviceSnapshotConfig,
+  VideoRecordingConfig,
+} from "../../src/models";
 import {
+  createAppearanceConfigRepository,
   createDeviceSnapshotConfigRepository,
   createVideoRecordingConfigRepository,
 } from "../../src/db/keyedJsonConfigRepository";
@@ -11,8 +16,12 @@ import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingC
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { FakeAppearanceConfigRepository } from "../fakes/FakeAppearanceConfigRepository";
 import { FakeToolSelectionRepository } from "../fakes/FakeToolSelectionRepository";
-import { runConfigRepositoryContract } from "./ConfigRepositoryContract";
+import {
+  runConfigRepositoryContract,
+  runKeyedConfigRepositoryContract,
+} from "./ConfigRepositoryContract";
 import { runVideoRecordingRepositoryContract } from "./VideoRecordingRepositoryContract";
 import { runFeatureFlagRepositoryContract } from "./FeatureFlagRepositoryContract";
 import { runSessionToolSelectionRepositoryContract } from "./SessionToolSelectionRepositoryContract";
@@ -117,3 +126,24 @@ runVideoRecordingRepositoryContract("VideoRecordingRepository (SQLite)", async (
   const db = await createTestDatabase();
   return { repository: new VideoRecordingRepository(db), dispose: () => db.destroy() };
 });
+
+const appearanceConfigs: { first: AppearanceConfig; second: AppearanceConfig } = {
+  first: { syncWithHost: true, defaultMode: "auto", applyOnConnect: true },
+  second: { syncWithHost: false, defaultMode: "dark", applyOnConnect: false },
+};
+for (const [name, make] of [
+  [
+    "FakeAppearanceConfigRepository",
+    async () => ({ repository: new FakeAppearanceConfigRepository() }),
+  ],
+  [
+    "AppearanceConfig (SQLite)",
+    async () => {
+      const db = await createTestDatabase();
+      return { repository: createAppearanceConfigRepository(db), dispose: () => db.destroy() };
+    },
+  ],
+] as const) {
+  runConfigRepositoryContract(name, make, appearanceConfigs);
+  runKeyedConfigRepositoryContract(name, make, appearanceConfigs.first);
+}

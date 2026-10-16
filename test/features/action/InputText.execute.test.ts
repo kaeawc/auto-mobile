@@ -542,7 +542,7 @@ describe("InputText.execute", () => {
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
     const input = new InputText(device, adb, undefined, timer, () => ({
       focus: async (selector, signal) => {
-        const result = await tap.execute({ ...selector, action: "focus" }, undefined, signal);
+        const result = await tap.execute({ ...selector, action: "focus" }, { signal });
         return {
           success: result.success,
           error: result.error,

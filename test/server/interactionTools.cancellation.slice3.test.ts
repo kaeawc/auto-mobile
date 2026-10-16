@@ -11,7 +11,7 @@ import { OpenURL } from "../../src/features/action/OpenURL";
 import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
 import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyProvider";
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import {
   resetKeyboardFactory,
@@ -25,7 +25,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
-} from "../../src/server/systemTrayHelpers";
+} from "../../src/features/systemTray/systemTrayHelpers";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -209,7 +209,7 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
   const adb = new FakeAdbExecutor();
   const hierarchy = new FakeKeyboardHierarchyProvider();
   const launcher = new FakeDeviceUrlLauncher();
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   setKeyboardFactory(() => new Keyboard(target, { create: () => adb }, hierarchy, timer));
   setOpenUrlFactory(() => new UnobservedOpenURL(target, adb, simctl, launcher, timer));
   let gestures = 0;
@@ -385,7 +385,7 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
   const timer = new FakeTimer();
   const { started, sleep } = pausedSleep(timer);
   restores.push(() => sleep.mockRestore());
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const open = new UnobservedOpenURL(target, new FakeAdbExecutor(), simctl, null, timer);

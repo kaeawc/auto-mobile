@@ -201,9 +201,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       talkBackExecutor,
       observeOptions,
     });
-    await expect(
-      scroll.execute(BASE_OPTIONS, undefined, undefined, AbortSignal.abort()),
-    ).rejects.toThrow("Operation cancelled");
+    await expect(scroll.execute(BASE_OPTIONS, { signal: AbortSignal.abort() })).rejects.toThrow(
+      "Operation cancelled",
+    );
     expect(observeOptions).toEqual([]);
     expect(talkBackExecutor.getSwipeCalls()).toEqual([]);
   });
@@ -219,9 +219,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       talkBackExecutor,
       onInteraction: () => controller.abort(),
     });
-    await expect(
-      scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal),
-    ).rejects.toThrow("Operation cancelled");
+    await expect(scroll.execute(BASE_OPTIONS, { signal: controller.signal })).rejects.toThrow(
+      "Operation cancelled",
+    );
     expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
   });
 
@@ -242,7 +242,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
         }
       },
     });
-    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+    const error = await scroll.execute(BASE_OPTIONS, { signal: controller.signal }).then(
       () => undefined,
       (reason: unknown) => reason,
     );
@@ -271,7 +271,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
         controller.abort();
       },
     });
-    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+    const error = await scroll.execute(BASE_OPTIONS, { signal: controller.signal }).then(
       () => undefined,
       (reason: unknown) => reason,
     );
@@ -292,7 +292,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       talkBackExecutor,
     });
     controller.abort();
-    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+    const error = await scroll.execute(BASE_OPTIONS, { signal: controller.signal }).then(
       () => undefined,
       (reason: unknown) => reason,
     );

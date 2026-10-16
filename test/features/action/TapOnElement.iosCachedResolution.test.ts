@@ -108,8 +108,8 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
       searchUntil: { duration: searchMs },
     };
     return tap instanceof TapOnElement
-      ? tap.execute(options, undefined, signal, undefined, { requestDeadlineMs: deadline })
-      : tap.execute(options, undefined, signal, { requestDeadlineMs: deadline });
+      ? tap.execute(options, { signal, deadlineMs: deadline })
+      : tap.execute(options, { signal, deadlineMs: deadline });
   };
   return {
     tap,

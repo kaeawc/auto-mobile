@@ -174,8 +174,7 @@ describe("DragAndDrop", () => {
             source: { elementId: "source-id" },
             target: { elementId: "target-id" },
           },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         ),
       ).rejects.toThrow("Operation cancelled");
       expect(observe).toHaveBeenCalledTimes(1);
@@ -202,8 +201,7 @@ describe("DragAndDrop", () => {
             source: { elementId: "source-id" },
             target: { elementId: "target-id" },
           },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         ),
       ).rejects.toThrow("Operation cancelled");
       expect(drag).toHaveBeenCalledTimes(1);
@@ -232,8 +230,7 @@ describe("DragAndDrop", () => {
             source: { elementId: "missing-source" },
             target: { elementId: "target-id" },
           },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         ),
       ).rejects.toThrow("Operation cancelled");
       expect(capture).toHaveBeenCalledTimes(1);
@@ -254,8 +251,7 @@ describe("DragAndDrop", () => {
         source: { elementId: "source-id" },
         target: { elementId: "target-id" },
       },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     expect(controller.signal.aborted).toBe(false);

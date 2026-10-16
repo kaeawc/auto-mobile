@@ -10,6 +10,7 @@ import type { SwipeOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice, SwipeOnOptions, SwipeOnToolPayload } from "../../src/models";
 import { resolveSwipeDirection } from "../../src/features/action/swipeon/swipeOnUtils";
 import { getStructuredField } from "../../src/utils/toolUtils";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 test("swipeOn schema advertises the runtime default gesture type", () => {
   const implicitDirection = resolveSwipeDirection({ direction: "down" }).direction;
@@ -117,9 +118,9 @@ describe("swipeOnHandler (registered handler wiring)", () => {
     let options: SwipeOnOptions | undefined;
     let forwardedSignal: AbortSignal | undefined;
     setSwipeOnFactory(() => ({
-      execute: async (args, _progress, actionSignal) => {
+      execute: async (args, call) => {
         options = args;
-        forwardedSignal = actionSignal;
+        forwardedSignal = (call as ActionCall | undefined)?.signal;
         return fakeResult({ success: true });
       },
     }));

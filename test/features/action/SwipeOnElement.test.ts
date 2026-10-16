@@ -57,7 +57,7 @@ describe("SwipeOnElement", () => {
     const controller = new AbortController();
     const options = { duration: 300 };
 
-    const result = await swipe.execute(element, "up", options, undefined, controller.signal);
+    const result = await swipe.execute(element, "up", options, { signal: controller.signal });
 
     expect(gesture.calls).toHaveLength(1);
     expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, options]);
@@ -75,7 +75,7 @@ describe("SwipeOnElement", () => {
     };
     const swipe = new TestSwipeOnElement(gesture, geometry);
 
-    await expect(swipe.execute(element, "up", {}, undefined, AbortSignal.abort())).rejects.toThrow(
+    await expect(swipe.execute(element, "up", {}, { signal: AbortSignal.abort() })).rejects.toThrow(
       "Operation cancelled",
     );
 

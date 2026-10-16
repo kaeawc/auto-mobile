@@ -54,10 +54,7 @@ function harness() {
     execute: (duration?: number, signal?: AbortSignal, remainingMs?: number) =>
       action.execute(
         { text: "ListItem", action: "longPress", duration },
-        undefined,
-        signal,
-        undefined,
-        { requestDeadlineMs: remainingMs === undefined ? undefined : timer.now() + remainingMs },
+        { signal, deadlineMs: remainingMs === undefined ? undefined : timer.now() + remainingMs },
       ),
   };
 }
@@ -116,10 +113,7 @@ describe("tapOn long press safety", () => {
       const observe = spyOn(h.action, "observedInteraction");
       const call = h.action.execute(
         { text: "ListItem", action: "longPress", duration: 20000, display: 1 },
-        undefined,
-        undefined,
-        undefined,
-        { requestDeadlineMs: h.timer.now() + remaining },
+        { deadlineMs: h.timer.now() + remaining },
       );
       await expect(call).rejects.toBeInstanceOf(ActionableError);
       await expect(call).rejects.toThrow(

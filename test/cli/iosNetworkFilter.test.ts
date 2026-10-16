@@ -1,3 +1,12 @@
+import {
+  OrderCheck,
+  dynamicImports,
+  functionBody,
+  ifStatements,
+  parseSource,
+  swapNodes,
+  variableDeclarations,
+} from "../helpers/entrypointOrder";
 import { describe, expect, test } from "bun:test";
 import {
   NETWORK_FILTER_USAGE_EXIT_CODE,
@@ -80,9 +89,46 @@ describe("--ios-network-filter", () => {
 
   test("dispatches before any daemon or server import", async () => {
     const entrypoint = await Bun.file("src/index.ts").text();
-    const dispatch = entrypoint.indexOf('rawArgs.indexOf("--ios-network-filter")');
-    const serverImport = entrypoint.indexOf('await import("./server")');
-    expect(dispatch).toBeGreaterThanOrEqual(0);
-    expect(dispatch).toBeLessThan(serverImport);
+    expect(networkFilterDispatchViolations(entrypoint)).toEqual([]);
+  });
+
+  test("the dispatch guard fails when the server import moves ahead of the dispatch", async () => {
+    const entrypoint = await Bun.file("src/index.ts").text();
+    const main = functionBody(parseSource(entrypoint), "main")!;
+    const dispatch = ifStatements(main, "networkFilterIndex >= 0")[0]!;
+    const serverImportStatement = dynamicImports(main, "./server")[0]!.parent.parent.parent;
+    expect(
+      networkFilterDispatchViolations(swapNodes(entrypoint, dispatch, serverImportStatement)),
+    ).not.toEqual([]);
+  });
+
+  test("the dispatch guard fails when the dispatch lookup disappears", async () => {
+    const entrypoint = await Bun.file("src/index.ts").text();
+    const mutated = entrypoint.replace('rawArgs.indexOf("--ios-network-filter")', "-1");
+    expect(mutated).not.toBe(entrypoint);
+    expect(networkFilterDispatchViolations(mutated)).toContain("missing networkFilterIndex lookup");
   });
 });
+
+/** `--ios-network-filter` dispatches before any daemon or server import in main(). */
+function networkFilterDispatchViolations(source: string): string[] {
+  const main = functionBody(parseSource(source), "main");
+  if (!main) {
+    return ["missing main()"];
+  }
+  const check = new OrderCheck();
+  const lookup = check.require(
+    "networkFilterIndex lookup",
+    variableDeclarations(main, "networkFilterIndex", 'rawArgs.indexOf("--ios-network-filter")'),
+  );
+  const dispatch = check.require(
+    "network filter dispatch",
+    ifStatements(main, "networkFilterIndex >= 0"),
+  );
+  const serverImport = check.require("server import", dynamicImports(main, "./server"));
+  const daemonImport = check.require("daemon import", dynamicImports(main, "./daemon/daemon"));
+  check.before("network filter lookup", lookup, "server import", serverImport);
+  check.before("network filter dispatch", dispatch, "server import", serverImport);
+  check.before("network filter dispatch", dispatch, "daemon import", daemonImport);
+  return check.violations;
+}

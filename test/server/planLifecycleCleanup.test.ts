@@ -22,7 +22,7 @@ import type { ExecutePlanResult } from "../../src/models/ExecutePlanResult";
 import { logger } from "../../src/utils/logger";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ClearAppData } from "../../src/features/action/ClearAppData";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -814,7 +814,7 @@ describe("executePlan cleans every acquired device before release", () => {
   );
 
   describe("iOS simulator clear-app-data through the real ClearAppData", () => {
-    const iosCleanup = (simctl: FakeSimCtlClient) =>
+    const iosCleanup = (simctl: FakeSimctl) =>
       new DefaultAppCleanupService({
         createClearAppData: (device) =>
           new ClearAppData(device, undefined, {
@@ -827,7 +827,7 @@ describe("executePlan cleans every acquired device before release", () => {
 
     test("an uninstalled bundle is cleaned and does not mark the simulator", async () => {
       await acquire([devices[3]]);
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setInstalledApps([{ bundleId: "com.example.other" }]);
       await lifecycle.afterExecution(
         input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
@@ -838,7 +838,7 @@ describe("executePlan cleans every acquired device before release", () => {
 
     test("a transient container failure on an installed bundle still marks the simulator", async () => {
       await acquire([devices[3]]);
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setInstalledApps([{ bundleId: "com.example.chat" }]);
       simctl.setContainerError("com.example.chat", new Error("simctl get_app_container failed"));
       await lifecycle.afterExecution(
@@ -849,7 +849,7 @@ describe("executePlan cleans every acquired device before release", () => {
 
     test("an unreadable listing is not mistaken for an uninstalled bundle", async () => {
       await acquire([devices[3]]);
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       simctl.setListAppsError(new Error("simctl listapps timed out"));
       await lifecycle.afterExecution(
         input({ device: devices[3], cleanupService: iosCleanup(simctl) }),

@@ -2568,7 +2568,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  private async pollSdkEvents(): Promise<SdkEventPollResult> {
+  /**
+   * Run one SDK event poll (joining an in-flight one for the same generation). Public so
+   * tests can drive polling directly with an injected FakeTimer instead of waiting on the
+   * scheduler.
+   */
+  async pollSdkEvents(): Promise<SdkEventPollResult> {
     const generation = this.sdkEventPollGeneration;
     if (this.sdkEventPollInFlight?.generation === generation) {
       return this.sdkEventPollInFlight.promise;

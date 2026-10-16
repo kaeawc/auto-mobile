@@ -504,11 +504,11 @@ test("generic wrappers mark only raw-valued properties", () => {
 test("the sanctioned accessor module is out of scope, and its callers read no raw field", () => {
   const code = 'function read(props: Record<string, unknown>) { return props["resource-id"]; }';
   expect(check(code, "src/features/utility/elementProperties.ts")).toEqual([]);
-  expect(check(code, "src/server/systemTrayHelpers.ts")).toHaveLength(1);
+  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
   expect(
     check(
       "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
-      "src/server/systemTrayHelpers.ts",
+      "src/features/systemTray/systemTrayHelpers.ts",
     ),
   ).toEqual([]);
 });

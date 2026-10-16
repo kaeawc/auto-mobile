@@ -5,7 +5,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { IosAppNetworkRuleClient } from "../../src/features/network-filter/IosAppNetworkRuleClient";
+import { IosAppNetworkRuleClient } from "../../src/features/networkFilter/IosAppNetworkRuleClient";
 import { logger } from "../../src/utils/logger";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";

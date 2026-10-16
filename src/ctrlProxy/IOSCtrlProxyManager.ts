@@ -365,6 +365,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // XCUITest process state
   private xcTestProcessId: number | null = null;
+
+  /** The runner process id this manager currently owns, or null when none is recorded. */
+  getXcTestProcessId(): number | null {
+    return this.xcTestProcessId;
+  }
+
+  /** Test seam: record (or clear) the owned runner process id without launching a runner. */
+  setXcTestProcessIdForTesting(pid: number | null): void {
+    this.xcTestProcessId = pid;
+  }
   private xcTestProcess: ChildProcess | null = null;
   // Owns the resident runner's process-lifecycle abort signal (issue #6410).
   // Deliberately NOT the ambient per-request signal: this runner is shared
@@ -924,7 +934,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private async forceStopForShutdown(deadline: number): Promise<void> {
+  /** Force-stop the runner within a shutdown deadline. Public so tests can drive shutdown teardown directly. */
+  async forceStopForShutdown(deadline: number): Promise<void> {
     this.isStopping = true;
     this.processSupervisor.stop();
     const stopTunnel = this.tunnelClient.prepareForcedStop();
@@ -1390,7 +1401,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private async startAfterForceRestart(
+  /** Start the runner after a forced restart. Public so tests can stub the restart launch. */
+  async startAfterForceRestart(
     options: CtrlProxyStartOptions,
     expectedForceRestartGeneration?: number,
   ): Promise<void> {
@@ -2827,8 +2839,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * just tried to stop. The primary liveness gate is strict by default too; this
    * explicit option keeps the ownership requirement visible at the forced-teardown
    * call site. An ambiguous responder must not block a legitimate restart (#6415 follow-up).
+   *
+   * Public so tests can stub the probe.
    */
-  private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
+  async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
     const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;
     for (;;) {
       if (
@@ -4284,7 +4298,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs, options);
   }
 
-  private startIproxyTunnel(options: IproxyTunnelStartOptions = {}): Promise<void> {
+  /** Start the iproxy tunnel to the runner. Public so tests can stub the tunnel launch. */
+  startIproxyTunnel(options: IproxyTunnelStartOptions = {}): Promise<void> {
     if (this.isSimulator()) {
       return Promise.resolve();
     }

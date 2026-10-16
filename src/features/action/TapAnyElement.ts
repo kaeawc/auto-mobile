@@ -130,6 +130,7 @@ import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
+import { deadlineRequest, resolveDeadlineActionCall, type ActionCall } from "./ActionCall";
 
 type TapAnyAccessibilityService = Pick<
   AndroidCtrlProxyClient,
@@ -1889,12 +1890,26 @@ export class TapAnyElement extends BaseVisualChange {
     }
   }
 
+  async execute(options: TapAnyElementOptions, call?: ActionCall): Promise<TapAnyElementResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
     request?: { requestDeadlineMs?: number },
+  ): Promise<TapAnyElementResult>;
+  async execute(
+    options: TapAnyElementOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
+    requestArg?: { requestDeadlineMs?: number },
   ): Promise<TapAnyElementResult> {
+    const { progress, signal, deadlineMs } = resolveDeadlineActionCall(
+      progressOrCall,
+      signalArg,
+      requestArg,
+    );
+    const request = deadlineRequest(deadlineMs);
     return withObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal, request),
     );

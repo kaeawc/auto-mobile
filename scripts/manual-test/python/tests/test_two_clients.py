@@ -75,5 +75,25 @@ class PairTests(unittest.TestCase):
                                   row["step"].get("arguments", {}).get("text") == "surviving broker client")
             self.assertGreater(surviving_call["monotonicAbsoluteMs"], peer_close["monotonicAbsoluteMs"])
 
+    def test_broker_grant_refusal_is_a_failed_step_not_a_close_failure(self) -> None:
+        with tempdir() as tmp:
+            path = Path(tmp) / "steps.json"
+            path.write_text(json.dumps({"steps": [call("tapOn", deviceId="granted-1", text="ok"),
+                                                  call("tapOn", deviceId="other-9", text="no")],
+                                        "afterPeerClosed": [call("echo", text="still usable")]}))
+            args = parser(True).parse_args(["--fake-server", "--script", str(path), "--out-dir", tmp,
+                                           "--close-order", "b-first"])
+            launch, scripts = prepare(args, True, guard_ok)
+            launch = LaunchSpec(launch.command, launch.args, {**launch.env, "FAKE_GRANTED_DEVICES": "granted-1"})
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(asyncio.run(two(args, launch, scripts)), 1)
+            for name in "AB":
+                rows = [json.loads(l) for l in (Path(tmp) / "lifetime-001" / f"{name}.jsonl").read_text().splitlines()]
+                responses = [r for r in rows if r["event"] == "response"]
+                self.assertTrue(responses[0]["ok"])
+                self.assertFalse(responses[1]["ok"])
+                self.assertIn("device_outside_broker_grant", json.dumps(responses[1]["response"]))
+                self.assertEqual(next(r for r in rows if r["event"] == "close")["status"], "CLOSE_OK")
+
     def test_precedence(self) -> None:
         self.assertEqual(worst_exit([0, 1, 3, 2]), 2)

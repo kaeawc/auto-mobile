@@ -56,8 +56,8 @@ import {
   type LivenessHandover,
 } from "../daemon/proxyLivenessRecovery";
 import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
-import { SESSION_EXPERIMENTAL_CAPABILITY } from "../models/sessionConfig";
-import type { SessionBrokerResult } from "../models/sessionBrokerResult";
+import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
+import type { SessionBrokerResult } from "../devices/sessionBrokerResult";
 import { RELAUNCH_EXECUTION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   MANAGED_SLOTS_RESOURCE_URI,

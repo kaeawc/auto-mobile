@@ -6,8 +6,8 @@ import {
   DAEMON_SESSION_REQUEST_STATUS_METHOD,
   type SessionBrokerProxyAcquisitionPorts,
 } from "../../src/daemon/sessionBrokerProxyAcquisition";
-import type { SessionConfig } from "../../src/models/sessionConfig";
-import type { SessionBrokerResult } from "../../src/models/sessionBrokerResult";
+import type { SessionConfig } from "../../src/devices/sessionConfig";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 

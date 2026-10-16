@@ -21,8 +21,8 @@ import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service"
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import type { BrokerRequestRecord } from "../../../src/daemon/sessionBroker/store";
 import { ActionableError } from "../../../src/models/ActionableError";
-import type { SessionBrokerResult } from "../../../src/models/sessionBrokerResult";
-import type { SessionConfig } from "../../../src/models/sessionConfig";
+import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
+import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { DaemonRequest } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";

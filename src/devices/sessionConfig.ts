@@ -3,14 +3,14 @@ import { z } from "zod";
 import {
   parseSessionDeviceRequirement,
   type SessionDeviceRequirement,
-} from "../devices/sessionRequirements";
+} from "./sessionRequirements";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
-import { ActionableError } from "./ActionableError";
+import { ActionableError } from "../models/ActionableError";
 import {
   compareExecutionOwnerIdentity,
   type ManagedSlotOwnerIdentityVerdict,
-} from "./managedSlotConfig";
+} from "../models/managedSlotConfig";
 
 export const SESSION_CONFIG_FLAG = "--session-config";
 export const SESSION_CONFIG_ENV = ENV_SPECS.SESSION_CONFIG.name;

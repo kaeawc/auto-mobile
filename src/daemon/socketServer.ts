@@ -13,7 +13,7 @@ import {
   type InputTapParams,
   type InputTypeTextParams,
 } from "./inputRouteParams";
-import { IDE_DEVICE_MUTATION_METHODS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -5563,6 +5563,91 @@ export class UnixSocketServer {
     );
   }
 
+  /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
+  private readonly ideRouteHandlers: ReadonlyMap<
+    string,
+    (
+      request: DaemonRequest,
+      socketSessionId: string | undefined,
+      ideMutation: IdeMutationCall | undefined,
+    ) => Promise<any | undefined> | any
+  > = new Map([
+    [
+      "ide/listFeatureFlags",
+      (request, socketSessionId, ideMutation) =>
+        this.ideListFeatureFlags(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setFeatureFlag",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetFeatureFlag(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setSessionToolEnabled",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetSessionToolEnabled(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/ping",
+      (request, socketSessionId, ideMutation) =>
+        this.idePing(request, socketSessionId, ideMutation),
+    ],
+    [
+      DAEMON_REPUBLISH_IDENTITY_METHOD,
+      async (request) => await this.republishDaemonIdentity(request.params),
+    ],
+    [DAEMON_PREPARE_RESTART_METHOD, async (request) => this.prepareDaemonRestart(request.params)],
+    [
+      DAEMON_PREPARE_MAINTENANCE_METHOD,
+      async (request) => this.prepareDaemonMaintenance(request.params),
+    ],
+    [
+      DAEMON_COMPLETE_MAINTENANCE_METHOD,
+      async (request) => this.completeDaemonMaintenance(request.params),
+    ],
+    [DAEMON_RESTART_ADMITTED_METHOD, async (request) => this.restartAdmittedDaemon(request.params)],
+    [
+      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+      async (request, socketSessionId) =>
+        this.restartAcceptanceSession(request.params, socketSessionId),
+    ],
+    [
+      DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+      async (request, socketSessionId) =>
+        this.commitAcceptanceRestart(request.params, socketSessionId),
+    ],
+    [
+      DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+      async (request, socketSessionId) =>
+        this.releaseAcceptanceRestart(request.params, socketSessionId),
+    ],
+    [
+      "ide/status",
+      (request, socketSessionId, ideMutation) =>
+        this.ideStatus(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/updateService",
+      (request, socketSessionId, ideMutation) =>
+        this.ideUpdateService(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setKeyValue",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetKeyValue(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/removeKeyValue",
+      (request, socketSessionId, ideMutation) =>
+        this.ideRemoveKeyValue(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/clearKeyValueFile",
+      (request, socketSessionId, ideMutation) =>
+        this.ideClearKeyValueFile(request, socketSessionId, ideMutation),
+    ],
+  ]);
+
   /**
    * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
    * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
@@ -5572,356 +5657,315 @@ export class UnixSocketServer {
     socketSessionId?: string,
     ideMutation?: IdeMutationCall,
   ): Promise<any | undefined> {
-    switch (request.method) {
-      case "ide/listFeatureFlags": {
-        const flags = await this.requireFeatureFlagService().listFlags();
-        return { flags };
-      }
-      case "ide/setFeatureFlag": {
-        const featureFlagService = this.requireFeatureFlagService();
-        const args = request.params as {
-          key?: string;
-          enabled?: boolean;
-          config?: Record<string, unknown> | null;
-        };
-        if (!args.key || typeof args.enabled !== "boolean") {
-          throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
-        }
-        this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
-        const updated = await featureFlagService.setFlag(
-          args.key as FeatureFlagKey,
-          args.enabled,
-          args.config,
-        );
-        return updated;
-      }
-      case "ide/setSessionToolEnabled": {
-        const args = request.params as {
-          sessionUuid?: string;
-          toolName?: string;
-          enabled?: boolean;
-        };
-        if (
-          !args.sessionUuid ||
-          !args.toolName ||
-          !ToolRegistry.isUserConfigurableTool(args.toolName) ||
-          typeof args.enabled !== "boolean"
-        ) {
-          throw new Error(
-            "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
-          );
-        }
-        this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
-          requesterSessionUuid: args.sessionUuid,
-        });
-        await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
-          args.sessionUuid,
-          args.toolName,
-          args.enabled,
-        );
-        ListChangedBroadcaster.emit("tools");
-        return {
-          sessionUuid: args.sessionUuid,
-          toolName: args.toolName,
-          enabled: args.enabled,
-        };
-      }
-      case "ide/ping": {
-        return { ok: true, timestamp: this.timer.now() };
-      }
-      case DAEMON_REPUBLISH_IDENTITY_METHOD: {
-        return await this.republishDaemonIdentity(request.params);
-      }
-      case DAEMON_PREPARE_RESTART_METHOD: {
-        return this.prepareDaemonRestart(request.params);
-      }
-      case DAEMON_PREPARE_MAINTENANCE_METHOD: {
-        return this.prepareDaemonMaintenance(request.params);
-      }
-      case DAEMON_COMPLETE_MAINTENANCE_METHOD: {
-        return this.completeDaemonMaintenance(request.params);
-      }
-      case DAEMON_RESTART_ADMITTED_METHOD: {
-        return this.restartAdmittedDaemon(request.params);
-      }
-      case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
-        return this.restartAcceptanceSession(request.params, socketSessionId);
-      }
-      case DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD: {
-        return this.commitAcceptanceRestart(request.params, socketSessionId);
-      }
-      case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
-        return this.releaseAcceptanceRestart(request.params, socketSessionId);
-      }
-      case "ide/status": {
-        return {
-          structuredSessionNotFound: true,
-          structuredToolErrorCodes: true,
-          // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
-          // floating "latest" tag — external consumers must see exactly what the
-          // daemon will fetch (#2746).
-          version: this.daemonIdentity.version,
-          pid: process.pid,
-          buildId: this.daemonIdentity.build.buildId,
-          entryScript: this.daemonIdentity.build.entryScript,
-          acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
-            ? createHash("sha256")
-                .update(this.acceptanceDiscoveryCapability)
-                .digest("hex")
-                .slice(0, 8)
-            : null,
-          startedAt: this.identityStartedAt,
-          processStartedAt: this.identityProcessStartedAt,
-          dbPath: this.identityDbPath,
-          reportedPidFilePath: this.identityPidFilePath,
-          reportedSocketPath: this.socketPath,
-          reportedSockets: this.identitySockets,
-          effectiveDebug: isDebugModeEnabled(),
-          options: this.startupOptions,
-          ...processGenerationRecordFields(this.processGenerationToken),
-          activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
-            scope: "global",
-          }),
-          releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
-          android: {
-            ctrlProxy: {
-              expectedSha256: resolveApkChecksum(),
-              url: resolveApkUrl(),
-            },
-          },
-          ios: {
-            xcTestService: {
-              expectedSha256: resolveIpaChecksum(),
-              expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
-              url: resolveIpaUrl(),
-            },
-          },
-        };
-      }
-      case "ide/updateService": {
-        const args = request.params as { deviceId?: string; platform?: string };
-        if (!args.deviceId || !args.platform) {
-          throw new Error(
-            "updateService requires 'deviceId' (string) and 'platform' (string) params",
-          );
-        }
-        if (args.platform !== "android" && args.platform !== "ios") {
-          throw new Error(`Invalid platform: ${args.platform}. Must be 'android' or 'ios'.`);
-        }
+    const handler = this.ideRouteHandlers.get(request.method);
+    return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
+  }
 
-        // Find the booted device
-        const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
-          args.platform,
-          args.deviceId,
-        );
-        // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
-        await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
-        this.assertDeviceActionable(deviceId, "to update the accessibility service");
-        const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
-        if (!targetDevice) {
-          throw new Error(`Device not found: ${args.deviceId}`);
-        }
-        if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
-          throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
-        }
-        // A lifecycle action on a held device: only the holder, or an explicit `force` (as
-        // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
-        await this.assertIdeMutationOwnership(
-          request,
-          targetDevice,
-          "ide/updateService",
-          (request.params as { force?: unknown }).force === true,
-          ideMutation,
-        );
-        if (args.platform === "android") {
-          getAbortSignal()?.throwIfAborted();
-          ideMutation?.dispatching();
-          AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-          const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
-          const result = await manager.ensureCompatibleVersion({
-            allowDownloadWhenInstalled: true,
-            bypassVersionCheckCache: true,
-          });
-          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
-          return {
-            success: successStatuses.has(result.status),
-            message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,
-            status: result,
-          };
-        } else {
-          const manager = IOSCtrlProxyManager.getInstance(targetDevice);
-          getAbortSignal()?.throwIfAborted();
-          ideMutation?.dispatching();
-          IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-          await manager.forceRestart();
-          return {
-            success: true,
-            message: "CtrlProxy iOS restarted",
-          };
-        }
-      }
-      case "ide/setKeyValue": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-          key?: string;
-          value?: string | null;
-          type?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName || !args.key || !args.type) {
-          throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/setKeyValue",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const key = args.key;
-        let usedDirectFileFallback = false;
-        let resolution: PreferenceStoreResolution | undefined;
-        if (args.value === null || args.value === undefined) {
-          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-            platform,
-            device,
-            appId,
-            fileName,
-            {
-              dispatching: () => ideMutation?.dispatching(),
-              viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-              viaDirectFile: (adb) =>
-                removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-            },
-          ));
-        } else {
-          // Enforce the same cross-platform type guidance as the MCP-tool path
-          // (storageTools.ts) before dispatch, so a platform-incompatible type
-          // fails with an actionable error rather than deeper in the client (#5022).
-          validateTypeForPlatform(platform, args.type as KeyValueType);
-          const value = args.value;
-          const type = args.type as KeyValueType;
-          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-            platform,
-            device,
-            appId,
-            fileName,
-            {
-              dispatching: () => ideMutation?.dispatching(),
-              viaSdk: (onDispatch) =>
-                client.setPreference(appId, fileName, key, value, type, { onDispatch }),
-              viaDirectFile: (adb) =>
-                setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
-            },
-          ));
-        }
-        const resolvedStore = resolution?.resolvedStore;
-        const effectiveValueDiffers = resolution?.effectiveValueDiffers;
-        const warning = preferenceSetWarning(
-          usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
-          effectiveValueDiffers,
-        );
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      case "ide/removeKeyValue": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-          key?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName || !args.key) {
-          throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/removeKeyValue",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const key = args.key;
-        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-          platform,
-          device,
-          appId,
-          fileName,
-          {
-            dispatching: () => ideMutation?.dispatching(),
-            viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-            viaDirectFile: (adb) =>
-              removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-          },
-        );
-        const resolvedStore = resolution?.resolvedStore;
-        const warning = usedDirectFileFallback
-          ? directFileFallbackRelaunchWarning(appId, fileName)
-          : undefined;
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      case "ide/clearKeyValueFile": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName) {
-          throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/clearKeyValueFile",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-          platform,
-          device,
-          appId,
-          fileName,
-          {
-            dispatching: () => ideMutation?.dispatching(),
-            viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
-            viaDirectFile: (adb) =>
-              clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
-          },
-        );
-        const resolvedStore = resolution?.resolvedStore;
-        const warning = usedDirectFileFallback
-          ? directFileFallbackRelaunchWarning(appId, fileName)
-          : undefined;
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      default:
-        return undefined;
+  private async ideListFeatureFlags(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const flags = await this.requireFeatureFlagService().listFlags();
+    return { flags };
+  }
+
+  private async ideSetFeatureFlag(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const featureFlagService = this.requireFeatureFlagService();
+    const args = IDE_ROUTE_PARSERS["ide/setFeatureFlag"](request.params);
+    this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
+    const updated = await featureFlagService.setFlag(
+      args.key as FeatureFlagKey,
+      args.enabled,
+      args.config,
+    );
+    return updated;
+  }
+
+  private async ideSetSessionToolEnabled(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/setSessionToolEnabled"](request.params);
+    this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
+      requesterSessionUuid: args.sessionUuid,
+    });
+    await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
+      args.sessionUuid,
+      args.toolName,
+      args.enabled,
+    );
+    ListChangedBroadcaster.emit("tools");
+    return {
+      sessionUuid: args.sessionUuid,
+      toolName: args.toolName,
+      enabled: args.enabled,
+    };
+  }
+
+  private async idePing(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    return { ok: true, timestamp: this.timer.now() };
+  }
+
+  private async ideStatus(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    return {
+      structuredSessionNotFound: true,
+      structuredToolErrorCodes: true,
+      // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
+      // floating "latest" tag — external consumers must see exactly what the
+      // daemon will fetch (#2746).
+      version: this.daemonIdentity.version,
+      pid: process.pid,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+      acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
+        ? createHash("sha256").update(this.acceptanceDiscoveryCapability).digest("hex").slice(0, 8)
+        : null,
+      startedAt: this.identityStartedAt,
+      processStartedAt: this.identityProcessStartedAt,
+      dbPath: this.identityDbPath,
+      reportedPidFilePath: this.identityPidFilePath,
+      reportedSocketPath: this.socketPath,
+      reportedSockets: this.identitySockets,
+      effectiveDebug: isDebugModeEnabled(),
+      options: this.startupOptions,
+      ...processGenerationRecordFields(this.processGenerationToken),
+      activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
+        scope: "global",
+      }),
+      releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
+      android: {
+        ctrlProxy: {
+          expectedSha256: resolveApkChecksum(),
+          url: resolveApkUrl(),
+        },
+      },
+      ios: {
+        xcTestService: {
+          expectedSha256: resolveIpaChecksum(),
+          expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
+          url: resolveIpaUrl(),
+        },
+      },
+    };
+  }
+
+  private async ideUpdateService(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/updateService"](request.params);
+
+    // Find the booted device
+    const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
+      args.platform,
+      args.deviceId,
+    );
+    // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
+    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
+    this.assertDeviceActionable(deviceId, "to update the accessibility service");
+    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
+    if (!targetDevice) {
+      throw new Error(`Device not found: ${args.deviceId}`);
     }
+    if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
+      throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
+    }
+    // A lifecycle action on a held device: only the holder, or an explicit `force` (as
+    // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
+    await this.assertIdeMutationOwnership(
+      request,
+      targetDevice,
+      "ide/updateService",
+      args.force,
+      ideMutation,
+    );
+    if (args.platform === "android") {
+      getAbortSignal()?.throwIfAborted();
+      ideMutation?.dispatching();
+      AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
+      const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
+      const result = await manager.ensureCompatibleVersion({
+        allowDownloadWhenInstalled: true,
+        bypassVersionCheckCache: true,
+      });
+      const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
+      return {
+        success: successStatuses.has(result.status),
+        message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,
+        status: result,
+      };
+    } else {
+      const manager = IOSCtrlProxyManager.getInstance(targetDevice);
+      getAbortSignal()?.throwIfAborted();
+      ideMutation?.dispatching();
+      IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
+      await manager.forceRestart();
+      return {
+        success: true,
+        message: "CtrlProxy iOS restarted",
+      };
+    }
+  }
+
+  private async ideSetKeyValue(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/setKeyValue"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/setKeyValue",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const key = args.key;
+    let usedDirectFileFallback = false;
+    let resolution: PreferenceStoreResolution | undefined;
+    if (args.value === null || args.value === undefined) {
+      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+        platform,
+        device,
+        appId,
+        fileName,
+        {
+          dispatching: () => ideMutation?.dispatching(),
+          viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
+          viaDirectFile: (adb) =>
+            removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+        },
+      ));
+    } else {
+      // Enforce the same cross-platform type guidance as the MCP-tool path
+      // (storageTools.ts) before dispatch, so a platform-incompatible type
+      // fails with an actionable error rather than deeper in the client (#5022).
+      validateTypeForPlatform(platform, args.type as KeyValueType);
+      const value = args.value;
+      const type = args.type as KeyValueType;
+      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+        platform,
+        device,
+        appId,
+        fileName,
+        {
+          dispatching: () => ideMutation?.dispatching(),
+          viaSdk: (onDispatch) =>
+            client.setPreference(appId, fileName, key, value, type, { onDispatch }),
+          viaDirectFile: (adb) =>
+            setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+        },
+      ));
+    }
+    const resolvedStore = resolution?.resolvedStore;
+    const effectiveValueDiffers = resolution?.effectiveValueDiffers;
+    const warning = preferenceSetWarning(
+      usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
+      effectiveValueDiffers,
+    );
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  private async ideRemoveKeyValue(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/removeKeyValue"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/removeKeyValue",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const key = args.key;
+    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+      platform,
+      device,
+      appId,
+      fileName,
+      {
+        dispatching: () => ideMutation?.dispatching(),
+        viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
+        viaDirectFile: (adb) =>
+          removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+      },
+    );
+    const resolvedStore = resolution?.resolvedStore;
+    const warning = usedDirectFileFallback
+      ? directFileFallbackRelaunchWarning(appId, fileName)
+      : undefined;
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  private async ideClearKeyValueFile(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/clearKeyValueFile"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/clearKeyValueFile",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+      platform,
+      device,
+      appId,
+      fileName,
+      {
+        dispatching: () => ideMutation?.dispatching(),
+        viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
+        viaDirectFile: (adb) =>
+          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+      },
+    );
+    const resolvedStore = resolution?.resolvedStore;
+    const warning = usedDirectFileFallback
+      ? directFileFallbackRelaunchWarning(appId, fileName)
+      : undefined;
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(warning ? { warning } : {}),
+    };
   }
 
   /**

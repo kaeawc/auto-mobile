@@ -56,7 +56,7 @@ function harness(session?: Session) {
     },
   } as DeviceRecoveryCoordinator;
   const port: AdbServerResetQuarantinePoolPort = {
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getDevices: () => devices,
     getSessionManager: () =>
       ({

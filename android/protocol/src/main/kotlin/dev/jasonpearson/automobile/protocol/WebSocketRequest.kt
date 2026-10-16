@@ -110,8 +110,8 @@ data class RequestTwoFingerSwipe(
   val displayId: Int? = null,
   /**
    * Number of simultaneous fingers, 2-5 (default 2). Finger `i` starts at `x1 + i * offset`. A
-   * service without the `multi_finger_gesture_v1` flag ignores this field and performs two
-   * fingers, so hosts must not send a value above 2 to it.
+   * service without the `multi_finger_gesture_v1` flag ignores this field and performs two fingers,
+   * so hosts must not send a value above 2 to it.
    */
   val fingerCount: Int = 2,
 ) : WebSocketRequest()

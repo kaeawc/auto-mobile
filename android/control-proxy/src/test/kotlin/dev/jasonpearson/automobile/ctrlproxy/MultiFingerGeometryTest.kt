@@ -10,7 +10,8 @@ class MultiFingerGeometryTest {
 
   @Test
   fun `two fingers keep the legacy first and offset strokes`() {
-    val strokes = computeMultiFingerStrokes(100.0, 200.0, 100.0, 50.0, offset = 100, fingerCount = 2)
+    val strokes =
+      computeMultiFingerStrokes(100.0, 200.0, 100.0, 50.0, offset = 100, fingerCount = 2)
     assertEquals(
       listOf(FingerStroke(100f, 200f, 100f, 50f), FingerStroke(200f, 200f, 200f, 50f)),
       strokes,
@@ -20,7 +21,8 @@ class MultiFingerGeometryTest {
   @Test
   fun `each finger count yields that many strokes spaced by the offset`() {
     for (count in MIN_MULTI_FINGER_COUNT..MAX_MULTI_FINGER_COUNT) {
-      val strokes = computeMultiFingerStrokes(10.0, 20.0, 30.0, 40.0, offset = 25, fingerCount = count)
+      val strokes =
+        computeMultiFingerStrokes(10.0, 20.0, 30.0, 40.0, offset = 25, fingerCount = count)
       assertEquals(count, strokes.size)
       strokes.forEachIndexed { index, stroke ->
         assertEquals(10f + index * 25f, stroke.startX, 0f)

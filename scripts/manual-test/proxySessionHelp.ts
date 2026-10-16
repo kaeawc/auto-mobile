@@ -82,7 +82,7 @@ Commands:
   resources                List resources and templates.
   subscribe <uri>          Subscribe; notifications stay in notifications.jsonl.
   status                   Report session outcome, grant/profile/failure, owner liveness and daemonSocketAlive; --all prints all clients.
-  close                    Close cleanly; wait up to 240 s for a released broker receipt.
+  close                    Close cleanly; wait up to 240 s for a released broker receipt. If the driver is dead but a ready grant is recorded, releases it like release (exit 1 if the broker no longer knows the session); with nothing to release exits 2.
   release                  Release the granted session with the stored token; wait for cleanup (240 s).
   abandon                  Abandon the stored request, including unknown requests (240 s).
   info                     Save the grant's current native device descriptor to info.json.

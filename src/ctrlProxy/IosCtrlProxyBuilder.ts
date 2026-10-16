@@ -24,7 +24,10 @@ import {
 import {
   DefaultIOSCtrlProxyBundleDownloader,
   type CtrlProxyIosBundleDownloader,
+  type Sha256Source,
 } from "../utils/IOSCtrlProxyBundleDownloader";
+import { defaultIdGenerator } from "../utils/IdGenerator";
+import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { hashAppBundle } from "../utils/ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { getSharedAutoMobileDir, getTempDir } from "../utils/tempDir";
@@ -247,6 +250,7 @@ export class IosCtrlProxyBuilder {
 
   private readonly config: CtrlProxyIosBuildConfig;
   private readonly downloader: CtrlProxyIosBundleDownloader;
+  private readonly artifactCache: VerifiedArtifactCache;
   /**
    * NOT using TTLCache: file-existence validation via fs.access(), not time-based.
    * Cache is invalidated when files are re-extracted, not after a TTL.
@@ -318,6 +322,13 @@ export class IosCtrlProxyBuilder {
         getSharedAutoMobileDir(IosCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();
+    // Adapters read `this.downloader` lazily so the cache always uses the injected seam.
+    this.artifactCache = new VerifiedArtifactCache({
+      downloader: { download: (url, destination) => this.downloader.download(url, destination) },
+      checksumCalculator: {
+        computeFileSha256: (filePath) => this.downloader.computeFileSha256(filePath),
+      },
+    });
   }
 
   /**
@@ -1208,15 +1219,38 @@ export class IosCtrlProxyBuilder {
       // resolvePinnedVersion already normalizes the `latest` sentinel.
       const isLatest = resolvePinnedVersion() === LATEST_RELEASE_VERSION;
       const cachedBundleExists = await this.isBundleValid(bundlePath, "");
+      // Set once the download itself succeeded: a later size/checksum failure must fail closed
+      // and never fall back to the cached bundle (only a failed download may).
+      let downloaded = false;
       try {
         logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
           url: this.getBundleUrl(),
           destination: bundlePath,
           reason: "checksum-mismatch-or-missing",
         });
-        await this.downloader.download(this.getBundleUrl(), bundlePath);
+        // Download to a sibling temp file and rename on success, so a failed download or
+        // verification never replaces (or deletes) the cached bundle.
+        await this.artifactCache.fetch({
+          label: "[IOSCtrlProxyBuilder]",
+          expectedSha256: expectedChecksum.length > 0 ? expectedChecksum : null,
+          url: this.getBundleUrl(),
+          // Unique per attempt: builders (and daemons) share this cache directory, and a shared
+          // temp name would let one attempt hash, rename or delete another's file.
+          archivePath: `${bundlePath}.${defaultIdGenerator.next()}.download`,
+          finalPath: bundlePath,
+          afterDownload: async (downloadedPath) => {
+            downloaded = true;
+            await this.assertBundleSize(downloadedPath);
+          },
+          mismatchError: (want, actual) =>
+            new Error(`CtrlProxy checksum verification failed. Expected: ${want}, Got: ${actual}`),
+          publish: async (_downloadedPath, checksum, source) => {
+            this.reportBundleVerification(checksum, source);
+          },
+        });
+        return { bundlePath, usedCachedFallback: false, localOverridePath: overridePath };
       } catch (error) {
-        if (isLatest && cachedBundleExists) {
+        if (!downloaded && isLatest && cachedBundleExists) {
           logger.warn(
             `[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`,
           );
@@ -1257,11 +1291,27 @@ export class IosCtrlProxyBuilder {
     return checksum.toLowerCase() === expectedChecksum.toLowerCase();
   }
 
-  private async verifyBundle(bundlePath: string): Promise<void> {
+  private async assertBundleSize(bundlePath: string): Promise<void> {
     const stats = await fs.stat(bundlePath);
     if (stats.size < IosCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
       throw new Error(`Downloaded bundle is too small (${stats.size} bytes), likely invalid`);
     }
+  }
+
+  /** Log a verified checksum, or fail closed / warn when none is configured. */
+  private reportBundleVerification(checksum: string | null, source: Sha256Source | null): void {
+    if (checksum !== null) {
+      logger.info("[IOSCtrlProxyBuilder] Bundle checksum verified", { checksum, source });
+      return;
+    }
+    this.assertPinnedVersionVerifiable();
+    logger.warn(
+      "[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)",
+    );
+  }
+
+  private async verifyBundle(bundlePath: string): Promise<void> {
+    await this.assertBundleSize(bundlePath);
 
     const expectedChecksum = this.getExpectedChecksum();
     if (expectedChecksum.length > 0) {
@@ -1271,13 +1321,10 @@ export class IosCtrlProxyBuilder {
           `CtrlProxy checksum verification failed. Expected: ${expectedChecksum}, Got: ${checksum}`,
         );
       }
-      logger.info("[IOSCtrlProxyBuilder] Bundle checksum verified", { checksum, source });
-    } else {
-      this.assertPinnedVersionVerifiable();
-      logger.warn(
-        "[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)",
-      );
+      this.reportBundleVerification(checksum, source);
+      return;
     }
+    this.reportBundleVerification(null, null);
   }
 
   /**

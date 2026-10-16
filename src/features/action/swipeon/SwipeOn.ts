@@ -893,7 +893,7 @@ export class SwipeOn extends BaseVisualChange {
       strategy: {
         observe,
         swipe: async ({ previousObservation, searchDragState, onDispatched, ...coordinates }) => {
-          const result = await this.observedInteraction(
+          const result = await this.observedInteraction<SwipeOnResult>(
             async () => {
               const fallback = async () => {
                 coordinates.onSearchFallback?.();
@@ -948,7 +948,7 @@ export class SwipeOn extends BaseVisualChange {
           );
           this.checkPostActionDisplay(
             result,
-            () => validateObservation(result.observation),
+            () => validateObservation(result.observation!),
             signal,
           );
           return {
@@ -957,7 +957,7 @@ export class SwipeOn extends BaseVisualChange {
             success: result.success,
             error: result.error,
             outcomeIndeterminate: result.outcomeIndeterminate,
-            observation: result.observation,
+            observation: result.observation!,
             staleDisplay: result.staleDisplay,
           };
         },

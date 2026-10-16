@@ -59,7 +59,7 @@ export class HandleIntentChooser extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("handleIntentChooser");
 
-    return this.observedInteraction(
+    return this.observedInteraction<IntentChooserResult>(
       async (observeResult: ObserveResult) => {
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {

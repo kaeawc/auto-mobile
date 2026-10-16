@@ -111,7 +111,7 @@ export class HomeScreen extends BaseVisualChange {
     };
 
     let possiblyAlreadyHome: ViewHierarchyResult | undefined;
-    const result = await this.observedInteraction(async (previousObservation) => {
+    const result = await this.observedInteraction<HomeScreenResult>(async (previousObservation) => {
       const previousHierarchy = await this.readHomeHierarchy(
         previousObservation,
         perf,

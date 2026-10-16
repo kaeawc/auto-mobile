@@ -145,6 +145,17 @@ describe("agent benchmark rendering", () => {
     expect(summary).toMatch(/incomplete\s+demo\s+1m 15\.5s · 0 stumble\(s\) · sequence 0m\/1a/);
   });
 
+  test("baseline cost rounding never overflows a huge finite cost to infinity", () => {
+    const huge = new TranscriptBuilder().init().mcp("observe").result({ costUsd: 1e308 });
+    const snippet = load(renderBaselineSnippet(result(huge))) as { baseline: { costUsd: number } };
+    expect(snippet.baseline.costUsd).toBe(1e308);
+    const rounded = new TranscriptBuilder().init().mcp("observe").result({ costUsd: 0.012345 });
+    expect(
+      (load(renderBaselineSnippet(result(rounded))) as { baseline: { costUsd: number } }).baseline
+        .costUsd,
+    ).toBe(0.0123);
+  });
+
   test("the baseline snippet is valid suite YAML", () => {
     const snippet = renderBaselineSnippet(result(passing()));
     const suite = parseSuiteDefinition(

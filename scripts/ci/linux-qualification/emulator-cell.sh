@@ -88,6 +88,12 @@ trap 'cell_error TERM' TERM INT
   printf 'Snapshot policy: -no-snapshot-load -no-snapshot-save\n'
 } > "$CELL_DIR/environment.txt"
 test -w "${KVM_DEVICE:-/dev/kvm}"
+# Run 38897261151: every automobile cell launched nothing because the CLI was
+# absent; fail before SDK setup and before the host-GPU exit can mask it.
+if [[ "$WORKLOAD" == automobile ]] && ! command -v auto-mobile > /dev/null; then
+  printf 'auto-mobile CLI not found on PATH\n' > "$CELL_DIR/harness-error.txt"
+  cell_error PREFLIGHT
+fi
 if [[ "$GPU" == host && ! -d /dev/dri ]]; then
   touch "$CELL_DIR/host-unavailable"
   printf 'Host GPU unavailable: no /dev/dri device\n' > "$CELL_DIR/not-exercised.txt"
@@ -152,6 +158,8 @@ for ((cycle=1; cycle<=CYCLES; cycle++)); do
     timeout -k 5 "$boot_seconds" auto-mobile --cli getAndroid --avdName medium_phone --boot-timeout-ms "$((boot_seconds * 1000))" > "$CYCLE_DIR/start.json" 2> "$CYCLE_DIR/start.stderr" &
     launcher=$!
     wait "$launcher" || acquisition_rc=$?
+    # timeout exits 126/127 when it cannot run the CLI: never a host-GPU verdict.
+    if (( acquisition_rc == 126 || acquisition_rc == 127 )); then touch "$CYCLE_DIR/harness-error"; fi
     if (( acquisition_rc == 0 )); then
       acquisition=$(acquired_device "$CYCLE_DIR/start.json")
       IFS=$'\t' read -r SERIAL SESSION_UUID <<< "$acquisition"

@@ -93,3 +93,51 @@ setup() {
   real_line=$(grep -n 'export REAL_EMULATOR=' "$script" | head -1 | cut -d: -f1)
   [ "$real_line" -lt "$path_line" ]
 }
+@test "global AutoMobile install uses an absolute path and verifies the bin link" {
+  # Run 38897261151: `bun add -g .` installed a nameless "@" package without
+  # the auto-mobile bin, so every automobile cell failed before booting.
+  action="$BATS_TEST_DIRNAME/../../.github/actions/setup-auto-mobile-npm-package/action.yml"
+  yq -r '.runs.steps[] | select(.name=="Globally Install AutoMobile") | .run' "$action" > "$BATS_TEST_TMPDIR/install.sh"
+  mkdir -p "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/global" "$BATS_TEST_TMPDIR/pkg"
+  export CALLS="$BATS_TEST_TMPDIR/calls" GLOBAL_BIN="$BATS_TEST_TMPDIR/global"
+  printf '#!/usr/bin/env bash\nif [[ "$1 $2" == "pm bin" ]]; then echo "$GLOBAL_BIN"; else printf "%%s\\n" "$*" >> "$CALLS"; fi\n' > "$BATS_TEST_TMPDIR/bin/bun"
+  chmod +x "$BATS_TEST_TMPDIR/bin/bun"
+  cd "$BATS_TEST_TMPDIR/pkg"
+  run env RUNNER_OS=Linux PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -e "$BATS_TEST_TMPDIR/install.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"auto-mobile bin missing"* ]]
+  [ "$(cat "$CALLS")" = "add -g $PWD" ]
+  printf '#!/bin/sh\n' > "$GLOBAL_BIN/auto-mobile"; chmod +x "$GLOBAL_BIN/auto-mobile"
+  run env RUNNER_OS=Linux PATH="$BATS_TEST_TMPDIR/bin:$PATH" bash -e "$BATS_TEST_TMPDIR/install.sh"
+  [ "$status" -eq 0 ]
+}
+@test "automobile cell without the CLI is a harness error before SDK setup or host exit" {
+  repo="$BATS_TEST_DIRNAME/../.."
+  fake="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$fake" "$BATS_TEST_TMPDIR/sdk/emulator"
+  # Restricted PATH: real auto-mobile installs on the host must not leak in.
+  for tool in bash jq git date mktemp dirname cat mkdir touch cp rm uname printf env; do
+    real=$(command -v "$tool") && [ -x "$real" ] && ln -sf "$real" "$fake/$tool"
+  done
+  export CALLS="$BATS_TEST_TMPDIR/calls"
+  for cmd in sdkmanager avdmanager sudo lscpu free lspci; do
+    printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "${0##*/}" "$*" >> "$CALLS"\n' > "$fake/$cmd"
+  done
+  printf '#!/usr/bin/env bash\necho "Android emulator version test"\n' > "$BATS_TEST_TMPDIR/sdk/emulator/emulator"
+  chmod +x "$fake"/* "$BATS_TEST_TMPDIR/sdk/emulator/emulator"
+  touch "$BATS_TEST_TMPDIR/kvm"
+  cell="$BATS_TEST_TMPDIR/cell"
+  # host proves the preflight runs before the no-/dev/dri unexercised exit.
+  for gpu in host swangle; do
+    rm -rf "$cell"; : > "$CALLS"
+    cd "$repo"
+    run env PATH="$fake" RUNNER_TEMP="$BATS_TEST_TMPDIR" CELL_DIR="$cell" GPU="$gpu" \
+      GPU_ARGS="[\"-gpu\",\"$gpu\"]" WORKLOAD=automobile CELL_STARTED_AT=1 CELL_BUDGET_SECONDS=999999999 \
+      ANDROID_HOME="$BATS_TEST_TMPDIR/sdk" KVM_DEVICE="$BATS_TEST_TMPDIR/kvm" \
+      bash scripts/ci/linux-qualification/emulator-cell.sh --budgeted
+    [ "$status" -eq 1 ]
+    [ "$(jq -r .outcome "$cell/result.json")" = harness-error ]
+    grep -qF 'auto-mobile CLI not found on PATH' "$cell/harness-error.txt"
+    ! grep -qE '^(sdkmanager|avdmanager)' "$CALLS"
+  done
+}

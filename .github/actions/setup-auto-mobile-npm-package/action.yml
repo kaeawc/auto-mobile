@@ -43,5 +43,9 @@ runs:
         if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
           npm install -g .
         else
-          bun add -g .
+          # Bun 1.3.14 resolves `bun add -g .` to a nameless "@" package with
+          # no bin link (Linux Qualification run 38897261151: auto-mobile not
+          # found); an absolute path installs @kaeawc/auto-mobile and its bin.
+          bun add -g "$PWD"
+          test -x "$(bun pm bin -g)/auto-mobile" || { echo "auto-mobile bin missing from $(bun pm bin -g)" >&2; exit 1; }
         fi

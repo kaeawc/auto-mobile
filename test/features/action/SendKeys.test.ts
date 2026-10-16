@@ -2267,8 +2267,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
     expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
     expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual([
-      trackedInputTextCommand("shell input text '50%'"),
-      trackedInputTextCommand("shell input text 's%s1'"),
+      trackedInputTextCommand("shell input text '50%'", 31),
+      trackedInputTextCommand("shell input text 's%s1'", 31),
     ]);
   });
 
@@ -2889,7 +2889,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       "shell settings --user 10 delete secure selected_input_method_subtype",
     );
     expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
-    expect(commands).toContain(trackedInputTextCommand("shell input text 'Abc'"));
+    expect(commands).toContain(trackedInputTextCommand("shell input text 'Abc'", 34));
     // The case read-back ran once: one warning, from one bounded series of settled re-reads.
     expect(result.warning?.match(/changed the letter case/g)).toHaveLength(1);
     expect(result.warning).toContain('eventAll typed "Abc"');
@@ -5631,7 +5631,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
       ).toMatchObject({ success: true });
       expect(keyCommands(h.adb)).toEqual([
-        trackedInputTextCommand("shell input text 'Ab%scD%sef'"),
+        trackedInputTextCommand("shell input text 'Ab%scD%sef'", 34),
       ]);
     });
 

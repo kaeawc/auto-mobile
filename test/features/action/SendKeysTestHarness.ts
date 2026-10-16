@@ -44,9 +44,9 @@ export type TextDelivery =
   | { kind: "keyevent" | "inputText"; text: string };
 
 /** Expected PID wrapper; keep argv assertions explicit about both Android implementations. */
-export function trackedInputTextCommand(command: string): string {
+export function trackedInputTextCommand(command: string, apiLevel: number | null = null): string {
   const input = command.slice("shell ".length);
-  return `shell if [ "$(getprop ro.build.version.sdk)" -ge 31 ]; then echo $$; exec cmd ${input}; else echo $$; exec ${input}; fi`;
+  return `shell echo $$; exec ${apiLevel !== null && apiLevel >= 31 ? "cmd " : ""}${input}`;
 }
 
 /**
@@ -104,15 +104,10 @@ export function decodeAndroidInputTextArgument(argument: string): string {
 
 /** The text a `shell input text ...` adb command types on the device, or undefined. */
 export function decodeInputTextCommand(command: string): string | undefined {
-  const modernPrefix =
-    'shell if [ "$(getprop ro.build.version.sdk)" -ge 31 ]; then echo $$; exec cmd ';
-  if (command.startsWith(modernPrefix)) {
-    const end = command.indexOf("; else echo $$; exec ", modernPrefix.length);
-    const input = command.slice(modernPrefix.length, end);
-    if (command !== trackedInputTextCommand(`shell ${input}`)) {
-      throw new Error(`unexpected tracked input wrapper: ${command}`);
-    }
-    command = `shell ${input}`;
+  const prefix = "shell echo $$; exec ";
+  if (command.startsWith(prefix)) {
+    const input = command.slice(prefix.length);
+    command = `shell ${input.startsWith("cmd ") ? input.slice("cmd ".length) : input}`;
   }
   if (!command.startsWith("shell input text ")) {
     return undefined;

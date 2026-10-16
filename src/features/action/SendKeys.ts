@@ -667,7 +667,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
-  private androidKeyCombinationSupported: Promise<boolean> | undefined;
+  private androidApiLevel: Promise<number | null> | undefined;
   private androidCaretUnsafe = false;
   /** Foreground user pinned for one IME span; set and cleared under the device IME lock. */
   private imeUserId: number | undefined;
@@ -3055,7 +3055,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     // The process may have typed part of the run before failing, so any failure is partial.
     return this.executeKeyEventPlanSafely(
-      { commands: [buildAndroidInputTextCommand(run.join(""))] },
+      { commands: [buildAndroidInputTextCommand(run.join(""))], textLength: run.join("").length },
       true,
       signal,
     );
@@ -3385,14 +3385,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async supportsAndroidKeyCombination(signal?: AbortSignal): Promise<boolean> {
-    this.androidKeyCombinationSupported ??= readAndroidDeviceApiLevel(this.adb, 1000, this.timer)
-      .then((apiLevel) => apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL)
-      .catch((error) => {
+    const apiLevel = await this.getAndroidApiLevel(signal);
+    return apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+  }
+
+  private async getAndroidApiLevel(signal?: AbortSignal): Promise<number | null> {
+    this.androidApiLevel ??= readAndroidDeviceApiLevel(this.adb, 1000, this.timer).catch(
+      (error) => {
         // Unexpected probe rejection must allow the next request to retry.
-        this.androidKeyCombinationSupported = undefined;
+        this.androidApiLevel = undefined;
         throw toActionableError(error, "Failed to read Android key-combination capability");
-      });
-    return awaitWhileRequestIsLive(this.androidKeyCombinationSupported, signal);
+      },
+    );
+    return awaitWhileRequestIsLive(this.androidApiLevel, signal);
   }
 
   private async executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {
@@ -3401,6 +3406,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (command.startsWith("shell input text ")) {
         await executeAndroidInputText(this.adb, this.timer, command, {
           signal,
+          apiLevel: await this.getAndroidApiLevel(signal),
+          textLength: plan.textLength ?? 1,
           ...(this.typingPasswordField ? { logLabel: "shell input <password key event>" } : {}),
         });
       } else if (this.typingPasswordField && command.startsWith("shell ")) {

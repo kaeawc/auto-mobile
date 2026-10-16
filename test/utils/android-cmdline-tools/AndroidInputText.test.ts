@@ -1,7 +1,8 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
-  INPUT_TEXT_SETTLEMENT_MS,
+  INPUT_TEXT_SETTLEMENT_BASE_MS,
+  INPUT_TEXT_SETTLEMENT_PER_CHAR_MS,
 } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
 import { buildAndroidInputTextCommand } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { logger } from "../../../src/utils/logger";
@@ -16,12 +17,14 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 
 describe("tracked Android input text", () => {
+  const settlementMs = INPUT_TEXT_SETTLEMENT_BASE_MS + 5 * INPUT_TEXT_SETTLEMENT_PER_CHAR_MS;
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   afterEach(() => warn.mockClear());
   afterAll(() => warn.mockRestore());
 
-  function start(chunks?: string[]) {
+  function start(chunks?: string[], apiLevel: number | null = 30, textLength = 5) {
     const adb = new FakeGuestInputAdb();
+    adb.setAndroidApiLevel(apiLevel);
     if (chunks) {
       adb.stdoutChunks = chunks;
     }
@@ -30,6 +33,9 @@ describe("tracked Android input text", () => {
     const error = new Error("original cancellation");
     let settled = false;
     const result = executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("a b'$"), {
+      apiLevel,
+      textLength,
+      noRetry: false,
       signal: controller.signal,
       logLabel: "shell input <password key event>",
     });
@@ -49,6 +55,111 @@ describe("tracked Android input text", () => {
     };
     return { adb, timer, controller, error, result, outcome, abort, settled: () => settled };
   }
+
+  test.each([31, 34, null])(
+    "API %s waits for natural exit without killing the binder client",
+    async (apiLevel) => {
+      const h = start(undefined, apiLevel);
+      h.adb.setTypingDuration(h.timer, 150);
+      await h.adb.entered.promise;
+      h.abort();
+      await drainUntil(() => h.timer.getPendingSleepCount() > 0, {
+        description: "natural exit poll",
+      });
+      expect(h.adb.cleanupCalls.some(({ args }) => args[1].includes("kill "))).toBe(false);
+      expect(h.adb.isTyping()).toBe(true);
+      expect(h.settled()).toBe(false);
+      h.timer.advanceTime(75);
+      await drainUntil(() => h.timer.getPendingSleepCount() > 0, {
+        description: "second natural exit poll",
+      });
+      expect(h.settled()).toBe(false);
+      h.timer.advanceTime(75);
+      expect(await h.outcome).toBe(h.error);
+      expect(h.adb.isTyping()).toBe(false);
+    },
+  );
+
+  test.each(["throw", "timeout"])("pre-31 kill is retried after probe %s", async (failure) => {
+    const h = start();
+    h.adb.cleanupError =
+      failure === "timeout"
+        ? new AdbCommandTimeoutError("probe timeout")
+        : new Error("probe failed");
+    await h.adb.entered.promise;
+    h.abort();
+    await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "failed probe" });
+    h.timer.advanceTime(75);
+    await drainUntil(() => h.adb.cleanupCalls.length === 2, { description: "retry probe" });
+    expect(h.adb.cleanupCalls[1].args[1]).toContain("kill 4242");
+    await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "failed retry" });
+    h.adb.cleanupError = undefined;
+    h.timer.advanceTime(75);
+    await drainUntil(() => h.adb.cleanupCalls.length === 3, { description: "successful retry" });
+    expect(h.adb.cleanupCalls[2].args[1]).toContain("kill 4242");
+    await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "successful probe" });
+    h.adb.guest = "gone";
+    h.timer.advanceTime(75);
+    expect(await h.outcome).toBe(h.error);
+    expect(h.adb.cleanupCalls[3].args[1]).not.toContain("kill ");
+  });
+
+  test.each([
+    [1, 3004],
+    [1000, 7000],
+    [100000, 30000],
+  ])("length %s gets a %sms settlement deadline", async (length, cap) => {
+    const h = start(undefined, 34, length);
+    await h.adb.entered.promise;
+    h.abort();
+    await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "scaled deadline" });
+    expect(h.timer.getPendingTimeouts()).toContain(cap);
+    h.timer.advanceTime(cap - 1);
+    await drainMicrotasks(20);
+    expect(h.settled()).toBe(false);
+    h.timer.advanceTime(1);
+    expect(await h.outcome).toBe(h.error);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`after ${cap}ms`), expect.any(Error));
+  });
+
+  test("a probe rejecting after deadline is debug-logged and preserves cancellation", async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const h = start();
+    const probe = Promise.withResolvers<{ stdout: string; stderr: string }>();
+    h.adb.cleanupResult = probe.promise;
+    try {
+      await h.adb.entered.promise;
+      h.abort();
+      await drainUntil(() => h.adb.cleanupCalls.length > 0, { description: "pending probe" });
+      h.timer.advanceTime(settlementMs);
+      expect(await h.outcome).toBe(h.error);
+      const lateError = new Error("probe aborted");
+      probe.reject(lateError);
+      await drainUntil(() => debug.mock.calls.length > 0, { description: "late probe log" });
+      expect(debug).toHaveBeenCalledWith(
+        expect.stringContaining("after settlement deadline"),
+        lateError,
+      );
+      expect(h.adb.cleanupCalls).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("deadline expired"),
+        expect.any(Error),
+      );
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  test.each([30, 31, 34])("API %s selects its dispatch on the host", async (apiLevel) => {
+    const h = start(undefined, apiLevel);
+    await h.adb.entered.promise;
+    h.adb.host.resolve({ stdout: "", stderr: "" });
+    await h.result;
+    const quoted = buildAndroidInputTextCommand("a b'$").slice("shell ".length);
+    expect(h.adb.getExecutedArgv()).toEqual([
+      ["shell", `echo $$; exec ${apiLevel >= 31 ? "cmd " : ""}${quoted}`],
+    ]);
+  });
 
   test("guest outlives host abort and holds follow-up until it exits", async () => {
     const h = start();
@@ -89,7 +200,7 @@ describe("tracked Android input text", () => {
     await h.adb.entered.promise;
     h.abort();
     await drainUntil(() => h.timer.getPendingSleepCount() > 0, { description: "guest poll" });
-    h.timer.advanceTime(INPUT_TEXT_SETTLEMENT_MS - 1);
+    h.timer.advanceTime(settlementMs - 1);
     await drainMicrotasks(20);
     expect(h.settled()).toBe(false);
     h.timer.advanceTime(1);
@@ -144,9 +255,7 @@ describe("tracked Android input text", () => {
     expect(argv[1]).toContain("echo $$;");
     expect(argv[1]).toContain("a%sb");
     const quoted = buildAndroidInputTextCommand("a b'$").slice("shell ".length);
-    expect(argv[1]).toBe(
-      `if [ "$(getprop ro.build.version.sdk)" -ge 31 ]; then echo $$; exec cmd ${quoted}; else echo $$; exec ${quoted}; fi`,
-    );
+    expect(argv[1]).toBe(`echo $$; exec ${quoted}`);
     expect(h.adb.dispatchOptions[0].logLabel).toBe("shell input <password key event>");
     expect(h.adb.dispatchOptions[0].noRetry).toBe(true);
   });
@@ -161,7 +270,7 @@ describe("tracked Android input text", () => {
       // Failure without an aborted signal must also clean up.
       h.adb.host.reject(h.error);
       await drainUntil(() => h.adb.cleanupCalls.length > 0, { description: "guard" });
-      h.timer.advanceTime(INPUT_TEXT_SETTLEMENT_MS);
+      h.timer.advanceTime(settlementMs);
       expect(await h.outcome).toBe(h.error);
       expect(warn).toHaveBeenCalled();
     },
@@ -203,6 +312,8 @@ describe("tracked Android input text", () => {
         timer,
         buildAndroidInputTextCommand(secret),
         {
+          apiLevel: 34,
+          textLength: secret.length,
           logLabel: "shell input <password key event>",
         },
       ).then(
@@ -234,7 +345,10 @@ describe("tracked Android input text", () => {
     adb.setCommandStdoutChunks("echo $$", ["4242\n"]);
     adb.setCommandError("echo $$", error);
     expect(
-      await executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("abc")).then(
+      await executeAndroidInputText(adb, timer, buildAndroidInputTextCommand("abc"), {
+        apiLevel: 34,
+        textLength: 3,
+      }).then(
         () => undefined,
         (failure: unknown) => failure,
       ),

@@ -488,6 +488,7 @@ describe("Android eventAll caret and preceding input", () => {
     expectWellFormedInserts(h.inserted);
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
+      "shell getprop ro.build.version.sdk",
       trackedInputTextCommand("shell input text 'b%sc'"),
     ]);
   });

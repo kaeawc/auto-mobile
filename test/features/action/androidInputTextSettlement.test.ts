@@ -24,7 +24,8 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     const controller = new AbortController();
     const error = new Error("cancelled text");
     const state = new TextRequestState();
-    const plan = { commands: [buildAndroidInputTextCommand("abcd")] };
+    const plan = { commands: [buildAndroidInputTextCommand("abcd")], textLength: 4 };
+    adb.setTypingDuration(timer, 150);
     const input = new InputText(android, adb, undefined, timer);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
@@ -85,16 +86,20 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     expect(released).toBe(false);
     expect(adb.wasCommandExecuted("KEYCODE_ENTER")).toBe(false);
     expect(adb.cleanupCalls.length).toBeGreaterThan(0);
+    expect(adb.cleanupCalls.every(({ args }) => !args[1].includes("kill "))).toBe(true);
     await drainUntil(() => timer.getPendingSleepCount() > 0, { description: "guest settlement" });
+    expect(timer.getPendingTimeouts()).toContain(3016);
     timer.advanceTime(75);
     await drainMicrotasks(50);
     expect(released).toBe(false);
-    adb.guest = "gone";
     timer.advanceTime(75);
     expect(await outcome).toBe(error);
     await followUp;
     expect(released).toBe(true);
     expect(state.hasPending()).toBe(false);
     expect(adb.wasCommandExecuted("KEYCODE_ENTER")).toBe(true);
+    expect(adb.isTyping()).toBe(false);
+    expect(adb.getApiLevelCalls()).toHaveLength(1);
+    expect(adb.getExecutedCommands().some((command) => command.includes("getprop"))).toBe(false);
   },
 );

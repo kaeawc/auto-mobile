@@ -1,6 +1,7 @@
 import type { ExecResult } from "../../src/models";
 import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "./FakeAdbExecutor";
+import type { FakeTimer } from "./FakeTimer";
 
 /** A host that can exit while its guest input process is still alive. */
 export class FakeGuestInputAdb extends FakeAdbExecutor {
@@ -12,6 +13,26 @@ export class FakeGuestInputAdb extends FakeAdbExecutor {
   guest: "input" | "recycled" | "gone" = "input";
   cleanupError: Error | undefined;
   cleanupHangs = false;
+  cleanupResult: Promise<ExecResult> | undefined;
+  private apiLevel = 30;
+  private typingDeadline: { timer: FakeTimer; at: number } | undefined;
+  private clientKilled = false;
+
+  override setAndroidApiLevel(level: number | null): void {
+    super.setAndroidApiLevel(level);
+    this.apiLevel = level ?? 34;
+  }
+
+  setTypingDuration(timer: FakeTimer, durationMs: number): void {
+    this.typingDeadline = { timer, at: timer.now() + durationMs };
+  }
+
+  isTyping(): boolean {
+    return (
+      this.guest === "input" &&
+      (!this.typingDeadline || this.typingDeadline.timer.now() < this.typingDeadline.at)
+    );
+  }
 
   override async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     if (args.join(" ").includes("/proc/")) {
@@ -22,7 +43,17 @@ export class FakeGuestInputAdb extends FakeAdbExecutor {
       if (this.cleanupError) {
         throw this.cleanupError;
       }
-      return { stdout: this.guest === "input" ? "alive\n" : "", stderr: "" };
+      if (this.cleanupResult) {
+        return this.cleanupResult;
+      }
+      if (this.typingDeadline && args[1].includes("kill 4242")) {
+        this.clientKilled = true;
+        // API 31+ typing runs in system_server, independently of the binder client.
+        if (this.apiLevel < 31) {
+          this.guest = "gone";
+        }
+      }
+      return { stdout: this.isTyping() && !this.clientKilled ? "alive\n" : "", stderr: "" };
     }
     const result = await super.execute(args, options);
     if (args.join(" ").includes("input text ")) {

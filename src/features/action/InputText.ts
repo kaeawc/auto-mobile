@@ -143,7 +143,7 @@ function assertInputNotAborted(signal?: AbortSignal, result?: { retryable?: bool
 type KeyboardDismissalOutcome = Pick<SendTextResult, "keyboardDismissed" | "warnings">;
 
 export class InputText extends BaseVisualChange {
-  private androidInputKeyCombinationSupported: boolean | undefined;
+  private androidApiLevel: number | undefined;
   private targetFocuser: TextInputTargetFocuser;
 
   constructor(
@@ -977,9 +977,17 @@ export class InputText extends BaseVisualChange {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    const apiLevel = await this.getAndroidApiLevel(timeoutMs, signal);
+    return apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+  }
+
+  private async getAndroidApiLevel(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<number | null> {
     assertInputNotAborted(signal);
-    if (this.androidInputKeyCombinationSupported !== undefined) {
-      return this.androidInputKeyCombinationSupported;
+    if (this.androidApiLevel !== undefined) {
+      return this.androidApiLevel;
     }
 
     const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs, this.timer);
@@ -990,10 +998,10 @@ export class InputText extends BaseVisualChange {
       // this instance — which now outlives a single request (the daemon caches
       // InputText per device). Answer conservatively but leave the cache empty
       // so the next call re-probes.
-      return false;
+      return null;
     }
-    this.androidInputKeyCombinationSupported = apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
-    return this.androidInputKeyCombinationSupported;
+    this.androidApiLevel = apiLevel;
+    return apiLevel;
   }
 
   private async withTextDispatch<T>(command: () => Promise<T>): Promise<T> {
@@ -1015,6 +1023,9 @@ export class InputText extends BaseVisualChange {
   ): Promise<void> {
     for (const [index, command] of plan.commands.entries()) {
       assertInputNotAborted(signal);
+      const apiLevel = command.startsWith("shell input text ")
+        ? await this.getAndroidApiLevel(timeoutMs, signal)
+        : null;
       await this.withTextDispatch(() => {
         const options = {
           timeoutMs,
@@ -1024,7 +1035,11 @@ export class InputText extends BaseVisualChange {
           waitForProcessSettlementAfterAbort: true,
         };
         return command.startsWith("shell input text ")
-          ? executeAndroidInputText(this.adb, this.timer, command, options)
+          ? executeAndroidInputText(this.adb, this.timer, command, {
+              ...options,
+              apiLevel,
+              textLength: plan.textLength ?? 1,
+            })
           : this.adb.execute(command.split(" "), options);
       });
       assertInputNotAborted(signal);

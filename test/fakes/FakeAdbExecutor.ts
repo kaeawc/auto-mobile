@@ -348,15 +348,6 @@ export class FakeAdbExecutor implements AdbExecutor {
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
-    if (options.onStdout) {
-      for (const [pattern, chunks] of this.commandStdoutChunks) {
-        if (args.join(" ").includes(pattern)) {
-          for (const chunk of chunks) {
-            options.onStdout(chunk);
-          }
-        }
-      }
-    }
     return this.executeCommand(
       args.join(" "),
       options.timeoutMs,
@@ -364,6 +355,7 @@ export class FakeAdbExecutor implements AdbExecutor {
       options.noRetry,
       options.signal,
       options.waitForProcessSettlementAfterAbort,
+      options.onStdout,
     );
   }
 
@@ -374,6 +366,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
+    onStdout?: (chunk: string) => void,
   ): Promise<ExecResult> {
     this.executedCommands.push(command);
     this.commandCalls.push({
@@ -393,6 +386,19 @@ export class FakeAdbExecutor implements AdbExecutor {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
+    const response = this.resolveCommandResponse(command);
+    const streamed = [...this.commandStdoutChunks].filter(([pattern]) => command.includes(pattern));
+    if (streamed.length > 0) {
+      for (const [, chunks] of streamed) {
+        for (const chunk of chunks) {
+          onStdout?.(chunk);
+        }
+      }
+    } else {
+      onStdout?.(response.stdout);
+    }
+
+    // Emit partial output before either successful completion or host failure.
     // Check for per-command errors based on pattern matching
     for (const [pattern, error] of this.commandErrors.entries()) {
       if (command.includes(pattern)) {
@@ -404,8 +410,6 @@ export class FakeAdbExecutor implements AdbExecutor {
     if (this.defaultError) {
       throw this.defaultError;
     }
-
-    const response = this.resolveCommandResponse(command);
 
     // Post-command abort hooks: this read has "completed"; trip any registered
     // controller so the NEXT read observes cancellation.

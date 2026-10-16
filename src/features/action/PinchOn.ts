@@ -58,6 +58,7 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 export const PINCH_DURATION_MIN_MS = 1;
 export const PINCH_DURATION_MAX_MS = 10000;
@@ -198,11 +199,19 @@ export class PinchOn extends BaseVisualChange {
     };
   }
 
+  async execute(options: PinchOnOptions, call?: ActionCall): Promise<PinchOnResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: PinchOnOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<PinchOnResult>;
+  async execute(
+    options: PinchOnOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<PinchOnResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     this.validateDuration(options.duration);
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;

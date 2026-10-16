@@ -58,7 +58,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
           stopAfterIosGestureFailure: true,
           ...(options?.lockScreen ? { iosLockScreenSwipe: true } : {}),
           iosGestureTimeoutMs: () => deadline - this.timer.now(),
-        }).execute({ direction: "up", autoTarget: false }, undefined, options?.signal);
+        }).execute({ direction: "up", autoTarget: false }, { signal: options?.signal });
       },
     };
   }

@@ -15,6 +15,7 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTapAt } from "../helpers/tapAtCoordinate";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 const devices = [
   { name: "Android test device", platform: "android", deviceId: "emulator-5554" },
@@ -130,10 +131,11 @@ describe("registered interaction handler cancellation", () => {
     const sentinel = new Error("fake command stopped");
     const execute = async (
       _options: unknown,
-      _progress: unknown,
+      progressOrCall: unknown,
       signal?: AbortSignal,
     ): Promise<never> => {
-      received = signal;
+      // Migrated actions receive an ActionCall; tap actions still take positional (progress, signal).
+      received = signal ?? (progressOrCall as ActionCall | undefined)?.signal;
       throw sentinel;
     };
     if (name === "tapOn") {

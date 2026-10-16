@@ -1707,8 +1707,7 @@ export async function swipeOnHandler(
       returnSpeed: args.returnSpeed,
       layer: args.layer,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const response = createStructuredToolResponse({
@@ -1773,8 +1772,7 @@ export async function pinchOnHandler(
       autoTarget: args.autoTarget,
       layer: args.layer,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const response = createJSONToolResponse({
@@ -2480,8 +2478,7 @@ export async function dragAndDropHandler(
       dragDurationMs: args.dragDurationMs,
       holdDurationMs: args.holdDurationMs,
     },
-    progress,
-    signal,
+    { progress, signal },
   );
 
   const message = result.success

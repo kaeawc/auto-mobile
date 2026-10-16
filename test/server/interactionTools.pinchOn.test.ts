@@ -8,6 +8,7 @@ import {
 import type { PinchOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice } from "../../src/models";
 import type { PinchOnResult } from "../../src/models";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 // Mirrors interactionTools.swipeOn.test.ts for the pinchOn message fix (#6056).
 // Before the fix, pinchOnHandler hardcoded `Pinched ${direction}` regardless of
@@ -114,8 +115,8 @@ describe("pinchOnHandler (registered handler wiring)", () => {
     const signal = new AbortController().signal;
     let forwarded: AbortSignal | undefined;
     setPinchOnFactory(() => ({
-      execute: async (_options, _progress, actionSignal) => {
-        forwarded = actionSignal;
+      execute: async (_options, call) => {
+        forwarded = (call as ActionCall | undefined)?.signal;
         return fakeResult({ success: true });
       },
     }));

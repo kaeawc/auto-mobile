@@ -55,6 +55,7 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 // Minimums also match the documented defaults (press 600, drag 300, hold 100 ms)
 // shared by default-display, explicit-display CtrlProxy/adb (drag only), and iOS paths.
@@ -290,12 +291,21 @@ export class DragAndDrop extends BaseVisualChange {
     return undefined;
   }
 
+  async execute(options: DragAndDropOptions, call?: ActionCall): Promise<DragAndDropResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: DragAndDropOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<DragAndDropResult>;
+  async execute(
+    options: DragAndDropOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<DragAndDropResult> {
-    signal = this.device.platform === "ios" ? combineWithAmbientAbort(signal) : signal;
+    const { progress, signal: callSignal } = resolveActionCall(progressOrCall, signalArg);
+    const signal =
+      this.device.platform === "ios" ? combineWithAmbientAbort(callSignal) : callSignal;
     const targeted = await this.executeExplicitDisplay(options, signal);
     if (targeted) {
       return targeted;

@@ -1,3 +1,4 @@
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { ProgressCallback } from "./BaseVisualChange";
 
 /**
@@ -8,6 +9,20 @@ import type { ProgressCallback } from "./BaseVisualChange";
 export interface ActionCall {
   signal?: AbortSignal;
   progress?: ProgressCallback;
+  /** Performance tracker for actions that thread one explicitly (scroll search). */
+  perf?: PerformanceTracker;
+}
+
+/** Normalizes the `ActionCall` form and the deprecated positional `(progress, perf, signal)` form. */
+export function resolveActionCallWithPerf(
+  progressOrCall?: ProgressCallback | ActionCall,
+  perf?: PerformanceTracker,
+  signal?: AbortSignal,
+): ActionCall {
+  if (typeof progressOrCall === "object" && progressOrCall !== null) {
+    return progressOrCall;
+  }
+  return { progress: progressOrCall, perf, signal };
 }
 
 /** `ActionCall` for rotation, which also carries the orientation lock and target display. */

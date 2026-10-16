@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { resolveActionCall, resolveRotateCall } from "../../../src/features/action/ActionCall";
+import {
+  resolveActionCall,
+  resolveActionCallWithPerf,
+  resolveRotateCall,
+} from "../../../src/features/action/ActionCall";
+
+import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 describe("resolveActionCall", () => {
   test("returns the call context unchanged", () => {
@@ -30,5 +36,19 @@ describe("resolveRotateCall", () => {
   test("returns the rotate call context unchanged", () => {
     const call = { lockOrientation: false, display: 2 };
     expect(resolveRotateCall(call)).toBe(call);
+  });
+});
+
+describe("resolveActionCallWithPerf", () => {
+  test("maps the deprecated positional progress, perf and signal", () => {
+    const progress = async () => {};
+    const perf = new NoOpPerformanceTracker();
+    const signal = new AbortController().signal;
+    expect(resolveActionCallWithPerf(progress, perf, signal)).toEqual({ progress, perf, signal });
+  });
+
+  test("returns the call context unchanged, carrying its own perf", () => {
+    const call = { perf: new NoOpPerformanceTracker() };
+    expect(resolveActionCallWithPerf(call)).toBe(call);
   });
 });

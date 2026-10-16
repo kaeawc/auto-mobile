@@ -46,12 +46,10 @@ describe("DeviceService Interface Compliance", () => {
 
       AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+      });
 
       // The assignment is the interface-conformance check (tsc fails the build if the class stops
       // implementing DeviceService) — no runtime `typeof method === "function"` echo of what the
@@ -102,12 +100,10 @@ describe("DeviceService Interface Compliance", () => {
 
       AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(),
+        timer: fakeTimer,
+      });
 
       // Assignment proves AndroidDeviceService conformance at compile time; the assertion exercises
       // the interface reference's base behavior.
@@ -174,12 +170,10 @@ describe("DeviceService Interface Compliance", () => {
 
       AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       expect(client.isConnected()).toBe(false);
       void client.close();
@@ -200,12 +194,10 @@ describe("DeviceService Interface Compliance", () => {
 
       AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+        webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       expect(connected).toBe(false);

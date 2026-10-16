@@ -99,8 +99,10 @@ async function connectedClient(deviceId: string, adb = new FakeAdbExecutor()) {
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId, name: "Android", platform: "android" },
     adb,
-    sockets.factory,
-    timer,
+    {
+      webSocketFactory: sockets.factory,
+      timer,
+    },
   );
   const stream = spyOn(client, "pushHierarchyToObservationStream");
   const backoff = spyOn(client, "startScreenshotBackoff").mockImplementation(() => {});

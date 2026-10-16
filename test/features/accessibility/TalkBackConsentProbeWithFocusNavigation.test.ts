@@ -52,15 +52,13 @@ interface SentRequest {
 async function createHarness() {
   const timer = new FakeTimer();
   let socket: CapturingWebSocket | null = null;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    new FakeAdbExecutor(),
-    (url: string) => {
+  const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+    webSocketFactory: (url: string) => {
       socket = new CapturingWebSocket(url, "none", 0, timer);
       return socket;
     },
     timer,
-  );
+  });
   const server = new DeviceDataStreamSocketServer("/fake/talkback-probe.sock", timer, {
     authorize: () => {},
   });

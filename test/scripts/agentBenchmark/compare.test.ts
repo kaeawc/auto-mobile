@@ -69,8 +69,29 @@ describe("compareRun verdict", () => {
     expect(result.checks.find((check) => check.name === "used the device")).toEqual({
       name: "used the device",
       passed: false,
-      detail: "no auto-mobile tool calls",
+      detail: "no successful auto-mobile tool calls",
     });
+    const onlyErrors = new TranscriptBuilder()
+      .init()
+      .mcp("tapOn", "invalid arguments", { isError: true })
+      .result({ finalText: "COUNT: 3" });
+    const failed = compareRun(audit(onlyErrors), OK_OUTCOME, {
+      answerIncludes: ["COUNT: 3"],
+      screenIncludes: [],
+    });
+    expect(failed.verdict).toBe("failed");
+    expect(failed.checks.find((check) => check.name === "used the device")?.passed).toBe(false);
+    // A call that never returned a result did not finish either.
+    const unfinished = new TranscriptBuilder()
+      .init()
+      .mcp("tapOn", "ok", { noResult: true })
+      .result({ finalText: "COUNT: 3" });
+    expect(
+      compareRun(audit(unfinished), OK_OUTCOME, {
+        answerIncludes: ["COUNT: 3"],
+        screenIncludes: [],
+      }).verdict,
+    ).toBe("failed");
   });
 
   test("a wrong final answer fails without making the run incomplete", () => {

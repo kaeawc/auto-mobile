@@ -1,10 +1,11 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -18,7 +19,7 @@ let socketCounter = 0;
  * on abort, so without a hold the next queued call interleaves with the still-writing tool.
  */
 function createServer(timer: FakeTimer): UnixSocketServer {
-  return new UnixSocketServer(
+  return createTestUnixSocketServer(
     join(tmpdir(), `cancel-dispatch-hold-${++socketCounter}.sock`),
     "http://localhost:0/mcp",
     {

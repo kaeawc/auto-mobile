@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
@@ -9,7 +10,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -120,7 +121,7 @@ describe("restoring a derived label session through the owned-sessions selector"
     await asPlanAllocation(manager, BASE, [labelSession], () =>
       pool.assignMultipleDevices([labelSession], 1_000, "android"),
     );
-    socketServer = new UnixSocketServer(
+    socketServer = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
       "http://localhost:0/mcp",
       { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,

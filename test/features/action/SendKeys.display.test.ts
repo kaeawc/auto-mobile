@@ -12,7 +12,12 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
+import {
+  android,
+  createSendKeysHarness,
+  decodeInputTextCommand,
+  focused,
+} from "./SendKeysTestHarness";
 
 const multiDisplay: BootedDevice = {
   ...android,
@@ -279,7 +284,11 @@ describe("sendKeys Android focus read routing", () => {
           expect(
             h.adb
               .getExecutedCommands()
-              .some((command) => /^shell input (keyevent|text) /.test(command)),
+              .some(
+                (command) =>
+                  command.startsWith("shell input keyevent ") ||
+                  decodeInputTextCommand(command) !== undefined,
+              ),
           ).toBe(true);
         }
       });

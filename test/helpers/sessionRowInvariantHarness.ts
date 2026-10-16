@@ -153,8 +153,9 @@ class MemoryJournal implements TerminalReleaseJournal {
     return [...this.left];
   }
 
-  record(intent: TerminalReleaseIntent): void {
+  record(intent: TerminalReleaseIntent): "volatile" {
     this.intents.set(intent.sessionId, intent);
+    return "volatile";
   }
 
   resolve(sessionId: string, reason?: string): void {

@@ -69,6 +69,8 @@ test/daemon/daemonTransportError.test.ts
 test/daemon/databaseHealthExit.test.ts
 test/daemon/derivedLabelLivenessClaim.test.ts
 test/daemon/desktopWireContract.test.ts
+test/daemon/deviceBinding.test.ts
+test/daemon/deviceBindingReaders.test.ts
 test/daemon/deviceControlTransportFailure.test.ts
 test/daemon/deviceDataStreamSocketServerCharacterization.test.ts
 test/daemon/deviceDisconnectHandler.test.ts
@@ -145,6 +147,7 @@ test/daemon/labelLeaseSharedRule.test.ts
 test/daemon/labelOfEndedBaseRefused.test.ts
 test/daemon/lapsedOwnerShieldedByDeviceRestartHandoff.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
+test/daemon/legacyLifecycleView.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessClaimDecision.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
@@ -222,6 +225,7 @@ test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
 test/daemon/proxy/HeartbeatKeeper.test.ts
+test/daemon/proxy/SessionBinding.test.ts
 test/daemon/proxy/proxySessionState.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
@@ -235,6 +239,8 @@ test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
 test/daemon/rehydrationIdleOrigin.test.ts
 test/daemon/rehydrationReservationAutolock.test.ts
+test/daemon/releaseCallerOrderingRecovery.test.ts
+test/daemon/releaseCallerOrderingUnknownSession.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
@@ -254,6 +260,11 @@ test/daemon/sessionInfoWallClock.test.ts
 test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.displayPin.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
+test/daemon/sessionSlotShadowProbe.test.ts
+test/daemon/sessionSlots.agreement.test.ts
+test/daemon/sessionSlots.store.test.ts
+test/daemon/sessionSlots.test.ts
+test/daemon/sessionSlots.windows.test.ts
 test/daemon/sessionSuspectGrace.test.ts
 test/daemon/shuttingDownFrameTypedFields.test.ts
 test/daemon/socketPaths.test.ts
@@ -343,6 +354,7 @@ test/fakes/FakeAdbClient.test.ts
 test/fakes/FakeAdbClientFactory.test.ts
 test/fakes/FakeCtrlProxy.test.ts
 test/fakes/FakeFailureRecorder.test.ts
+test/fakes/FakeGuestInputAdb.test.ts
 test/fakes/FakeIOSCtrlProxy.test.ts
 test/fakes/FakeImageBackend.test.ts
 test/fakes/FakeIosVoiceOverDetector.test.ts
@@ -350,6 +362,7 @@ test/fakes/FakeNavigationGraphManager.test.ts
 test/fakes/FakeSlotRegistry.test.ts
 test/fakes/FakeSystemConfigurationAdapter.test.ts
 test/fakes/FakeTimer.test.ts
+test/fakes/adbStdout.test.ts
 test/features/accessibility/ContrastCapturedScreen.test.ts
 test/features/accessibility/ContrastDarkSettingsSearch.test.ts
 test/features/accessibility/ContrastPixelReview.test.ts
@@ -413,6 +426,7 @@ test/features/action/TapOnElement.toolDispatch.test.ts
 test/features/action/TapOnElementIosScreenSize.test.ts
 test/features/action/Telephony.test.ts
 test/features/action/androidImeLock.test.ts
+test/features/action/androidInputTextSettlement.test.ts
 test/features/action/androidPreTapStablePolicy.property.test.ts
 test/features/action/androidPreTapStablePolicy.test.ts
 test/features/action/appIdShellInjection.test.ts
@@ -440,6 +454,8 @@ test/features/action/prototypeTapUnderSystemBars.test.ts
 test/features/action/refreshAndroidViewHierarchy.test.ts
 test/features/action/resolveAutoInputMode.property.test.ts
 test/features/action/resolveAutoInputMode.test.ts
+test/features/action/sendkeys/EventOnlyTyper.test.ts
+test/features/action/sendkeys/ImeSpan.test.ts
 test/features/action/swipeon/AutoTargetSelectorUnit.test.ts
 test/features/action/swipeon/OverlayDetector.characterization.test.ts
 test/features/action/swipeon/OverlayDetector.property.test.ts
@@ -517,6 +533,8 @@ test/features/navigation/navigationInternalNoDiff.test.ts
 test/features/networkFilter/NetworkFilterAppProvider.test.ts
 test/features/networkFilter/NetworkFilterHostSeams.test.ts
 test/features/networkFilter/NetworkFilterInstaller.test.ts
+test/features/observe/ActiveWindowAttribution.test.ts
+test/features/observe/AndroidCtrlProxyClientSettingsSendCommand.test.ts
 test/features/observe/AndroidMultiDisplayActivity.test.ts
 test/features/observe/ConditionPredicates.test.ts
 test/features/observe/ConditionResolver.test.ts
@@ -823,6 +841,7 @@ test/helpers/abortableWaitFor.test.ts
 test/helpers/adbIntegrationCommandRunner.test.ts
 test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
+test/helpers/createTestUnixSocketServer.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/inMemoryDaemonWire.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
@@ -830,6 +849,7 @@ test/helpers/isolateEmptyToolRegistry.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts
+test/helpers/whepChromeLaunchArgs.test.ts
 test/helpers/whepSubscriptionRecovery.test.ts
 test/lint/accumulatorForEachRule.test.ts
 test/lint/additionalRules.test.ts
@@ -838,6 +858,8 @@ test/lint/archiveExtractionBoundary.test.ts
 test/lint/auxSocketDirBoundary.test.ts
 test/lint/bareExpectRule.test.ts
 test/lint/daemonLauncherBoundary.test.ts
+test/lint/deviceBindingSingleReader.test.ts
+test/lint/deviceBindingSingleWriter.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
 test/lint/errorHandlingConvention.test.ts

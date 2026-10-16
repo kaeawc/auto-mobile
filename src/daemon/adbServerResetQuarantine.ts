@@ -1,3 +1,4 @@
+import { unbindDevice, holderOf, isBusy } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type DeviceInfo } from "../models";
 import type { Session, SessionManager } from "./sessionManager";
@@ -98,7 +99,7 @@ export class AdbServerResetQuarantine {
     }
     const sessionId =
       device.adbServerResetSessionId ??
-      device.sessionId ??
+      holderOf(device) ??
       this.pool.getSessionManager().getSessionForDevice(device.id);
     const session = sessionId ? this.pool.getSessionManager().getSession(sessionId) : null;
     if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
@@ -132,14 +133,14 @@ export class AdbServerResetQuarantine {
         ) {
           continue;
         }
-        const sessionId = device.sessionId;
-        if (device.sessionId) {
-          const session = this.pool.getSessionManager().getSession(device.sessionId);
+        const sessionId = holderOf(device);
+        if (holderOf(device)) {
+          const session = this.pool.getSessionManager().getSession(holderOf(device)!);
           if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
-            this.pool.getRecoveryCoordinator().finalizeRecoveryRecord(device.sessionId);
+            this.pool.getRecoveryCoordinator().finalizeRecoveryRecord(holderOf(device)!);
             continue;
           }
-          device.adbServerResetSessionId = device.sessionId;
+          device.adbServerResetSessionId = holderOf(device)!;
         }
         device.adbServerResetAutolockSessionId = device.autolockSessionId;
         const trackedProcess = this.pool.getStartedDeviceProcesses().get(device.id);
@@ -147,8 +148,7 @@ export class AdbServerResetQuarantine {
           this.pool.getAdbServerResetTrackedProcesses().set(device, trackedProcess);
         }
         this.reserveAdbServerResetRecovery(device);
-        device.sessionId = null;
-        device.status = "idle";
+        unbindDevice(device);
         this.pool.noteDeviceStateChanged?.(device);
         await this.pool.removeDevice(device.id, false, device);
         detached.push(device);
@@ -174,7 +174,7 @@ export class AdbServerResetQuarantine {
     }
     try {
       for (const device of cohort) {
-        if (capturedTargets.some(({ sessionId }) => sessionId === device.sessionId)) {
+        if (capturedTargets.some(({ sessionId }) => sessionId === holderOf(device))) {
           device.adbServerResetIncidentId = await this.pool.recordEmulatorLossIncident(
             device.id,
             "adb-server-reset",
@@ -239,7 +239,7 @@ export class AdbServerResetQuarantine {
       if (device.adbServerResetIncidentId) {
         await this.pool.completeEmulatorLossRecovery(
           device.adbServerResetIncidentId,
-          device.sessionId && activeSessionIds.has(device.sessionId)
+          holderOf(device) && activeSessionIds.has(holderOf(device)!)
             ? "exhausted"
             : "not-attempted",
         );
@@ -279,13 +279,13 @@ export class AdbServerResetQuarantine {
       if (
         this.pool.getDevices().get(device.id) !== device ||
         !this.pool.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        !device.sessionId
+        !holderOf(device)
       ) {
         continue;
       }
-      const session = this.pool.getSessionManager().getSession(device.sessionId);
+      const session = this.pool.getSessionManager().getSession(holderOf(device)!);
       if (session?.assignedDevice === device.id && session.platform === "android") {
-        sessionTargets.set(device.sessionId, {
+        sessionTargets.set(holderOf(device)!, {
           deviceId: device.id,
           session,
           pooledDevice: device,
@@ -307,7 +307,7 @@ export class AdbServerResetQuarantine {
       if (
         this.pool.getDevices().get(device.id) !== device ||
         !this.pool.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        device.sessionId !== null ||
+        holderOf(device) !== null ||
         !this.pool.getStartedDeviceProcesses().has(device.id)
       ) {
         continue;
@@ -480,10 +480,10 @@ export class AdbServerResetQuarantine {
       ? this.pool.getDevices().get(assignedDeviceId)
       : undefined;
     return (
-      restoredDevice?.sessionId === sessionId &&
-      restoredDevice.status === "busy" &&
-      restoredDevice.platform === "android" &&
-      restoredDevice.avdName === device.avdName
+      holderOf(restoredDevice) === sessionId &&
+      isBusy(restoredDevice) &&
+      restoredDevice!.platform === "android" &&
+      restoredDevice!.avdName === device.avdName
     );
   }
 

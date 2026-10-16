@@ -1188,6 +1188,125 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     });
   });
 
+  test("a terminal release whose write is in flight when its own rewrite lands still releases the row", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    let released: Promise<unknown> | undefined;
+    let landTerminal!: () => void;
+    store.duringPlainUpsert = async () => {
+      store.park = new Promise<void>((resolve) => {
+        landTerminal = resolve;
+      });
+      released = manager.releaseSession(SESSION, "explicit-release");
+      await settleMicrotasks(100);
+    };
+    landReleaseWrite();
+    await settleMicrotasks();
+    expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
+    store.park = undefined;
+    landTerminal();
+    await released;
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+    expect(await store.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+  });
+
+  test.each(["first statement", "refusal retry"] as const)(
+    "a terminal release observes its own %s generation at statement settlement",
+    async (attempt) => {
+      manager.attachDaemonSessionId("daemon-1");
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const files = new FakeTerminalReleaseJournalFileSystem();
+      const journal = createDaemonTerminalReleaseJournal({
+        dataDir: "/data",
+        daemonSessionId: "daemon-1",
+        liveDaemonSessionIds: new Set(["daemon-1"]),
+        fileSystem: files,
+      });
+      manager.attachTerminalReleaseJournal(journal);
+      // Repair a peer startup sweep's expiry through the real activity persistence path.
+      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      const landed = Promise.withResolvers<number>();
+      const statement = Promise.withResolvers<number>();
+      const upsert = store.upsertActiveSession.bind(store);
+      store.refuseGuardedUpserts = attempt === "refusal retry" ? 1 : 0;
+      store.upsertActiveSession = (...args) => {
+        if (store.refuseGuardedUpserts > 0) {
+          return upsert(...args);
+        }
+        // Land the fake DB write, but expose its statement promise's settlement separately.
+        void upsert(...args).then(landed.resolve, statement.reject);
+        return statement.promise;
+      };
+      timer.advanceTime(1);
+      const activity = refresh();
+      const generation = await landed.promise;
+      const read = store.getSession.bind(store);
+      let classified = false;
+      store.afterRefusedRelease = () => {
+        store.getSession = (sessionId) => {
+          store.getSession = read;
+          // Settle alongside the read's clock conversion, before its refusal classifier runs.
+          // The retry wrapper's await must not leave the generation unrecorded in that gap.
+          void Promise.resolve().then(() => statement.resolve(generation));
+          classified = true;
+          return read(sessionId);
+        };
+      };
+      await manager.releaseSession(SESSION, "explicit-release");
+      await activity;
+
+      expect(classified).toBe(true);
+      expect(store.activityUpserts).toBe(attempt === "refusal retry" ? 2 : 1);
+      expect(await store.getSession(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+      });
+      expect(journal.loadUnconfirmed()).toEqual([]);
+      expect(manager.getSession(SESSION)).toBeNull();
+    },
+  );
+
+  test("another own generation advance during terminal resolution keeps the release owed", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const journal = createDaemonTerminalReleaseJournal({
+      dataDir: "/data",
+      daemonSessionId: "daemon-1",
+      liveDaemonSessionIds: new Set(["daemon-1"]),
+      fileSystem: files,
+    });
+    manager.attachTerminalReleaseJournal(journal);
+    // Model two already-issued own upserts landing before successive conditioned statements.
+    const row = (await store.getSession(SESSION))!;
+    let advances = 0;
+    const advanceOwnRow = () => {
+      advances++;
+      const generation = advances + 1;
+      store.seed({ ...row, stable_identity_generation: generation });
+      manager["recordPersistedRowGeneration"](session, generation);
+      if (advances < 2) {
+        store.afterRefusedRelease = advanceOwnRow;
+      }
+    };
+    store.refuseGuardedReleaseWrites = 2;
+    store.afterRefusedRelease = advanceOwnRow;
+    await expect(manager.releaseSession(SESSION, "explicit-release")).rejects.toThrow(
+      "row stayed writable",
+    );
+    // Bounded resolution surfaces a transient failure; it must not resolve the durable intent.
+    expect(journal.loadUnconfirmed()).toHaveLength(1);
+    await manager.releaseSession(SESSION, "explicit-release");
+    expect(advances).toBe(2);
+    expect(await store.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+    expect(journal.loadUnconfirmed()).toEqual([]);
+  });
+
   test("a terminal release landing during a rewrite refuses it without needing a terminal re-write", async () => {
     await supersededReleaseWithFailingRewrite(1);
     let released: Promise<unknown> | undefined;

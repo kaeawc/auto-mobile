@@ -1,8 +1,8 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -66,7 +66,7 @@ let unsubscribe: () => void;
 
 function useServer(ownerDevice: string): void {
   const session = createFakeSession(OWNER, ownerDevice, "android");
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     createFakeDaemonState(new Map([[OWNER, session]])),

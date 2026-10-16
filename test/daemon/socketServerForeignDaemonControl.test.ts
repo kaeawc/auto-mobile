@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -5,7 +6,6 @@ import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -85,7 +85,7 @@ function useServer(localSessionHoldsDevice = false): void {
       },
     }),
   };
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     state,

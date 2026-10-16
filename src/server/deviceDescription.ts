@@ -1,3 +1,4 @@
+import { statusOf } from "../daemon/deviceBinding";
 import {
   describeImage,
   imageLinkFrom,
@@ -335,7 +336,7 @@ function poolStatus(
   pooled: PooledDevice | undefined,
   unlendable: boolean,
 ): DevicePoolStatus | null {
-  return pooled ? classifyPoolStatus(pooled.status, unlendable) : null;
+  return pooled ? classifyPoolStatus(statusOf(pooled), unlendable) : null;
 }
 
 /**

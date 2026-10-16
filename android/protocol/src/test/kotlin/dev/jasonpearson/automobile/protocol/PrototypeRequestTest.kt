@@ -430,7 +430,22 @@ class PrototypeRequestTest {
       applied("{}", "/data/t", received(JsonPrimitive("plain text"))).data!!["t"],
     )
     assertEquals(JsonPrimitive(""), applied("{}", "/data/t", received(null, 204)).data!!["t"])
-    assertEquals(JsonPrimitive(""), applied("{}", "/data/t", received(JsonNull)).data!!["t"])
+  }
+
+  @Test
+  fun `a literal null body is invalid_response and leaves into unchanged`() {
+    val result = applied("""{"t":"old"}""", "/data/t", received(JsonNull))
+    assertFalse(result.result.succeeded)
+    assertFalse(result.result.wroteInto)
+    assertEquals(JsonPrimitive("old"), result.data!!["t"])
+    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.result.meta.error!!.code)
+  }
+
+  @Test
+  fun `an empty 2xx body succeeds and writes an empty string`() {
+    val result = applied("{}", "/data/t", received(null))
+    assertTrue(result.result.succeeded)
+    assertEquals(JsonPrimitive(""), result.data!!["t"])
   }
 
   @Test

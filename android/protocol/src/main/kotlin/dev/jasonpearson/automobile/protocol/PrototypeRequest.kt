@@ -364,7 +364,7 @@ object PrototypeRequestOutcome {
 
   /** The `into` value of a 2xx response: JSON as is, an empty body (and HEAD) as `""`. */
   fun intoValue(response: PrototypeRequestResponse.Received): JsonElement =
-    response.body?.takeUnless { it is JsonNull } ?: JsonPrimitive("")
+    response.body ?: JsonPrimitive("")
 
   /**
    * Applies one response through [commit], which performs one `/data` write and returns why it was
@@ -380,7 +380,21 @@ object PrototypeRequestOutcome {
   ): PrototypeRequestResult {
     var meta = metaOf(response)
     var wroteInto = false
-    if (response is PrototypeRequestResponse.Received && meta.error == null && into != null) {
+    if (response is PrototypeRequestResponse.Received && response.body is JsonNull) {
+      // A literal JSON `null` body is not an empty one: /data cannot hold it, so `into` stays.
+      if (meta.error == null) {
+        meta =
+          meta.copy(
+            error =
+              PrototypeRequestError(
+                PrototypeRequestErrorCode.INVALID_RESPONSE,
+                "The response body is JSON null, which /data cannot hold.",
+              ),
+          )
+      }
+    } else if (
+      response is PrototypeRequestResponse.Received && meta.error == null && into != null
+    ) {
       val refused = commit(PrototypeDataWrite.Set(into, intoValue(response)))
       if (refused == null) {
         wroteInto = true

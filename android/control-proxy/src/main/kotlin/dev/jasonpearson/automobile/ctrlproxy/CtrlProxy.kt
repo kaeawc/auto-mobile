@@ -9,7 +9,6 @@ import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -1434,6 +1433,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override suspend fun broadcast(message: String) {
             webSocketServer.broadcast(message)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
+  private val clipboardController by lazy {
+    ClipboardController(
+      clipboardManager = { clipboardManager },
+      activeWindowRoot = { rootInActiveWindow },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      responseSender =
+        object : ClipboardController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerf(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -3319,7 +3348,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
-    performClipboard(requestId, action, text)
+    clipboardController.performClipboard(requestId, action, text)
 
   override suspend fun installCaCert(requestId: String?, certificate: String) =
     caCertificateController.performInstallCaCertificate(requestId, certificate)
@@ -6732,143 +6761,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform clipboard operations using ClipboardManager and AccessibilityService. Supports copy,
-   * paste, clear, and get operations.
-   */
-  private suspend fun performClipboard(requestId: String?, action: String, text: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performClipboard: action='$action'")
-    perfProvider.serial("performClipboard")
-
-    try {
-      perfProvider.startOperation("executeClipboardAction")
-
-      val (success, resultText, error) =
-        when (action) {
-          "copy" -> {
-            if (text == null || text.isEmpty()) {
-              Triple(false, null, "Text is required for copy action")
-            } else {
-              try {
-                val clip = ClipData.newPlainText("AutoMobile", text)
-                clipboardManager.setPrimaryClip(clip)
-                Log.d(TAG, "Clipboard copy successful (${text.length} chars)")
-                Triple(true, null, null)
-              } catch (e: CancellationException) {
-                throw e
-              } catch (e: Exception) {
-                Log.e(TAG, "Clipboard copy failed", e)
-                Triple(false, null, "Copy failed: ${e.message}")
-              }
-            }
-          }
-          "get" -> {
-            try {
-              val readResult =
-                CtrlProxyClipboard.readResultFromPrimaryClip(clipboardManager.primaryClip)
-              if (readResult.success) {
-                val clipText = readResult.text ?: ""
-                if (clipText.isEmpty()) {
-                  Log.d(TAG, "Clipboard is empty")
-                } else {
-                  Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
-                }
-                Triple(true, clipText, null)
-              } else {
-                val readError = readResult.error ?: "Clipboard read failed"
-                Log.w(TAG, readError)
-                Triple(false, null, readError)
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard get failed", e)
-              Triple(false, null, "Get failed: ${e.message}")
-            }
-          }
-          "clear" -> {
-            try {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboardManager.clearPrimaryClip()
-                Log.d(TAG, "Clipboard cleared using clearPrimaryClip()")
-              } else {
-                // Fallback for API < 28: set empty clip
-                val emptyClip = ClipData.newPlainText("", "")
-                clipboardManager.setPrimaryClip(emptyClip)
-                Log.d(TAG, "Clipboard cleared using empty clip (API < 28)")
-              }
-              Triple(true, null, null)
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard clear failed", e)
-              Triple(false, null, "Clear failed: ${e.message}")
-            }
-          }
-          "paste" -> {
-            try {
-              perfProvider.startOperation("findFocusedNode")
-              val focusedNode = findFocusedEditableNode(rootInActiveWindow)
-              perfProvider.endOperation("findFocusedNode")
-
-              if (focusedNode == null) {
-                Log.w(TAG, "No focused editable node found for paste")
-                Triple(
-                  false,
-                  null,
-                  "No focused input field found. Focus a text field before pasting.",
-                )
-              } else {
-                perfProvider.startOperation("performPaste")
-                val pasteSuccess =
-                  focusedNode.performAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE,
-                  )
-                focusedNode.recycle()
-                perfProvider.endOperation("performPaste")
-
-                if (pasteSuccess) {
-                  Log.d(TAG, "Clipboard paste successful")
-                  Triple(true, null, null)
-                } else {
-                  Log.w(TAG, "Paste action returned false")
-                  Triple(false, null, "Paste action failed")
-                }
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard paste failed", e)
-              Triple(false, null, "Paste failed: ${e.message}")
-            }
-          }
-          else -> {
-            Log.w(TAG, "Unknown clipboard action: $action")
-            Triple(false, null, "Unknown action: $action")
-          }
-        }
-
-      perfProvider.endOperation("executeClipboardAction")
-      perfProvider.end()
-
-      Log.d(TAG, "Clipboard action completed: action=$action, success=$success")
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Clipboard total time: ${totalTime}ms")
-
-      // Broadcast clipboard result
-      broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
-    }
-  }
-
-  /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports
    * for the active display (topmost first), for the first node [find] returns. The extractor's own
    * window enumeration is reused so node actions and focus read-back cannot disagree with
@@ -7137,38 +7029,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast clipboard result to WebSocket clients */
-  private suspend fun broadcastClipboardResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    text: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clipboard result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clipboard_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("clipboard_result", requestId = requestId, perfTiming = perfTiming) {
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (text != null) {
-            put("text", text)
-          }
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
     }
   }
 

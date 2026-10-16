@@ -2,7 +2,7 @@
 1033	src/constants/release.ts
 2869	src/ctrlProxy/CtrlProxyManager.ts
 4150	src/ctrlProxy/IOSCtrlProxyManager.ts
-1807	src/ctrlProxy/IosCtrlProxyBuilder.ts
+1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
@@ -12,7 +12,7 @@
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8465	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
-4158	src/daemon/manager.ts
+4163	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
 2558	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts

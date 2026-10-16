@@ -24,16 +24,25 @@ Fixtures for `src/features/bootAdmission` (#11588).
   the lane host. Follow-up (#11965): replace with a capture from the project's Alpine image,
   using `cat /proc/<pid>/status` and `/proc/<pid>/cmdline` of a controlled short-lived process.
 
-# Owed: Linux /proc captures (#11998, #11965)
+# Captured Linux /proc fixtures (#11998)
 
-`proc-status-upstream-man-proc_pid_status.txt` is upstream documentation, not
-a capture from a running Linux process. Capture real process fixtures with
-`scripts/capture-proc-fixtures.sh [out-dir]` (default:
-`test/fixtures/android-boot-admission`). The script writes:
+`proc-<distro>-<case>-status.txt` (`text eol=lf`) and `proc-<distro>-<case>-cmdline.bin`
+(`binary`, NUL-separated argv, raw kernel bytes) are real `/proc/<pid>/status` and
+`/proc/<pid>/cmdline` reads, produced by `scripts/ci/linux-qualification/capture-proc-fixtures.sh`
+in the Linux Qualification workflow (job `proc-fixtures`, GitHub Actions run 38862794590,
+2026-10-16, runner kernel Linux 6.17.0-1022-azure x86_64). Nothing is edited or normalized.
 
-- `proc-alpine-status.txt`, `proc-alpine-cmdline.bin`, and `proc-alpine-pid1-status.txt`
-- `proc-debian-status.txt`, `proc-debian-cmdline.bin`, and `proc-debian-pid1-status.txt`
-- `proc-alpine-provenance.txt` and `proc-debian-provenance.txt`
+- `alpine`: `alpine:3` (3.24.2, BusyBox 1.37.0), digest
+  `sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6`.
+- `debian`: `debian:stable-slim`, digest
+  `sha256:eb593cf2c358cacef45ca0a424bbc7d30cfa3466265fc2662b9466a0ca6ba1c5`.
+- `normal`: `sleep 60` (alpine pid 13).
+- `pid1`: container init `sh -s` (pid 1; alpine and debian).
+- `comm-name`: a script literally named `my (proc) x`; `Name:` keeps spaces and parentheses (alpine pid 126).
+- `argv0-spoof`: `exec -a "my (proc) x" sleep 60`; argv[0] changes while `Name:` stays `sleep` (debian pid 21; BusyBox did not capture it).
+- `zombie`: an unreaped `sleep` child, empty cmdline and no `VmRSS` (alpine pid 144; debian reaped its child, so no capture).
 
-Once captured, `test/features/bootAdmission/procProcessTable.test.ts` must
-switch to these captured files. No capture was made on the lane host.
+Re-capture by downloading the run's `proc-fixtures` artifact
+(`gh run download 38862794590 -n proc-fixtures`) or re-running that workflow job.
+`proc-status-upstream-man-proc_pid_status.txt` above is still upstream documentation,
+used by `processTableRetry.test.ts`; `procProcessTable.test.ts` no longer reads it.

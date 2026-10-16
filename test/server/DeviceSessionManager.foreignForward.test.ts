@@ -280,7 +280,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
         stdout: `${h.device.deviceId} tcp:8767 tcp:8765`,
         stderr: "",
       } as ExecResult);
-      const realManager = AndroidCtrlProxyManager.getInstance(h.device, h.adb);
+      const realManager = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
       const installed = spyOn(realManager, "isInstalled").mockResolvedValue(true);
       const enabled = spyOn(realManager, "isEnabled").mockResolvedValue(true);
       try {
@@ -398,7 +398,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     test(`#12220 adb forward evidence refuses before ${installed ? (enabled ? "connect" : "enable") : "install"}`, async () => {
       const h = harness(installed, enabled, true);
       installAdbForwardEvidence(h.adb, "foreign");
-      const real = AndroidCtrlProxyManager.getInstance(h.device, h.adb);
+      const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
       const isInstalled = spyOn(real, "isInstalled");
       const isEnabled = spyOn(real, "isEnabled");
       await expect(
@@ -421,7 +421,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
   test("#12220 real not-installed control refuses foreign adb forward before install", async () => {
     const h = harness(false, false, true);
     installAdbForwardEvidence(h.adb, "foreign");
-    const real = AndroidCtrlProxyManager.getInstance(h.device, h.adb);
+    const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
     spyOn(real, "isInstalled").mockResolvedValue(false);
     spyOn(real, "isEnabled").mockResolvedValue(false);
     spyOn(real, "ensureCompatibleVersion").mockResolvedValue({ status: "not_installed" });
@@ -483,7 +483,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     test(`#12220 ${mode} adb forward permits real install, enable, and stylus`, async () => {
       const h = harness(false, false, true);
       installAdbForwardEvidence(h.adb, mode);
-      const real = AndroidCtrlProxyManager.getInstance(h.device, h.adb);
+      const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
       spyOn(real, "isInstalled").mockResolvedValue(false);
       spyOn(real, "isEnabled").mockResolvedValue(false);
       spyOn(real, "ensureCompatibleVersion").mockResolvedValue({ status: "not_installed" });

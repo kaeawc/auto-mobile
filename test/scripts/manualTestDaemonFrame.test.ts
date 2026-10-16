@@ -125,7 +125,7 @@ const config = "/standalone/request.json";
  * No database or native lifecycle is needed to exercise connection confinement here. */
 function fakeBrokerBindingFixture(failed = false) {
   const f = fixture();
-  f.connection.refusalCode = "device_outside_managed_slots";
+  f.connection.refusalCode = "device_outside_broker_grant";
   delete f.deps.env.MT_BATCH;
   const files = new Map([[config, JSON.stringify(request)]]);
   f.deps.readFile = (path) => files.get(path) ?? '{"name":"named"}';
@@ -1593,9 +1593,9 @@ posixTest("expected refusal recognizes product messages and structured refusal c
     },
     {
       isError: true,
-      content: [{ type: "text", text: JSON.stringify({ code: "device_outside_managed_slots" }) }],
+      content: [{ type: "text", text: JSON.stringify({ code: "device_outside_broker_grant" }) }],
     },
-    { isError: true, structuredContent: { code: "device_outside_managed_slots" } },
+    { isError: true, structuredContent: { code: "device_outside_broker_grant" } },
   ]) {
     const f = batchFixture();
     const respond = f.connection.respond;

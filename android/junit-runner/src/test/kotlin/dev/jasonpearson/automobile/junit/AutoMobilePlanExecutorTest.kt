@@ -12,7 +12,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -25,6 +24,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor
 
 class AutoMobilePlanExecutorTest {
   private var timings = PlanExecutorTimings()
+  private lateinit var collaborators: PlanExecutorCollaborators
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var fakeDaemonClient: FakeDaemonToolClient
   private lateinit var fakeDeviceChecker: FakeDeviceChecker
@@ -33,19 +33,15 @@ class AutoMobilePlanExecutorTest {
   fun setup() {
     fakeDaemonClient = FakeDaemonToolClient()
     fakeDeviceChecker = FakeDeviceChecker(devicesAvailable = true)
-    DaemonSocketClientManager.testClient = fakeDaemonClient
-    AutoMobileSharedUtils.testDeviceChecker = fakeDeviceChecker
-    DaemonHeartbeat.testController = FakeDaemonHeartbeat()
-    AutoMobilePlanExecutor.testAgent =
+    val agent =
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
-  }
-
-  @After
-  fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { agent },
+        deviceChecker = fakeDeviceChecker,
+        daemon = fakeDaemonClient,
+        heartbeat = FakeDaemonHeartbeat(),
+      )
   }
 
   private fun recoveryFixtureDir(): File {
@@ -106,7 +102,7 @@ class AutoMobilePlanExecutorTest {
       val waits = retryable && (code == "session_held_by_recovery" || recovering)
       val hint = (envelope?.get("retryAfterMs") ?: wire["retryAfterMs"])?.jsonPrimitive?.long
       fakeDaemonClient = FakeDaemonToolClient()
-      DaemonSocketClientManager.testClient = fakeDaemonClient
+      collaborators = collaborators.copy(daemon = fakeDaemonClient)
       sleeps.clear()
       fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(wire, true))
       fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
@@ -149,7 +145,7 @@ class AutoMobilePlanExecutorTest {
       val sleeps = mutableListOf<Long>()
       timings = timings.copy(deviceOwnedSleeper = { sleeps.add(it) })
       fakeDaemonClient = FakeDaemonToolClient()
-      DaemonSocketClientManager.testClient = fakeDaemonClient
+      collaborators = collaborators.copy(daemon = fakeDaemonClient)
       fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(wire, true))
       val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
       assertEquals(false, result.success)
@@ -183,7 +179,7 @@ class AutoMobilePlanExecutorTest {
       val sleeps = mutableListOf<Long>()
       timings = timings.copy(deviceOwnedSleeper = { sleeps.add(it) })
       fakeDaemonClient = FakeDaemonToolClient()
-      DaemonSocketClientManager.testClient = fakeDaemonClient
+      collaborators = collaborators.copy(daemon = fakeDaemonClient)
       fakeDaemonClient.queueExecutePlanResponse(frame)
       fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
       val waits =
@@ -383,7 +379,7 @@ class AutoMobilePlanExecutorTest {
     for (case in cases) {
       val code = case[0] as String
       fakeDaemonClient = FakeDaemonToolClient()
-      DaemonSocketClientManager.testClient = fakeDaemonClient
+      collaborators = collaborators.copy(daemon = fakeDaemonClient)
       fakeDaemonClient.setResponse(
         "executePlan",
         DaemonResponse(
@@ -779,11 +775,11 @@ class AutoMobilePlanExecutorTest {
     val plain = "shoes #1: size\nlarge"
 
     val result =
-      AutoMobilePlanExecutor.execute(
-        "test-plans/parameter-substitution.yaml",
-        mapOf("quoted" to quoted, "plain" to plain),
-        AutoMobilePlanExecutionOptions(),
-      )
+      AutoMobilePlan("test-plans/parameter-substitution.yaml", collaborators) {
+          "quoted" to quoted
+          "plain" to plain
+        }
+        .execute()
 
     assertTrue(result.errorMessage, result.success)
     val raw =
@@ -1105,7 +1101,7 @@ class AutoMobilePlanExecutorTest {
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
       options,
-      timings,
+      collaborators.copy(timings = timings),
     )
   }
 

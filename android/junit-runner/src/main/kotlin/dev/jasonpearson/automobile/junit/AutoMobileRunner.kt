@@ -16,15 +16,24 @@ import org.junit.runners.model.FrameworkMethod
  * to execute YAML plans with AI-assisted recovery.
  */
 class AutoMobileRunner
-private constructor(private val klass: Class<*>, private val timings: TestTimingSource) :
-  BlockJUnit4ClassRunner(klass) {
+private constructor(
+  private val klass: Class<*>,
+  private val timings: TestTimingSource,
+  private val collaborators: PlanExecutorCollaborators,
+) : BlockJUnit4ClassRunner(klass) {
 
-  constructor(klass: Class<*>) : this(klass, TestTimingCache)
+  constructor(klass: Class<*>) : this(klass, TestTimingCache, PlanExecutorCollaborators())
 
   internal constructor(
     klass: Class<*>,
     store: TestTimingStore,
-  ) : this(klass, store as TestTimingSource)
+    collaborators: PlanExecutorCollaborators = PlanExecutorCollaborators(),
+  ) : this(klass, store as TestTimingSource, collaborators)
+
+  internal constructor(
+    klass: Class<*>,
+    collaborators: PlanExecutorCollaborators,
+  ) : this(klass, TestTimingStore(collaborators = collaborators) as TestTimingSource, collaborators)
 
   private val orderedChildren: List<FrameworkMethod> by lazy {
     val children = super.getChildren()
@@ -69,8 +78,8 @@ private constructor(private val klass: Class<*>, private val timings: TestTiming
 
   override fun run(notifier: RunNotifier) {
     // Skip the entire class if no devices are available
-    if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
-      val checker = AutoMobileSharedUtils.deviceChecker
+    if (!collaborators.deviceChecker.areDevicesAvailable()) {
+      val checker = collaborators.deviceChecker
       if (checker.checkFailed()) {
         // A failed adb probe is an infrastructure problem, not "no devices": fail, never skip.
         val detail = checker.getLastError() ?: "unknown adb failure"
@@ -90,7 +99,7 @@ private constructor(private val klass: Class<*>, private val timings: TestTiming
     }
 
     // Proceed with normal execution if devices are available
-    val heartbeat = DaemonHeartbeat.startBackground()
+    val heartbeat = collaborators.heartbeat.startBackground(DaemonHeartbeat.DEFAULT_INTERVAL_MS)
     try {
       super.run(notifier)
     } finally {
@@ -168,7 +177,7 @@ private constructor(private val klass: Class<*>, private val timings: TestTiming
         )
         .toIntOrNull() ?: 2
     val safeConfiguredForks = if (configuredForks > 0) configuredForks else 1
-    val deviceCount = AutoMobileSharedUtils.deviceChecker.getDeviceCount()
+    val deviceCount = collaborators.deviceChecker.getDeviceCount()
     return if (deviceCount > 0) {
       safeConfiguredForks.coerceAtMost(deviceCount)
     } else {
@@ -240,7 +249,7 @@ private constructor(private val klass: Class<*>, private val timings: TestTiming
         )
         .toIntOrNull() ?: 2
 
-    val deviceCount = AutoMobileSharedUtils.deviceChecker.getDeviceCount()
+    val deviceCount = collaborators.deviceChecker.getDeviceCount()
     val maxParallelForks =
       if (deviceCount > 0) {
         val effectiveForks = configuredForks.coerceAtMost(deviceCount)

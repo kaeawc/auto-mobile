@@ -191,6 +191,16 @@ write_src() { # <name> <lines...>
   [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
 }
 
+@test "dropping the enable that closes a baselined disable block fails as a new row" {
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-block(max-params)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
+}
+
 @test "removing an oxlint-disable passes and --update shrinks the baseline" {
   write_src a.ts '// oxlint-disable-next-line max-params -- reason'
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update

@@ -89,6 +89,28 @@ describe("oxlintDisableScan", () => {
     expect([...file.keys()]).toEqual(["src/a.ts\toxlint-disable-file(a)"]);
   });
 
+  test("an unbounded disable closed by a later enable is keyed as a block; dropping the closer is a new row", () => {
+    const keys = (src: string) => {
+      const counts = new Map<string, number>();
+      countRows("src/a.ts", src, counts);
+      return [...counts.keys()].filter((k) => !k.includes("no-reason"));
+    };
+    expect(keys("/* eslint-disable a, b -- r */\nfoo();\n/* eslint-enable a */\n")).toEqual([
+      "src/a.ts\toxlint-disable-block(a)",
+      "src/a.ts\toxlint-disable-file(b)",
+    ]);
+    expect(keys("/* oxlint-disable a -- r */\nfoo();\n/* oxlint-enable */\n")).toEqual([
+      "src/a.ts\toxlint-disable-block(a)",
+    ]);
+    expect(keys("/* oxlint-disable a -- r */\nfoo();\n")).toEqual([
+      "src/a.ts\toxlint-disable-file(a)",
+    ]);
+    // An enable before the disable closes nothing.
+    expect(keys("/* oxlint-enable a */\n/* oxlint-disable a -- r */\nfoo();\n")).toEqual([
+      "src/a.ts\toxlint-disable-file(a)",
+    ]);
+  });
+
   test("countRows emits a no-reason row only for reason-less directives", () => {
     const counts = new Map<string, number>();
     countRows(

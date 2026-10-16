@@ -9,9 +9,10 @@
 // literals, or on a later line of a block comment, is never a directive.
 //
 // Output is sorted "<count>\t<file>\t<key>" rows (the ratchet's row format), with
-// three key shapes: "oxlint-disable(<rule>)" for each -next-line/-line directive,
-// "oxlint-disable-file(<rule>)" for the unbounded form (a separate key, so widening
-// a one-line suppression to the rest of the file is a new row, not a swap), and
+// four key shapes: "oxlint-disable(<rule>)" for each -next-line/-line directive,
+// "oxlint-disable-block(<rule>)" for an unbounded disable a later enable closes,
+// "oxlint-disable-file(<rule>)" for one that runs to the end of the file (separate
+// keys, so widening a suppression, or dropping its closing enable, is a new row), and
 // "oxlint-disable-no-reason(<rule>)" for those without a `-- reason` suffix.
 // The `eslint-` spelling of each directive is counted identically (oxlint honours
 // it) and a leading `eslint/` is stripped from the rule. A directive naming
@@ -31,6 +32,7 @@ import ts from "typescript";
 
 // Like oxlint, the directive keyword must be followed by whitespace or end the comment.
 const DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(-next-line|-line)?(?=\s|$)(.*)$/s;
+const ENABLE = /^\s*(?:oxlint|eslint)-enable(?=\s|$)(.*)$/s;
 const SCAN_EXTENSIONS = /\.(?:[cm]?ts|tsx)$/;
 
 export interface Directive {
@@ -38,6 +40,34 @@ export interface Directive {
   hasReason: boolean;
   /** "line" for the -next-line/-line forms; "file" for the unbounded form, which covers the rest of the file. */
   scope: "line" | "file";
+  /**
+   * For an unbounded disable: the rules a later enable directive closes. Each is
+   * counted under its own key, so deleting or moving that closer (which extends the
+   * suppression to the end of the file) turns it into a new file-scope row.
+   */
+  closed?: string[];
+}
+
+/** Rule list of an enable directive (`*` when bare), or null when the comment is not one. */
+export function parseEnable(commentBody: string): string[] | null {
+  const m = ENABLE.exec(commentBody);
+  if (!m) {
+    return null;
+  }
+  const rules = splitRules(m[1].split(/\s-{2,}/)[0]);
+  return rules.length ? rules : ["*"];
+}
+
+function splitRules(text: string): string[] {
+  // oxlint splits the rule list on commas or whitespace.
+  return [
+    ...new Set(
+      text
+        .split(/[\s,]+/)
+        .map((r) => normalizeRule(r.trim()))
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export function normalizeRule(rule: string): string {
@@ -56,13 +86,9 @@ export function parseDirective(commentBody: string): Directive | null {
   const sep = rest.search(/\s-{2,}/);
   const rulesPart = sep === -1 ? rest : rest.slice(0, sep);
   const reason = sep === -1 ? "" : rest.slice(sep).replace(/^\s-+/, "").trim();
-  // oxlint splits the rule list on commas or whitespace.
-  const rules = rulesPart
-    .split(/[\s,]+/)
-    .map((r) => normalizeRule(r.trim()))
-    .filter(Boolean);
+  const rules = splitRules(rulesPart);
   return {
-    rules: rules.length ? [...new Set(rules)] : ["*"],
+    rules: rules.length ? rules : ["*"],
     hasReason: reason.length > 0,
     scope,
   };
@@ -90,16 +116,12 @@ function collectTokens(node: ts.Node, sf: ts.SourceFile, visit: (token: ts.Node)
 export function findDirectives(source: string, fileName = "input.tsx"): Directive[] {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const seen = new Set<number>();
-  const found: Directive[] = [];
+  const comments: Array<{ pos: number; body: string }> = [];
   const take = (ranges: ts.CommentRange[] | undefined) => {
     for (const range of ranges ?? []) {
-      if (seen.has(range.pos)) {
-        continue;
-      }
-      seen.add(range.pos);
-      const d = parseDirective(commentBody(source, range));
-      if (d) {
-        found.push(d);
+      if (!seen.has(range.pos)) {
+        seen.add(range.pos);
+        comments.push({ pos: range.pos, body: commentBody(source, range) });
       }
     }
   };
@@ -107,7 +129,39 @@ export function findDirectives(source: string, fileName = "input.tsx"): Directiv
     take(ts.getLeadingCommentRanges(source, token.getFullStart()));
     take(ts.getTrailingCommentRanges(source, token.end));
   });
+  comments.sort((a, b) => a.pos - b.pos);
+  const found: Directive[] = [];
+  // Unbounded disables still open, per rule, awaiting a closing enable.
+  const open: Array<{ directive: Directive; rule: string }> = [];
+  for (const { body } of comments) {
+    const d = parseDirective(body);
+    if (d) {
+      found.push(d);
+      if (d.scope === "file") {
+        d.closed = [];
+        open.push(...d.rules.map((rule) => ({ directive: d, rule })));
+      }
+      continue;
+    }
+    const enabled = parseEnable(body);
+    if (enabled) {
+      // A bare enable closes everything; a named one closes only those rules.
+      for (let i = open.length - 1; i >= 0; i--) {
+        if (enabled.includes("*") || enabled.includes(open[i].rule)) {
+          open[i].directive.closed!.push(open[i].rule);
+          open.splice(i, 1);
+        }
+      }
+    }
+  }
   return found;
+}
+
+function keyFor(d: Directive, rule: string): string {
+  if (d.scope === "line") {
+    return "oxlint-disable";
+  }
+  return d.closed?.includes(rule) ? "oxlint-disable-block" : "oxlint-disable-file";
 }
 
 export function countRows(file: string, source: string, counts: Map<string, number>): void {
@@ -118,7 +172,7 @@ export function countRows(file: string, source: string, counts: Map<string, numb
   const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
   for (const d of findDirectives(source, file)) {
     for (const rule of d.rules) {
-      bump(`${file}\t${d.scope === "file" ? "oxlint-disable-file" : "oxlint-disable"}(${rule})`);
+      bump(`${file}\t${keyFor(d, rule)}(${rule})`);
       if (!d.hasReason) {
         bump(`${file}\toxlint-disable-no-reason(${rule})`);
       }

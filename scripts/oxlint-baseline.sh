@@ -32,7 +32,8 @@
 # TypeScript scanner, and this script merges its rows into the same baseline and
 # the same new_or_increased compare:
 #   <count>  <file>  oxlint-disable(<rule>)            every -next-line/-line directive, per rule
-#   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded (rest-of-file) directive, per rule
+#   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
+#   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,
 # and removing one shrinks the baseline via --update. A directive listing several

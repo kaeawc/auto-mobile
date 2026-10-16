@@ -14,7 +14,7 @@ import { clipIosChromeBounds } from "../swipeon/iosChromeInsets";
 import { isUsableScreenSize } from "../../utility/ElementGeometry";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 /**
  * iOS implementation of {@link TapStrategy}. Filters the response
@@ -29,7 +29,7 @@ export class IosTapStrategy implements TapStrategy {
   constructor(
     private readonly device: BootedDevice,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   prepareViewHierarchyForResponse(

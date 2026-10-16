@@ -136,7 +136,7 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   parser?: import("../../../utils/interfaces/ElementParser").ElementParser;
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagService;
+  featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;
   voiceOverExecutor?: VoiceOverSwipeRunner;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;

@@ -13,7 +13,7 @@ import {
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
 import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { throwIfAborted } from "../../../utils/toolUtils";
 
 /**
@@ -37,7 +37,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     private readonly iosClient: IOSCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
     private readonly timer: Timer,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   /**

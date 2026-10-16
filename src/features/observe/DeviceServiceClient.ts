@@ -14,6 +14,15 @@
  * Platform-specific behavior is implemented by subclasses through abstract methods.
  */
 
+import type { BootedDevice, ViewHierarchyResult } from "../../models";
+import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import {
+  DefaultScreenshotBackoffScheduler,
+  type ScreenshotBackoffScheduler,
+  type ScreenshotCaptureResult,
+} from "./ScreenshotBackoffScheduler";
+
 import WebSocket from "ws";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
@@ -264,6 +273,16 @@ export abstract class DeviceServiceClient {
   protected hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
   protected recoveryPromise: Promise<boolean> | null = null;
 
+  protected device!: BootedDevice;
+  // Terminal-close latch; transient socket loss must not set it (#5493).
+  protected closed: boolean = false;
+  // Failed dials and lost open connections count; platforms reset on successful recovery/connect.
+  protected consecutiveConnectionFailures: number = 0;
+  protected supportedCommands: Set<string> | null = null;
+  protected screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
+  protected static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
+  protected static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
+
   // Logging tag for subclass identification
   protected abstract readonly logTag: string;
 
@@ -314,7 +333,25 @@ export abstract class DeviceServiceClient {
   protected abstract onConnectionClosed(): void;
 
   /** Called once for a failed dial or an established connection that was lost. */
-  protected onConnectAttemptFailed(): void {}
+  protected onConnectAttemptFailed(): void {
+    if (this.closed || !this.autoReconnectEnabled || !this.shouldCountConnectionFailure()) {
+      return;
+    }
+    this.consecutiveConnectionFailures++;
+    logger.info(
+      `[${this.clientLogTag}] Connection attempt failed (failure count: ${this.consecutiveConnectionFailures})`,
+    );
+    if (this.consecutiveConnectionFailures > 0 && this.consecutiveConnectionFailures % 3 === 0) {
+      this.onConnectionFailureThresholdReached();
+    }
+  }
+
+  protected shouldCountConnectionFailure(): boolean {
+    return true;
+  }
+
+  /** Platform recovery retains its own re-entry guard and restart-budget ownership. */
+  protected onConnectionFailureThresholdReached(): void {}
 
   /** Cleanup for an explicitly closed client that never had an open socket. */
   protected onClientClosedWithoutConnection(): void {}
@@ -1502,5 +1539,156 @@ export abstract class DeviceServiceClient {
         ? (requestActivityAt ?? this.lastSendAt)
         : Math.max(requestActivityAt, this.lastSendAt);
     return { inFlightRequests: this.requestManager.getPendingCount(), lastActivityAt };
+  }
+
+  /** Android's connection log tag predates its base connection-lifecycle tag. */
+  protected get clientLogTag(): string {
+    return this.logTag;
+  }
+
+  protected onSessionRebound(): void {}
+
+  /** Bind navigation events to the current session; only a changed owner invokes the platform hook. */
+  public bindSession(sessionId: string): void {
+    // Binding means this session is live again — clear any released-tombstone so a
+    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
+    // gets its own manager rather than the unattributed global (#4984).
+    NavigationGraphManager.clearReleasedSession(sessionId);
+    if (this.boundSessionId !== sessionId) {
+      // A per-device client routes nav events to whichever session bound last.
+      // That is correct under the pool's one-device-one-live-session invariant
+      // (a device is released before it is reassigned). Trace the transition off
+      // a previously-bound session so a concurrent-share regression — two live
+      // sessions driving one device — is diagnosable in the logs. Debug, not
+      // warn: the common case (a released device rebinding to its next session)
+      // is expected and must not be noisy.
+      if (this.boundSessionId !== null) {
+        logger.debug(
+          `[${this.clientLogTag}] Rebinding device ${this.device.deviceId} from session ` +
+            `${this.boundSessionId} to ${sessionId}`,
+        );
+      }
+      this.boundSessionId = sessionId;
+      this.onSessionRebound();
+      // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
+      if (this.hierarchyNavigationDetector) {
+        this.hierarchyNavigationDetector.dispose();
+        this.hierarchyNavigationDetector = null;
+      }
+    }
+  }
+
+  public async getSupportedCommands(): Promise<string[] | null> {
+    if (this.supportedCommands === null) {
+      const connected = await this.ensureConnected();
+      // ensureConnected resolves on the WebSocket `open` event, but the runner's
+      // `supportedCommands` arrive a beat later in the `connected` handshake
+      // message. Without waiting for it, the first probe (e.g. doctor) of a
+      // healthy runner reads null and misreports it as `unknown`. Poll briefly
+      // for the handshake before reading.
+      if (connected) {
+        await this.waitForHandshake();
+      }
+    }
+    return this.getCachedSupportedCommands();
+  }
+
+  /** Connection-free view of the last advertised command set. */
+  public getCachedSupportedCommands(): string[] | null {
+    return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
+  }
+
+  /** iOS also checks cancellation when the handshake already arrived; Android does not. */
+  protected beforeHandshakeWait(_signal?: AbortSignal): void {}
+
+  protected awaitHandshakePoll(work: () => Promise<void>, signal: AbortSignal): Promise<void> {
+    return raceWithDeadline(work, { timer: this.timer, signal, label: "Device service handshake" });
+  }
+
+  protected async waitForHandshake(
+    timeoutMs: number = DeviceServiceClient.HANDSHAKE_WAIT_TIMEOUT_MS,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    this.beforeHandshakeWait(signal);
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.supportedCommands === null && this.timer.now() < deadline) {
+      if (!signal) {
+        await this.timer.sleep(DeviceServiceClient.HANDSHAKE_POLL_INTERVAL_MS);
+        continue;
+      }
+      let timeout: ReturnType<Timer["setTimeout"]> | undefined;
+      try {
+        await this.awaitHandshakePoll(
+          () =>
+            new Promise<void>((resolve) => {
+              timeout = this.timer.setTimeout(
+                resolve,
+                DeviceServiceClient.HANDSHAKE_POLL_INTERVAL_MS,
+              );
+            }),
+          signal,
+        );
+      } finally {
+        if (timeout !== undefined) {
+          this.timer.clearTimeout(timeout);
+        }
+      }
+    }
+  }
+
+  protected forwardHierarchyToObservationStream(
+    hierarchy: ViewHierarchyResult,
+    frameContext: string | undefined,
+    hooks: {
+      logTag: string;
+      prepare?: () => void;
+      recordForwarded: (captureSequence: number) => void;
+    },
+  ): void {
+    const server = getDeviceDataStreamServer();
+    if (!server) {
+      return;
+    }
+    try {
+      hooks.prepare?.();
+      const captureSequence = server.pushHierarchyUpdate(
+        this.device.deviceId,
+        hierarchy,
+        frameContext,
+      );
+      // A missing identity leaves geometry untracked so control clients fail closed.
+      if (captureSequence !== null) {
+        hierarchy.captureSequence = captureSequence;
+        hooks.recordForwarded(captureSequence);
+      }
+    } catch (error) {
+      logger.warn(`[${hooks.logTag}] Failed to push hierarchy to observation stream: ${error}`);
+    }
+  }
+
+  protected createScreenshotBackoffScheduler(
+    capture: () => Promise<ScreenshotCaptureResult>,
+    emit: (result: ScreenshotCaptureResult) => void,
+    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+  ): ScreenshotBackoffScheduler {
+    if (!this.screenshotBackoffScheduler) {
+      this.screenshotBackoffScheduler = new DefaultScreenshotBackoffScheduler(
+        capture,
+        emit,
+        {
+          ...options,
+          getKeepAliveIntervalMs: () => {
+            const server = getDeviceDataStreamServer();
+            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
+          },
+        },
+        this.timer,
+        () => {
+          const server = getDeviceDataStreamServer();
+          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
+        },
+      );
+    }
+    return this.screenshotBackoffScheduler;
   }
 }

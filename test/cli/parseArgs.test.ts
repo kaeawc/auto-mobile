@@ -508,3 +508,87 @@ describe("inherited AUTOMOBILE_MANAGED_SLOT_CONFIG (#11286)", () => {
     expect(() => parseArgs([], logger, env, missingFile)).toThrow("managed_slot_config_invalid");
   });
 });
+
+describe("--session-config", () => {
+  const config = {
+    contractVersion: 1,
+    requestId: "request-1",
+    device: {
+      schemaVersion: 1,
+      platform: "ios",
+      hardware: { kind: "archetype", archetype: "phone" },
+      os: { kind: "minimum", version: "18.0" },
+    },
+  };
+  const json = JSON.stringify(config);
+  const noFile = (): string => {
+    throw new Error("unexpected file read");
+  };
+
+  test("parses separate, equals, file and environment forms", () => {
+    expect(parseArgs(["--session-config", json], logger, {}, noFile).sessionConfig).toEqual(config);
+    expect(parseArgs([`--session-config=${json}`], logger, {}, noFile).sessionConfig).toEqual(
+      config,
+    );
+    expect(
+      parseArgs(["--session-config", "/cfg.json"], logger, {}, () => json).sessionConfig,
+    ).toEqual(config);
+    expect(
+      parseArgs([], logger, { AUTOMOBILE_SESSION_CONFIG: json }, noFile).sessionConfig,
+    ).toEqual(config);
+  });
+
+  test("rejects missing values and every competing session source", () => {
+    expect(() => parseArgs(["--session-config"], logger, {}, noFile)).toThrow(
+      "session_config_invalid",
+    );
+    expect(() =>
+      parseArgs(
+        ["--session-config", json, "--initial-session-uuid", "existing"],
+        logger,
+        {},
+        noFile,
+      ),
+    ).toThrow("session_config_invalid");
+    expect(() =>
+      parseArgs(
+        [
+          "--session-config",
+          json,
+          "--managed-slot-config",
+          JSON.stringify({
+            contractVersion: 1,
+            managedHostScope: "host",
+            runnerNamespace: "runner",
+            runnerIncarnation: "incarnation",
+            localSlotCapacity: 1,
+            requests: [
+              {
+                slotIndex: 0,
+                role: "primary",
+                platform: "android",
+                requestedSpec: { runtime: "system-images;android-35;google_apis;x86_64" },
+              },
+            ],
+          }),
+        ],
+        logger,
+        {},
+        noFile,
+      ),
+    ).toThrow("session_config_invalid");
+    expect(() => parseArgs(["--session-config", json, "--no-proxy"], logger, {}, noFile)).toThrow(
+      "session_config_invalid",
+    );
+  });
+
+  test.each([["--cli", "observe"], ["--daemon-mode"], ["--daemon", "status"]])(
+    "ignores inherited environment config for %j",
+    (...args) => {
+      expect(
+        parseArgs(args, logger, { AUTOMOBILE_SESSION_CONFIG: "/missing.json" }, noFile)
+          .sessionConfig,
+      ).toBeUndefined();
+    },
+  );
+});

@@ -33,7 +33,7 @@ import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
-import { withStaleDisplay } from "../../models/StaleDisplayError";
+import { withStaleDisplay } from "../observe/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";

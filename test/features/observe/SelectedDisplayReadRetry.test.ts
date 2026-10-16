@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
 import { SelectedDisplayReadError } from "../../../src/features/observe/SelectedDisplayRead";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import {
   readOptions,

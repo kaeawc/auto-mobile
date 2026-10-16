@@ -4,7 +4,7 @@ import { inputDurationArgument } from "./touchscreenInput";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { DragAndDropTarget } from "../../models/DragAndDropOptions";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
-import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
+import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {

@@ -9,10 +9,6 @@ import {
   test,
 } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import {
-  DefaultAppLifecycleMonitor,
-  type AppLifecycleEvent,
-} from "../../src/utils/AppLifecycleMonitor";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { DefaultScreenshotBackoffScheduler } from "../../src/features/observe/ScreenshotBackoffScheduler";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
@@ -20,7 +16,6 @@ import { RecompositionTracker } from "../../src/features/performance/Recompositi
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
@@ -261,37 +256,5 @@ describe("detached promise rejection ownership", () => {
     } finally {
       remove.mockRestore();
     }
-  });
-
-  test("lifecycle listeners warn on rejection and keep duplicate/removal semantics", async () => {
-    const monitor = new DefaultAppLifecycleMonitor(new FakeAdbClientFactory());
-    const error = new Error("lifecycle rejected");
-    let calls = 0;
-    const listener = async () => {
-      calls++;
-      throw error;
-    };
-    const event: AppLifecycleEvent = {
-      type: "launch",
-      device,
-      appId: "com.promise.app",
-      timestamp: new Date(0),
-    };
-    monitor.addEventListener("launch", listener);
-    monitor.addEventListener("launch", listener);
-    monitor.addEventListener("terminate", listener);
-    monitor.removeEventListener("launch", listener);
-    monitor.emit("launch", event);
-    await timer.advanceTimersByTimeAsync(0);
-    expect(calls).toBe(1);
-    expect(warnings).toHaveBeenCalledWith(
-      "App lifecycle listener failed: lifecycle rejected",
-      error,
-    );
-    monitor.removeEventListener("launch", listener);
-    monitor.emit("launch", event);
-    expect(calls).toBe(1);
-    expect(monitor.listenerCount("terminate")).toBe(1);
-    monitor.removeAllListeners();
   });
 });

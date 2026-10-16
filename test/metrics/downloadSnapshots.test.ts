@@ -18,7 +18,7 @@ import {
   type FileStore,
   type GithubAssetCount,
   type NpmDayCount,
-} from "../../src/metrics/downloadSnapshots";
+} from "../../scripts/metrics/downloadSnapshots";
 import { collect } from "../../scripts/metrics/collect-release-downloads";
 
 /**

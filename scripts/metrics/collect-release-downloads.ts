@@ -3,7 +3,7 @@
  * Collect daily release-download metrics and append today's snapshot to
  * `docs/metrics/data/downloads.jsonl`.
  *
- * Source of truth (see src/metrics/downloadSnapshots.ts for the pure logic):
+ * Source of truth (see scripts/metrics/downloadSnapshots.ts for the pure logic):
  *   - GitHub REST `download_count` per release asset is CUMULATIVE-only, so we
  *     snapshot it daily and diff snapshots at view time to recover dailies.
  *   - npm's range API returns TRUE daily counts, stored verbatim.
@@ -31,7 +31,7 @@ import {
   type FileStore,
   type GithubAssetCount,
   type NpmDayCount,
-} from "../../src/metrics/downloadSnapshots";
+} from "./downloadSnapshots";
 
 const REPO = "kaeawc/auto-mobile";
 const NPM_PACKAGE = "@kaeawc/auto-mobile";

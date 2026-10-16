@@ -34,6 +34,12 @@ const xmlText = z.string().refine((text) => !XML_ILLEGAL.test(text), {
   message: "preference keys and strings must be valid XML text (no control characters)",
 });
 
+/** Longest delay setTimeout honors (2^31-1 ms); a larger one fires almost immediately. */
+const MAX_TIMER_SECONDS = 2_147_483;
+
+/** Text the oracle matches; a blank needle would match almost any screen or answer. */
+const needle = z.string().refine((value) => value.trim() !== "", "must not be blank");
+
 const baselineSchema = z
   .object({
     totalToolCalls: z.number().int().nonnegative().optional(),
@@ -76,8 +82,13 @@ const claudeSchema = z
       .array(toolRule)
       .default([])
       .transform((tools) => (tools.includes("Bash") ? tools : ["Bash", ...tools])),
-    maxBudgetUsd: z.number().positive().optional(),
-    timeoutSeconds: z.number().int().positive().default(DEFAULT_TIMEOUT_SECONDS),
+    maxBudgetUsd: z.number().finite().positive().optional(),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_TIMER_SECONDS)
+      .default(DEFAULT_TIMEOUT_SECONDS),
     // No free-form extra flags: any Claude flag can undo run isolation (--settings,
     // --resume, --plugin-dir, ...), so each supported knob gets its own typed field.
   })
@@ -127,22 +138,22 @@ const suiteSchema = z
           )
           .optional(),
         launchUri: z.string().min(1).optional(),
-        settleSeconds: z.number().nonnegative().default(2),
+        settleSeconds: z.number().finite().nonnegative().max(MAX_TIMER_SECONDS).default(2),
         /** Text the app must show after settling; otherwise the run stops before Claude. */
-        startScreenIncludes: z.array(z.string().min(1)).default([]),
+        startScreenIncludes: z.array(needle).default([]),
       })
       .strict()
       .default({}),
     claude: claudeSchema.default({}),
     verify: z
       .object({
-        answerIncludes: z.array(z.string().min(1)).default([]),
-        screenIncludes: z.array(z.string().min(1)).default([]),
+        answerIncludes: z.array(needle).default([]),
+        screenIncludes: z.array(needle).default([]),
       })
       .strict()
       .default({}),
-    failurePatterns: z.array(z.string().min(1)).default([]),
-    ignoredFailurePatterns: z.array(z.string().min(1)).default([]),
+    failurePatterns: z.array(needle).default([]),
+    ignoredFailurePatterns: z.array(needle).default([]),
     baseline: baselineSchema.optional(),
     baselineToolSequence: z.array(z.string().min(1)).optional(),
   })

@@ -315,7 +315,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("result event has an invalid num_turns");
   }
   const cost = event.total_cost_usd;
-  if (cost !== undefined && !(asNumber(cost) !== undefined && (cost as number) >= 0)) {
+  if (cost === undefined && event.subtype === "success") {
+    // A successful result always reports its cost; without it the metric goes missing.
+    state.audit.parseErrors.push("result event has no total_cost_usd");
+  } else if (cost !== undefined && !(asNumber(cost) !== undefined && (cost as number) >= 0)) {
     state.audit.parseErrors.push("result event has an invalid total_cost_usd");
   }
   const usage = event.usage;

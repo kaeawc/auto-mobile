@@ -101,8 +101,9 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   instead of continuing unprotected. A separate benchmark-only lock
   (`<claim file>.agent-benchmark`) is held for the whole run, so a second benchmark on the same
   device is refused even after the handover; a crashed benchmark's lock is reclaimed.
-- No iOS simulator may be booted (checked with `xcrun simctl` on macOS): the benchmark's
-  AutoMobile server discovers iOS too, which would make device selection ambiguous.
+- No iOS simulator may be booted and no physical iOS device connected (checked with
+  `xcrun simctl` and `devicectl` on macOS): the benchmark's AutoMobile server discovers iOS too,
+  which would make device selection ambiguous.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
@@ -193,7 +194,8 @@ paths, so sequence drift never fails a run.
 
 When a run passes with no stumbles, the harness writes `<run>/baseline.yml`, which you can paste
 into the suite. A run that recovered from a stumble still passes but writes no snippet, because its
-error count and recovery calls would skew later comparisons.
+error count and recovery calls would skew later comparisons. A suite with `clearAppData: false`
+never writes one either, since state left by earlier runs makes its starting point unreproducible.
 Record baselines only from clean, passing runs. When establishing one, allow up to three
 attempts. If none passes, leave the suite without a `baseline` block rather than recording a
 failed run.

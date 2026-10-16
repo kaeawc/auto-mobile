@@ -106,6 +106,7 @@ function setup(transcript: string, launchMs = 42_000) {
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
+    physicalIosDevices: async () => [],
     launcher: {
       async launch(spec) {
         launches.push(spec);
@@ -465,6 +466,28 @@ describe("agent benchmark harness", () => {
     expect(runner.adbCalls()).toEqual(["devices"]);
     expect(claims).toEqual([]);
     expect(launches).toHaveLength(0);
+  });
+
+  test("a connected physical iOS device stops the run before anything touches the device", async () => {
+    const { runner, launches, claims, deps, options } = setup(PASSING);
+    deps.physicalIosDevices = async () => ["Test iPhone"];
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
+      /Connected iOS device\(s\) \(Test iPhone\).*disconnect them first/,
+    );
+    expect(runner.adbCalls()).toEqual(["devices"]);
+    expect(claims).toEqual([]);
+    expect(launches).toHaveLength(0);
+  });
+
+  test("a pass without clearing app data writes no baseline snippet", async () => {
+    const { fs, logs, deps, options } = setup(PASSING);
+    const suite = loadedSuite({
+      preflight: { launchUri: "example:start", settleSeconds: 3, clearAppData: false },
+    });
+    const result = await runSuite(suite, options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(fs.exists(artifact("baseline.yml"))).toBe(false);
+    expect(logs).toContain("[demo] passed, but clearAppData is false; no baseline.yml written");
   });
 
   test("an unreadable foreign claim also keeps the device untouched", async () => {

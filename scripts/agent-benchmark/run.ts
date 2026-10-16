@@ -43,6 +43,7 @@ import {
 } from "../../src/daemon/foreignDeviceOwnership";
 import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { getSharedDevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import {
   readExclusiveLockContent,
   releaseExclusiveLock,
@@ -437,6 +438,11 @@ async function main(argv: string[]): Promise<number> {
     fs: realFs,
     log: (line) => console.error(line),
     env: process.env,
+    physicalIosDevices: async () => {
+      // Never throws: hosts without Xcode or hardware list nothing.
+      const discovery = await getSharedDevicectlDeviceLister().listConnectedDevices();
+      return discovery.devices.map((device) => device.name);
+    },
   });
   emit(results, options.json);
   return results.every((result) => result.comparison.verdict === "passed") ? 0 : 1;

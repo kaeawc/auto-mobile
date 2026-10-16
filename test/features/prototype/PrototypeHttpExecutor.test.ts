@@ -1,3 +1,4 @@
+import { applyPrototypeRequestOutcome } from "../../../src/features/prototype/prototypeRequestOutcome";
 import { describe, expect, test } from "bun:test";
 import {
   FetchPrototypeHttpExecutor,
@@ -125,6 +126,40 @@ describe("FetchPrototypeHttpExecutor", () => {
       100,
     );
     expect(failureCode(await executor.execute(request, signal()))).toBe("too_large");
+  });
+
+  test("a non-2xx status is an http outcome even when its body is over the cap", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(40));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const { executor } = executorFor(
+      async () =>
+        new Response(stream, {
+          status: 500,
+          headers: { "content-length": "1000", "x-id": "9" },
+        }),
+      new FakeTimer(),
+      100,
+    );
+    const outcome = await executor.execute(request, signal());
+    expect(outcome).toMatchObject({
+      ok: true,
+      status: 500,
+      headers: { "x-id": "9" },
+      body: null,
+    });
+    expect(cancelled).toBe(true);
+    const response = { type: "prototype_response" as const, requestId: "r", ...outcome };
+    expect(applyPrototypeRequestOutcome({}, "/data/feed", response).meta.error).toEqual({
+      code: "http_error",
+      message: "HTTP 500",
+    });
   });
 
   test("returns connection_refused as a typed error, not a throw", async () => {
@@ -259,6 +294,26 @@ describe("prototype request host", () => {
       ok: false,
       error: { code: "invalid_request" },
     });
+  });
+
+  test("closing one host leaves another host's request on the same device running", async () => {
+    const executor = new PendingExecutor();
+    const coordinator = new PrototypeRequestCoordinator(executor);
+    const older = createPrototypeRequestHost("d", coordinator);
+    const current = createPrototypeRequestHost("d", coordinator);
+    const sentByCurrent: PrototypeResponseMessage[] = [];
+    const olderDone = older.handleRequest(frame, () => undefined);
+    const currentDone = current.handleRequest({ ...frame, requestId: "r2" }, (r) =>
+      sentByCurrent.push(r),
+    );
+    older.handleDisconnect();
+    await olderDone;
+    expect(executor.signals.map((s) => s.aborted)).toEqual([true, false]);
+    expect(coordinator.inFlightCount("d")).toBe(1);
+    expect(sentByCurrent).toEqual([]);
+    current.handleDisconnect();
+    await currentDone;
+    expect(coordinator.inFlightCount()).toBe(0);
   });
 
   test("disconnect cancels the device's requests and a failed reply is swallowed", async () => {

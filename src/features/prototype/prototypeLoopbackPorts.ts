@@ -1,11 +1,14 @@
 import { logger } from "../../utils/logger";
+import { expandPrototypeComponents } from "./prototypeComponents";
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { mapBindableFields, record } from "./prototypeTemplate";
 
 /**
  * Finds the loopback ports a prototype's `via: "device"` requests need `adb reverse` for (#12530).
  * On an Android device `localhost` is the device itself, so such a request only reaches the host's
- * server through a reverse. The walk is generic (any object with `type: "request"` and
- * `via: "device"`, at any depth, including nested `onSuccess`/`onError` lists) so it does not depend
- * on the request action's schema.
+ * server through a reverse. The walk visits only real action slots (node, part and span action
+ * lists, `scroll.refresh`, and nested request `onSuccess`/`onError`) through the shared bindable-field
+ * walker, so opaque values (`data`, request bodies, emit context, component props) are never scanned.
  */
 
 export interface UnreversibleLoopbackUrl {
@@ -55,29 +58,37 @@ function classifyUrl(url: string): Classified {
   return port === undefined ? { reason: `no port for the ${parsed.protocol} scheme` } : { port };
 }
 
-function visit(node: unknown, out: { ports: Set<number>; unreversible: Map<string, string> }) {
-  if (Array.isArray(node)) {
-    node.forEach((child) => visit(child, out));
+function collect(
+  action: Record<string, unknown>,
+  out: { ports: Set<number>; unreversible: Map<string, string> },
+): void {
+  if (typeof action.url !== "string") {
     return;
   }
-  if (node === null || typeof node !== "object") {
-    return;
+  const classified = classifyUrl(action.url);
+  if (classified && "port" in classified) {
+    out.ports.add(classified.port);
+  } else if (classified) {
+    out.unreversible.set(action.url, classified.reason);
   }
-  const record = node as Record<string, unknown>;
-  if (record.type === "request" && record.via === "device" && typeof record.url === "string") {
-    const classified = classifyUrl(record.url);
-    if (classified && "port" in classified) {
-      out.ports.add(classified.port);
-    } else if (classified) {
-      out.unreversible.set(record.url, classified.reason);
-    }
-  }
-  Object.values(record).forEach((child) => visit(child, out));
 }
 
 export function extractDeviceLoopbackPorts(spec: unknown): DeviceLoopbackPorts {
   const found = { ports: new Set<number>(), unreversible: new Map<string, string>() };
-  visit(spec, found);
+  const expansion = expandPrototypeComponents(spec);
+  if (expansion.success) {
+    // Only the executable action slots are visited, so request-shaped JSON in `data`, a request
+    // `body`, emit context or component props is never mistaken for an action.
+    walkPrototypeNodes(expansion.spec, (node, path) => {
+      mapBindableFields(node, path, (value, _at, kind) => {
+        const action = record(value);
+        if (kind === "deviceRequest" && action) {
+          collect(action, found);
+        }
+        return value;
+      });
+    });
+  }
   return {
     ports: [...found.ports].sort((a, b) => a - b),
     unreversible: [...found.unreversible].map(([url, reason]) => ({ url, reason })),

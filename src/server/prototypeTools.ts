@@ -1751,8 +1751,7 @@ async function performMutation(
   // events exactly as an in-place one does; only the caller needs telling.
   const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace, signal);
   const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
-  // Every display lookup and window-option check happens before staging; nothing is re-resolved
-  // after dispatch. A refused show must not reset the event epoch of a prototype still on screen.
+  // Display lookups and window-option checks precede staging, so a refused show cannot reset the event epoch.
   const ordering: ShowOrdering = {
     commits,
     scope,
@@ -1761,6 +1760,7 @@ async function performMutation(
     sent: false,
     startedFreshEvents: false,
   };
+  const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
     const generation = takenGeneration;
     const resolved = await preflightWithGeneration(ordering, () =>
@@ -1792,7 +1792,6 @@ async function performMutation(
     if (stage.failure) {
       withdrawGeneration(ordering);
     }
-    const reversing = reverseLifecycle(dependencies, device, args, target);
     const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
     const { result, warning } = await withdrawOnAbort(
       ordering,
@@ -1890,6 +1889,7 @@ async function performMutation(
     // Rethrow the original error to preserve abort and ActionableError identity after binding cleanup.
     throw error;
   } finally {
+    await reversing.abandon(ordering.sent);
     endShownSpec(store, ordering);
     settleGeneration(ordering);
   }

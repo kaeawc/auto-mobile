@@ -35,7 +35,7 @@ import {
   type TalkBackTargetContext,
 } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
-import { inputDurationArgument } from "./touchscreenInput";
+import { dispatchAndroidLongPress } from "./androidLongPress";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -50,7 +50,7 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
-import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
@@ -122,7 +122,7 @@ import {
 import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
+import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -5535,37 +5535,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     }
 
-    const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
-    try {
-      try {
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence?.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          { timeoutMs: longPressTimeoutMs, signal },
-        );
-      } catch (error) {
-        logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
-        this.throwIfLongPressInterrupted(error, durationMs, signal);
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-        // Only a non-cancellation failure may use the legacy input source.
-        fence?.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          { timeoutMs: longPressTimeoutMs, signal },
-        );
-      }
-    } catch (error) {
-      logger.warn(`[TapOnElement] Android long press failed: ${errorMessage(error)}`, error);
-      this.throwIfLongPressInterrupted(error, durationMs, signal);
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throw toActionableError(error, "Android long press failed");
-    }
+    await dispatchAndroidLongPress({
+      adb: this.adb,
+      x,
+      y,
+      durationMs,
+      signal,
+      assertCurrent: fence ? () => fence.assertCurrent() : undefined,
+      logTag: "TapOnElement",
+    });
   }
 
   private throwIfLongPressInterrupted(

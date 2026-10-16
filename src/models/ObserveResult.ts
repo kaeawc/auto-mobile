@@ -12,9 +12,9 @@ import { PerformanceAuditResult } from "../features/performance/PerformanceAudit
 import { AccessibilityAuditResult } from "./AccessibilityAudit";
 import { RecompositionSummary } from "./Recomposition";
 import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
-import { SelectedElement } from "../utils/interfaces/NavigationGraph";
+import { SelectedElement } from "./SelectedElement";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
-import type { MediaView } from "../features/observe/IdentifyMediaViews";
+import type { MediaView } from "./MediaView";
 import type { ObserveError } from "./ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";

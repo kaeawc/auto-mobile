@@ -90,7 +90,7 @@
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1868	src/utils/android-cmdline-tools/AdbClient.ts
-3324	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
+3336	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3185	src/utils/ios-cmdline-tools/SimCtlClient.ts

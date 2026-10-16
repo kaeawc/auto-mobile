@@ -84,6 +84,21 @@ function failedResult(config: SessionConfig, failure: SessionBrokerFailure): Ses
   };
 }
 
+/**
+ * Reading or assembling the receipt failed after activation committed. The active grant stays
+ * intact and is not routed through acquisition rollback; the caller receives an RPC error and a
+ * replay of the same request identity reads the committed receipt.
+ */
+class CommittedReceiptReadError extends ActionableError {
+  constructor(requestId: string, cause: unknown) {
+    super(
+      `Session request ${requestId} committed its session, but its receipt could not be read ` +
+        `(${errorMessage(cause)}); replay the same request ID to recover it`,
+      { cause },
+    );
+  }
+}
+
 function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
   return (
     left.daemonId === right.daemonId &&
@@ -151,6 +166,10 @@ export class SessionBroker {
       admitted = true;
       return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
     } catch (error) {
+      if (error instanceof CommittedReceiptReadError) {
+        logger.warn(error.message, error.cause);
+        throw error;
+      }
       logger.warn(
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
@@ -311,11 +330,16 @@ export class SessionBroker {
     // here on hands it back for a replay of that identity instead of destroying it; the session's
     // own liveness policy releases it if the caller never returns. Abandonment is separate and
     // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
-    return this.result(
-      signal.aborted
-        ? ((await this.options.store.getRequest(config.requestId)) ?? request)
-        : request,
-    );
+    try {
+      return await this.result(
+        signal.aborted
+          ? ((await this.options.store.getRequest(config.requestId)) ?? request)
+          : request,
+      );
+    } catch (error) {
+      // Only the reply is uncertain (#12771): the committed grant is not a preparation failure.
+      throw new CommittedReceiptReadError(config.requestId, error);
+    }
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {

@@ -1,0 +1,390 @@
+{
+  "id": "7c6bc883-86cf-4ae3-8eb5-f1cd49dd891b",
+  "op": "call",
+  "tool": "observe",
+  "ms": 412,
+  "startedAt": "2026-10-16T05:14:06.349Z",
+  "endedAt": "2026-10-16T05:14:06.761Z",
+  "ok": true,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"observationId\":\"fe6c54fa-8ef1-4e5c-8ad1-8c81f8944ac8\",\"deviceId\":\"emulator-5556\",\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1792127645857,\"screenSize\":{\"width\":1080,\"height\":2400,\"units\":\"physical-pixels\"},\"systemInsets\":{\"top\":168,\"bottom\":84,\"left\":78,\"right\":78},\"insets\":{\"available\":true,\"source\":\"android-window-metrics\",\"units\":\"physical-pixels\",\"systemBars\":{\"visible\":{\"top\":136,\"bottom\":63,\"left\":0,\"right\":0},\"stable\":{\"top\":136,\"bottom\":63,\"left\":0,\"right\":0}},\"displayCutout\":{\"top\":136,\"bottom\":0,\"left\":0,\"right\":0},\"displayCutoutInfo\":{\"classification\":\"unknown\",\"bounds\":[[480,0,625,136]]},\"systemGestures\":{\"top\":168,\"bottom\":84,\"left\":78,\"right\":78},\"mandatorySystemGestures\":{\"top\":168,\"bottom\":84,\"left\":0,\"right\":0},\"tappableElement\":{\"top\":136,\"bottom\":0,\"left\":0,\"right\":0},\"systemChrome\":{\"visibility\":\"visible\",\"statusBar\":\"visible\",\"navigationBar\":\"visible\",\"homeIndicatorAutoHideRequested\":null,\"source\":\"android-window-insets\"}},\"intentChooserDetected\":true,\"notificationPermissionDetected\":false,\"rotation\":0,\"wakefulness\":\"Awake\",\"wakefulnessSource\":\"hierarchy\",\"backStack\":{\"depth\":0,\"activities\":[{\"name\":\"com.android.internal.app.ResolverActivity\",\"taskId\":13,\"userId\":0,\"isTaskRoot\":true},{\"name\":\"com.google.android.apps.nexuslauncher.NexusLauncherActivity\",\"taskId\":2,\"userId\":0,\"isTaskRoot\":true},{\"name\":\"com.android.permissioncontroller.permission.ui.GrantPermissionsActivity\",\"taskId\":9,\"userId\":0,\"taskAffinity\":\"10169:com.google.android.youtube\",\"isTaskRoot\":true},{\"name\":\"dev.jasonpearson.automobile.playground.MainActivity\",\"taskId\":10,\"userId\":0,\"taskAffinity\":\"10214:dev.jasonpearson.automobile.playground\",\"isTaskRoot\":true}],\"tasks\":[{\"id\":13,\"userId\":0,\"rootActivity\":\"android/com.android.internal.app.ResolverActivity\",\"packageName\":\"android\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.shell\"},{\"id\":2,\"userId\":0,\"rootActivity\":\"com.google.android.apps.nexuslauncher/.NexusLauncherActivity\",\"packageName\":\"com.google.android.apps.nexuslauncher\",\"numActivities\":1},{\"id\":9,\"userId\":0,\"affinity\":\"10169:com.google.android.youtube\",\"numActivities\":1,\"launchedFromPackage\":\"com.google.android.youtube\",\"rootActivity\":\"com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity\",\"packageName\":\"com.google.android.permissioncontroller\"},{\"id\":10,\"userId\":0,\"affinity\":\"10214:dev.jasonpearson.automobile.playground\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.shell\",\"rootActivity\":\"dev.jasonpearson.automobile.playground/.MainActivity\",\"packageName\":\"dev.jasonpearson.automobile.playground\"}],\"currentActivity\":{\"name\":\"com.android.internal.app.ResolverActivity\",\"taskId\":13,\"userId\":0},\"displayCount\":1,\"currentTaskId\":13,\"capturedAt\":1792127646684,\"source\":\"adb\"},\"activeWindow\":{\"appId\":\"android\",\"activityName\":\"com.android.internal.app.ResolverActivity\",\"layoutSeqSum\":5572},\"deviceLock\":{\"locked\":false,\"keyguardShowing\":false,\"secure\":false},\"accessibilityState\":{\"enabled\":false,\"service\":\"unknown\",\"detectionSkipped\":false},\"freshness\":{\"actualTimestamp\":1792127645857,\"ageMs\":82,\"verified\":true,\"isFresh\":true},\"snapshotReference\":{\"snapshotId\":\"62247fd8-24c1-40de-8ff7-3e678d383807\",\"expiresAt\":1792127946747},\"skeleton\":[{\"bounds\":[0,1646,1080,1794],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-dfc010a67d818f32~843e4e04\",\"label\":\"Chrome\"},{\"bounds\":[0,1794,1080,1942],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-dfc010a67d818f32~69d7ba3c\",\"label\":\"Quick Share\"},{\"bounds\":[0,1942,1080,2090],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-dfc010a67d818f32~f73bb4e6\",\"label\":\"Bluetooth\"},{\"bounds\":[0,2090,1080,2238],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-d0425955b6d1c474~f412b815\",\"label\":\"Gmail\",\"sublabel\":\"Chat\"},{\"bounds\":[0,2238,1080,2386],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-d0425955b6d1c474~56bf769a\",\"label\":\"Drive\",\"sublabel\":\"Copy to clipboard\"},{\"bounds\":[0,2386,1080,2400],\"affordances\":[\"tap\",\"long-press\"],\"elementId\":\"s2-e463212d84da9d12\"},{\"bounds\":[631,2174,853,2316],\"affordances\":[\"tap\"],\"elementId\":\"android:id/button_once\",\"label\":\"Just once\",\"enabled\":false},{\"bounds\":[853,2174,1033,2316],\"affordances\":[\"tap\"],\"elementId\":\"android:id/button_always\",\"label\":\"Always\",\"enabled\":false},{\"bounds\":[0,0,1080,2400],\"affordances\":[\"scroll\"],\"elementId\":\"android:id/contentPanel\"}],\"context\":[{\"bounds\":[63,1523,1017,1580],\"affordances\":[],\"elementId\":\"android:id/title\",\"label\":\"Share\"},{\"bounds\":[151,1,209,136],\"affordances\":[],\"elementId\":\"s2-425d6fb4840881ab\",\"label\":\"Security & privacy notification:\"},{\"bounds\":[209,1,267,136],\"affordances\":[],\"elementId\":\"s2-59c2c43e07860ca2\",\"label\":\"Android System notification:\"},{\"bounds\":[930,39,969,97],\"affordances\":[],\"elementId\":\"com.android.systemui:id/mobile_combo\",\"label\":\"T-Mobile, signal full.\"},{\"bounds\":[47,47,1005,90],\"affordances\":[],\"elementId\":\"com.android.systemui:status-bar-summary\",\"label\":\"Status bar: 1:14, Wifi signal full., Battery charging, 100 percent.\"}],\"observationScreenshotResourceUri\":\"automobile:observation/emulator-5556/fe6c54fa-8ef1-4e5c-8ad1-8c81f8944ac8/screenshot\"}"
+      }
+    ],
+    "structuredContent": {
+      "observationId": "fe6c54fa-8ef1-4e5c-8ad1-8c81f8944ac8",
+      "deviceId": "emulator-5556",
+      "display": {
+        "key": "0",
+        "role": "unknown",
+        "posture": "unknown",
+        "generation": 0
+      },
+      "updatedAt": 1792127645857,
+      "screenSize": {
+        "width": 1080,
+        "height": 2400,
+        "units": "physical-pixels"
+      },
+      "systemInsets": {
+        "top": 168,
+        "bottom": 84,
+        "left": 78,
+        "right": 78
+      },
+      "insets": {
+        "available": true,
+        "source": "android-window-metrics",
+        "units": "physical-pixels",
+        "systemBars": {
+          "visible": {
+            "top": 136,
+            "bottom": 63,
+            "left": 0,
+            "right": 0
+          },
+          "stable": {
+            "top": 136,
+            "bottom": 63,
+            "left": 0,
+            "right": 0
+          }
+        },
+        "displayCutout": {
+          "top": 136,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "displayCutoutInfo": {
+          "classification": "unknown",
+          "bounds": [
+            [
+              480,
+              0,
+              625,
+              136
+            ]
+          ]
+        },
+        "systemGestures": {
+          "top": 168,
+          "bottom": 84,
+          "left": 78,
+          "right": 78
+        },
+        "mandatorySystemGestures": {
+          "top": 168,
+          "bottom": 84,
+          "left": 0,
+          "right": 0
+        },
+        "tappableElement": {
+          "top": 136,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "systemChrome": {
+          "visibility": "visible",
+          "statusBar": "visible",
+          "navigationBar": "visible",
+          "homeIndicatorAutoHideRequested": null,
+          "source": "android-window-insets"
+        }
+      },
+      "intentChooserDetected": true,
+      "notificationPermissionDetected": false,
+      "rotation": 0,
+      "wakefulness": "Awake",
+      "wakefulnessSource": "hierarchy",
+      "backStack": {
+        "depth": 0,
+        "activities": [
+          {
+            "name": "com.android.internal.app.ResolverActivity",
+            "taskId": 13,
+            "userId": 0,
+            "isTaskRoot": true
+          },
+          {
+            "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+            "taskId": 2,
+            "userId": 0,
+            "isTaskRoot": true
+          },
+          {
+            "name": "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+            "taskId": 9,
+            "userId": 0,
+            "taskAffinity": "10169:com.google.android.youtube",
+            "isTaskRoot": true
+          },
+          {
+            "name": "dev.jasonpearson.automobile.playground.MainActivity",
+            "taskId": 10,
+            "userId": 0,
+            "taskAffinity": "10214:dev.jasonpearson.automobile.playground",
+            "isTaskRoot": true
+          }
+        ],
+        "tasks": [
+          {
+            "id": 13,
+            "userId": 0,
+            "rootActivity": "android/com.android.internal.app.ResolverActivity",
+            "packageName": "android",
+            "numActivities": 1,
+            "launchedFromPackage": "com.android.shell"
+          },
+          {
+            "id": 2,
+            "userId": 0,
+            "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+            "packageName": "com.google.android.apps.nexuslauncher",
+            "numActivities": 1
+          },
+          {
+            "id": 9,
+            "userId": 0,
+            "affinity": "10169:com.google.android.youtube",
+            "numActivities": 1,
+            "launchedFromPackage": "com.google.android.youtube",
+            "rootActivity": "com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+            "packageName": "com.google.android.permissioncontroller"
+          },
+          {
+            "id": 10,
+            "userId": 0,
+            "affinity": "10214:dev.jasonpearson.automobile.playground",
+            "numActivities": 1,
+            "launchedFromPackage": "com.android.shell",
+            "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+            "packageName": "dev.jasonpearson.automobile.playground"
+          }
+        ],
+        "currentActivity": {
+          "name": "com.android.internal.app.ResolverActivity",
+          "taskId": 13,
+          "userId": 0
+        },
+        "displayCount": 1,
+        "currentTaskId": 13,
+        "capturedAt": 1792127646684,
+        "source": "adb"
+      },
+      "activeWindow": {
+        "appId": "android",
+        "activityName": "com.android.internal.app.ResolverActivity",
+        "layoutSeqSum": 5572
+      },
+      "deviceLock": {
+        "locked": false,
+        "keyguardShowing": false,
+        "secure": false
+      },
+      "accessibilityState": {
+        "enabled": false,
+        "service": "unknown",
+        "detectionSkipped": false
+      },
+      "freshness": {
+        "actualTimestamp": 1792127645857,
+        "ageMs": 82,
+        "verified": true,
+        "isFresh": true
+      },
+      "snapshotReference": {
+        "snapshotId": "62247fd8-24c1-40de-8ff7-3e678d383807",
+        "expiresAt": 1792127946747
+      },
+      "skeleton": [
+        {
+          "bounds": [
+            0,
+            1646,
+            1080,
+            1794
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-dfc010a67d818f32~843e4e04",
+          "label": "Chrome"
+        },
+        {
+          "bounds": [
+            0,
+            1794,
+            1080,
+            1942
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-dfc010a67d818f32~69d7ba3c",
+          "label": "Quick Share"
+        },
+        {
+          "bounds": [
+            0,
+            1942,
+            1080,
+            2090
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-dfc010a67d818f32~f73bb4e6",
+          "label": "Bluetooth"
+        },
+        {
+          "bounds": [
+            0,
+            2090,
+            1080,
+            2238
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-d0425955b6d1c474~f412b815",
+          "label": "Gmail",
+          "sublabel": "Chat"
+        },
+        {
+          "bounds": [
+            0,
+            2238,
+            1080,
+            2386
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-d0425955b6d1c474~56bf769a",
+          "label": "Drive",
+          "sublabel": "Copy to clipboard"
+        },
+        {
+          "bounds": [
+            0,
+            2386,
+            1080,
+            2400
+          ],
+          "affordances": [
+            "tap",
+            "long-press"
+          ],
+          "elementId": "s2-e463212d84da9d12"
+        },
+        {
+          "bounds": [
+            631,
+            2174,
+            853,
+            2316
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "android:id/button_once",
+          "label": "Just once",
+          "enabled": false
+        },
+        {
+          "bounds": [
+            853,
+            2174,
+            1033,
+            2316
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "android:id/button_always",
+          "label": "Always",
+          "enabled": false
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            1080,
+            2400
+          ],
+          "affordances": [
+            "scroll"
+          ],
+          "elementId": "android:id/contentPanel"
+        }
+      ],
+      "context": [
+        {
+          "bounds": [
+            63,
+            1523,
+            1017,
+            1580
+          ],
+          "affordances": [],
+          "elementId": "android:id/title",
+          "label": "Share"
+        },
+        {
+          "bounds": [
+            151,
+            1,
+            209,
+            136
+          ],
+          "affordances": [],
+          "elementId": "s2-425d6fb4840881ab",
+          "label": "Security & privacy notification:"
+        },
+        {
+          "bounds": [
+            209,
+            1,
+            267,
+            136
+          ],
+          "affordances": [],
+          "elementId": "s2-59c2c43e07860ca2",
+          "label": "Android System notification:"
+        },
+        {
+          "bounds": [
+            930,
+            39,
+            969,
+            97
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:id/mobile_combo",
+          "label": "T-Mobile, signal full."
+        },
+        {
+          "bounds": [
+            47,
+            47,
+            1005,
+            90
+          ],
+          "affordances": [],
+          "elementId": "com.android.systemui:status-bar-summary",
+          "label": "Status bar: 1:14, Wifi signal full., Battery charging, 100 percent."
+        }
+      ],
+      "observationScreenshotResourceUri": "automobile:observation/emulator-5556/fe6c54fa-8ef1-4e5c-8ad1-8c81f8944ac8/screenshot"
+    }
+  }
+}

@@ -39,7 +39,7 @@ fun interface PrototypeStateWriteValidator {
 
 object PrototypeSpecValidator {
   private val pathKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
-  private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+  internal val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
   private val colorPattern = Regex("^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
   private val blankTextPattern =
     Regex(
@@ -73,6 +73,8 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_PATCH_OPS: Int = limit("MAX_PROTOTYPE_PATCH_OPS")
   val MAX_PROTOTYPE_DATA_BYTES: Int = limit("MAX_PROTOTYPE_DATA_BYTES")
   val MAX_PROTOTYPE_DATA_WRITE_BYTES: Int = limit("MAX_PROTOTYPE_DATA_WRITE_BYTES")
+  val MAX_PROTOTYPE_STORAGE_BYTES: Int = limit("MAX_PROTOTYPE_STORAGE_BYTES")
+  val MAX_PROTOTYPE_STORAGE_KEYS: Int = limit("MAX_PROTOTYPE_STORAGE_KEYS")
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")

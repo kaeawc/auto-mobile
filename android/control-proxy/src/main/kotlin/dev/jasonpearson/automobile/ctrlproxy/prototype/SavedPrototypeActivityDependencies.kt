@@ -53,6 +53,11 @@ object SavedPrototypeEvents {
 }
 
 internal object SavedPrototypeActivityDependencies {
+  /** Where the values a saved prototype's `storage` block keeps live (#12522). */
+  @Volatile
+  var storageStore: (Context) -> PrototypeStorageStore = {
+    PrototypeStorageStores.inDirectory(prototypeStorageRoot(it.filesDir))
+  }
   @Volatile
   var store: (Context) -> SavedPrototypeStore = {
     SavedPrototypeStores.inDirectory(savedPrototypeRoot(it))
@@ -66,6 +71,7 @@ internal object SavedPrototypeActivityDependencies {
   @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
 
   fun reset() {
+    storageStore = { PrototypeStorageStores.inDirectory(prototypeStorageRoot(it.filesDir)) }
     store = { SavedPrototypeStores.inDirectory(savedPrototypeRoot(it)) }
     isUserUnlocked = { it.getSystemService(UserManager::class.java)?.isUserUnlocked == true }
     ioDispatcher = Dispatchers.IO

@@ -216,6 +216,16 @@ internal fun prototypeSavedListFrame(
     ),
   )
 
+internal fun prototypeClearedFrame(requestId: String?, cleared: Int): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = true,
+      cleared = cleared,
+    ),
+  )
+
 internal fun prototypeRefusalFrame(
   requestId: String?,
   code: SavedPrototypeErrorCode,

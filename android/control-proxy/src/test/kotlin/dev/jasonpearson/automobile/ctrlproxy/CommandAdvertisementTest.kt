@@ -22,6 +22,7 @@ class CommandAdvertisementTest {
   private val knownFlags =
     setOf(
       "prototype_saved_v1",
+      "prototype_storage_v1",
       "node_selector_actions",
       "ime_key_events_v1",
       "ime_clear_field_v1",

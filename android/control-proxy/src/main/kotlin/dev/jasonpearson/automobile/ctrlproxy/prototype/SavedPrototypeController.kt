@@ -25,6 +25,8 @@ class SavedPrototypeController(
   private val sink: PrototypeResultSink,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   private val pinner: PrototypeShortcutPinner = UnsupportedShortcutPinner,
+  /** Clears the values the deleted prototype's `storage` block kept; returns the keys removed. */
+  private val clearStorage: suspend (String) -> Int = { 0 },
 ) {
   private val json = Json {
     prettyPrint = false
@@ -106,6 +108,7 @@ class SavedPrototypeController(
         refusal(SavedPrototypeErrorCode.NOT_FOUND, "Saved prototype not found: $id")
       } else {
         disableShortcut(id)
+        clearStorage(id)
         PrototypeResult(timestamp = 0, success = true)
       }
     }
@@ -194,7 +197,7 @@ class SavedPrototypeController(
   }
 
   // Build the outcome before calling the sink: even a sink failure cannot cause a second reply.
-  private suspend fun reply(requestId: String?, action: () -> PrototypeResult) {
+  private suspend fun reply(requestId: String?, action: suspend () -> PrototypeResult) {
     val result =
       try {
         withContext(ioDispatcher) { action() }

@@ -102,8 +102,6 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
   "clear_preferences_result.totalTimeMs":
     "Optional host timing slot; storage broadcaster omits it.",
   "prototype_result.totalTimeMs": "Optional host timing slot; PrototypeResult replies omit it.",
-  "prototype_result.cleared":
-    "clear_prototype_storage reply (#12522, prototype_storage_v1); the Kotlin PrototypeResult adds it with the device lane.",
 };
 
 const responseNames = fixture.responses.map(({ serialName }) => serialName);

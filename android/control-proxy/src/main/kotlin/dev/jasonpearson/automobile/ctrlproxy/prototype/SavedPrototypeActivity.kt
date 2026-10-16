@@ -25,6 +25,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.ctrlproxy.CtrlProxyTheme
 import dev.jasonpearson.automobile.ctrlproxy.R
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * Standalone activity renderer: no service, idle timer, disconnect or foreground-app scoping. Back
@@ -82,6 +86,7 @@ class SavedPrototypeActivity : ComponentActivity() {
     scope.launch {
       interactions.withLock {
         if (isFinishing) return@withLock
+        runtime?.flushStorage()
         runtime?.close()
         runtime = null
         images = null
@@ -109,7 +114,7 @@ class SavedPrototypeActivity : ComponentActivity() {
     }
   }
 
-  private fun prepareRuntime(loaded: SavedPrototypeLoadResult.Loaded) {
+  private suspend fun prepareRuntime(loaded: SavedPrototypeLoadResult.Loaded) {
     val source = SavedPrototypeAssetSource(loaded)
     images =
       PrototypeImageCache(
@@ -118,9 +123,20 @@ class SavedPrototypeActivity : ComponentActivity() {
         dispatcher = SavedPrototypeActivityDependencies.ioDispatcher,
       )
     fonts = PrototypeFontCache(source, ComposePrototypeFontLoader())
+    // The stored values replace the saved spec's before the first draw, as for a shown prototype.
+    val opened =
+      PrototypeStoragePersistence(
+          SavedPrototypeActivityDependencies.storageStore(this),
+          CoroutinePrototypeScheduler(scope),
+          SavedPrototypeActivityDependencies.ioDispatcher,
+        )
+        .open(loaded.spec) { restored ->
+          PrototypeSpecValidator.validate(Json.encodeToString(restored)) is
+            PrototypeSpecValidation.Success
+        }
     runtime =
       PrototypeRuntime(
-        loaded.spec,
+        opened.spec,
         SavedPrototypeActivityDependencies.eventSink,
         SavedPrototypeActivityDependencies.clock,
         nextSequence = { SavedPrototypeEvents.nextSequence(loaded.spec.id) },
@@ -128,6 +144,7 @@ class SavedPrototypeActivity : ComponentActivity() {
           finish()
           true
         },
+        storage = opened.session,
       )
   }
 
@@ -148,6 +165,12 @@ class SavedPrototypeActivity : ComponentActivity() {
   private suspend fun dismiss() {
     runtime?.dismiss(PrototypeDismissReason.USER)
     finish()
+  }
+
+  /** The last point a stopped activity is sure to run: write what the debounce still holds. */
+  override fun onStop() {
+    scope.launch { interactions.withLock { runtime?.flushStorage() } }
+    super.onStop()
   }
 
   override fun onDestroy() {

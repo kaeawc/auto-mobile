@@ -6,10 +6,13 @@ import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
+import dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes
+import dev.jasonpearson.automobile.protocol.PrototypeStorageReport
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -121,5 +124,54 @@ class PrototypeResultFrameTest {
     val decoded = json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult
     assertEquals(listOf("hero", "logo"), decoded.missingAssets)
     assertTrue(decoded.success)
+  }
+
+  @Test
+  fun `a clear storage reply carries cleared and other results omit it`() {
+    val parsed = json.parseToJsonElement(prototypeClearedFrame("r2", 3)).jsonObject
+    assertEquals(JsonPrimitive("prototype_result"), parsed["type"])
+    assertEquals(JsonPrimitive(3), parsed["cleared"])
+    assertEquals(JsonPrimitive(true), parsed["success"])
+    assertEquals(
+      JsonPrimitive(0),
+      json.parseToJsonElement(prototypeClearedFrame("r2", 0)).jsonObject["cleared"],
+    )
+    assertFalse(
+      "cleared" in json.parseToJsonElement(prototypeResultFrame("r1", true, null)).jsonObject,
+    )
+  }
+
+  @Test
+  fun `an inspect entry carries the storage report only when there is one`() {
+    val report =
+      PrototypeStorageReport(
+        version = 2,
+        keys = listOf(PrototypeStorageKeyBytes("state:dark", 14)),
+        totalBytes = 14,
+        skippedKeys = listOf("data:/cart"),
+      )
+    val entry =
+      PrototypeStatusEntry(
+        id = "proto",
+        persistent = false,
+        state = emptyMap(),
+        lastSequence = 1,
+        storage = report,
+      )
+    val frame = json.parseToJsonElement(prototypeStatusFrame("r9", listOf(entry), 0)).jsonObject
+    val sent = frame.getValue("prototypes").jsonArray.single().jsonObject
+    assertEquals(
+      json.parseToJsonElement(
+        """{"version":2,"keys":[{"key":"state:dark","bytes":14}],"totalBytes":14,"skippedKeys":["data:/cart"]}""",
+      ),
+      sent["storage"],
+    )
+    val bare = entry.copy(storage = report.copy(skippedKeys = null))
+    val parsed = json.parseToJsonElement(prototypeStatusFrame("r9", listOf(bare), 0)).jsonObject
+    val storage = parsed.getValue("prototypes").jsonArray.single().jsonObject.getValue("storage")
+    assertFalse("skippedKeys" in storage.jsonObject)
+    val none =
+      json.parseToJsonElement(prototypeStatusFrame("r9", listOf(entry.copy(storage = null)), 0))
+    assertFalse("storage" in none.jsonObject.getValue("prototypes").jsonArray.single().jsonObject)
   }
 }

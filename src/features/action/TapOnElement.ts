@@ -87,7 +87,6 @@ import {
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
-// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";

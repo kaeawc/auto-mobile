@@ -7,6 +7,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 /** Helpers shared by TapOnElement and TapAnyElement (#11832). */
 
+// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();
 
 /** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */

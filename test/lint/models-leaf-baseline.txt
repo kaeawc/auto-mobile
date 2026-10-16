@@ -7,5 +7,3 @@ src/models/ObserveResult.ts	src/features/observe/IdentifyMediaViews
 src/models/ObserveResult.ts	src/features/observe/screenshot/observeCrop
 src/models/ObserveResult.ts	src/features/performance/PerformanceAudit
 src/models/ObserveResult.ts	src/utils/interfaces/NavigationGraph
-src/models/PackageSigningInspection.ts	src/utils/android-cmdline-tools/apkSigningBlock
-src/models/TapOnElementResult.ts	src/features/talkback/TalkBackTapStrategy

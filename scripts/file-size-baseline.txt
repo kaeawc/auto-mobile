@@ -80,7 +80,7 @@
 1170	src/server/executionTracker.ts
 1645	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
-3747	src/server/interactionTools.ts
+3152	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2875	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts

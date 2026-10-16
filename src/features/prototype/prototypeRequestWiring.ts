@@ -16,6 +16,17 @@ export function createPrototypeRequestCoordinator(
   return new PrototypeRequestCoordinator(new FetchPrototypeHttpExecutor({ timer }));
 }
 
+/** Routes an iOS prototype agent's `prototype_request` frames and disconnects to the coordinator. */
+export function attachIosPrototypeRequests(
+  agent: { attachRequestHost?(host: PrototypeRequestHost | undefined): void },
+  deviceId: string,
+  requests: PrototypeRequestCoordinator | undefined,
+): void {
+  if (requests !== undefined) {
+    agent.attachRequestHost?.(createPrototypeRequestHost(deviceId, requests));
+  }
+}
+
 /** Routes an Android client's `prototype_request` frames and disconnects to the coordinator. */
 export function attachAndroidPrototypeRequests(
   client: { attachPrototypeRequestHost?(host: PrototypeRequestHost | undefined): void },

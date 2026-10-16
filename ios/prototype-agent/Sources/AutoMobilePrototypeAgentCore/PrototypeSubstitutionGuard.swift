@@ -216,6 +216,16 @@ private struct PrototypeSubstitutionGuard {
             try field(action, "value", path: path, scope: scope)
         case "emit": try field(action, "name", path: path, scope: scope)
         case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
+        case "request":
+            try field(action, "url", path: path, text: true, scope: scope)
+            try field(action, "statusKey", path: path, scope: scope)
+            for list in ["onSuccess", "onError"] {
+                guard case let .array(entries)? = action[list] else { continue }
+                for (index, entry) in entries.enumerated() {
+                    guard case let .object(nested) = entry else { continue }
+                    try actionFields(nested, path: "\(path).\(list)[\(index)]", scope: scope)
+                }
+            }
         case "toggle", "increment", "decrement":
             try field(action, "key", path: path, scope: scope)
         default: break

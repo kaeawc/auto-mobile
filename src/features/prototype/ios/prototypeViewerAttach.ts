@@ -8,6 +8,7 @@ import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import type { PrototypeRequestHost } from "../prototypeRequestHandler";
 import type { PrototypeAgentConnections } from "./iosPrototypeTransport";
 import {
   connectPrototypeAgent,
@@ -153,6 +154,9 @@ class BufferedViewerClient implements PrototypeAgentClient {
       this.closedListeners.add(listener);
     }
     return () => this.closedListeners.delete(listener);
+  }
+  attachRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.client.attachRequestHost?.(host);
   }
   close(): void {
     this.client.close();

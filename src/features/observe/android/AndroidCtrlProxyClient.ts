@@ -104,6 +104,7 @@ import {
 } from "./AndroidServiceRecovery";
 import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import { AndroidCtrlProxyDelegatingFacade } from "./AndroidCtrlProxyDelegatingFacade";
+import { AndroidDeviceStateSync } from "./AndroidDeviceStateSync";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -161,9 +162,8 @@ import {
   registerDeviceIncarnationListener,
 } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import {} from "../../../server/NetworkState";
 import {
-  buildNetworkMockRules,
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   type NetworkMockPushResult,
   type NetworkMockRuleSync,
@@ -2099,78 +2099,20 @@ export class AndroidCtrlProxyClient
    * the device drops what that session installed (issue #10061).
    */
   public syncNetworkStateToDevice(): void {
-    try {
-      const state = NetworkState.getInstance();
-      const deviceId = this.device.deviceId;
-
-      // Always sync mock rules on reconnect, scoped to this device. The device
-      // store keeps consumption per mockId across a re-push (#10060). Sending an
-      // empty list clears stale rules that may linger from a previous connection.
-      const rules = buildNetworkMockRules(state, deviceId);
-      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })));
-
-      // Always re-sync error simulation state (including disabled) so the
-      // device doesn't keep stale simulation config from a previous connection
-      const sim = state.getSimulation(deviceId);
-      this.sendMessage(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.setNetworkErrorSimulation({
-            enabled: sim !== null,
-            errorType: sim?.errorType,
-            limit: sim?.limit,
-            expiresAtEpochMs: sim?.expiresAt,
-            // What is left now, not the original duration: the device times it on its own
-            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
-            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
-          }),
-        ),
-      );
-    } catch (e) {
-      logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
-    }
+    this.getDeviceStateSync().syncNetworkState();
   }
 
   private syncAccessibilityFlagsToDevice(): void {
-    try {
-      const flags = serverConfig.getAccessibilityFlagsConfig();
-      const allEnabled =
-        flags.includeNotImportantViews &&
-        flags.reportViewIds &&
-        flags.retrieveInteractiveWindows &&
-        flags.occlusionEnabled;
-      // Diagnostic: without this, "did the push ever get attempted" is unanswerable from
-      // logs alone — the only prior signal was the (info-level) send below, so a no-op
-      // skip and "never called" were indistinguishable (issue occlusion-flag).
-      logger.debug(
-        `[AndroidCtrlProxyClient] syncAccessibilityFlagsToDevice invoked: allEnabled=${allEnabled}, ` +
-          `occlusionEnabled=${flags.occlusionEnabled}`,
-      );
-      if (allEnabled) {
-        return;
-      }
+    this.getDeviceStateSync().syncAccessibilityFlags();
+  }
 
-      logger.info(
-        `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
-          `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
-          `reportViewIds=${flags.reportViewIds}, ` +
-          `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
-          `occlusionEnabled=${flags.occlusionEnabled}`,
-      );
-      this.sendMessage(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.setAccessibilityFlags({
-            includeNotImportantViews: flags.includeNotImportantViews,
-            reportViewIds: flags.reportViewIds,
-            retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
-            occlusionEnabled: flags.occlusionEnabled,
-          }),
-        ),
-      );
-    } catch (e) {
-      logger.debug(
-        `[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`,
-      );
-    }
+  private deviceStateSync: AndroidDeviceStateSync | undefined;
+  private getDeviceStateSync(): AndroidDeviceStateSync {
+    this.deviceStateSync ??= new AndroidDeviceStateSync({
+      deviceId: this.device.deviceId,
+      sendMessage: (message) => this.sendMessage(message),
+    });
+    return this.deviceStateSync;
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */

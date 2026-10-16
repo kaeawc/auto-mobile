@@ -50,6 +50,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { isPackageInstalledForUser } from "../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../utils/logger";
+import { isPathInside } from "../utils/filesystem/pathContainment";
 import { prepareFileSource } from "./fileSourcePreparation";
 import {
   getSharedStorageService,
@@ -1723,8 +1724,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   }
 
   private assertBelow(root: string, target: string, paths: typeof posix = hostPath): void {
-    const path = paths.relative(root, target);
-    if (!path || path === ".." || path.startsWith(`..${paths.sep}`) || paths.isAbsolute(path)) {
+    if (!isPathInside(root, target, { paths, allowEqual: false })) {
       throw new ActionableError(
         "iOS Files fixture destination must remain strictly below its managed namespace root.",
       );

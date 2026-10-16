@@ -6,6 +6,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ResolutionAction } from "../../models/ResolutionAction";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { CONTAINS_IGNORE_CASE, EXACT_MATCH } from "../utility/SelectionPolicy";
 import { nodeAttributes, type NodeAttributes } from "../../models/ViewHierarchyResult";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import {
@@ -235,7 +236,7 @@ export function tapSelectorFor(
       selector: { elementId: id },
       select: (index) =>
         selector.selectByResourceId(viewHierarchy, id, {
-          partialMatch: false,
+          ...EXACT_MATCH,
           index,
           intentAction,
         }),
@@ -246,8 +247,7 @@ export function tapSelectorFor(
       selector: { text },
       select: (index) =>
         selector.selectByText(viewHierarchy, text, {
-          partialMatch: true,
-          caseSensitive: false,
+          ...CONTAINS_IGNORE_CASE,
           index,
           intentAction,
         }),

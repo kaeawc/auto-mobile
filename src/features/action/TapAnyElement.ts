@@ -1,4 +1,9 @@
 import { isStrictlyScoped } from "../utility/ScopedSelection";
+import {
+  isContainerAvailable,
+  resolveSearchUntilDuration,
+  throwIfLongPressInterrupted,
+} from "./tapSharedHelpers";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -66,7 +71,7 @@ import {
   TapOnElementResult,
   ViewHierarchyResult,
 } from "../../models";
-import { AdbClient, AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
   visibleTapBounds,
@@ -77,8 +82,6 @@ import {
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
-// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
-const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -672,17 +675,7 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     signal?: AbortSignal,
   ): void {
-    if (
-      signal?.aborted ||
-      error instanceof AdbCommandTimeoutError ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
-      // Killing host adb cannot cancel input's system_server injection.
-      throw new ActionableError(
-        `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
-        { cause: error },
-      );
-    }
+    throwIfLongPressInterrupted(error, durationMs, signal);
   }
 
   private async trySemanticAndroidLongPress(
@@ -933,34 +926,18 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private getSearchUntilDuration(options: TapAnyElementOptions): number {
-    const duration = options.searchUntil?.duration ?? TapAnyElement.SEARCH_UNTIL_DEFAULT_MS;
-    if (!Number.isFinite(duration)) {
-      throw new ActionableError("searchUntil.duration must be a number");
-    }
-    if (duration < TapAnyElement.SEARCH_UNTIL_MIN_MS) {
-      throw new ActionableError(
-        `searchUntil.duration must be at least ${TapAnyElement.SEARCH_UNTIL_MIN_MS}ms`,
-      );
-    }
-    if (duration > TapAnyElement.SEARCH_UNTIL_MAX_MS) {
-      throw new ActionableError(
-        `searchUntil.duration must be at most ${TapAnyElement.SEARCH_UNTIL_MAX_MS}ms`,
-      );
-    }
-    return Math.round(duration);
+    return resolveSearchUntilDuration(options.searchUntil?.duration, {
+      defaultMs: TapAnyElement.SEARCH_UNTIL_DEFAULT_MS,
+      minMs: TapAnyElement.SEARCH_UNTIL_MIN_MS,
+      maxMs: TapAnyElement.SEARCH_UNTIL_MAX_MS,
+    });
   }
 
   private isContainerAvailable(
     viewHierarchy: ViewHierarchyResult,
     container?: ElementContainerSelector,
   ): boolean {
-    if (!container) {
-      return true;
-    }
-    return (
-      this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      defaultContainerSelector.hasContainer(viewHierarchy, container)
-    );
+    return isContainerAvailable(this.elementSelector, viewHierarchy, container);
   }
 
   private findClickableElement(

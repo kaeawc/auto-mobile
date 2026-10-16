@@ -216,6 +216,12 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     expect(
       resolvePrivateDaemonOrphanIdleMs({ AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "0" }),
     ).toBe(0);
+    // A blank value is unset (the default), not 0; only an explicit "0" disables the watchdog.
+    for (const blank of ["", "  "]) {
+      expect(
+        resolvePrivateDaemonOrphanIdleMs({ AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: blank }),
+      ).toBe(DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS);
+    }
   });
 
   test("an aux-dir-only daemon's suffixed socket is not a harness marker (#10906)", () => {

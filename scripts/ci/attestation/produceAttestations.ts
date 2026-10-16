@@ -80,9 +80,6 @@ export class UnsignedSigner implements Signer {
 export interface AttestationSink {
   publish(env: AttestationEnvelope, id: string): Promise<void>;
 }
-export class NoopSink implements AttestationSink {
-  async publish(_env: AttestationEnvelope, _id: string): Promise<void> {}
-}
 export interface FileSystem {
   mkdir(path: string, options: { recursive: true }): Promise<unknown>;
   writeFile(path: string, content: string, encoding: "utf8"): Promise<void>;

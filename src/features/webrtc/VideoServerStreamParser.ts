@@ -65,8 +65,6 @@ const FLAG_REPLAYED = 1n << 61n;
 const ROTATION_SHIFT = 59n;
 const ROTATION_MASK = 0b11n << ROTATION_SHIFT;
 const PTS_MASK = (1n << ROTATION_SHIFT) - 1n;
-/** Mux header wire version whose config packets attest rotation in bits 60-59 (issue #4786). */
-export const VIDEO_SERVER_MUX_VERSION = 2;
 
 export interface VideoServerStreamHeader {
   codecId: number;

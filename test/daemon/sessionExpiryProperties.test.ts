@@ -35,8 +35,8 @@ import {
 // #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, and
 // #10699 (host sleep is told from a daemon stall by the wall clock outrunning the monotonic one,
 // not by length) with its fix, and #10729 (autolock owners get the default lease) with its fix,
-// so every property here is enforced. A property a newly found bug violates can be registered as
-// an inverted assertion with the harness's `expectKnownFailure`, so it stays visible until fixed.
+// so every property here is enforced. A property a newly found bug violates should be added as a
+// failing property with its issue number and fixed in the same change.
 //
 // The pool is real: a 60 s window acquires through DevicePool.autolockDevice and a 120 s window
 // through bindOrReuseDeviceSession, and every release is judged by what it leaves in the pool

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { relativePosix, typeScriptFiles } from "./astGuard";
-import { scanNamedCalls } from "./recordHeartbeatCallers";
+import { scanNamedCallOwners, scanNamedCalls } from "./recordHeartbeatCallers";
 
 const source = ts.createSourceFile(
   "sessionManager.ts",
@@ -142,23 +142,37 @@ test("the liveness controller's port getSession calls stay within the retained e
 
 // Expiring `getSession(` calls left in src/server (#12581). Each is a mutation, release path,
 // identity compare or routing/admission site where lazy expiry is observable; pure device reads
-// use findSession. Counts may only shrink; a new pure reader must call findSession.
+// use findSession. Keyed by `file#enclosing function` so a sanctioned call and a pure reader
+// cannot trade places within a file. Counts may only shrink; a new pure reader must call
+// findSession.
 const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
-  "ToolExecutionContext.ts": 2,
-  "deviceLabelMapping.ts": 1,
-  "deviceToolsStartDevice.ts": 1,
-  "index.ts": 2,
-  "planDeviceOwnership.ts": 1,
-  "planExecutionOrchestrator.ts": 2,
-  "sessionBiometricEnrollment.ts": 1,
-  "sessionClock.ts": 1,
-  "sessionLocation.ts": 5,
-  "sessionNetworkCondition.ts": 1,
-  "sessionRotation.ts": 1,
-  "sessionScreenReader.ts": 1,
-  "setActiveDevice.ts": 5,
-  "toolRegistry.ts": 3,
-  "webrtcStreamManager.ts": 1,
+  "ToolExecutionContext.ts#consumeSetupTiming": 1,
+  "ToolExecutionContext.ts#storeSetupTiming": 1,
+  "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
+  "deviceToolsStartDevice.ts#callerMayReuse": 1,
+  "index.ts#executeToolCallBody": 1,
+  "index.ts#foreignOwnedExplicitSessionUuid": 1,
+  "planDeviceOwnership.ts#ownsDevice": 1,
+  "planExecutionOrchestrator.ts#brokerGrantedLabelDevices": 1,
+  "planExecutionOrchestrator.ts#buildDeviceMapping": 1,
+  "sessionBiometricEnrollment.ts#runSessionBiometricMutation": 1,
+  "sessionClock.ts#runSessionClockMutation": 1,
+  "sessionLocation.ts#createSessionLocationAppliedCallback": 2,
+  "sessionLocation.ts#createSessionLocationWriteAdmission": 1,
+  "sessionLocation.ts#getLiveSessionLocationWrite": 1,
+  "sessionLocation.ts#runSessionLocationMutation": 1,
+  "sessionNetworkCondition.ts#runSessionNetworkMutation": 1,
+  "sessionRotation.ts#runSessionRotationMutation": 1,
+  "sessionScreenReader.ts#runSessionScreenReaderMutation": 1,
+  "setActiveDevice.ts#admitSessionlessSelection": 1,
+  "setActiveDevice.ts#assertDeviceOwner": 1,
+  "setActiveDevice.ts#bindRequestedDevice": 1,
+  "setActiveDevice.ts#refuseForeignOwnedSession": 1,
+  "setActiveDevice.ts#restorePriorDisplayPin": 1,
+  "toolRegistry.ts#getCleanupDevices": 1,
+  "toolRegistry.ts#refuseControlCallBeforeAdmission": 1,
+  "toolRegistry.ts#releasePlanBaseSession": 1,
+  "webrtcStreamManager.ts#isDaemonSessionLive": 1,
 };
 
 const SERVER_DIR = fileURLToPath(new URL("../../src/server/", import.meta.url));
@@ -197,20 +211,35 @@ describe("getSession call detection", () => {
   });
 });
 
+describe("getSession call owners", () => {
+  test.each([
+    ["function f() { m.getSession(id); }", "f"],
+    ["class C { run() { m.getSession(id); } }", "run"],
+    ["class C { run = () => m.getSession(id); }", "run"],
+    ["const g = () => m.getSession(id);", "g"],
+    ["const o = { h() { return m.getSession(id); } };", "h"],
+    ["function outer() { const inner = () => m.getSession(id); }", "inner"],
+    ["m.getSession(id);", "<module>"],
+  ])("%s -> %s", (source, owner) => {
+    expect(scanNamedCallOwners("fixture.ts", source, "getSession")).toEqual([owner]);
+  });
+});
+
 describe("src/server expiring getSession readers", () => {
   let actual: Record<string, number> = {};
 
   beforeAll(() => {
-    actual = Object.fromEntries(
-      typeScriptFiles(SERVER_DIR).flatMap((file) => {
-        const text = readFileSync(file, "utf8");
-        if (!text.includes("getSession")) {
-          return [];
-        }
-        const count = scanNamedCalls(file, text, "getSession").length;
-        return count ? [[relativePosix(SERVER_DIR, file), count]] : [];
-      }),
-    );
+    actual = {};
+    for (const file of typeScriptFiles(SERVER_DIR)) {
+      const text = readFileSync(file, "utf8");
+      if (!text.includes("getSession")) {
+        continue;
+      }
+      for (const owner of scanNamedCallOwners(file, text, "getSession")) {
+        const key = `${relativePosix(SERVER_DIR, file)}#${owner}`;
+        actual[key] = (actual[key] ?? 0) + 1;
+      }
+    }
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("calls stay within the retained expiry reader inventory", () => {

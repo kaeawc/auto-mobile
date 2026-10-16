@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildAsciiKeyEventPlan } from "../../../src/features/action/asciiKeyEvents";
+import { buildAsciiKeyEventPlan } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import {
   buildAndroidInputTextCommand,
   canJoinAndroidInputText,

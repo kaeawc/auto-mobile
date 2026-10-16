@@ -772,16 +772,16 @@ describe("PinchOn", () => {
       }));
       fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
       pinchOn = new PinchOn(iosDevice, null, {
+        timer: fakeTimer,
         capture: new FakeHierarchyCapture(
           async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
           "ios",
         ),
       });
-      (pinchOn as any).observeScreen = fakeObserveScreen;
-      (pinchOn as any).awaitIdle = fakeAwaitIdle;
-      (pinchOn as any).window = fakeWindow;
-      (pinchOn as any).adb = fakeAdb;
-      (pinchOn as any).timer = fakeTimer;
+      pinchOn.observeScreen = fakeObserveScreen;
+      pinchOn.awaitIdle = fakeAwaitIdle;
+      pinchOn.window = fakeWindow;
+      pinchOn.adb = fakeAdb;
 
       const result = await pinchOn.execute({
         direction: "in",

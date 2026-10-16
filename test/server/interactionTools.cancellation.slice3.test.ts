@@ -30,6 +30,7 @@ import { throwIfAborted } from "../../src/utils/toolUtils";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 
 const device: BootedDevice = { platform: "android", deviceId: "test", name: "Test" };
 const captured = JSON.parse(
@@ -74,13 +75,11 @@ test.each(["keyboard", "openLink", "systemTray"])(
         return { success: true, open: false, message: "closed" };
       },
     );
-    const open = spyOn(OpenURL.prototype, "execute").mockImplementation(
-      async (url, ...rest: [AbortSignal?]) => {
-        throwIfAborted(rest[0]);
-        dispatches++;
-        return { success: true, url };
-      },
-    );
+    const open = spyOn(OpenURL.prototype, "execute").mockImplementation(async (url, call) => {
+      throwIfAborted((call as ActionCall | undefined)?.signal);
+      dispatches++;
+      return { success: true, url };
+    });
     restores.push(
       () => keyboard.mockRestore(),
       () => open.mockRestore(),
@@ -303,8 +302,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
   let reads = 0;
   let received: AbortSignal | undefined;
   setOpenUrlFactory(() => ({
-    execute: async (url, signal) => {
-      received = signal;
+    execute: async (url, call) => {
+      received = (call as ActionCall | undefined)?.signal;
       return { success: true, url };
     },
   }));

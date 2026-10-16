@@ -200,7 +200,7 @@ describe("TerminateApp (Android install listing)", () => {
       throw new Error("CtrlProxy lookup interrupted");
     });
     await expect(
-      app.execute("com.example.app", { skipObservation: true }, controller.signal),
+      app.execute("com.example.app", { skipObservation: true, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(adb.wasCommandExecuted("shell pm list packages")).toBe(false);
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
@@ -220,7 +220,7 @@ describe("TerminateApp (Android install listing)", () => {
     });
     try {
       await expect(
-        app.execute("com.example.app", { skipObservation: true }, controller.signal),
+        app.execute("com.example.app", { skipObservation: true, signal: controller.signal }),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
       expect(adb.wasCommandExecuted("force-stop")).toBe(false);
     } finally {

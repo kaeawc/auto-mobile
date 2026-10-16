@@ -151,7 +151,7 @@ describe("TerminateApp Android termination verification", () => {
   });
 
   const executeObserved = (signal?: AbortSignal) =>
-    app.execute(PACKAGE, { userId: 0, skipUiStability: true }, signal);
+    app.execute(PACKAGE, { userId: 0, skipUiStability: true, signal });
   const elapsed = () => timer.now() - 100;
 
   test("immediate stop verifies once without sleeps before observing", async () => {

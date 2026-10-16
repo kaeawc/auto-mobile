@@ -278,7 +278,7 @@ test("registered openLink probes the chooser with the normalized opened URL", as
       chooserAppPackage: "com.example.app",
     });
 
-    expect(openSpy).toHaveBeenCalledWith(rawUrl, undefined);
+    expect(openSpy).toHaveBeenCalledWith(rawUrl, { signal: undefined });
     expect(chooserCalls).toEqual([["custom", "com.example.app", "example://item"]]);
   } finally {
     openSpy.mockRestore();

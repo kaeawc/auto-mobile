@@ -371,7 +371,7 @@ describe("InstallApp", () => {
     });
 
     test("an explicit userId wins over where the app is installed", async () => {
-      const result = await setup({ personal: true, work: false }).execute(apkPath, 10);
+      const result = await setup({ personal: true, work: false }).execute(apkPath, { userId: 10 });
       expect(result).toMatchObject({ success: true, userId: 10 });
       expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
     });
@@ -802,7 +802,7 @@ describe("InstallApp", () => {
       timer: fakeTimer,
     });
 
-    await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow();
+    await expect(installApp.execute(ipaPath, { signal: controller.signal })).rejects.toThrow();
     expect(queries).toBe(1);
   });
 
@@ -1160,7 +1160,7 @@ describe("InstallApp", () => {
       performanceTrackerFactory: () => perf,
     });
 
-    await expect(installApp.execute(appPath, undefined, controller.signal)).rejects.toThrow(
+    await expect(installApp.execute(appPath, { signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
   });
@@ -1177,7 +1177,7 @@ describe("InstallApp", () => {
       deviceAppInstaller: fakeInstaller,
     });
 
-    await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow(
+    await expect(installApp.execute(ipaPath, { signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
   });
@@ -1422,7 +1422,7 @@ describe("InstallApp", () => {
           { userId: 0, name: "Owner", flags: 0x13, running: !stopped },
           { userId: 10, name: "Work", flags: 0x30, running: true },
         ]);
-        const result = await androidAction().execute(apkPath, 10);
+        const result = await androidAction().execute(apkPath, { userId: 10 });
         expect(result).toMatchObject({ success: true, userId: 10, packageName, upgrade: false });
         const commands = fakeAdb.getExecutedCommands();
         const uninstallIndex = commands.indexOf(`uninstall ${packageName}`);
@@ -1461,7 +1461,7 @@ describe("InstallApp", () => {
         ]);
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
-          const result = await androidAction().execute(apkPath, 10);
+          const result = await androidAction().execute(apkPath, { userId: 10 });
           expect(result.success).toBe(true);
           expect(result.error).toBeUndefined();
           expect(result.warning).toContain("App data was lost for users: 0, 10, 11");
@@ -1488,7 +1488,7 @@ describe("InstallApp", () => {
           "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
         ),
       ]);
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.success).toBe(false);
       expect(result.error).toContain(
         `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE)`,
@@ -1513,7 +1513,7 @@ describe("InstallApp", () => {
         stderr: "Failure [INSTALL_FAILED_INVALID_APK]",
       });
       fakeAdb.reinstallError = error;
-      const execution = androidAction().execute(apkPath, 10);
+      const execution = androidAction().execute(apkPath, { userId: 10 });
       await expect(execution).rejects.toThrow(
         `The previous version of ${packageName} was uninstalled`,
       );
@@ -1543,7 +1543,7 @@ describe("InstallApp", () => {
             ? controller.signal
             : new AbortController().signal;
       return runWithAbortSignal(source === "explicit" ? undefined : controller.signal, () =>
-        androidAction().execute(apkPath, 10, signal),
+        androidAction().execute(apkPath, { userId: 10, signal }),
       );
     }
 
@@ -1730,13 +1730,13 @@ describe("InstallApp", () => {
       configureDowngrade();
       const error = new Error("uninstall denied");
       fakeAdb.setCommandError(`uninstall ${packageName}`, error);
-      await expect(androidAction().execute(apkPath, 10)).rejects.toBe(error);
+      await expect(androidAction().execute(apkPath, { userId: 10 })).rejects.toBe(error);
     });
 
     test("unavailable user enumeration falls back to the target user", async () => {
       const installCommand = configureDowngrade();
       fakeAdb.setUsers([]);
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.success).toBe(true);
       expect(result.warning).toContain(
         "Other users could not be checked and may have lost the app",
@@ -1752,7 +1752,7 @@ describe("InstallApp", () => {
     test("failed other-user listing proceeds and names the unchecked user", async () => {
       configureDowngrade();
       fakeAdb.setCommandError("shell pm list packages --user 0", new Error("listing failed"));
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("User 0 could not be checked and may have lost the app");
       expect(result.warning).toContain("listing failed");
@@ -1764,7 +1764,7 @@ describe("InstallApp", () => {
       configureDowngrade();
       const cancellation = new DOMException("Listing aborted", "AbortError");
       fakeAdb.setCommandError("shell pm list packages --user 0", cancellation);
-      await expect(androidAction().execute(apkPath, 10)).rejects.toBe(cancellation);
+      await expect(androidAction().execute(apkPath, { userId: 10 })).rejects.toBe(cancellation);
       expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
     });
 
@@ -1780,7 +1780,7 @@ describe("InstallApp", () => {
       const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
       // Deliberately lenient fake: the action must stop even if ADB ignores the signal.
       fakeAdb.abortAfterCommand(restoreCommand, controller);
-      const execution = androidAction().execute(apkPath, 10, controller.signal);
+      const execution = androidAction().execute(apkPath, { userId: 10, signal: controller.signal });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
       await expect(execution).rejects.toThrow("was uninstalled");
@@ -1796,7 +1796,7 @@ describe("InstallApp", () => {
       const cancellation = new DOMException("Restore aborted", "AbortError");
       const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
       fakeAdb.setCommandError(restoreCommand, cancellation);
-      const execution = androidAction().execute(apkPath, 10);
+      const execution = androidAction().execute(apkPath, { userId: 10 });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", cancellation);
       await expect(execution).rejects.toThrow("NOT restored for users: 0");
@@ -1810,7 +1810,7 @@ describe("InstallApp", () => {
       // The first listing is discovery; only the second listing confirms the restore.
       fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [present(), present()]);
       fakeAdb.postRestoreAbortController = controller;
-      const execution = androidAction().execute(apkPath, 10, controller.signal);
+      const execution = androidAction().execute(apkPath, { userId: 10, signal: controller.signal });
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
       await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
       await expect(execution).rejects.toThrow("reinstalled for target user 10");
@@ -1842,7 +1842,7 @@ describe("InstallApp", () => {
             createExecResult("Failure [INSTALL_FAILED_INVALID_APK]"),
           ]);
         }
-        const result = await androidAction().execute(apkPath, 10);
+        const result = await androidAction().execute(apkPath, { userId: 10 });
         expect(result.success).toBe(!fails);
         expect(result.warning ?? result.error).not.toContain("users: none");
         if (!fails) {
@@ -1859,7 +1859,7 @@ describe("InstallApp", () => {
         present(),
         createExecResult("package:other"),
       ]);
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("NOT restored for users: 0");
       expect(result.warning).toContain("Package restored for users: 10");
@@ -1872,7 +1872,7 @@ describe("InstallApp", () => {
     test("failed restore confirmation warns without failing the target install", async () => {
       configureDowngrade();
       fakeAdb.postRestoreListingError = new Error("confirmation offline");
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.success).toBe(true);
       expect(result.warning).toContain("could not confirm");
       expect(result.warning).toContain("user 0");
@@ -1886,7 +1886,7 @@ describe("InstallApp", () => {
         "shell pm list packages --user 0",
         createExecResult("package:com.example.other"),
       );
-      const result = await androidAction().execute(apkPath, 10);
+      const result = await androidAction().execute(apkPath, { userId: 10 });
       expect(result.warning).toBe(
         `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
       );
@@ -1899,7 +1899,7 @@ describe("InstallApp", () => {
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        const result = await androidAction().execute(apkPath, 0);
+        const result = await androidAction().execute(apkPath, { userId: 0 });
         expect(result.success).toBe(true);
         expect(result.packageName).toBe(packageName);
         expect(result.error).toBeUndefined();
@@ -1917,16 +1917,16 @@ describe("InstallApp", () => {
       fakeAdb.setThrowOnAbortedSignal();
       fakeAdb.abortAfterCommand("install --user 0", controller);
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
-      await expect(androidAction().execute(apkPath, 0, controller.signal)).rejects.toThrow(
-        "Operation cancelled",
-      );
+      await expect(
+        androidAction().execute(apkPath, { userId: 0, signal: controller.signal }),
+      ).rejects.toThrow("Operation cancelled");
     });
 
     test("post-install listing AbortError propagates without an aborted signal", async () => {
       const error = new DOMException("Listing aborted", "AbortError");
       fakeAdb.postInstallListingError = error;
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
-      await expect(androidAction().execute(apkPath, 0)).rejects.toBe(error);
+      await expect(androidAction().execute(apkPath, { userId: 0 })).rejects.toBe(error);
     });
 
     test.each(["", "package:com.example.other"])(
@@ -1939,7 +1939,9 @@ describe("InstallApp", () => {
           createExecResult(""),
           createExecResult(listing),
         ]);
-        await expect(androidAction({ create: () => adb }).execute(apkPath, 0)).rejects.toThrow(
+        await expect(
+          androidAction({ create: () => adb }).execute(apkPath, { userId: 0 }),
+        ).rejects.toThrow(
           `APK package name mismatch: aapt reported "${packageName}", but the device reported "${listing ? "com.example.other" : "no installed package"}" after installation. Verify the APK manifest application ID and install the matching APK.`,
         );
       },
@@ -1959,7 +1961,7 @@ describe("InstallApp", () => {
           upgrade ? present() : createExecResult(""),
           present(),
         ]);
-        const result = await androidAction().execute(apkPath, 0);
+        const result = await androidAction().execute(apkPath, { userId: 0 });
         expect(result).toEqual({
           success: true,
           error: undefined,
@@ -2355,7 +2357,7 @@ describe("InstallApp", () => {
       await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
       fakeAdb.setCommandResponseSequence(listCommand, [absent(), absent(), present()]);
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result).toMatchObject({ success: true, upgrade: false, userId: 0, packageName });
       expect(result.warning).toContain("timed out but the device finished installing");
@@ -2375,7 +2377,7 @@ describe("InstallApp", () => {
       await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
       fakeAdb.setCommandResponse(listCommand, absent());
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Install outcome is indeterminate");
@@ -2421,7 +2423,7 @@ describe("InstallApp", () => {
         createExecResult(dumpsysAfter),
       ]);
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result).toMatchObject({ success: true, upgrade: true, packageName });
       expect(result.warning).toContain("timed out but the device finished installing");
@@ -2443,7 +2445,7 @@ describe("InstallApp", () => {
       fakeAdb.setCommandResponse(listCommand, present());
       fakeAdb.setCommandResponse("shell dumpsys package", createExecResult(dumpsysBefore));
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Install outcome is indeterminate");
@@ -2464,7 +2466,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Install outcome is indeterminate");
@@ -2487,7 +2489,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result.success).toBe(true);
       expect(result.warning).toContain("timed out but the device finished installing");
@@ -2512,7 +2514,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const rejection = installApp.execute(apkPath, 0);
+      const rejection = installApp.execute(apkPath, { userId: 0 });
       await expect(rejection).rejects.toThrow("was uninstalled during downgrade recovery");
       await expect(rejection).rejects.toThrow("Install outcome is indeterminate");
       await expect(rejection).rejects.toThrow("do not retry automatically");
@@ -2550,7 +2552,7 @@ describe("InstallApp", () => {
         return execute(...args);
       });
 
-      const result = await installApp.execute(apkPath, 0);
+      const result = await installApp.execute(apkPath, { userId: 0 });
 
       expect(result.success).toBe(true);
       expect(result.warning).toContain("was newer than the artifact");
@@ -2577,7 +2579,7 @@ describe("InstallApp", () => {
         }),
       );
 
-      await expect(installApp.execute(hostile, 0)).rejects.toThrow("Command failed");
+      await expect(installApp.execute(hostile, { userId: 0 })).rejects.toThrow("Command failed");
       expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
     });
   });
@@ -2741,11 +2743,9 @@ describe("InstallApp", () => {
           },
         });
         const run = runWithAbortSignal(source === "ambient" ? controller.signal : undefined, () =>
-          action.execute(
-            "/tmp/MyApp.app",
-            undefined,
-            source === "explicit" ? controller.signal : undefined,
-          ),
+          action.execute("/tmp/MyApp.app", {
+            signal: source === "explicit" ? controller.signal : undefined,
+          }),
         );
         if (source === "explicit") {
           await expect(run).rejects.toThrow("Operation cancelled");
@@ -2815,7 +2815,7 @@ describe("InstallApp", () => {
         const { simctl, action } = realRecovery();
         const controller = new AbortController();
 
-        const result = await action.execute("/tmp/MyApp.app", undefined, controller.signal);
+        const result = await action.execute("/tmp/MyApp.app", { signal: controller.signal });
 
         expect(result.success).toBe(true);
         expect(simctl.events).toEqual(["install", "terminate", "uninstall", "install"]);
@@ -2829,7 +2829,7 @@ describe("InstallApp", () => {
         const controller = new AbortController();
         simctl.onTerminate = () => controller.abort();
 
-        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+        const failure = await action.execute("/tmp/MyApp.app", { signal: controller.signal }).then(
           () => undefined,
           (error: unknown) => error,
         );
@@ -2847,7 +2847,7 @@ describe("InstallApp", () => {
           return new Error("simctl uninstall killed");
         };
 
-        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+        const failure = await action.execute("/tmp/MyApp.app", { signal: controller.signal }).then(
           () => undefined,
           (error: unknown) => error,
         );
@@ -2865,7 +2865,7 @@ describe("InstallApp", () => {
           controller.abort();
         };
 
-        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+        const failure = await action.execute("/tmp/MyApp.app", { signal: controller.signal }).then(
           () => undefined,
           (error: unknown) => error,
         );

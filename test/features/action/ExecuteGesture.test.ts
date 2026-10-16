@@ -132,8 +132,7 @@ describe("ExecuteGesture", () => {
           { x: 0, y: 0 },
           { x: 10, y: 10 },
         ],
-        300,
-        AbortSignal.abort(),
+        { durationMs: 300, signal: AbortSignal.abort() },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -151,8 +150,7 @@ describe("ExecuteGesture", () => {
           { x: 0, y: 0 },
           { x: 10, y: 10 },
         ],
-        300,
-        controller.signal,
+        { durationMs: 300, signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getExecutedCommands()).toHaveLength(1);
@@ -262,7 +260,7 @@ describe("ExecuteGesture", () => {
           ],
         },
       ],
-      450,
+      { durationMs: 450 },
     );
 
     expect(result).toEqual({ pathLength: 2, duration: 450, platform: "ios" });
@@ -310,7 +308,7 @@ describe("ExecuteGesture", () => {
             ],
           },
         ],
-        300,
+        { durationMs: 300 },
       ),
     ).rejects.toThrow(
       "iOS multi-finger gesture failed: XCTest private multi-touch event synthesis classes are unavailable",
@@ -333,7 +331,7 @@ describe("ExecuteGesture", () => {
     test("a confirmed swipe resolves", async () => {
       const fakeClient = new FakeIOSCtrlProxy();
 
-      const result = await iosGesture(fakeClient).execute(path, 450);
+      const result = await iosGesture(fakeClient).execute(path, { durationMs: 450 });
 
       expect(result).toEqual({ pathLength: 2, duration: 450, platform: "ios" });
       expect(fakeClient.getSwipeHistory()).toEqual([
@@ -352,7 +350,7 @@ describe("ExecuteGesture", () => {
       });
 
       const error = await iosGesture(fakeClient)
-        .execute(path, 300)
+        .execute(path, { durationMs: 300 })
         .catch((e: unknown) => e);
 
       expect(error).toBeInstanceOf(ActionableError);
@@ -365,7 +363,7 @@ describe("ExecuteGesture", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setSwipeResult({ success: false, error: "Runner refused", totalTimeMs: 1 });
 
-      await expect(iosGesture(fakeClient).execute(path, 300)).rejects.toThrow(
+      await expect(iosGesture(fakeClient).execute(path, { durationMs: 300 })).rejects.toThrow(
         "iOS gesture failed: Runner refused",
       );
     });
@@ -380,7 +378,7 @@ describe("ExecuteGesture", () => {
       });
 
       const error = await iosGesture(fakeClient)
-        .execute(path, 300)
+        .execute(path, { durationMs: 300 })
         .catch((e: unknown) => e);
 
       expect((error as Error).message).toBe("iOS gesture failed: Not connected");
@@ -413,7 +411,7 @@ describe("ExecuteGesture", () => {
             ],
           },
         ],
-        300,
+        { durationMs: 300 },
       ),
     ).rejects.toThrow("iOS multi-finger gestures only support horizontally spaced parallel swipes");
     expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
@@ -442,7 +440,7 @@ describe("ExecuteGesture", () => {
             ],
           },
         ],
-        300,
+        { durationMs: 300 },
       ),
     ).rejects.toThrow("iOS multi-finger gestures require at least two points per finger");
     expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);

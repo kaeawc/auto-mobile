@@ -12,7 +12,6 @@ import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
@@ -708,7 +707,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 
   test("booted readiness does not initialize iOS CtrlProxy collaborators", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-booted-only", {
       udid: "ios-booted-only",
       name: "iPhone 15",
@@ -724,7 +723,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 
   test("push update fires clearForDevice on the injected ObserveScreenCache", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-push-1", {
       udid: "ios-push-1",
       name: "iPhone 15",
@@ -773,7 +772,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
 
   test("re-registers cache invalidation on a replacement iOS client only once", async () => {
     const deviceId = "ios-restarted-push";
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo(deviceId, {
       udid: deviceId,
       name: "iPhone 15",
@@ -819,7 +818,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       IOSCtrlProxyManager,
       "reapOrphanedRunnerProcessesOnStartup",
     ).mockImplementation(() => reaping.promise);
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-push-1", {
       udid: "ios-push-1",
       name: "iPhone 15",
@@ -1134,7 +1133,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
-  function createIosManager(fakeSimctl: FakeSimCtlClient, timer = new FakeTimer()) {
+  function createIosManager(fakeSimctl: FakeSimctl, timer = new FakeTimer()) {
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
     const provider = new FakeDeviceClientProvider(
@@ -1149,7 +1148,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   }
 
   test("repeated verification across multiple 30-second intervals never presents", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-sim-1", {
       udid: "ios-sim-1",
       name: "iPhone 15",
@@ -1170,7 +1169,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   });
 
   test("verification of a shutdown device never presents", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
+    const fakeSimctl = new FakeSimctl();
     fakeSimctl.setDeviceInfo("ios-sim-1", {
       udid: "ios-sim-1",
       name: "iPhone 15",

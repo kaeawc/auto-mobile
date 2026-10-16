@@ -1203,13 +1203,9 @@ export class ScrollUntilVisible {
           query: container.text || container.elementId || "",
           containerElementId: undefined,
         };
-        return await this.deps.accessibilityService.getAccessibilityHierarchy(
-          queryOptions,
-          undefined,
-          undefined,
-          undefined,
-          serverConfig.isRawElementSearchEnabled(),
-        );
+        return await this.deps.accessibilityService.getAccessibilityHierarchy(queryOptions, {
+          disableAllFiltering: serverConfig.isRawElementSearchEnabled(),
+        });
       case "ios":
         // Refresh through ObserveScreen so retrying a selector sees the same
         // cleaned iOS projection that introduced it, rather than CtrlProxy's

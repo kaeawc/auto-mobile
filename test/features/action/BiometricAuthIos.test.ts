@@ -2,7 +2,7 @@ import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
 import { BiometricAuth } from "../../../src/features/action/BiometricAuth";
 import { BootedDevice } from "../../../src/models";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosSdkTriggerSender } from "../../fakes/FakeIosSdkTriggerSender";
 
@@ -19,7 +19,7 @@ const ENROLL_COMMAND = `spawn ${SIM_UDID} notifyutil -1 ${ENROLL} -s ${ENROLL} 1
 const UNENROLL_COMMAND = `spawn ${SIM_UDID} notifyutil -1 ${ENROLL} -s ${ENROLL} 0 -g ${ENROLL} -p ${ENROLL}`;
 
 describe("BiometricAuth - iOS Simulator", () => {
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let timer: FakeTimer;
   // The app under test does not embed the AutoMobile SDK, so every call falls back to simctl.
   let noSdk: FakeIosSdkTriggerSender;
@@ -31,7 +31,7 @@ describe("BiometricAuth - iOS Simulator", () => {
     simctl.getMethodCalls("executeCommand").map((c) => String(c.command));
 
   beforeEach(() => {
-    simctl = new FakeSimCtlClient();
+    simctl = new FakeSimctl();
     simctl.setCommandResult(ENROLL_GET_COMMAND, `${ENROLL} 1\n`);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -216,7 +216,7 @@ describe("BiometricAuth - iOS Simulator", () => {
 });
 
 describe("BiometricAuth - iOS in-app SDK trigger route (#1580)", () => {
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let timer: FakeTimer;
   let sdk: FakeIosSdkTriggerSender;
 
@@ -228,7 +228,7 @@ describe("BiometricAuth - iOS in-app SDK trigger route (#1580)", () => {
     simctl.getMethodCalls("executeCommand").map((c) => String(c.command));
 
   beforeEach(() => {
-    simctl = new FakeSimCtlClient();
+    simctl = new FakeSimctl();
     simctl.setCommandResult(ENROLL_GET_COMMAND, `${ENROLL} 1\n`);
     timer = new FakeTimer();
     timer.enableAutoAdvance();

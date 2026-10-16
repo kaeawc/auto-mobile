@@ -36,7 +36,7 @@ function makeExecutor(
   fakeProxy: FakeCtrlProxy,
   fakeDetector: FakeAccessibilityDetector,
   fakeTimer: FakeTimer,
-  fakeAdb: AdbExecutor = new FakeAdbClient() as unknown as AdbExecutor,
+  fakeAdb: AdbExecutor = new FakeAdbClient(),
   featureFlags?: FeatureFlagService,
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
@@ -211,7 +211,7 @@ describe("TalkBackSwipeExecutor", () => {
   describe("TalkBack detection dependency (#3915 regression)", () => {
     test("passes the injected ADB executor (not null) to detectMethod on android", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
-      const sentinelAdb = new FakeAdbClient() as unknown as AdbExecutor;
+      const sentinelAdb = new FakeAdbClient();
       const exec = makeExecutor(
         ANDROID_DEVICE,
         fakeGestureExecutor,
@@ -252,7 +252,7 @@ describe("TalkBackSwipeExecutor", () => {
         fakeCtrlProxy,
         fakeAccessibilityDetector,
         fakeTimer,
-        new FakeAdbClient() as unknown as AdbExecutor,
+        new FakeAdbClient(),
         sentinelFlags,
       );
 

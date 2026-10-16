@@ -1,7 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import {
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+} from "../../src/daemon/constants";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -21,6 +24,40 @@ function setup() {
 }
 
 describe("DaemonClient tool cancellation", () => {
+  test("close cancellation joins a pending notification subscription without closing sibling RPCs", async () => {
+    const { client, socket, timer, respond } = setup();
+    const controller = new AbortController();
+    const subscription = client.subscribeToNotifications({ signal: controller.signal }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const sibling = client.callDaemonMethod("daemon/heartbeat", { sessionId: "session-a" });
+    const [first, second] = socket.getWrittenMessages<DaemonRequest>();
+    try {
+      expect(first.method).toBe(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+      controller.abort(new Error("proxy closing"));
+      expect(await subscription).toMatchObject({ cause: controller.signal.reason });
+      expect(client.hasPendingRequestForTesting(first.id)).toBe(false);
+      expect(client.hasPendingRequestForTesting(second.id)).toBe(true);
+      expect(socket.destroyed).toBe(false);
+      const cancel = socket.getWrittenMessages<DaemonRequest>()[2];
+      expect(cancel).toMatchObject({
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: first.id },
+      });
+      respond(first.id);
+      respond(cancel.id);
+      respond(second.id);
+      expect(await sibling).toEqual({ ok: true });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      controller.abort();
+      respond(second.id);
+      await Promise.all([subscription, sibling]);
+      await client.close();
+    }
+  });
+
   test("readResource abort sends one mapped cancel frame and preserves a no-signal sibling", async () => {
     const { client, socket, timer, respond } = setup();
     const controller = new AbortController();

@@ -29,7 +29,7 @@ import {
   type SetNetworkConditionInput,
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
 
 const androidDevice: BootedDevice = {
@@ -86,7 +86,7 @@ describe("DeviceState", () => {
   });
 
   test("reads and sets iOS Simulator biometric enrollment", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 1\n`);
     simctl.setCommandResult(
       IOS_BIOMETRIC_UNENROLL_COMMAND,
@@ -117,7 +117,7 @@ describe("DeviceState", () => {
   });
 
   test("reports unsupported iOS reads separately from healthy requested reads", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 0\n`);
 
     const result = await new DeviceState(iosSimulator, {
@@ -132,7 +132,7 @@ describe("DeviceState", () => {
   });
 
   test("reports a supported read failure above unsupported requested fields", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandError(IOS_BIOMETRIC_GET_COMMAND, new Error("biometric read failed"));
 
     const result = await new DeviceState(iosSimulator, {
@@ -156,7 +156,7 @@ describe("DeviceState", () => {
   });
 
   test("retains a verified biometric result when a sibling state request fails", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandResult(
       IOS18_BIOMETRIC_ENROLL_COMMAND,
       `${IOS_BIOMETRIC_ENROLLMENT} 1\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
@@ -177,7 +177,7 @@ describe("DeviceState", () => {
   });
 
   test("reports iOS 18+ simulator Do Not Disturb read as unsupported (dead legacy key)", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(ios18Simulator, { simctl });
     const result = await deviceState.getState();
@@ -216,7 +216,7 @@ describe("DeviceState", () => {
   });
 
   test("reports iOS 18+ simulator DND enable as unsupported without issuing a notifyutil write", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(ios18Simulator, { simctl });
     const result = await deviceState.setState({
@@ -240,7 +240,7 @@ describe("DeviceState", () => {
   });
 
   test("reports iOS 18+ simulator DND disable as unsupported without issuing a notifyutil write", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(ios18Simulator, { simctl });
     const result = await deviceState.setState({
@@ -259,7 +259,7 @@ describe("DeviceState", () => {
   });
 
   test("reports iOS 18+ simulator priority/alarms DND as unsupported", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(ios18Simulator, { simctl });
     const result = await deviceState.setState({
@@ -284,7 +284,7 @@ describe("DeviceState", () => {
       deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
       iosVersion: "26.2",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(ios26Simulator, { simctl });
     const result = await deviceState.setState({ doNotDisturb: { enabled: true } });
@@ -296,7 +296,7 @@ describe("DeviceState", () => {
   });
 
   test("reads iOS simulator Do Not Disturb as unsupported without issuing a notifyutil read", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(iosSimulator, {
       simctl,
@@ -318,7 +318,7 @@ describe("DeviceState", () => {
   });
 
   test("reports iOS simulator DND priority/alarms as unsupported, not a silent downgrade", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(iosSimulator, {
       simctl,
@@ -349,7 +349,7 @@ describe("DeviceState", () => {
       platform: "ios",
       deviceId: "12345678-1234-1234-1234-123456789ABC",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
 
     const deviceState = new DeviceState(unknownVersionSimulator, { simctl });
     const result = await deviceState.setState({ doNotDisturb: { enabled: true } });
@@ -375,7 +375,7 @@ describe("DeviceState", () => {
   // old `<= 17` legacy fast-path was therefore wrong at every testable version.
   test("reports DND unsupported without a simctl call for every iOS simulator major", async () => {
     for (const iosVersion of ["16.4", "17.5", "18.6", "26.2"]) {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const deviceState = new DeviceState({ ...iosSimulator, iosVersion }, { simctl });
 
       const read = await deviceState.getState();
@@ -394,7 +394,7 @@ describe("DeviceState", () => {
       deviceId: "00008110-000A4D8E0C01401E",
     };
 
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const deviceState = new DeviceState(physicalIos, { simctl });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: false },
@@ -696,7 +696,7 @@ describe("DeviceState", () => {
   });
 
   test("reports network conditioning unsupported on an iOS simulator", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const deviceState = new DeviceState(iosSimulator, {
       simctl,
       networkFilterBridge: new FakeNetworkFilterBridge(),
@@ -1144,7 +1144,7 @@ describe("DeviceState", () => {
       deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
       iosVersion: "18.6",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const deviceState = new DeviceState(simulator, { simctl });
 
     const result = await deviceState.getState([]);

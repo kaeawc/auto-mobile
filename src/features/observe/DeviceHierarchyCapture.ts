@@ -1,5 +1,5 @@
 import { holderOf } from "../../daemon/deviceBinding";
-import type { ViewHierarchy as ViewHierarchyReader } from "./interfaces/ViewHierarchy";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -73,7 +73,7 @@ export interface DeviceHierarchyCaptureDependencies {
   adbFactory?: AdbClientFactory;
   syncClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   settle?: SettleObserve;
-  viewHierarchy?: Pick<ViewHierarchyReader, "getViewHierarchy">;
+  viewHierarchy?: ViewHierarchyRequestReader;
   timer?: Timer;
   ids?: IdGenerator;
   observationServiceStart?: Pick<ObservationReadServiceStart, "start">;
@@ -365,11 +365,12 @@ export function createDeviceHierarchyCapture(
 ): HierarchyCapture {
   const reader = new ViewHierarchyCaptureReader(
     {
-      getViewHierarchy: (...args) =>
-        (
+      getViewHierarchy: (queryOptions, request) => {
+        const hierarchy: ViewHierarchyRequestReader =
           dependencies.viewHierarchy ??
-          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer)
-        ).getViewHierarchy(...args),
+          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer);
+        return hierarchy.getViewHierarchy(queryOptions, request);
+      },
       filterOffscreenNodes,
     },
     async (request) => {

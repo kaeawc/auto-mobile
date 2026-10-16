@@ -468,9 +468,9 @@ describe("AdbClient retry contract", () => {
       timer,
     );
 
-    await expect(client.executeCommand("shell getprop sys.boot_completed", 100)).rejects.toThrow(
-      "Command timed out after 100ms",
-    );
+    await expect(
+      client.executeCommand("shell getprop sys.boot_completed", { timeoutMs: 100 }),
+    ).rejects.toThrow("Command timed out after 100ms");
     expect(calls).toBe(1);
     expect(timer.now()).toBe(100);
   });
@@ -490,9 +490,9 @@ describe("AdbClient retry contract", () => {
       timer,
     );
 
-    await expect(client.executeCommand("shell getprop sys.boot_completed", 300)).rejects.toThrow(
-      "Command timed out after 300ms",
-    );
+    await expect(
+      client.executeCommand("shell getprop sys.boot_completed", { timeoutMs: 300 }),
+    ).rejects.toThrow("Command timed out after 300ms");
     expect(calls).toBe(2);
     expect(timer.getSleepHistory()).toEqual([200, 100]);
     expect(timer.now()).toBe(300);
@@ -743,12 +743,7 @@ describe("AdbClient missing-device notifications", () => {
     );
 
     try {
-      const command = client.executeCommand(
-        "shell getprop sys.boot_completed",
-        undefined,
-        undefined,
-        true,
-      );
+      const command = client.executeCommand("shell getprop sys.boot_completed", { noRetry: true });
       await dispatched.promise;
       await busyRegistry.runExclusive(DEVICE.deviceId, async () => undefined);
       expect(busyRegistry.isBusy(DEVICE.deviceId)).toBe(false);
@@ -769,7 +764,7 @@ describe("AdbClient missing-device notifications", () => {
         busyRegistry,
       );
       await expect(
-        idleClient.executeCommand("shell getprop sys.boot_completed", undefined, undefined, true),
+        idleClient.executeCommand("shell getprop sys.boot_completed", { noRetry: true }),
       ).rejects.toThrow("device 'emulator-5554' not found");
       expect(notifications).toEqual([expect.objectContaining({ deviceId: DEVICE.deviceId })]);
     } finally {
@@ -796,7 +791,7 @@ describe("AdbClient missing-device notifications", () => {
     try {
       await busyRegistry.runExclusive(DEVICE.deviceId, async () => {
         await expect(
-          client.executeCommand("shell getprop sys.boot_completed", undefined, undefined, true),
+          client.executeCommand("shell getprop sys.boot_completed", { noRetry: true }),
         ).rejects.toThrow("device 'emulator-5554' not found");
       });
       expect(notifications).toEqual([]);
@@ -823,7 +818,7 @@ describe("AdbClient missing-device notifications", () => {
 
     try {
       await expect(
-        client.executeCommand("shell getprop sys.boot_completed", undefined, undefined, true),
+        client.executeCommand("shell getprop sys.boot_completed", { noRetry: true }),
       ).rejects.toThrow("device 'emulator-5554' not found");
       expect(notifications).toEqual([expect.objectContaining({ deviceId: DEVICE.deviceId })]);
     } finally {
@@ -852,12 +847,7 @@ describe("AdbClient missing-device notifications", () => {
 
     try {
       busyRegistry.setBusy(DEVICE.deviceId, true);
-      const command = client.executeCommand(
-        "shell getprop sys.boot_completed",
-        undefined,
-        undefined,
-        true,
-      );
+      const command = client.executeCommand("shell getprop sys.boot_completed", { noRetry: true });
       await dispatched.promise;
       busyRegistry.setBusy(DEVICE.deviceId, false);
       rejection.reject(new Error("adb: device 'emulator-5554' not found"));
@@ -881,7 +871,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
+      client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
     ).rejects.toThrow("device-disconnected:emulator-5554");
   });
 
@@ -891,7 +881,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
+      client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 
@@ -901,7 +891,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
+      client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 });

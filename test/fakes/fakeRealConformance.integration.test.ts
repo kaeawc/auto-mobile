@@ -37,7 +37,6 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeToolSelectionRepository.ts:FakeToolSelectionRepository": "SessionToolSelectionRepository",
   "FakeUnderlyingServer.ts:FakeUnderlyingServer": "Server",
   "FakeSetUIStateDependencies.ts:FakeFieldTypeDetector": "FieldTypeDetector",
-  "FakeSimCtlClient.ts:FakeSimCtlClient": "SimCtl",
   "FakeTalkBackTapStrategy.ts:FakeTalkBackTapStrategy": "TalkBackTapStrategy",
   "FakeVideoRecordingConfigRepository.ts:FakeVideoRecordingConfigRepository": "ConfigRepository",
   "FakeVideoRecordingRepository.ts:FakeVideoRecordingRepository": "VideoRecordingRepository",

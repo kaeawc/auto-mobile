@@ -605,13 +605,11 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     try {
       // `minTimestamp` rejects the cached (initial) tree; skipping the fresh wait
       // goes straight to the sync that produces the newer one (#6099).
-      hierarchy = await this.viewHierarchy.getViewHierarchy(
-        undefined,
-        new NoOpPerformanceTracker(),
-        true,
+      hierarchy = await this.viewHierarchy.getViewHierarchy(undefined, {
+        skipWaitForFresh: true,
         minTimestamp,
         signal,
-      );
+      });
     } catch (error) {
       logger.debug(
         `[OBSERVE] SystemUI-overlay recapture failed; preserving original hierarchy: ${error}`,
@@ -731,13 +729,11 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       // Android-only semantics: the iOS delegate serves its stale fallback for
       // skip + unmet minTimestamp, but this recapture is unreachable there (it
       // requires an adb-sourced back stack).
-      hierarchy = await this.viewHierarchy.getViewHierarchy(
-        undefined,
-        new NoOpPerformanceTracker(),
-        true,
+      hierarchy = await this.viewHierarchy.getViewHierarchy(undefined, {
+        skipWaitForFresh: true,
         minTimestamp,
         signal,
-      );
+      });
     } catch (error) {
       logger.debug(
         `[OBSERVE] Attribution recapture failed; preserving original hierarchy: ${error}`,

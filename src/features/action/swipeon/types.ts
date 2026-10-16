@@ -15,6 +15,7 @@ import { AccessibilityDetector } from "../../accessibility/interfaces/Accessibil
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import type { DisplayFenceDependencies } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";
+import type { AccessibilityHierarchyRequest } from "../../observe/hierarchyReadArgs";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
 
@@ -111,10 +112,7 @@ export interface ScrollAccessibilityService {
 
   getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null>;
 }
 

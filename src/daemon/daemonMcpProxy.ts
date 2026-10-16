@@ -147,6 +147,7 @@ import {
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
+import { SESSION_OWNERSHIP_LOST_CODE } from "./sessionReleasedDuringCall";
 import {
   declaresDeviceSessionSuspect,
   readDeviceSessionSuspectRefusal,
@@ -196,6 +197,15 @@ import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition"
 import { RegistryRetryPacing } from "./managedSlots/registryRetryPacing";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
 import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
+import {
+  acquireSessionThroughDaemon,
+  DAEMON_RELEASE_BROKER_SESSION_METHOD,
+} from "./sessionBrokerProxyAcquisition";
+import type { SessionConfig } from "../devices/sessionConfig";
+import type {
+  SessionBrokerReleaseResult,
+  SessionBrokerResult,
+} from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
 import {
@@ -240,6 +250,7 @@ interface ManagedExecutionHold {
   acknowledgedClient?: DaemonClientLike;
 }
 
+const SESSION_BROKER_PROXY_CLIENT_NAME = "auto-mobile-session-broker-proxy";
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -354,6 +365,15 @@ export function resourceUriNamesSession(uri: string): boolean {
 }
 
 const NO_HANDOFFS: ReadonlySet<string> = new Set();
+
+function isSessionOwnershipLostError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === SESSION_OWNERSHIP_LOST_CODE
+  );
+}
 
 /** The latest binding's keeper heartbeat while it is in flight. */
 export interface LatestHeartbeatAsk {
@@ -794,6 +814,8 @@ export class DaemonMcpProxy {
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
+  /** Underlying connection work retained even when close rejects the public single-flight waiter. */
+  private connectionAttemptWork: Promise<void> | null = null;
   private connectingAllowsLifecycle = false;
   private connectionCloseReject: ((reason?: unknown) => void) | null = null;
   /**
@@ -866,6 +888,14 @@ export class DaemonMcpProxy {
   private managedConnectionRebind: ManagedConnectionRebind | undefined;
   /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
   private managedSlotsAcquisitionAbort: AbortController | undefined;
+  /** The durable session broker result exposed by this proxy. */
+  private sessionBrokerResult: SessionBrokerResult | undefined;
+  /** A ready broker receipt currently held by the heartbeat keeper. */
+  private sessionBrokerBinding: { requestId: string; sessionUuid: string } | undefined;
+  /** Broker sessions are excluded from generic release until their broker release settles. */
+  private readonly sessionBrokerSessions = new Map<string, string>();
+  /** Aborts preparation and same-request status polling when the proxy closes. */
+  private sessionBrokerAcquisitionAbort: AbortController | undefined;
   /**
    * Aborts every tool call and resource read this proxy has in flight when it closes (#11642).
    * Each one's daemon request is cancelled on its own socket (`daemon/cancelRequest`), so nothing
@@ -1377,6 +1407,220 @@ export class DaemonMcpProxy {
     }
   }
 
+  /**
+   * Prepare one durable broker request before serving MCP. The helper owns bounded same-request
+   * status recovery; a ready result is bound, claimed and heartbeated here.
+   */
+  async acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult> {
+    const abort = new AbortController();
+    this.sessionBrokerAcquisitionAbort = abort;
+    try {
+      const result = await acquireSessionThroughDaemon(
+        config,
+        {
+          ensureConnected: () => this.ensureConnected(),
+          callDaemonMethod: (method, params, options) =>
+            this.requireClient().callDaemonMethod(method, params, options),
+          holdSession: (requestId, sessionUuid) => this.holdBrokerSession(requestId, sessionUuid),
+          releaseSession: (sessionUuid) => this.releasePreparedBrokerSession(sessionUuid),
+          livenessOwnerToken: this.livenessOwnerToken,
+          timer: this.timer,
+        },
+        abort.signal,
+      );
+      this.sessionBrokerResult = result;
+      return result;
+    } finally {
+      if (this.sessionBrokerAcquisitionAbort === abort) {
+        this.sessionBrokerAcquisitionAbort = undefined;
+      }
+    }
+  }
+
+  /** Bind a ready receipt to the existing keeper without enrolling it in managed-slot release. */
+  private async holdBrokerSession(requestId: string, sessionUuid: string): Promise<void> {
+    const trimmedRequestId = requestId.trim();
+    const trimmedSessionUuid = sessionUuid.trim();
+    if (trimmedRequestId.length === 0 || trimmedSessionUuid.length === 0) {
+      throw new ActionableError("A session broker request ID and session UUID are required.");
+    }
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    const existing = this.sessionBrokerBinding;
+    if (
+      existing &&
+      (existing.requestId !== trimmedRequestId || existing.sessionUuid !== trimmedSessionUuid)
+    ) {
+      throw new ActionableError(
+        `Cannot hold broker session ${trimmedSessionUuid}: request ${existing.requestId} already ` +
+          `holds session ${existing.sessionUuid}.`,
+      );
+    }
+    if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmedSessionUuid) {
+      throw new ActionableError(
+        `Cannot hold broker session ${trimmedSessionUuid}: this proxy is already bound to ` +
+          `session ${this.boundSessionUuid}.`,
+      );
+    }
+    this.bindStartupSession(trimmedSessionUuid);
+    this.sessionBrokerSessions.set(trimmedSessionUuid, trimmedRequestId);
+    this.sessionBrokerBinding = {
+      requestId: trimmedRequestId,
+      sessionUuid: trimmedSessionUuid,
+    };
+    try {
+      await this.ensureConnected();
+      await this.establishBoundSessionHeartbeat();
+    } catch (error) {
+      this.sessionBrokerBinding = undefined;
+      throw toActionableError(error, `Failed to hold broker session ${trimmedSessionUuid}`);
+    }
+  }
+
+  private heldSessionBrokerBinding(): { requestId: string; sessionUuid: string } | undefined {
+    const binding = this.sessionBrokerBinding;
+    if (
+      !binding ||
+      this.sessionBrokerSessions.get(binding.sessionUuid) !== binding.requestId ||
+      this.boundSessionUuid !== binding.sessionUuid ||
+      this.terminalBoundSession?.sessionUuid === binding.sessionUuid
+    ) {
+      return undefined;
+    }
+    return binding;
+  }
+
+  /** Rebind only the still-current durable receipt; the daemon derives its private scope. */
+  private async rebindSessionBrokerConnection(client: DaemonClientLike): Promise<void> {
+    const binding = this.heldSessionBrokerBinding();
+    if (!binding || this.closing || this.client !== client) {
+      return;
+    }
+    try {
+      await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
+        sessionId: binding.sessionUuid,
+        clientName: SESSION_BROKER_PROXY_CLIENT_NAME,
+        sessionBroker: {
+          requestId: binding.requestId,
+          livenessOwnerToken: this.livenessOwnerToken,
+        },
+      });
+    } catch (error) {
+      if (isSessionOwnershipLostError(error) && this.isCurrentBrokerBinding(binding)) {
+        this.sessionBrokerBinding = undefined;
+        this.fenceBoundSessionUuid(binding.sessionUuid, SESSION_OWNERSHIP_LOST_CODE);
+        logger.warn(
+          `[DaemonMcpProxy] Broker request ${binding.requestId} no longer grants session ` +
+            `${binding.sessionUuid}; the binding is terminal.`,
+          error,
+        );
+        return;
+      }
+      logger.warn(
+        `[DaemonMcpProxy] Re-binding broker request ${binding.requestId} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private isCurrentBrokerBinding(binding: { requestId: string; sessionUuid: string }): boolean {
+    return (
+      this.sessionBrokerBinding?.requestId === binding.requestId &&
+      this.sessionBrokerBinding.sessionUuid === binding.sessionUuid &&
+      this.sessionBrokerSessions.get(binding.sessionUuid) === binding.requestId
+    );
+  }
+
+  getSessionBrokerResult(): SessionBrokerResult | undefined {
+    return this.sessionBrokerResult;
+  }
+
+  private async callBrokerRelease(sessionUuid: string): Promise<unknown> {
+    const client = this.client;
+    if (!client) {
+      throw new DaemonUnavailableError("Cannot release broker session without a daemon connection");
+    }
+    return raceWithDeadline(
+      () =>
+        client.callDaemonMethod(
+          DAEMON_RELEASE_BROKER_SESSION_METHOD,
+          { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
+          { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+        ),
+      {
+        timer: this.timer,
+        timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+        label: `Release broker session ${sessionUuid}`,
+      },
+    );
+  }
+
+  private forgetBrokerSession(sessionUuid: string): void {
+    const requestId = this.sessionBrokerSessions.get(sessionUuid);
+    this.sessionBrokerSessions.delete(sessionUuid);
+    if (
+      requestId !== undefined &&
+      this.sessionBrokerBinding?.requestId === requestId &&
+      this.sessionBrokerBinding.sessionUuid === sessionUuid
+    ) {
+      this.sessionBrokerBinding = undefined;
+    }
+    this.ownedDeviceSessions.delete(sessionUuid);
+    this.claimableSessions.delete(sessionUuid);
+    this.dropHeldSession(sessionUuid);
+    if (this.boundSessionUuid === sessionUuid) {
+      this.clearBoundSessionUuid();
+    }
+    this.syncHeartbeatKeeper();
+  }
+
+  private async releasePreparedBrokerSession(sessionUuid: string): Promise<unknown> {
+    try {
+      return await this.callBrokerRelease(sessionUuid);
+    } finally {
+      this.forgetBrokerSession(sessionUuid);
+    }
+  }
+
+  /** Broker teardown remains durable in the daemon even when this bounded call cannot confirm it. */
+  private async releaseBrokerSessions(): Promise<void> {
+    const sessions = [...this.sessionBrokerSessions.keys()];
+    this.sessionBrokerBinding = undefined;
+    await Promise.all(
+      sessions.map(async (sessionUuid) => {
+        try {
+          const result = await this.callBrokerRelease(sessionUuid);
+          const release = result as Partial<SessionBrokerReleaseResult> | undefined;
+          if (
+            release?.sessionUuid !== sessionUuid ||
+            !["released", "cleanup_pending", "unknown_session"].includes(String(release?.outcome))
+          ) {
+            logger.warn(
+              `[DaemonMcpProxy] Broker release for ${sessionUuid} returned a stale or malformed result`,
+            );
+          } else if (release.outcome === "unknown_session") {
+            logger.warn(
+              `[DaemonMcpProxy] Broker release for ${sessionUuid} did not find its durable receipt`,
+            );
+          } else {
+            logger.info(
+              `[DaemonMcpProxy] Released broker session ${sessionUuid}: ${release.outcome}`,
+            );
+          }
+        } catch (error) {
+          logger.warn(
+            `[DaemonMcpProxy] Releasing broker session ${sessionUuid} failed; durable daemon ` +
+              `cleanup remains pending: ${errorMessage(error)}`,
+            error,
+          );
+        } finally {
+          this.forgetBrokerSession(sessionUuid);
+        }
+      }),
+    );
+  }
+
   /** The scope and slot sessions this proxy holds after a ready acquisition, if any. */
   private heldManagedSlotBinding(): { scopeKey: string; sessionUuids: string[] } | undefined {
     const scopeKey =
@@ -1546,6 +1790,7 @@ export class DaemonMcpProxy {
       (sessionId) =>
         sessionId !== this.config.initialSessionUuid?.trim() &&
         !this.managedExecutionSessions.has(sessionId) &&
+        !this.sessionBrokerSessions.has(sessionId) &&
         !this.releasedSessionReasons.has(sessionId),
     );
     await Promise.all(
@@ -1626,6 +1871,11 @@ export class DaemonMcpProxy {
       return this.connecting;
     }
     const attempt = this.doConnect(allowsLifecycle);
+    this.connectionAttemptWork = attempt;
+    void attempt.then(
+      () => this.clearConnectionAttemptWork(attempt),
+      () => this.clearConnectionAttemptWork(attempt),
+    );
     const connecting = new Promise<void>((resolve, reject) => {
       this.connectionCloseReject = reject;
       void attempt.then(resolve, reject);
@@ -1633,6 +1883,16 @@ export class DaemonMcpProxy {
     this.connecting = connecting;
     this.connectingAllowsLifecycle = allowsLifecycle;
     return connecting;
+  }
+
+  private clearConnectionAttemptWork(attempt: Promise<void>): void {
+    if (this.connectionAttemptWork === attempt) {
+      this.connectionAttemptWork = null;
+    }
+  }
+
+  private async joinConnectionAttempt(): Promise<void> {
+    await this.connectionAttemptWork?.catch(() => undefined);
   }
 
   private clearConnectionAttempt(connecting: Promise<void>): void {
@@ -1857,7 +2117,7 @@ export class DaemonMcpProxy {
         );
       }
       this.subscribeToClientConnectionClosed(client);
-      await runPreflightTransport(() => client.connect());
+      await runPreflightTransport(() => client.connect(undefined, this.closeAbort.signal));
       if (this.closing) {
         await client.close();
         throw new DaemonUnavailableError("MCP proxy is closing");
@@ -1871,7 +2131,7 @@ export class DaemonMcpProxy {
       // timeout, while the time-critical first heartbeat must still be dispatched
       // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
       const notificationSubscription = supportsNotifications
-        ? client.subscribeToNotifications!().catch((error) => {
+        ? client.subscribeToNotifications!({ signal: this.closeAbort.signal }).catch((error) => {
             logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
           })
         : Promise.resolve();
@@ -1900,6 +2160,7 @@ export class DaemonMcpProxy {
       // so callers do not race later requests ahead of notification opt-in. Failure
       // was converted to a warning above and preserves the prior best-effort policy.
       await notificationSubscription;
+      this.throwIfClosing();
       if (this.resourceSubscriptions.size > 0) {
         await this.replayResourceSubscriptions(client);
       }
@@ -1987,12 +2248,14 @@ export class DaemonMcpProxy {
     // A managed slot connection that reconnects re-binds the new socket to its slot sessions
     // (#11178); the daemon dropped the old socket's binding when it closed. Other proxies keep
     // their establishment exactly as before.
-    const establishOwnership = this.heldManagedSlotBinding()
-      ? async () => {
-          await establishBaseOwnership();
-          await this.rebindManagedConnection(client);
-        }
-      : establishBaseOwnership;
+    const establishOwnership =
+      this.heldManagedSlotBinding() || this.heldSessionBrokerBinding()
+        ? async () => {
+            await establishBaseOwnership();
+            await this.rebindManagedConnection(client);
+            await this.rebindSessionBrokerConnection(client);
+          }
+        : establishBaseOwnership;
 
     return isFirstPresentationProfileApplication
       ? [applyPresentationProfile, establishOwnership]
@@ -3408,6 +3671,7 @@ export class DaemonMcpProxy {
     onProgress?: DaemonProxyProgressCallback,
     callerSignal?: AbortSignal,
   ): Promise<any> {
+    this.refuseBrokerGenericAcquisition(name);
     const signal = this.untilClosed(callerSignal);
     let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
     if (isDeviceBindingTool(name)) {
@@ -3429,6 +3693,20 @@ export class DaemonMcpProxy {
       false,
     );
     return this.withPendingResumedNotice(retried.forwardedSessionUuid, retried.result);
+  }
+
+  private refuseBrokerGenericAcquisition(name: string): void {
+    if (!this.sessionBrokerResult || !isDeviceSessionAcquisitionTool(name)) {
+      return;
+    }
+    const terminal = this.terminalBoundSession;
+    if (terminal && this.sessionBrokerSessions.has(terminal.sessionUuid)) {
+      throw this.boundSessionExpiredError();
+    }
+    throw new ActionableError(
+      `Tool ${name} cannot acquire a generic device on a session-broker connection. ` +
+        `Use the exact bound session ${this.sessionBrokerResult.sessionUuid ?? "reported by initialize"}.`,
+    );
   }
 
   /**
@@ -5434,6 +5712,7 @@ export class DaemonMcpProxy {
       sessionPlatforms: this.sessionPlatforms,
       sessionDeviceIds: this.sessionDeviceIds,
       managedExecutionSessions: this.managedExecutionSessions,
+      sessionBrokerSessions: this.sessionBrokerSessions,
       plainRestartSessionLosses: this.plainRestartSessionLosses,
       pendingHeldSessionPlatformLosses: this.pendingHeldSessionPlatformLosses,
       initialSessionUuid: () => this.config.initialSessionUuid,
@@ -7234,6 +7513,7 @@ export class DaemonMcpProxy {
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
     this.managedSlotsAcquisitionAbort?.abort(closingError);
+    this.sessionBrokerAcquisitionAbort?.abort(closingError);
     this.closeAbort.abort(closingError);
     this.connected = false;
     this.livenessRecovery.stop();
@@ -7252,6 +7532,8 @@ export class DaemonMcpProxy {
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
       this.releaseManagedExecutionSessions(),
+      this.releaseBrokerSessions(),
+      this.joinConnectionAttempt(),
     ]);
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
@@ -7265,6 +7547,8 @@ export class DaemonMcpProxy {
     this.connected = false;
     this.clearBoundSessionUuid();
     this.otherHeldSessions.clear();
+    this.sessionBrokerSessions.clear();
+    this.sessionBrokerBinding = undefined;
     // Every not-found window ends with the proxy: nothing is heartbeated or asked again (#11570).
     this.notFoundWindows.clear();
     this.notFoundStopped.clear();

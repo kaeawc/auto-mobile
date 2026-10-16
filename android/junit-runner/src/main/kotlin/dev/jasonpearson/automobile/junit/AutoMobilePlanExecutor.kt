@@ -24,12 +24,6 @@ import org.junit.Test
  */
 internal object AutoMobilePlanExecutor {
 
-  /** Injectable agent for testing. When null, uses [LazyInitializer.getAgent]. */
-  @JvmStatic internal var testAgent: AutoMobileAgent? = null
-
-  private val agent: AutoMobileAgent
-    get() = testAgent ?: LazyInitializer.getAgent()
-
   /** Detected test context from stack trace inspection. */
   private data class TestContext(val className: String, val methodName: String)
 
@@ -167,7 +161,7 @@ internal object AutoMobilePlanExecutor {
     planPath: String,
     parameters: Map<String, Any>,
     options: AutoMobilePlanExecutionOptions,
-    timings: PlanExecutorTimings = PlanExecutorTimings(),
+    collaborators: PlanExecutorCollaborators = PlanExecutorCollaborators(),
   ): AutoMobilePlanExecutionResult {
 
     val startTime = System.currentTimeMillis()
@@ -177,7 +171,7 @@ internal object AutoMobilePlanExecutor {
       val resolvedPlanPath = resolvePlanPath(planPath)
 
       // Check device availability after plan file validation
-      if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
+      if (!collaborators.deviceChecker.areDevicesAvailable()) {
         val executionTime = System.currentTimeMillis() - startTime
         return AutoMobilePlanExecutionResult(
           success = false,
@@ -216,7 +210,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       // Execute the processed plan
-      val result = executeProcessedPlan(processedPlanContent, options, secretValues, timings)
+      val result = executeProcessedPlan(processedPlanContent, options, secretValues, collaborators)
 
       val executionTime = System.currentTimeMillis() - startTime
 
@@ -323,7 +317,7 @@ internal object AutoMobilePlanExecutor {
     planContent: String,
     options: AutoMobilePlanExecutionOptions,
     secretValues: List<String>,
-    timings: PlanExecutorTimings,
+    collaborators: PlanExecutorCollaborators,
   ): InternalExecutionResult {
     return executePlanFromStep(
       planContent,
@@ -331,7 +325,7 @@ internal object AutoMobilePlanExecutor {
       startStep = 0,
       recoveryAlreadyAttempted = false,
       secretValues = secretValues,
-      timings = timings,
+      collaborators = collaborators,
     )
   }
 
@@ -357,7 +351,7 @@ internal object AutoMobilePlanExecutor {
     secretValues: List<String>,
     deviceIdOverride: String? = null,
     sessionUuidOverride: String? = null,
-    timings: PlanExecutorTimings,
+    collaborators: PlanExecutorCollaborators,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
@@ -369,14 +363,14 @@ internal object AutoMobilePlanExecutor {
     // When AI recovery may follow a failure, the daemon keeps the failed attempt's session and
     // device (#10834) so no other session can take the device between the attempt and recovery.
     // Every path that does not go on to recovery releases the held session itself.
-    val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted)
+    val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted, collaborators)
     // A resumed run takes over the session the daemon held for recovery. Until this run's
     // executePlan reaches the daemon, whose plan lifecycle then releases it, the runner still owns
     // that session: it releases it before switching to a fresh one or giving up, or the held
     // session blocks the device until its lease lapses (#11139).
     var takenOverSession: String? = sessionUuidOverride.takeIf { !holdForRecovery }
     val releaseTakenOverSession = {
-      takenOverSession?.let { releaseHeldSession(it) }
+      takenOverSession?.let { releaseHeldSession(it, collaborators) }
       takenOverSession = null
     }
 
@@ -432,6 +426,7 @@ internal object AutoMobilePlanExecutor {
             ),
           ),
           options.effectiveExecutePlanTimeoutMs(),
+          collaborators,
         )
       if (!response.success) {
         // Treat the prerequisite like executePlan itself: the retry classifier
@@ -454,16 +449,17 @@ internal object AutoMobilePlanExecutor {
         }
 
         takenOverSession = null
-        DaemonHeartbeat.registerSession(sessionUuid)
+        collaborators.heartbeat.registerSession(sessionUuid)
         response =
           try {
             callDaemonToolForAttempt(
               "executePlan",
               JsonObject(args),
               options.effectiveExecutePlanTimeoutMs(),
+              collaborators,
             )
           } finally {
-            DaemonHeartbeat.unregisterSession(sessionUuid)
+            collaborators.heartbeat.unregisterSession(sessionUuid)
           }
         outputPayload =
           response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
@@ -499,7 +495,7 @@ internal object AutoMobilePlanExecutor {
             deviceOwnedWaitMs,
             parsed.retryAfterMs,
             parsed.code,
-            timings,
+            collaborators.timings,
           )
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
@@ -512,9 +508,9 @@ internal object AutoMobilePlanExecutor {
           "$waitLead; waiting ${delayMs}ms before retrying " +
             "(wait ${deviceOwnedWaits + 1}): $errorMessage",
         )
-        if (holdForRecovery) releaseHeldSession(sessionUuid)
+        if (holdForRecovery) releaseHeldSession(sessionUuid, collaborators)
         releaseTakenOverSession()
-        timings.deviceOwnedSleeper(delayMs)
+        collaborators.timings.deviceOwnedSleeper(delayMs)
         deviceOwnedWaits++
         deviceOwnedWaitMs += delayMs
         // A refusal consumes no executePlan retry; the next pass is the same attempt number.
@@ -534,10 +530,10 @@ internal object AutoMobilePlanExecutor {
       }
 
       // The retry is a fresh session; the held one would otherwise keep the device from it.
-      if (holdForRecovery) releaseHeldSession(sessionUuid)
+      if (holdForRecovery) releaseHeldSession(sessionUuid, collaborators)
       releaseTakenOverSession()
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
-      Thread.sleep(timings.retryBackoffMs)
+      Thread.sleep(collaborators.timings.retryBackoffMs)
     }
 
     val failureMessage =
@@ -569,7 +565,7 @@ internal object AutoMobilePlanExecutor {
       planContent = planContent,
       recoveryAlreadyAttempted = recoveryAlreadyAttempted,
       secretValues = secretValues,
-      timings = timings,
+      collaborators = collaborators,
       heldSessionUuid = attemptSessionUuid.takeIf { holdForRecovery },
     )
   }
@@ -578,21 +574,22 @@ internal object AutoMobilePlanExecutor {
   private fun recoveryMayFollow(
     options: AutoMobilePlanExecutionOptions,
     recoveryAlreadyAttempted: Boolean,
+    collaborators: PlanExecutorCollaborators,
   ): Boolean =
     options.aiAssistance &&
       !recoveryAlreadyAttempted &&
       !resolveCiMode() &&
-      agent.recoveryConfigProvider.isRecoveryEnabled()
+      collaborators.agent().recoveryConfigProvider.isRecoveryEnabled()
 
   /**
    * Release a session the daemon kept after a failed executePlan (`holdSessionOnFailure`, #10834)
    * once recovery will not resume it. Best-effort: if the release does not reach the daemon, the
    * session lapses at its heartbeat timeout because nothing heartbeats it any more.
    */
-  private fun releaseHeldSession(sessionUuid: String) {
+  private fun releaseHeldSession(sessionUuid: String, collaborators: PlanExecutorCollaborators) {
     val response =
       try {
-        DaemonSocketClientManager.callDaemonMethod(
+        collaborators.daemon.callDaemonMethod(
           RELEASE_SESSION_METHOD,
           JsonObject(mapOf("sessionId" to JsonPrimitive(sessionUuid))),
           RELEASE_SESSION_TIMEOUT_MS,
@@ -649,9 +646,10 @@ internal object AutoMobilePlanExecutor {
     errorMessage: String,
     toolResults: List<ToolResultEntry>,
     recoveryAttempted: Boolean,
+    collaborators: PlanExecutorCollaborators,
     releaseHeld: () -> Unit = {},
   ): InternalExecutionResult? {
-    val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    val loss = sessionUuid?.let { collaborators.heartbeat.sessionLoss(it) } ?: return null
     // An unconfirmed loss may be a session the daemon still holds: release it rather than leak it.
     if (!loss.confirmed) releaseHeld()
     val reason = "AI recovery cannot continue: ${loss.describe()}"
@@ -676,11 +674,13 @@ internal object AutoMobilePlanExecutor {
     recoveryAlreadyAttempted: Boolean,
     secretValues: List<String>,
     heldSessionUuid: String? = null,
-    timings: PlanExecutorTimings,
+    collaborators: PlanExecutorCollaborators,
   ): InternalExecutionResult {
     // The daemon kept the failed attempt's session and device for recovery (#10834). Only the
     // resumed plan takes it over (and releases it); every other outcome releases it here.
-    val releaseHeld = { if (heldSessionUuid != null) releaseHeldSession(heldSessionUuid) }
+    val releaseHeld = {
+      if (heldSessionUuid != null) releaseHeldSession(heldSessionUuid, collaborators)
+    }
 
     val errorMessage =
       "AutoMobile plan execution failed with exit code ${result.exitCode}" +
@@ -689,7 +689,7 @@ internal object AutoMobilePlanExecutor {
     System.err.println(errorMessage)
 
     val ciMode = resolveCiMode()
-    val recoveryFlagEnabled = agent.recoveryConfigProvider.isRecoveryEnabled()
+    val recoveryFlagEnabled = collaborators.agent().recoveryConfigProvider.isRecoveryEnabled()
     if (
       !options.aiAssistance ||
         !recoveryFlagEnabled ||
@@ -732,20 +732,28 @@ internal object AutoMobilePlanExecutor {
         errorMessage,
         toolResults,
         recoveryAttempted = false,
+        collaborators = collaborators,
         releaseHeld = releaseHeld,
       )
       ?.let {
         return it
       }
-    if (recoverySession != null) DaemonHeartbeat.registerSession(recoverySession)
+    if (recoverySession != null) collaborators.heartbeat.registerSession(recoverySession)
     val recoveryOutcome =
       try {
-        agent.attemptAiRecovery(failedStepContext, secretValues)
+        collaborators
+          .agent()
+          .attemptAiRecovery(
+            failedStepContext,
+            secretValues,
+            collaborators.timings,
+            collaborators.heartbeat,
+          )
       } catch (error: Throwable) {
         releaseHeld()
         throw error
       } finally {
-        if (recoverySession != null) DaemonHeartbeat.unregisterSession(recoverySession)
+        if (recoverySession != null) collaborators.heartbeat.unregisterSession(recoverySession)
       }
 
     // Released while recovery ran: never resume on it, whatever recovery reported.
@@ -755,6 +763,7 @@ internal object AutoMobilePlanExecutor {
         errorMessage,
         toolResults,
         recoveryAttempted = true,
+        collaborators = collaborators,
         releaseHeld = releaseHeld,
       )
       ?.let {
@@ -795,7 +804,7 @@ internal object AutoMobilePlanExecutor {
         startStep = resumeStep,
         recoveryAlreadyAttempted = true, // prevent recursive recovery
         secretValues = secretValues,
-        timings = timings,
+        collaborators = collaborators,
         deviceIdOverride = failedStepContext.deviceId,
         sessionUuidOverride = failedStepContext.sessionUuid,
       )
@@ -1394,9 +1403,10 @@ internal object AutoMobilePlanExecutor {
     toolName: String,
     arguments: JsonObject,
     timeoutMs: Long,
+    collaborators: PlanExecutorCollaborators,
   ): DaemonResponse =
     try {
-      DaemonSocketClientManager.callTool(toolName, arguments, timeoutMs)
+      collaborators.daemon.callTool(toolName, arguments, timeoutMs)
     } catch (error: DaemonUnavailableException) {
       DaemonResponse(
         id = "",

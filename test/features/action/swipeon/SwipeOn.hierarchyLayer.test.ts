@@ -3,7 +3,6 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
@@ -49,7 +48,7 @@ function harness(
   observe.setObserveResult(() => observation);
   const action = new SwipeOn(
     { name: "fake", platform: "android", deviceId: "layer-swipe" },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       timer,
       observeScreen: observe,

@@ -716,11 +716,9 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
-             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, dismissOnSwipe, supportingText,
-             keyboardType, secure, multiline, minLines, maxLength, trailingIcon, imeAction
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
-             dismissOnSwipe, supportingText,
-             keyboardType, secure, multiline, minLines, maxLength
+             dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
+             imeAction
     }
 
     init(from decoder: Decoder) throws {

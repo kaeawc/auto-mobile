@@ -11,7 +11,6 @@ import {
   installSessionManagerFixture,
   makeHierarchy,
   makeSessionManager,
-  recordHeartbeatFor,
 } from "../helpers/sessionManagerSuite";
 
 describe("SessionManager", () => {
@@ -331,7 +330,7 @@ describe("SessionManager", () => {
       fakeTimer.advanceTime(100);
       manager.setDeviceLabels("session-1", labels);
       fakeTimer.advanceTime(50);
-      recordHeartbeatFor(manager, "session-1");
+      manager.recordHeartbeat("session-1");
       repository.finishUpsert();
 
       // Neither the label write at 100 (cache data, #10703) nor the heartbeat at 150 (liveness,

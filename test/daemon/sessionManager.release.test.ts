@@ -16,7 +16,6 @@ import {
   installSessionManagerFixture,
   makeSessionManager,
   quietPersistence,
-  recordHeartbeatFor,
 } from "../helpers/sessionManagerSuite";
 
 describe("SessionManager", () => {
@@ -572,7 +571,7 @@ describe("SessionManager", () => {
       const { mgr, barrier, activity } = makeDrainableManager();
 
       await mgr.createSession("s1", "emulator-5554", "android");
-      recordHeartbeatFor(mgr, "s1");
+      mgr.recordHeartbeat("s1");
       await Promise.resolve(); // let the void-tracked write run
       expect(activity).toContain("s1");
       // Exactly one barrier-tracked write: a single recordHeartbeat drives one
@@ -587,7 +586,7 @@ describe("SessionManager", () => {
 
       await mgr.createSession("s1", "emulator-5554", "android");
       barrier.beginDrain();
-      recordHeartbeatFor(mgr, "s1");
+      mgr.recordHeartbeat("s1");
       await Promise.resolve();
       // The heartbeat's activity write was short-circuited by the drain.
       expect(activity).toHaveLength(0);

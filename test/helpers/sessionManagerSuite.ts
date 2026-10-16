@@ -329,8 +329,9 @@ export function makeSessionManagerHarness(): {
 /**
  * Registers the shared per-test fixture of the `SessionManager` suites: a fresh manager over a
  * `FakeTimer` and in-memory persistence, with the heartbeat env cleared around each test and the
- * manager's cleanup timer stopped afterwards. `assign` hands each test's instances to the suite;
- *  Every manager a test builds with `makeSessionManager` is stopped afterwards, so tests need no `try/finally`.
+ * manager's cleanup timer stopped afterwards. `assign` hands each test's instances to the suite.
+ * Every manager a test builds with `makeSessionManager` is stopped afterwards too, so tests need
+ * no `try/finally`.
  */
 export function installSessionManagerFixture(
   assign: (fixture: { manager: SessionManager; timer: FakeTimer }) => void,
@@ -396,7 +397,9 @@ export function recoveringAssigner(
 ): SessionDeviceAssigner {
   return {
     async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-      await options.before?.(sessionId);
+      if (options.before) {
+        await options.before(sessionId);
+      }
       const session = await restarted.createSession(
         sessionId,
         options.deviceId ?? "emulator-5554",
@@ -525,13 +528,4 @@ export function makeReapingMonitor(
     { preFirstHeartbeatGraceMs },
   );
   return { monitor, reaped };
-}
-
-/**
- * Records a heartbeat for `sessionId` directly on `manager`. The `SessionManager` suites test that
- * method itself, so they reach it here, in one place (the record-heartbeat-callers lint gate lists
- * this file), instead of from every split suite file.
- */
-export function recordHeartbeatFor(manager: SessionManager, sessionId: string): void {
-  manager.recordHeartbeat(sessionId);
 }

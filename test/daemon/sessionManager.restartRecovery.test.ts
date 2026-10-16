@@ -15,6 +15,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
 import {
+  installSessionManagerCleanup,
   installSessionManagerFixture,
   makeSessionManager,
   persistedRecoverySession,
@@ -26,6 +27,8 @@ import {
   sessionRow,
   stubbedPersistence,
 } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 describe("SessionManager", () => {
   let fakeTimer: FakeTimer;

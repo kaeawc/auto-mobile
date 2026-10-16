@@ -19,10 +19,13 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import {
   DeferredDeviceSessionPersistence,
   DeferredReleaseDeviceSessionPersistence,
+  installSessionManagerCleanup,
   installSessionManagerFixture,
   makeSessionManager,
   persistedRecoverySession,
 } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 describe("SessionManager", () => {
   let sessionManager: SessionManager;

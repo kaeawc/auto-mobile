@@ -20,7 +20,6 @@ import {
   persistenceMirroringRelease,
   persistenceServing,
   quietPersistence,
-  recordHeartbeatFor,
   recoverPersisted,
   replacingAssigner,
   sessionRow,
@@ -852,7 +851,7 @@ describe("SessionManager", () => {
       expect(manager.getSessionForNewExecution("s1")).toBeNull();
 
       const expiresAt = session.expiresAt;
-      recordHeartbeatFor(manager, "s1");
+      manager.recordHeartbeat("s1");
       await Promise.resolve();
       expect(session.expiresAt).toBe(expiresAt);
       expect(activity).toEqual([]);
@@ -893,7 +892,7 @@ describe("SessionManager", () => {
       await keepAwake.started;
       expect(manager.getSession("s1")).toBeNull();
       expect(manager.getSessionForNewExecution("s1")).toBeNull();
-      recordHeartbeatFor(manager, "s1");
+      manager.recordHeartbeat("s1");
       expect(session.expiresAt).toBe(1);
 
       keepAwake.finish();

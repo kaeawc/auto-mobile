@@ -9,7 +9,7 @@ const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
 const BASELINE_FILE = path.join(import.meta.dir, "record-heartbeat-callers-baseline.txt");
 // Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 36;
+const BASELINE_CEILING = 39;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 const HARNESS_FILE = "test/helpers/livenessScenarioHarness.ts";

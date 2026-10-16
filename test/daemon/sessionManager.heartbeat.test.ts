@@ -16,7 +16,6 @@ import {
   installSessionManagerFixture,
   makeReapingMonitor,
   makeSessionManager,
-  recordHeartbeatFor,
   stubbedPersistence,
 } from "../helpers/sessionManagerSuite";
 
@@ -36,7 +35,7 @@ describe("SessionManager", () => {
 
       // A heartbeat does not extend the idle deadline (#10656), and the suspect grace (#10051)
       // belongs to the heartbeat lease only: idleness releases exactly at the deadline.
-      recordHeartbeatFor(sessionManager, "session-1");
+      sessionManager.recordHeartbeat("session-1");
       fakeTimer.advanceTime(1000);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
@@ -57,7 +56,7 @@ describe("SessionManager", () => {
           "android",
         );
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await drainMicrotasks(10);
         const before = {
           lastUsedAt: session.lastUsedAt,
@@ -71,7 +70,7 @@ describe("SessionManager", () => {
           throw new Error("one activity write failed");
         });
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await drainMicrotasks(10);
         // No persisted field changed, so the failing write is never reached.
         expect(write).toHaveBeenCalledTimes(1);
@@ -94,7 +93,7 @@ describe("SessionManager", () => {
           throw new Error("one activity write failed");
         });
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await drainMicrotasks(10);
         expect(write).toHaveBeenCalledTimes(1);
         expect(await persistence.getSession!(session.sessionId)).toEqual(storedBefore);
@@ -109,7 +108,7 @@ describe("SessionManager", () => {
         expect(session).toMatchObject(acknowledged);
 
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await drainMicrotasks(10);
         expect(write).toHaveBeenCalledTimes(2);
         expect(session).toMatchObject({ ...acknowledged, lastHeartbeat: 20 });
@@ -190,7 +189,7 @@ describe("SessionManager", () => {
           throw new Error("one activity write failed");
         });
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await drainMicrotasks(10);
         const { monitor, reaped } = makeReapingMonitor(manager, fakeTimer, 500);
         fakeTimer.advanceTime(491);
@@ -254,7 +253,7 @@ describe("SessionManager", () => {
           const session = await createAwaitingOwnerSession(manager, "success-owner");
           fakeTimer.advanceTime(10);
           if (operation === "heartbeat") {
-            recordHeartbeatFor(manager, session.sessionId);
+            manager.recordHeartbeat(session.sessionId);
             await drainMicrotasks(10);
           } else {
             await manager.getOrCreateSession(session.sessionId);
@@ -310,7 +309,7 @@ describe("SessionManager", () => {
         const firstRefresh = manager.getOrCreateSession(session.sessionId);
         await firstStarted.promise;
         fakeTimer.advanceTime(10);
-        recordHeartbeatFor(manager, session.sessionId);
+        manager.recordHeartbeat(session.sessionId);
         await secondStarted.promise;
         failFirst.resolve();
         await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
@@ -367,14 +366,14 @@ describe("SessionManager", () => {
         fakeTimer.advanceTime(10);
         let firstRefresh: ReturnType<SessionManager["getOrCreateSession"]> | undefined;
         if (older === "heartbeat") {
-          recordHeartbeatFor(manager, session.sessionId);
+          manager.recordHeartbeat(session.sessionId);
         } else {
           firstRefresh = manager.getOrCreateSession(session.sessionId);
         }
         await firstStarted.promise;
         fakeTimer.advanceTime(10);
         if (newer === "heartbeat") {
-          recordHeartbeatFor(manager, session.sessionId);
+          manager.recordHeartbeat(session.sessionId);
           await drainMicrotasks(10);
         } else {
           await manager.getOrCreateSession(session.sessionId);
@@ -439,7 +438,7 @@ describe("SessionManager", () => {
       }
       timer.advanceTime(10);
       if (operation === "heartbeat") {
-        recordHeartbeatFor(manager, "activity-session");
+        manager.recordHeartbeat("activity-session");
       }
       await writeStarted.promise;
       await Promise.resolve();
@@ -532,7 +531,7 @@ describe("SessionManager", () => {
 
     await manager.createSession("session-1", "emulator-5554", "android");
     await expect(manager.claimLivenessOwnership("session-1", "owner-a")).resolves.toBe("claimed");
-    recordHeartbeatFor(manager, "session-1");
+    manager.recordHeartbeat("session-1");
     const owned = manager.getSession("session-1")!;
     const before = {
       lastUsedAt: owned.lastUsedAt,

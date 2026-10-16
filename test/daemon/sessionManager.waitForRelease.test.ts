@@ -8,6 +8,7 @@ import {
   DeferredDeviceSessionPersistence,
   DeferredReleaseDeviceSessionPersistence,
   makeSessionManager,
+  stopBuiltSessionManagers,
 } from "../helpers/sessionManagerSuite";
 
 describe("SessionManager.waitForSessionReleaseWithin", () => {
@@ -24,6 +25,7 @@ describe("SessionManager.waitForSessionReleaseWithin", () => {
   afterEach(() => {
     persistence.finishRelease.resolve();
     manager.stopCleanupTimer();
+    stopBuiltSessionManagers();
   });
 
   test("returns true without a deadline when this UUID has no release", async () => {

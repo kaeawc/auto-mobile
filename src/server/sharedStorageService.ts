@@ -756,7 +756,12 @@ async function execute(
   timeoutMs?: number,
 ): Promise<void> {
   try {
-    await adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
+    await adb.executeCommand(command, {
+      timeoutMs,
+      noRetry: true,
+      signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }
@@ -842,7 +847,12 @@ async function executeResult(
   timeoutMs?: number,
 ) {
   try {
-    return await adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
+    return await adb.executeCommand(command, {
+      timeoutMs,
+      noRetry: true,
+      signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

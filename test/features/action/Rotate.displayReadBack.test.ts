@@ -1,3 +1,4 @@
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -50,7 +51,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
   test("reports success once the target display reads back the requested orientation", async () => {
     const { adb, rotate } = setup();
     adb.setCommandResponse(DUMPSYS, createExecResult(mirrorLandscape, ""));
-    const result = await rotate.execute("portrait", undefined, true, undefined, 3);
+    const result = await rotate.execute("portrait", { lockOrientation: true, display: 3 });
     expect(result).toMatchObject({
       success: true,
       currentOrientation: "portrait",
@@ -71,7 +72,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
       createExecResult(mirrorLandscape, ""),
       createExecResult(mirrorLandscape.replace("    mRotation=0 ", "    mRotation=1 "), ""),
     ]);
-    const result = await rotate.execute("landscape", undefined, true, undefined, 3);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 3 });
     expect(result.success).toBe(true);
     expect(result.currentOrientation).toBe("landscape");
     expect(dumpsysCalls(adb)).toHaveLength(2);
@@ -82,7 +83,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
     const { adb, rotate } = setup();
     // Display 0 is landscape in this capture; display 3 stays at rotation 0 (portrait).
     adb.setCommandResponse(DUMPSYS, createExecResult(mirrorLandscape, ""));
-    const result = await rotate.execute("landscape", undefined, true, undefined, 3);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 3 });
     expect(result).toMatchObject({
       success: false,
       orientation: "landscape",
@@ -100,7 +101,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
     adb.setCommandResponse(DUMPSYS, createExecResult(mirrorPortrait, ""));
     // Display 4 of the portrait capture never leaves rotation 0.
     adb.setCommandResponse("shell wm size -d 4", createExecResult("Physical size: 1080x1920", ""));
-    const result = await rotate.execute("landscape", undefined, true, undefined, 4);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 4 });
     expect(result.success).toBe(false);
     const reads = dumpsysCalls(adb);
     expect(reads).toHaveLength(5);
@@ -111,8 +112,8 @@ describe("Rotate non-default display read-back (#10362)", () => {
   test("slow reads stop polling once the confirmation budget has elapsed", async () => {
     const { adb, rotate, timer } = setup();
     const slow = new (class extends FakeAdbExecutor {
-      override async executeCommand(command: string, timeoutMs?: number) {
-        const result = await adb.executeCommand(command, timeoutMs);
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        const result = await adb.executeCommand(command, options);
         if (command === DUMPSYS) {
           timer.advanceTime(600);
         }
@@ -122,7 +123,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
     adb.setCommandResponse(DUMPSYS, createExecResult(mirrorPortrait, ""));
     adb.setCommandResponse("shell wm size -d 4", createExecResult("Physical size: 1080x1920", ""));
     Object.assign(rotate, { adb: slow });
-    const result = await rotate.execute("landscape", undefined, true, undefined, 4);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 4 });
     expect(result.success).toBe(false);
     // 600ms per read: the second read ends past the 1000ms budget, so no third read starts.
     expect(dumpsysCalls(adb)).toHaveLength(2);
@@ -130,7 +131,7 @@ describe("Rotate non-default display read-back (#10362)", () => {
 
   test("an unreadable display rotation is reported as unconfirmed", async () => {
     const { adb, rotate } = setup();
-    const result = await rotate.execute("landscape", undefined, true, undefined, 3);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 3 });
     expect(result.success).toBe(true);
     expect(result.currentOrientation).toBe("unknown");
     expect(result.warning).toContain(

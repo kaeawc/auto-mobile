@@ -26,7 +26,7 @@ import {
 } from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 export type AccessibilityScrollAction = "scroll_forward" | "scroll_backward";
 
@@ -59,7 +59,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     private readonly accessibilityDetector: AccessibilityDetector,
     private readonly adb: AdbExecutor,
     private readonly timer: Timer,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   async executeSwipeGesture(

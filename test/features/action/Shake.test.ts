@@ -124,7 +124,7 @@ describe("Shake", () => {
       const progressCallback = () => {
         callbackCalled = true;
       };
-      const resultPromise = shake.execute({ duration: 50 }, progressCallback);
+      const resultPromise = shake.execute({ duration: 50 }, { progress: progressCallback });
       const result = await resultPromise;
 
       expect(result.success).toBe(true);
@@ -423,7 +423,7 @@ describe("Shake", () => {
         stderr: "",
       });
       const controller = new AbortController();
-      const pending = shake.execute({ duration: 50 }, undefined, controller.signal);
+      const pending = shake.execute({ duration: 50 }, { signal: controller.signal });
       for (
         let turn = 0;
         turn < 20 && !fakeAdb.wasCommandExecuted("emu sensor set acceleration 100:100:100");

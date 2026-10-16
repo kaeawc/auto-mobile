@@ -30,6 +30,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
+import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 
 const devices: BootedDevice[] = [
   { name: "Android", platform: "android", deviceId: "emulator-5554" },
@@ -399,24 +400,23 @@ describe("slice 2 registered handler cancellation", () => {
     const startedCleanup = new Promise<void>((resolve) => {
       cleanupStarted = resolve;
     });
-    const dispatch = spyOn(adb, "executeCommand").mockImplementation(
-      async (command, timeout, _buffer, _retry, signal) => {
-        if (command.endsWith("0:9.77622:0")) {
-          expect(getAbortSignal()).toBeUndefined();
-          expect(signal).toBeUndefined();
-          expect(timeout).toBe(1000);
-          cleanupStarted();
-          await timer.sleep(5000);
-        }
-        return {
-          stdout: "",
-          stderr: "",
-          includes: () => false,
-          trim: () => "",
-          toString: () => "",
-        };
-      },
-    );
+    const dispatch = spyOn(adb, "executeCommand").mockImplementation(async (command, options) => {
+      const { timeoutMs: timeout, signal } = executeCommandOptionsOf([command, options]);
+      if (command.endsWith("0:9.77622:0")) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(signal).toBeUndefined();
+        expect(timeout).toBe(1000);
+        cleanupStarted();
+        await timer.sleep(5000);
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        includes: () => false,
+        trim: () => "",
+        toString: () => "",
+      };
+    });
     const { started, sleep } = pausedSleep(timer);
     setShakeFactory(() => shake);
     try {

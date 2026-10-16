@@ -54,7 +54,7 @@ function harness(
   });
   Object.assign(ctrlProxyManager, { assertNotDrivenByOtherDaemon: guard });
   const actualCtrlProxyManager = realManager
-    ? AndroidCtrlProxyManager.getInstance(device, adb)
+    ? AndroidCtrlProxyManager.getInstance(device, { create: () => adb })
     : ctrlProxyManager;
   const waitForConnection = mock(async () => false);
   const ctrlProxyClient =

@@ -9,7 +9,6 @@ import type {
   DocumentPickerVisibilityVerifier,
 } from "../../src/server/appFileService";
 import { ActionableError, type BootedDevice } from "../../src/models";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { logger } from "../../src/utils/logger";
 
@@ -151,7 +150,7 @@ function harness() {
   const args = ["get_app_container", device.deviceId, appFiles.IOS_FILES_FIXTURE_BUNDLE_ID, "data"];
   // Only single-path stdout is trimmed; there is no simctl-output parser fixture.
   simctl.setCommandArgsResult(args, ` ${root}\n`);
-  const factory = () => simctl as unknown as SimCtlClient;
+  const factory = () => simctl;
   const container = new appFiles.SimctlIosFilesFixtureContainer(factory, fs);
   const provider = new appFiles.IosSimulatorUserFilesProvider(container);
   return { fs, simctl, args, factory, container, provider };

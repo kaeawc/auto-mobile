@@ -9,6 +9,7 @@ import { terminateAppResultSchema } from "../../../src/server/toolOutputSchemas"
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   DefaultDeviceWindowCacheInvalidator,
@@ -212,7 +213,7 @@ describe("TerminateApp (Android install listing)", () => {
     const commandSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
       const result = await executeCommand(...args);
       if (args[0] === "shell pm list packages --user 0") {
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new Error("listing interrupted");
       }

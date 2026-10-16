@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { fakeWhipClient } from "../../helpers/fakeWhipClient";
 import type { RTCPeerConnection } from "werift";
 import {
   evaluateH264SpsForSend,
@@ -14,7 +15,6 @@ import {
   type H264Profile,
 } from "../../../src/features/webrtc/h264Level";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
-import type { WhipClient } from "../../../src/features/webrtc/WhipClient";
 
 /**
  * Cross-source H.264 profile-negotiation guard (issues #4884, #4756).
@@ -155,10 +155,10 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
           {
             createPeerConnection: () => pc as unknown as RTCPeerConnection,
             createWhipClient: () =>
-              ({
+              fakeWhipClient({
                 publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
                 delete: async () => {},
-              }) as unknown as WhipClient,
+              }),
           },
         );
 

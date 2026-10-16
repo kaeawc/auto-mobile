@@ -9,12 +9,10 @@ export async function isPackageInstalledForUser(
   timeoutMs?: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const result = await adb.executeCommand(
-    `shell pm list packages --user ${userId}`,
+  const result = await adb.executeCommand(`shell pm list packages --user ${userId}`, {
     timeoutMs,
-    undefined,
-    true,
+    noRetry: true,
     signal,
-  );
+  });
   return packageListingContains(result.stdout, packageName);
 }

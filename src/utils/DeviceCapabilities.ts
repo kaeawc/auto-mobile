@@ -114,12 +114,11 @@ export class DeviceCapabilitiesDetector {
       return { stdout: "" };
     }
 
-    return this.adb.executeCommand(
-      command,
-      Math.min(REFRESH_RATE_PROBE_TIMEOUT_MS, remainingBudget),
-      DUMPSYS_MAX_BUFFER,
-      true,
-    );
+    return this.adb.executeCommand(command, {
+      timeoutMs: Math.min(REFRESH_RATE_PROBE_TIMEOUT_MS, remainingBudget),
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+      noRetry: true,
+    });
   }
 
   /**

@@ -1,5 +1,18 @@
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
+  ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+  describeFocusTarget,
+  distinctFocusFields,
+  findFocusIdentifier,
+  focusFieldSizeMatches,
+  focusScrollDelta,
+  hasStableFocusIdentity,
+  isSameFocusTarget,
+  requireTestTag,
+  type FocusIdentifierKey,
+} from "./tapFocusIdentity";
+import { matchedTapElement } from "./tapPointGeometry";
+import {
   isContainerAvailable,
   resolveSearchUntilDuration,
   throwIfLongPressInterrupted,
@@ -281,7 +294,6 @@ interface TapPointContext {
 /** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
 type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
-type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
 
 const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
   {
@@ -592,7 +604,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS;
 
-  private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = 3;
+  private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
 
   constructor(
     device: BootedDevice,
@@ -878,7 +890,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return point;
     }
     const elementLabel = element.text ?? element["content-desc"] ?? element["resource-id"];
-    const focusTarget = this.describeFocusTarget(element, options);
+    const focusTarget = describeFocusTarget(element, options);
     const selectorLabel =
       focusTarget !== "the matched element"
         ? focusTarget
@@ -1446,7 +1458,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!target?.bounds) {
       return null;
     }
-    const matched = this.matchedTapElement(selection, target, options);
+    const matched = matchedTapElement(selection, target, options);
     const matchedBounds = matched.bounds;
     const matchForTap = hasTapArea(matchedBounds) ? matched : target;
     const visible = visibleTapBounds(target.bounds, screenSize, matchForTap.bounds);
@@ -1461,18 +1473,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       nodes,
       context: createIosVisibleTapContext(nodes, screenSize, hierarchy),
     });
-  }
-
-  private matchedTapElement(
-    selection: ElementSelectionResult,
-    target: Element,
-    options?: TapOnElementOptions,
-  ): Element {
-    // Sibling selectors act on a different node from their anchor; focus
-    // selectors may similarly promote a label to its editable field.
-    return options?.sibling || options?.action === "focus"
-      ? target
-      : (selection.matchedElement ?? target);
   }
 
   private resolveVisibleTapPoint(
@@ -1952,7 +1952,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
 
     return {
-      selection: this.elementSelector.selectByTestTag(viewHierarchy, this.requireTestTag(options), {
+      selection: this.elementSelector.selectByTestTag(viewHierarchy, requireTestTag(options), {
         container: options.container,
         screenSizeOptions: options.screenSizeOptions,
         strategy: options.selectionStrategy,
@@ -1970,159 +1970,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       : TEXT_SELECTION_INTENT_BY_ACTION[options.action];
   }
 
-  private isSameFocusTarget(
-    target: Element,
-    candidate: Element,
-    nodes?: readonly SearchableEntry[],
-    selectedNode?: SearchableEntry,
-  ): boolean {
-    const candidateSource = getHierarchyNodeSource(candidate);
-    if (selectedNode && candidateSource === selectedNode.source) {
-      return true;
-    }
-    if (!selectedNode && this.hasDirectFocusIdentity(target, candidate)) {
-      return true;
-    }
-    if (!nodes || !candidateSource) {
-      return false;
-    }
-    const targets = selectedNode
-      ? [selectedNode]
-      : nodes.filter((node) => node.element && this.hasDirectFocusIdentity(target, node.element));
-    // Focus can be serialized on the search bar while its inner text field is
-    // selected (or vice versa). Only the nearest editable node on the same
-    // ancestry chain represents the same field.
-    return nodes.some((focusedNode) => {
-      if (focusedNode.source !== candidateSource || !focusedNode.element) {
-        return false;
-      }
-      return targets.some((matchedNode) => {
-        for (const [start, end] of [
-          [focusedNode, matchedNode],
-          [matchedNode, focusedNode],
-        ] as const) {
-          let parent = start.parentIndex;
-          while (parent !== undefined) {
-            const ancestor = nodes[parent];
-            if (ancestor === end) {
-              return true;
-            }
-            if (isFocusEditableElement(ancestor.properties)) {
-              break;
-            }
-            parent = ancestor.parentIndex;
-          }
-        }
-        return false;
-      });
-    });
-  }
-
-  private hasDirectFocusIdentity(target: Element, candidate: Element): boolean {
-    for (const key of ["resource-id", "view-id", "test-tag"] as const) {
-      const targetValue = target[key];
-      const candidateValue = candidate[key];
-      if (
-        key === "view-id" &&
-        targetValue !== candidateValue &&
-        [targetValue, candidateValue].some((value) => String(value).startsWith("s2-"))
-      ) {
-        continue;
-      }
-      if (
-        typeof targetValue === "string" &&
-        targetValue.length > 0 &&
-        typeof candidateValue === "string" &&
-        candidateValue.length > 0
-      ) {
-        return targetValue === candidateValue;
-      }
-    }
-    return (
-      boundsNearlyEqual(
-        target.bounds,
-        candidate.bounds,
-        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-      ) && this.hasStableFocusIdentity(target, candidate)
-    );
-  }
-
-  private describeFocusTarget(element: Element, options: TapOnElementOptions): string {
-    const text =
-      element.text ??
-      element["content-desc"] ??
-      element["ios-accessibility-label"] ??
-      options.text ??
-      options.textAny?.[0];
-    return typeof text === "string" && text.length > 0
-      ? JSON.stringify(text)
-      : "the matched element";
-  }
-
-  private hasStableFocusIdentity(target: Element, candidate: Element, labelText?: string): boolean {
-    if (target.class !== candidate.class) {
-      return false;
-    }
-    const stableKeys = (["resource-id", "test-tag"] as const).filter((key) => {
-      const value = target[key];
-      return typeof value === "string" && value.length > 0;
-    });
-    if (stableKeys.length > 0) {
-      return stableKeys.every((key) => target[key] === candidate[key]);
-    }
-    const targetText = target.text ?? target["content-desc"] ?? target["ios-accessibility-label"];
-    const candidateText =
-      candidate.text ?? candidate["content-desc"] ?? candidate["ios-accessibility-label"];
-    const identityText =
-      typeof targetText === "string" && targetText.length > 0 ? targetText : labelText;
-    return (
-      typeof identityText === "string" && identityText.length > 0 && identityText === candidateText
-    );
-  }
-
-  private distinctFocusFields(nodes: readonly SearchableEntry[]): SearchableEntry[] {
-    const groups: SearchableEntry[][] = [];
-    for (const node of nodes) {
-      // A capture can deserialize the same field under both hierarchy and windows.
-      // Keep one occurrence per root in each group, so same-tree peers stay ambiguous.
-      const copies = groups.find((group) =>
-        group.every(
-          (copy) => copy.rootGroup !== node.rootGroup && this.isDuplicateFocusField(copy, node),
-        ),
-      );
-      if (copies) {
-        copies.push(node);
-      } else {
-        groups.push([node]);
-      }
-    }
-    return groups.map((group) => group[0]);
-  }
-
-  private isDuplicateFocusField(a: SearchableEntry, b: SearchableEntry): boolean {
-    return Boolean(
-      a.element &&
-      b.element &&
-      a.className === b.className &&
-      boundsNearlyEqual(
-        a.element.bounds,
-        b.element.bounds,
-        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-      ) &&
-      isElementKeyboardFocused(a.element) === isElementKeyboardFocused(b.element) &&
-      (
-        [
-          "resource-id",
-          "test-tag",
-          "view-id",
-          "text",
-          "content-desc",
-          "ios-accessibility-label",
-        ] as const
-      ).every((key) => a.element![key] === b.element![key]),
-    );
-  }
-
   private findSoleFocusedFieldByStableIdentity(
     target: Element,
     nodes: readonly SearchableEntry[],
@@ -2135,7 +1982,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         isFocusEditableElement(node.properties) &&
         isElementKeyboardFocused(node.element),
     );
-    const distinctFocusedFields = this.distinctFocusFields(focusedFields);
+    const distinctFocusedFields = distinctFocusFields(focusedFields);
     if (distinctFocusedFields.length !== 1) {
       return undefined;
     }
@@ -2143,7 +1990,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return candidate &&
       (this.device.platform === "android" && !candidate.text
         ? this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText, preTapHierarchy)
-        : this.hasStableFocusIdentity(target, candidate, labelText)) &&
+        : hasStableFocusIdentity(target, candidate, labelText)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -2151,47 +1998,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       )
       ? candidate
       : undefined;
-  }
-
-  private focusFieldSizeMatches(target: Element, candidate: Element): boolean {
-    const epsilon = TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
-    return (
-      horizontalExtentNearlyEqual(target.bounds, candidate.bounds, epsilon) &&
-      Math.abs(
-        target.bounds.right - target.bounds.left - (candidate.bounds.right - candidate.bounds.left),
-      ) <= epsilon &&
-      Math.abs(
-        target.bounds.bottom - target.bounds.top - (candidate.bounds.bottom - candidate.bounds.top),
-      ) <= epsilon
-    );
-  }
-
-  private focusScrollDelta(
-    before: readonly SearchableEntry[],
-    after: readonly SearchableEntry[],
-  ): number | undefined {
-    if (!before.length || before.length !== after.length) {
-      return undefined;
-    }
-    const delta = after[0].element!.bounds.top - before[0].element!.bounds.top;
-    const consistent = before.every((field, ordinal) => {
-      const target = field.element!;
-      const candidate = after[ordinal].element!;
-      return (
-        target.class === candidate.class &&
-        this.focusFieldSizeMatches(target, candidate) &&
-        boundsNearlyEqual(
-          {
-            ...target.bounds,
-            top: target.bounds.top + delta,
-            bottom: target.bounds.bottom + delta,
-          },
-          candidate.bounds,
-          TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-        )
-      );
-    });
-    return consistent ? delta : undefined;
   }
 
   /** Shared so each captured hierarchy is projected once across the focus-confirmation reads. */
@@ -2222,7 +2028,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (
       !isFocusEditableElement(target) ||
       target.class !== candidate.class ||
-      !this.focusFieldSizeMatches(target, candidate) ||
+      !focusFieldSizeMatches(target, candidate) ||
       (["resource-id", "test-tag", "view-id"] as const).some(
         (key) =>
           [target[key], candidate[key]].some(
@@ -2262,7 +2068,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (signals.conflict) {
       return false;
     }
-    const fields = this.distinctFocusFields(
+    const fields = distinctFocusFields(
       nodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
     );
     const sameBoundsFields = fields.filter((node) =>
@@ -2278,7 +2084,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const preNodes = preTapHierarchy
       ? this.focusProjection.project(resolveViewHierarchyForSearch(preTapHierarchy)!)
       : [];
-    const preFields = this.distinctFocusFields(
+    const preFields = distinctFocusFields(
       preNodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
     );
     const targetFields = preFields.filter(
@@ -2296,7 +2102,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (targetOrdinal >= 0 && targetOrdinal !== candidateOrdinal) {
       return false;
     }
-    const delta = this.focusScrollDelta(preFields, fields);
+    const delta = focusScrollDelta(preFields, fields);
     const scrollDelta = delta ?? 0;
     const adjustedBounds = {
       ...target.bounds,
@@ -2315,32 +2121,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       signals.matched ||
       (atTargetBounds && (emptyFields.length === 1 || (targetOrdinal >= 0 && delta !== undefined)))
     );
-  }
-
-  private findFocusIdentifier(
-    target: Element,
-    nodes: readonly SearchableEntry[],
-  ): { key: FocusIdentifierKey; value: string; shared: boolean } | undefined {
-    let shared: { key: FocusIdentifierKey; value: string; shared: boolean } | undefined;
-    for (const key of ["resource-id", "test-tag", "view-id"] as const) {
-      const value = target[key];
-      if (typeof value !== "string" || value.length === 0) {
-        continue;
-      }
-      const fields = this.distinctFocusFields(
-        nodes.filter(
-          (node) =>
-            node.element && isFocusEditableElement(node.properties) && node.element[key] === value,
-        ),
-      );
-      if (fields.length === 1) {
-        return { key, value, shared: false };
-      }
-      if (fields.length > 1) {
-        shared ??= { key, value, shared: true };
-      }
-    }
-    return shared;
   }
 
   /**
@@ -2411,7 +2191,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           node.element &&
           isFocusEditableElement(node.properties) &&
           isElementKeyboardFocused(node.element) &&
-          this.isSameFocusTarget(selected, node.element, nodes, selectedNode),
+          isSameFocusTarget(selected, node.element, nodes, selectedNode),
       ) &&
       selected[identifier.key] === identifier.value &&
       target.class === selected.class &&
@@ -2477,7 +2257,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       node.element &&
       isFocusEditableElement(node.properties) &&
       isElementKeyboardFocused(node.element) &&
-      this.isSameFocusTarget(target, node.element, nodes),
+      isSameFocusTarget(target, node.element, nodes),
     );
   }
 
@@ -2491,7 +2271,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       candidate &&
       isFocusEditableElement(candidate) &&
       isElementKeyboardFocused(candidate) &&
-      this.isSameFocusTarget(target, candidate, this.focusProjection.project(hierarchy)),
+      isSameFocusTarget(target, candidate, this.focusProjection.project(hierarchy)),
     );
   }
 
@@ -2569,8 +2349,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     // The scope must single the field out before the tap, or it identifies nothing.
     if (
-      this.distinctFocusFields(preNodes.filter((node) => inScopeWithIdentity(node, preNodes)))
-        .length !== 1
+      distinctFocusFields(preNodes.filter((node) => inScopeWithIdentity(node, preNodes))).length !==
+      1
     ) {
       return false;
     }
@@ -2585,7 +2365,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         isElementKeyboardFocused(node.element),
     );
     return (
-      this.distinctFocusFields(inScope).length === 1 &&
+      distinctFocusFields(inScope).length === 1 &&
       inScope.every((node) => isElementKeyboardFocused(node.element!)) &&
       focused.every((node) => inScope.includes(node))
     );
@@ -2616,7 +2396,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       preTapHierarchy,
     }: { labelText?: string; selectedIndex?: number; preTapHierarchy?: ViewHierarchyResult },
   ): boolean {
-    const identifier = this.findFocusIdentifier(target, nodes);
+    const identifier = findFocusIdentifier(target, nodes);
     if (identifier?.shared) {
       return this.verifyIndexedFocusTarget(
         scopedOptions,
@@ -2633,7 +2413,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           isFocusEditableElement(node.properties) &&
           isElementKeyboardFocused(node.element) &&
           node.element[identifier.key] === identifier.value &&
-          this.isSameFocusTarget(target, node.element, nodes),
+          isSameFocusTarget(target, node.element, nodes),
       );
     }
     const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node, nodes));
@@ -2647,15 +2427,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return false;
     }
     return this.isRefoundFocusTarget(scopedOptions, target, viewHierarchy);
-  }
-
-  private requireTestTag(options: TapOnElementOptions): string {
-    if (!options.testTag) {
-      throw new ActionableError(
-        "tapOn requires non-blank text, textAny, elementId, or testTag to interact with",
-      );
-    }
-    return options.testTag;
   }
 
   private prepareViewHierarchyForResponse(
@@ -3787,7 +3558,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           action: options.action,
           element,
           selectedElement,
-          error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
+          error: `Cannot focus ${describeFocusTarget(element, options)} because it is not an editable input`,
         };
       }
       if (isElementKeyboardFocused(element)) {
@@ -4107,7 +3878,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
     if (!result.focusVerified) {
       result.success = false;
-      result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(result.element, options)}: the focused field could not be matched to the target`;
+      result.error = `Failed to confirm focus on editable input ${describeFocusTarget(result.element, options)}: the focused field could not be matched to the target`;
     }
     return result;
   }
@@ -4452,7 +4223,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 element,
                 selectedElement: selectedElementMetadata,
                 searchUntil: searchOutcome.stats,
-                error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
+                error: `Cannot focus ${describeFocusTarget(element, options)} because it is not an editable input`,
               };
             }
 
@@ -4594,7 +4365,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               options,
               screenSize,
               chromeElements: [
-                this.matchedTapElement(
+                matchedTapElement(
                   finalSelection,
                   tapElement,
                   requestedAction === "focus" ? { ...options, action: "focus" } : options,
@@ -4810,7 +4581,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         );
         if (!result.focusVerified) {
           result.success = false;
-          result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
+          result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
         }
       }
 
@@ -5753,10 +5524,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          longPressTimeoutMs,
-          undefined,
-          undefined,
-          signal,
+          { timeoutMs: longPressTimeoutMs, signal },
         );
       } catch (error) {
         logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
@@ -5769,10 +5537,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          longPressTimeoutMs,
-          undefined,
-          undefined,
-          signal,
+          { timeoutMs: longPressTimeoutMs, signal },
         );
       }
     } catch (error) {

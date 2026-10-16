@@ -17,7 +17,6 @@ import {
   resetForeignCtrlProxyForwardEvidenceForTesting,
 } from "./foreignCtrlProxyForwardEvidence";
 import { isProcessRunning } from "../../../utils/processLiveness";
-import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 
 // Three attempts preserve the existing connection retry bound.
 export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
@@ -71,7 +70,6 @@ import {
   ActionableError,
   nodeAttributes,
 } from "../../../models";
-import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
@@ -103,7 +101,11 @@ import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/Wo
 import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
+import {
+  WEBSOCKET_NOT_CONNECTED_MESSAGE,
+  sendCommand,
+  type SendCommandOptions,
+} from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
@@ -116,7 +118,6 @@ import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocke
 import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
 import {
   ScreenshotBackoffScheduler,
-  DefaultScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
   computeChecksum,
 } from "../ScreenshotBackoffScheduler";
@@ -139,21 +140,29 @@ import {
   withAndroidScreenshotCaptureLock,
 } from "./AndroidPhysicalDisplayId";
 import {
-  normalizeAnr,
-  normalizeCrash,
   withResolvedTimestamp,
   type SdkAnrPayload,
   type SdkAnrWirePayload,
   type SdkCrashPayload,
   type SdkCrashWirePayload,
 } from "../crash/sdkCrashIngestion";
-import { AndroidSdkEventIngestor, DefaultAndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
+import {
+  AndroidSdkEventIngestor,
+  DefaultAndroidSdkEventIngestor,
+  type AndroidHandledExceptionEvent as HandledExceptionEvent,
+} from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
+import {
+  AndroidAppEventRecorder,
+  parseStackTrace,
+  type AndroidPackageEvent as PackageEvent,
+  type AndroidFrameMetricsEvent,
+} from "./AndroidAppEventRecorder";
 import {
   deviceIncarnationToken,
   registerDeviceIncarnationListener,
@@ -238,11 +247,7 @@ import type {
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import {
-  CtrlProxyPackages,
-  packageEventAndroidUserId,
-  type PackageInfoOptions,
-} from "./CtrlProxyPackages";
+import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
 import type { DelegateContext } from "../shared/types";
@@ -304,43 +309,6 @@ export interface InteractionEvent {
   text?: string;
   scrollDeltaX?: number;
   scrollDeltaY?: number;
-}
-
-/**
- * Interface for package event from accessibility service
- */
-interface PackageEvent {
-  action: "added" | "removed" | "replaced";
-  packageName: string;
-  /** Android user id; APKs before #10067 sent the package uid here. */
-  userId: number;
-  /** Raw package uid; present only on APKs whose `userId` is a real user id (#10067). */
-  uid?: number | null;
-  isSystem?: boolean | null;
-  removedForAllUsers?: boolean | null;
-}
-
-/**
- * Interface for handled exception event from SDK
- */
-interface HandledExceptionEvent {
-  timestamp?: number;
-  exceptionClass: string;
-  /** The wire name the device writes (#10068). */
-  message?: string | null;
-  /** Legacy name from before #10068; read only when `message` is absent. */
-  exceptionMessage?: string;
-  stackTrace: string;
-  customMessage?: string;
-  currentScreen?: string;
-  packageName: string;
-  appVersion?: string;
-  deviceInfo: {
-    model: string;
-    manufacturer: string;
-    osVersion: string;
-    sdkInt: number;
-  };
 }
 
 /**
@@ -863,13 +831,7 @@ interface WsAnrEventMessage extends WsMessageBase {
 /** Real per-frame metrics from the in-app SDK FrameMetricsCollector (issue #5076). */
 interface WsFrameMetricsMessage extends WsMessageBase {
   type: "frame_metrics_event";
-  frameMetrics?: {
-    applicationId?: string;
-    fps?: number;
-    frameTimeMs?: number;
-    jankFrames?: number;
-    totalFrames?: number;
-  };
+  frameMetrics?: AndroidFrameMetricsEvent;
 }
 
 interface WsNetworkEventMessage extends WsMessageBase {
@@ -1603,12 +1565,15 @@ const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 const ADB_FORWARD_ADDRESS_IN_USE_PATTERN = /address already in use|EADDRINUSE/i;
 
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+  protected override get clientLogTag(): string {
+    return "AndroidCtrlProxyClient";
+  }
+
   /** Optional observer for display and posture changes. */
   onDisplayTransition?: (event: AndroidDisplayTransition) => void;
   private readonly streamedCaptureSequences = new WeakMap<object, number>();
   private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
 
-  private device: BootedDevice;
   private adb: AdbExecutor;
   private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
   private readonly idGenerator: IdGenerator;
@@ -1657,11 +1622,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
-  // Terminal-close latch (#5493): set once by close() so the best-effort ADB
-  // screencap fallback in captureScreenshotViaAdb() cannot outlive the client.
-  // Distinct from a transient websocket disconnect (onConnectionClosed), which
-  // must still allow the ADB fallback.
-  private closed: boolean = false;
+
   private incarnationToken: string | undefined;
   private readinessHolds = 0;
   private forwardSetupFailure: string | undefined;
@@ -1669,13 +1630,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Match the bounded ADB forward-removal confirmation window during teardown.
   private static readonly INBOUND_HANDLER_DRAIN_TIMEOUT_MS = 2000;
 
-  // Connection-failure escalation to service recovery (issue #7532). Counts
-  // failures via the base class's onConnectAttemptFailed() hook, which fires
-  // once per failed dial AND once per lost open connection (#7537), so both
-  // count toward the threshold. Reset on a successful connect or a successful
-  // recovery.
-  private consecutiveConnectionFailures: number = 0;
-  private static readonly MAX_CONSECUTIVE_FAILURES_BEFORE_RECOVERY = 3;
   // Re-entry guard: a recovery burst that has not settled must not start a
   // second, overlapping recovery attempt.
   private isRecoveringService: boolean = false;
@@ -1736,8 +1690,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private sdkScreenIdentityWaiters = new Map<string, Set<SdkRouteWaiter>>();
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
-  // Screenshot backoff scheduler
-  private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
@@ -1783,10 +1735,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
-  private supportedCommands: Set<string> | null = null;
+
   private readonly rejectedCommands = new Set<string>();
-  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
-  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
+
   // Matches iOS's CONNECTION_RESET_MS (set for #2695). The base default
   // (10000ms) outlives waitForConnection()'s default retry budget
   // (~2.7s), so a client that hit maxConnectionAttempts stays cooled down
@@ -1804,6 +1755,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private readonly certificateFileSystem: CertificateFileSystem | undefined;
+
+  private appEventRecorder: AndroidAppEventRecorder | null = null;
 
   /**
    * Owns SDK telemetry/crash/ANR ingestion (issue #2764). Lazily built so it can
@@ -2211,38 +2164,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
   }
 
-  /**
-   * Bind this client to a session for multi-agent NavigationGraphManager isolation.
-   * Called when a tool execution context binds a session to this device.
-   */
-  public bindSession(sessionId: string): void {
-    // Binding means this session is live again — clear any released-tombstone so a
-    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
-    // gets its own manager rather than the unattributed global (#4984).
-    NavigationGraphManager.clearReleasedSession(sessionId);
-    if (this.boundSessionId !== sessionId) {
-      // A per-device client routes nav events to whichever session bound last.
-      // That is correct under the pool's one-device-one-live-session invariant
-      // (a device is released before it is reassigned). Trace the transition off
-      // a previously-bound session so a concurrent-share regression — two live
-      // sessions driving one device — is diagnosable in the logs. Debug, not
-      // warn: the common case (a released device rebinding to its next session)
-      // is expected and must not be noisy.
-      if (this.boundSessionId !== null) {
-        logger.debug(
-          `[AndroidCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
-            `${this.boundSessionId} to ${sessionId}`,
-        );
-      }
-      this.boundSessionId = sessionId;
-      // A new session is a fresh owner: do not let a previous session's exhausted budget strand it.
-      this.forcedRestartBudget.rearm("new session bound");
-      // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
-      if (this.hierarchyNavigationDetector) {
-        this.hierarchyNavigationDetector.dispose();
-        this.hierarchyNavigationDetector = null;
-      }
-    }
+  protected override onSessionRebound(): void {
+    // A new session is a fresh owner: do not let a previous session's exhausted budget strand it.
+    this.forcedRestartBudget.rearm("new session bound");
   }
 
   /**
@@ -2471,6 +2395,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       });
     }
     return this.sdkEventIngestorInstance;
+  }
+
+  /** Resolve collaborators lazily so injected stores and session-bound ingestors stay live. */
+  private getAppEventRecorder(): AndroidAppEventRecorder {
+    if (!this.appEventRecorder) {
+      this.appEventRecorder = new AndroidAppEventRecorder({
+        deviceId: this.device.deviceId,
+        platform: this.device.platform,
+        timer: this.timer,
+        crashEventSink: this.crashEventSink,
+        getSdkEventIngestor: () => this.getSdkEventIngestor(),
+        getInstalledAppsStore: () => this.getInstalledAppsRepository(),
+        getWorkProfileMonitor: () => this.workProfileMonitor,
+        invalidateBuildContext: (appId) => this.invalidateBuildContext(appId),
+        getLastForegroundPackage: () => this.lastForegroundPackage,
+        // Resolve the module exports per call so later spies and singleton swaps are honoured.
+        getFrameMetricsStore: () => getSdkFrameMetricsStore(),
+        getInstalledAppsCacheWriteCoordinator: () => getInstalledAppsCacheWriteCoordinator(),
+        getDbWriteBarrier: () => getDbWriteBarrier(),
+      });
+    }
+    return this.appEventRecorder;
   }
 
   /**
@@ -3036,34 +2982,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
-   * Escalate repeated connection failures to service recovery (issue #7532).
-   * Fires once per failed dial AND once per lost open connection (#7537's
-   * `onConnectAttemptFailed` funnel), so both refused dials and dropped
-   * connections count toward the threshold — mirroring
-   * `IOSCtrlProxyClient.onConnectAttemptFailed`. Disabled while auto-reconnect
-   * is off or the client is closed.
+   * Whether a failed attempt counts toward escalating to service recovery (issue #7532).
+   * The shared `DeviceServiceClient.onConnectAttemptFailed` funnel (#7537) calls this once per
+   * failed dial AND once per lost open connection, so both refused dials and dropped
+   * connections count toward the threshold. Android additionally skips a failure caused by a
+   * foreign forwarding-lease conflict.
    */
-  protected override onConnectAttemptFailed(): void {
-    if (
-      this.closed ||
-      !this.autoReconnectEnabled ||
-      this.isLastConnectionFailureForwardingLeaseConflict()
-    ) {
-      return;
-    }
+  protected override shouldCountConnectionFailure(): boolean {
+    return !this.isLastConnectionFailureForwardingLeaseConflict();
+  }
 
-    this.consecutiveConnectionFailures++;
-    logger.info(
-      `[AndroidCtrlProxyClient] Connection attempt failed (failure count: ${this.consecutiveConnectionFailures})`,
-    );
-
-    if (
-      this.consecutiveConnectionFailures > 0 &&
-      this.consecutiveConnectionFailures %
-        AndroidCtrlProxyClient.MAX_CONSECUTIVE_FAILURES_BEFORE_RECOVERY ===
-        0 &&
-      !this.isRecoveringService
-    ) {
+  protected override onConnectionFailureThresholdReached(): void {
+    if (!this.isRecoveringService) {
       this.triggerServiceRecovery();
     }
   }
@@ -3352,23 +3282,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // `undefined`, so CtrlProxyHierarchy (the single source of truth) applies its own
   // defaults — keeping the two-copies drift class from issue #3505 unrepresentable.
   async getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
+    ...args: Parameters<CtrlProxyHierarchy["getAccessibilityHierarchy"]>
   ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(
-      queryOptions,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      disableAllFiltering,
-      signal,
-      readOptions,
-    );
+    return this.hierarchy.getAccessibilityHierarchy(...args);
   }
 
   async setRecompositionTrackingEnabled(
@@ -3380,21 +3296,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async getLatestHierarchy(
-    waitForFresh?: boolean,
-    timeout?: number,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
+    ...args: Parameters<CtrlProxyHierarchy["getLatestHierarchy"]>
   ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(
-      waitForFresh,
-      timeout,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-    );
+    return this.hierarchy.getLatestHierarchy(...args);
   }
 
   async requestHierarchySync(
@@ -4194,7 +4098,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           cancelScreenshotBackoff: false,
           // A socket lost after the caller's connection check must take its catch path.
           notConnectedError: () => {
-            throw new Error("WebSocket not connected");
+            throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
           },
           unsupportedCommandError: (_type, error) => {
             throw new Error(error);
@@ -4353,20 +4257,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.supportedCommands !== null &&
       this.isCommandSupported("node_selector_actions")
     );
-  }
-
-  /**
-   * Connects and waits for the runner handshake before returning its advertised
-   * command set. A null result means no compatible handshake was available.
-   */
-  public async getSupportedCommands(): Promise<string[] | null> {
-    if (this.supportedCommands === null) {
-      const connected = await this.ensureConnected();
-      if (connected) {
-        await this.waitForHandshake();
-      }
-    }
-    return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
   }
 
   public async supportsCommand(name: string): Promise<boolean> {
@@ -4680,7 +4570,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           abortSignal,
           requireExistingConnection: true,
           cancelScreenshotBackoff: false,
-          notConnectedError: () => failure("WebSocket not connected"),
+          notConnectedError: () => failure(WEBSOCKET_NOT_CONNECTED_MESSAGE),
           timeoutError: (timeout) => failure(`Settings ${operation} timeout after ${timeout}ms`),
           unsupportedCommandError: (_type, error) => failure(error),
         },
@@ -4725,7 +4615,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           acknowledged: false,
           action,
           totalTimeMs: this.timer.now() - startTime,
-          error: "WebSocket not connected",
+          error: WEBSOCKET_NOT_CONNECTED_MESSAGE,
         };
       }
       if (combinedSignal?.aborted) {
@@ -4814,7 +4704,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         return {
           success: false,
           totalTimeMs: this.timer.now() - startTime,
-          error: "WebSocket not connected",
+          error: WEBSOCKET_NOT_CONNECTED_MESSAGE,
         };
       }
       if (combinedSignal?.aborted) {
@@ -5018,7 +4908,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return;
     }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket not connected");
+      throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
     }
     const message = serializeCtrlProxyRequest(
       ctrlProxyRequests.requestScreenshot({
@@ -7146,28 +7036,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     hierarchy: ViewHierarchyResult,
     frameContext?: string,
   ): void {
-    const server = getDeviceDataStreamServer();
-    if (!server) {
-      return;
-    }
-
-    try {
-      const captureSequence = server.pushHierarchyUpdate(
-        this.device.deviceId,
-        hierarchy,
-        frameContext,
-      );
-      // Record the identity the daemon assigned, so screenshot requests initiated from here on are
-      // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
-      // geometry untracked, and the daemon then omits the identity so a control client fails closed.
-      if (captureSequence !== null) {
-        hierarchy.captureSequence = captureSequence;
+    this.forwardHierarchyToObservationStream(hierarchy, frameContext, {
+      logTag: "CTRL_PROXY",
+      recordForwarded: (captureSequence) => {
         this.streamedCaptureSequences.set(hierarchy, captureSequence);
         this.screenGeometry.markForwarded(captureSequence);
-      }
-    } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to push hierarchy to observation stream: ${error}`);
-    }
+      },
+    });
   }
 
   /**
@@ -7290,39 +7165,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {
-    if (!this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler = new DefaultScreenshotBackoffScheduler(
-        async (): Promise<ScreenshotCaptureResult> => {
-          return this.captureScreenshotForBackoff();
-        },
-        (result: ScreenshotCaptureResult) => {
-          if (result.data) {
-            this.pushScreenshotToObservationStream(
-              result.data,
-              result,
-              result.captureBinding,
-              result.frameContext,
-              result.rotation,
-            );
-          }
-        },
-        {
-          intervals: [0, 100, 300, 500, 800, 1300],
-          keepAliveIntervalMs: 3000,
-          getKeepAliveIntervalMs: () => {
-            const server = getDeviceDataStreamServer();
-            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
-          },
-          minCaptureIntervalMs: AndroidCtrlProxyClient.A11Y_SCREENSHOT_MIN_INTERVAL_MS,
-        },
-        this.timer,
-        () => {
-          const server = getDeviceDataStreamServer();
-          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
-        },
+    return this.createScreenshotBackoffScheduler(
+      async () => this.captureScreenshotForBackoff(),
+      (result) => this.emitBackoffScreenshot(result),
+      {
+        intervals: [0, 100, 300, 500, 800, 1300],
+        keepAliveIntervalMs: 3000,
+        minCaptureIntervalMs: AndroidCtrlProxyClient.A11Y_SCREENSHOT_MIN_INTERVAL_MS,
+      },
+    );
+  }
+
+  private emitBackoffScreenshot(result: ScreenshotCaptureResult): void {
+    if (result.data) {
+      this.pushScreenshotToObservationStream(
+        result.data,
+        result,
+        result.captureBinding,
+        result.frameContext,
+        result.rotation,
       );
     }
-    return this.screenshotBackoffScheduler;
   }
 
   private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
@@ -7470,7 +7333,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const command = `shell "screencap ${displayArgument}-p ${quotedTempFile} && base64 ${quotedTempFile} && rm ${quotedTempFile}"`;
       const maxBuffer = 50 * 1024 * 1024;
       const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
-        this.adb.executeCommand(command, undefined, maxBuffer),
+        this.adb.executeCommand(command, { maxBuffer }),
       );
 
       if (!result.stdout || result.stdout.trim().length === 0) {
@@ -7555,53 +7418,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
-    if (this.device.platform !== "android") {
-      return;
-    }
-
-    if (!event.packageName || !Number.isInteger(event.userId) || event.userId < 0) {
-      logger.warn("[CTRL_PROXY] Ignoring package event with missing data");
-      return;
-    }
-
-    const deviceId = this.device.deviceId;
-    const androidUserId = packageEventAndroidUserId(event);
-    const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
-    const repo = this.getInstalledAppsRepository();
-
-    // Invalidate cached build/content-hash provenance for this package (#4984) so the
-    // next nav event re-resolves the hash. Fires for every action (add/replace/remove)
-    // — a rebuild+reinstall, INCLUDING the same-versionCode/different-content daily-dev
-    // case, must not keep recording against the previous build's hash.
-    this.invalidateBuildContext(event.packageName);
-
-    try {
-      if (event.action === "removed") {
-        if (event.removedForAllUsers) {
-          await repo.removeInstalledAppForDevice(deviceId, event.packageName);
-        } else {
-          await repo.removeInstalledApp(deviceId, androidUserId, event.packageName);
-        }
-      } else {
-        const isSystem = event.isSystem === true;
-        await repo.upsertInstalledApp(
-          deviceId,
-          androidUserId,
-          event.packageName,
-          isSystem,
-          eventTimestamp,
-        );
-      }
-
-      // Notify work profile monitor that this user has accessibility service
-      // (if we're receiving package events, the service is working for this user)
-      if (androidUserId > 0 && this.workProfileMonitor) {
-        this.workProfileMonitor.setProfileHasAccessibilityService(androidUserId, true);
-      }
-    } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
-    }
+  private handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
+    return this.getAppEventRecorder().handlePackageEvent(event, timestamp);
   }
 
   private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
@@ -7619,11 +7437,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return navWrite;
   }
 
-  private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`,
-    );
-    await this.getSdkEventIngestor().recordHandledException(event);
+  private handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
+    return this.getAppEventRecorder().handleHandledExceptionEvent(event);
   }
 
   private isCommandSupported(messageType: string): boolean {
@@ -7668,140 +7483,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     });
   }
 
-  private async waitForHandshake(
-    timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
-    signal?: AbortSignal,
+  protected override awaitHandshakePoll(
+    work: () => Promise<void>,
+    signal: AbortSignal,
   ): Promise<void> {
-    const deadline = this.timer.now() + timeoutMs;
-    while (this.supportedCommands === null && this.timer.now() < deadline) {
-      if (!signal) {
-        await this.timer.sleep(AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
-        continue;
-      }
-      let timeout: ReturnType<Timer["setTimeout"]> | undefined;
-      try {
-        await this.awaitActionWork(
-          () =>
-            new Promise<void>((resolve) => {
-              timeout = this.timer.setTimeout(
-                resolve,
-                AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS,
-              );
-            }),
-          signal,
-        );
-      } finally {
-        if (timeout !== undefined) {
-          this.timer.clearTimeout(timeout);
-        }
-      }
-    }
+    return this.awaitActionWork(work, signal);
   }
 
-  private async persistCrash(event: SdkCrashPayload): Promise<void> {
-    try {
-      await this.crashEventSink.saveCrash(normalizeCrash(event, this.device.deviceId));
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to persist crash: ${error}`);
-    }
+  private persistCrash(event: SdkCrashPayload): Promise<void> {
+    return this.getAppEventRecorder().persistCrash(event);
   }
 
-  /**
-   * Ingest a live frame-metrics event from the in-app SDK (issue #5076) into the
-   * shared store. `PerformanceMonitor` prefers this real app-frame data over the
-   * dumpsys scrape when it is fresh. The event's applicationId identifies the
-   * app; fall back to the last-known foreground package if the SDK omitted it.
-   */
   private handleFrameMetricsEvent(data: NonNullable<WsFrameMetricsMessage["frameMetrics"]>): void {
-    const packageName = data.applicationId ?? this.lastForegroundPackage;
-    if (!packageName) {
-      return;
-    }
-    getSdkFrameMetricsStore().ingest(this.device.deviceId, packageName, {
-      fps: data.fps ?? null,
-      frameTimeMs: data.frameTimeMs ?? null,
-      jankFrames: data.jankFrames ?? null,
-      receivedAt: this.timer.now(),
-    });
+    return this.getAppEventRecorder().handleFrameMetricsEvent(data);
   }
 
-  private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`,
-    );
-    await Promise.all([
-      this.persistCrash(event),
-      this.getSdkEventIngestor().recordCrashAnalytics(event),
-    ]);
+  private handleCrashEvent(event: SdkCrashPayload): Promise<void> {
+    return this.getAppEventRecorder().handleCrashEvent(event);
   }
 
-  private async persistAnr(event: SdkAnrPayload): Promise<void> {
-    try {
-      await this.crashEventSink.saveAnr(normalizeAnr(event, this.device.deviceId));
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to persist ANR: ${error}`);
-    }
+  private persistAnr(event: SdkAnrPayload): Promise<void> {
+    return this.getAppEventRecorder().persistAnr(event);
   }
 
-  private async handleAnrEvent(event: SdkAnrPayload): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`,
-    );
-    const packageName = event.packageName ?? event.processName;
-    await Promise.all([
-      this.persistAnr(event),
-      this.getSdkEventIngestor().recordAnrAnalytics(event, packageName),
-    ]);
+  private handleAnrEvent(event: SdkAnrPayload): Promise<void> {
+    return this.getAppEventRecorder().handleAnrEvent(event);
   }
 
   private parseStackTrace(stackTrace: string, packageName: string): StackTraceElement[] {
-    const elements: StackTraceElement[] = [];
-    const lines = stackTrace.split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      const match = trimmed.match(
-        /^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/,
-      );
-      if (match) {
-        const [, fullClassName, methodName, fileName, lineNumberStr] = match;
-        const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : undefined;
-
-        const isAppCode =
-          fullClassName.startsWith(packageName) ||
-          fullClassName.includes(packageName.split(".").slice(0, 2).join("."));
-
-        elements.push({
-          className: fullClassName,
-          methodName,
-          fileName,
-          lineNumber,
-          isAppCode,
-        });
-      }
-    }
-
-    return elements;
+    return parseStackTrace(stackTrace, packageName);
   }
 
-  private async markInstalledAppsStale(reason: string): Promise<void> {
-    if (this.device.platform !== "android") {
-      return;
-    }
-
-    try {
-      // Fired fire-and-forget on WS close, which happens during shutdown socket
-      // teardown — route through the barrier so it drains (or is skipped) before
-      // closeDatabase() rather than racing the closing connection (issue #2792).
-      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
-        getDbWriteBarrier()
-          .track(() => this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId))
-          .then(() => undefined),
-      );
-      logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
-    } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to mark installed apps stale: ${error}`);
-    }
+  private markInstalledAppsStale(reason: string): Promise<void> {
+    return this.getAppEventRecorder().markInstalledAppsStale(reason);
   }
 }
 

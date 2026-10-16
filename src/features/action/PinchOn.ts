@@ -226,7 +226,9 @@ export class PinchOn extends BaseVisualChange {
 
     if (this.device.platform === "android") {
       throwIfAborted(signal);
-      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
+      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, {
+        create: () => this.adb,
+      });
       const available = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
       throwIfAborted(signal);
       if (!available) {

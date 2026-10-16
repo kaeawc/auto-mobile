@@ -7,6 +7,7 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -918,7 +919,7 @@ describe("tapAny long press safety", () => {
         if (path === "timeout") {
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new DOMException("Operation aborted", "AbortError");
       });

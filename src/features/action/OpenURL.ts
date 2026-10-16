@@ -167,7 +167,7 @@ export interface OpenURLOptions {
 }
 
 export class OpenURL extends BaseVisualChange {
-  private readonly simctl: SimCtlClient | null;
+  private readonly simctl: Pick<SimCtlClient, "executeCommandArgs"> | null;
   private readonly devicectl: DeviceUrlLauncher | null;
   private readonly iosOpenUrlBackend?: IosOpenUrlBackend;
 
@@ -180,7 +180,7 @@ export class OpenURL extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "executeCommandArgs"> | null = null,
     devicectl: DeviceUrlLauncher | null = null,
     timerOrOptions: Timer | OpenURLOptions = defaultTimer,
   ) {

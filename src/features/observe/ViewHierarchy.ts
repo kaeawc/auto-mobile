@@ -1,3 +1,4 @@
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "./DeviceServiceUtils";
 import { iosHierarchyAcquisition } from "./ios/types";
 import { linkWindowRoots } from "./linkWindowRoots";
 import {
@@ -581,7 +582,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // signature -- otherwise this is an ordinary/unexpected thrown error.
       const errMessage = errorMessage(err);
       const transportFailure =
-        errMessage.includes("WebSocket not connected") ||
+        errMessage.includes(WEBSOCKET_NOT_CONNECTED_MESSAGE) ||
         errMessage.includes("Failed to connect to accessibility service");
       return {
         hierarchy: {

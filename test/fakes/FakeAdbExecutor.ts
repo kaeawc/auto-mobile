@@ -7,6 +7,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { resolveExecuteCommandOptions } from "../../src/utils/android-cmdline-tools/executeCommandArgs";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
 /**
@@ -348,26 +349,27 @@ export class FakeAdbExecutor implements AdbExecutor {
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
-    return this.executeCommand(
-      args.join(" "),
-      options.timeoutMs,
-      options.maxBuffer,
-      options.noRetry,
-      options.signal,
-      options.waitForProcessSettlementAfterAbort,
-      options.onStdout,
-    );
+    return this.executeCommand(args.join(" "), options);
   }
 
   async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-    onStdout?: (chunk: string) => void,
+    timeoutMsOrOptions?: number | AdbExecuteOptions,
+    maxBufferArg?: number,
+    noRetryArg?: boolean,
+    signalArg?: AbortSignal,
+    waitForProcessSettlementAfterAbortArg?: boolean,
+    onStdoutArg?: (chunk: string) => void,
   ): Promise<ExecResult> {
+    const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
+      resolveExecuteCommandOptions(
+        timeoutMsOrOptions,
+        maxBufferArg,
+        noRetryArg,
+        signalArg,
+        waitForProcessSettlementAfterAbortArg,
+        onStdoutArg,
+      );
     this.executedCommands.push(command);
     this.commandCalls.push({
       command,

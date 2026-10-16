@@ -123,3 +123,89 @@ test("manager drain excludes settled identities from its next writer snapshot", 
   expect(timer.getPendingTimeouts()).toEqual([]);
   expect(timer.getSleepHistory()).toEqual([]);
 });
+
+test("manager retry callbacks retain instance dispatch and enter on the timer's turn", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  manager.stopCleanupTimer();
+  manager.setTerminalReleaseRetryBackoff({ delayForAttempt: () => 37 });
+  const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
+  const snapshot: SessionReleaseSnapshot = {
+    sessionId: "retry-dispatch",
+    deviceId: "fake-device",
+    releaseReason: "explicit-release",
+    releasedAtMs: 0,
+    terminal: true,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 1000, ageMs: 0 },
+  };
+  Reflect.set(manager, "isTerminalReleaseRetryCurrent", () => true);
+  const schedule = Reflect.get(manager, "scheduleTerminalReleaseRetry") as (
+    snapshot: SessionReleaseSnapshot,
+  ) => void;
+  schedule.call(manager, snapshot);
+  expect(writer.pending(snapshot.sessionId)).toBe(true);
+  expect(timer.getPendingTimeouts()).toEqual([37]);
+  let entered = false;
+  // Patch after scheduling: the timer must still dispatch through this manager instance.
+  Reflect.set(manager, "retryTerminalReleaseWrite", () => {
+    entered = true;
+    writer.cancelRetry(snapshot);
+    return Promise.resolve();
+  });
+  const settled = writer.settled(snapshot.sessionId);
+  timer.advanceTime(37);
+  expect(entered).toBe(true);
+  expect(writer.pending(snapshot.sessionId)).toBe(false);
+  await settled;
+  expect(timer.getSleepHistory()).toEqual([]);
+});
+
+test("manager stop clears writer handles and drain retains the original retry promise", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  manager.stopCleanupTimer();
+  const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
+  const snapshot: SessionReleaseSnapshot = {
+    sessionId: "retry-stop",
+    deviceId: "fake-device",
+    releaseReason: "explicit-release",
+    releasedAtMs: 0,
+    terminal: true,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 1000, ageMs: 0 },
+  };
+  Reflect.set(manager, "isTerminalReleaseRetryCurrent", () => true);
+  const schedule = Reflect.get(manager, "scheduleTerminalReleaseRetry") as (
+    snapshot: SessionReleaseSnapshot,
+  ) => void;
+  schedule.call(manager, snapshot);
+  expect(timer.getPendingTimeouts()).toHaveLength(1);
+  manager.stopCleanupTimer();
+  expect(timer.getPendingTimeouts()).toEqual([]);
+  expect(writer.pending(snapshot.sessionId)).toBe(true);
+  const gate = Promise.withResolvers<void>();
+  Reflect.set(manager, "retryTerminalReleaseWrite", () => gate.promise);
+  const retryNow = Reflect.get(manager, "retryPendingTerminalReleasesNow") as () => Promise<void>[];
+  expect(retryNow.call(manager)).toEqual([gate.promise]);
+  let drained = false;
+  const drain = manager.drainReleasePromises(1000).then((result) => {
+    drained = true;
+    return result;
+  });
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+  expect(drained).toBe(false);
+  writer.cancelRetry(snapshot);
+  gate.resolve();
+  expect(await drain).toBe(true);
+  expect(timer.getPendingTimeouts()).toEqual([]);
+  expect(timer.getSleepHistory()).toEqual([]);
+});

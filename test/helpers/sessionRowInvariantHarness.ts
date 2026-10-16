@@ -5,6 +5,7 @@ import {
   SessionManager,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import type { SessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import type {
   TerminalReleaseIntent,
   TerminalReleaseJournal,
@@ -739,7 +740,7 @@ export async function runSessionRowInterleaving(
     await settleMicrotasks(random.pick([0, 1, 3, 8, 20, 60]));
   }
 
-  /** The retries the manager still holds for the id, read from its own bookkeeping. */
+  /** The row work still owed for the id, through each owner's public surface. */
   const armedRetries = (): string[] => {
     const armed: string[] = [];
     const owed = (
@@ -753,10 +754,8 @@ export async function runSessionRowInterleaving(
     } else if (owed?.handle !== undefined) {
       armed.push("a live-row rewrite retry is armed");
     }
-    const release = (
-      Reflect.get(manager, "pendingTerminalReleaseRetries") as Map<string, { handle?: unknown }>
-    ).get(sessionId);
-    if (release?.handle !== undefined) {
+    const writer = Reflect.get(manager, "rowWriter") as SessionRowWriter;
+    if (writer.pending(sessionId)) {
       armed.push("a release write retry is armed");
     }
     return armed;

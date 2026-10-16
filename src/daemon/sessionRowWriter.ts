@@ -43,6 +43,12 @@ export interface ReleaseRowLanded {
 
 export interface SessionRowWriter {
   desire(uuid: string, desired: DesiredReleaseRow): void;
+  scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void;
+  cancelRetry(snapshot: SessionReleaseSnapshot): void;
+  beginReleaseDrain(): void;
+  retryPendingNow(): Promise<void>[];
+  stopRetryTimers(): void;
+  setRetryBackoff(backoff: BackoffPolicy): void;
   pending(uuid: string): boolean;
   settled(uuid: string): Promise<void>;
   /** Track background writes without wrapping their promises or changing settlement timing. */
@@ -61,6 +67,25 @@ export interface SessionRowWriter {
 
 type ReleaseRowListener = (event: ReleaseRowLanded) => void | Promise<unknown>;
 
+/** Identity and drain state of one scheduled retry; row policy remains with its caller. */
+export interface ReleaseRowRetry {
+  snapshot: SessionReleaseSnapshot;
+  shutdownAttempted?: boolean;
+  isCurrent(): boolean;
+}
+
+export interface ReleaseRowRetryCallbacks {
+  isStillOwed(): boolean;
+  drop(): void;
+  run(entry: ReleaseRowRetry): Promise<void>;
+}
+
+interface ScheduledReleaseRowRetry extends ReleaseRowRetry {
+  attempt: number;
+  handle?: NodeJS.Timeout;
+  callbacks: ReleaseRowRetryCallbacks;
+}
+
 interface Desire {
   desired: DesiredReleaseRow;
   desireSeq: number;
@@ -77,7 +102,6 @@ interface Row {
   parked: number;
   /** A fence lift signals a live desire until W3 moves live writes into this writer. */
   liveSeq: number;
-  waiters: Set<() => void>;
 }
 
 interface SessionRowWriterOptions {
@@ -124,19 +148,21 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private readonly listeners = new Set<ReleaseRowListener>();
   private readonly work = new Set<Promise<void>>();
   private readonly drainWrites = new Set<Promise<void>>();
+  private readonly retries = new Map<string, ScheduledReleaseRowRetry>();
+  private readonly waiters = new Map<string, Set<() => void>>();
   private desireSeq = 0;
   private draining = false;
 
   constructor(
     private readonly persistence: DeviceSessionPersistence,
     private readonly timer: Timer,
-    private readonly backoff: BackoffPolicy,
+    private backoff: BackoffPolicy,
     private readonly logger: Pick<Logger, "warn" | "debug">,
     private readonly options: SessionRowWriterOptions,
   ) {}
 
   desire(uuid: string, desired: DesiredReleaseRow): void {
-    const row = this.rows.get(uuid) ?? { liveSeq: 0, parked: 0, waiters: new Set() };
+    const row = this.rows.get(uuid) ?? { liveSeq: 0, parked: 0 };
     if (row.desired?.desired.terminal && !desired.terminal) {
       return;
     }
@@ -161,6 +187,122 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     this.start(uuid, row, entry);
   }
 
+  /** Schedule only: callbacks keep their original promise and await sequence. */
+  scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void {
+    const uuid = snapshot.sessionId;
+    const pending = this.retries.get(uuid);
+    if (!snapshot.terminal && pending?.snapshot.terminal) {
+      return;
+    }
+    if (!callbacks.isStillOwed()) {
+      callbacks.drop();
+      return;
+    }
+    const attempt = (pending?.snapshot === snapshot ? pending.attempt : 0) + 1;
+    if (pending?.handle !== undefined) {
+      this.timer.clearTimeout(pending.handle);
+    }
+    const entry: ScheduledReleaseRowRetry = {
+      snapshot,
+      attempt,
+      callbacks,
+      shutdownAttempted: this.draining,
+      isCurrent: () => this.retries.get(uuid) === entry,
+    };
+    if (this.draining) {
+      this.retryDuringDrain(entry, pending);
+      return;
+    }
+    entry.handle = this.timer.setTimeout(() => {
+      entry.handle = undefined;
+      void callbacks.run(entry);
+    }, this.backoff.delayForAttempt(attempt));
+    entry.handle.unref?.();
+    this.retries.set(uuid, entry);
+    this.logger.warn(
+      `[SessionManager] The ${snapshot.releaseReason} release of session ${uuid} ` +
+        `is not persisted; retrying the write (attempt ${attempt})`,
+    );
+  }
+
+  /** One immediate attempt per owed snapshot; a further failure cannot spin shutdown. */
+  private retryDuringDrain(
+    entry: ScheduledReleaseRowRetry,
+    pending: ScheduledReleaseRowRetry | undefined,
+  ): void {
+    const { snapshot, attempt, callbacks } = entry;
+    const uuid = snapshot.sessionId;
+    if (pending?.snapshot === snapshot && pending.shutdownAttempted) {
+      this.removeRetry(uuid);
+      this.logger.warn(
+        `[SessionManager] The ${snapshot.releaseReason} release of session ` +
+          `${uuid} is still not persisted at shutdown` +
+          (snapshot.terminal ? "; the session stays fenced only until this process exits" : ""),
+      );
+      return;
+    }
+    this.retries.set(uuid, entry);
+    this.logger.warn(
+      `[SessionManager] The ${snapshot.releaseReason} release of session ${uuid} ` +
+        `is not persisted; retrying the write before shutdown (attempt ${attempt})`,
+    );
+    this.trackDrainWrite(callbacks.run(entry));
+  }
+
+  cancelRetry(snapshot: SessionReleaseSnapshot): void {
+    if (this.retries.get(snapshot.sessionId)?.snapshot === snapshot) {
+      this.removeRetry(snapshot.sessionId);
+    }
+  }
+
+  private removeRetry(uuid: string): void {
+    const entry = this.retries.get(uuid);
+    if (entry?.handle !== undefined) {
+      this.timer.clearTimeout(entry.handle);
+    }
+    this.retries.delete(uuid);
+    this.resolveWaiters(uuid);
+  }
+
+  private resolveWaiters(uuid: string): void {
+    if (this.pending(uuid)) {
+      return;
+    }
+    for (const resolve of this.waiters.get(uuid) ?? []) {
+      resolve();
+    }
+    this.waiters.delete(uuid);
+  }
+
+  beginReleaseDrain(): void {
+    this.draining = true;
+  }
+
+  /** Snapshot synchronously and return the caller's original write promises. */
+  retryPendingNow(): Promise<void>[] {
+    return Array.from(this.retries.values(), (entry) => {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+      entry.shutdownAttempted = true;
+      return entry.callbacks.run(entry);
+    });
+  }
+
+  stopRetryTimers(): void {
+    for (const entry of this.retries.values()) {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+    }
+  }
+
+  setRetryBackoff(backoff: BackoffPolicy): void {
+    this.backoff = backoff;
+  }
+
   private evictNonTerminal(): void {
     const pending = Array.from(this.rows.entries()).filter(
       ([, row]) => row.desired && !row.desired.desired.terminal,
@@ -174,7 +316,10 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
 
   pending(uuid: string): boolean {
     const row = this.rows.get(uuid);
-    return row !== undefined && (!!row.active || !!row.desired || row.parked > 0);
+    return (
+      this.retries.has(uuid) ||
+      (row !== undefined && (!!row.active || !!row.desired || row.parked > 0))
+    );
   }
 
   pendingSnapshot(uuid: string): SessionReleaseSnapshot | undefined {
@@ -186,11 +331,12 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   }
 
   settled(uuid: string): Promise<void> {
-    const row = this.rows.get(uuid);
-    if (!row || !this.pending(uuid)) {
+    if (!this.pending(uuid)) {
       return Promise.resolve();
     }
-    return new Promise((resolve) => row.waiters.add(resolve));
+    const waiters = this.waiters.get(uuid) ?? new Set<() => void>();
+    this.waiters.set(uuid, waiters);
+    return new Promise((resolve) => waiters.add(resolve));
   }
 
   cancel(uuid: string, snapshot: SessionReleaseSnapshot): void {
@@ -456,10 +602,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       return;
     }
     this.rows.delete(uuid);
-    for (const resolve of row.waiters) {
-      resolve();
-    }
-    row.waiters.clear();
+    this.resolveWaiters(uuid);
   }
 
   private track(write: Promise<void>): void {
@@ -480,7 +623,8 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   }
 
   async drain(): Promise<void> {
-    this.draining = true;
+    this.beginReleaseDrain();
+    const retries = this.retryPendingNow();
     for (const [uuid, row] of this.rows) {
       if (!row.desired) {
         continue;
@@ -493,16 +637,22 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
         this.schedule(uuid, row, row.desired);
       }
     }
-    while (this.work.size || this.rows.size || this.drainWrites.size) {
+    if (retries.length > 0) {
+      await Promise.allSettled(retries);
+    }
+    while (this.work.size || this.rows.size || this.drainWrites.size || this.retries.size) {
       await Promise.all([
         ...this.work,
         ...this.drainWrites,
-        ...Array.from(this.rows.keys(), (uuid) => this.settled(uuid)),
+        ...Array.from(new Set([...this.rows.keys(), ...this.retries.keys()]), (uuid) =>
+          this.settled(uuid),
+        ),
       ]);
     }
   }
 
   stop(): void {
+    this.stopRetryTimers();
     for (const [uuid, row] of this.rows) {
       if (row.desired?.handle !== undefined) {
         this.timer.clearTimeout(row.desired.handle);

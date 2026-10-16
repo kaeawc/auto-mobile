@@ -1,5 +1,9 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
-import { SerializedSessionRowWriter, type SessionRowWriter } from "./sessionRowWriter";
+import {
+  SerializedSessionRowWriter,
+  type SessionRowWriter,
+  type ReleaseRowRetry,
+} from "./sessionRowWriter";
 import {
   SessionSlots,
   deriveSlotTag,
@@ -969,18 +973,6 @@ interface ReleaseReasonState {
   terminalPersisted?: boolean;
 }
 
-/**
- * A release row whose write failed, waiting to be retried: a terminal one (#10959), or a
- * non-terminal one whose session is already gone (#11557).
- */
-interface TerminalReleaseRetry {
-  snapshot: SessionReleaseSnapshot;
-  attempt: number;
-  handle?: NodeJS.Timeout;
-  /** Already retried during shutdown's drain; a further failure is not retried again (#11058). */
-  shutdownAttempted?: boolean;
-}
-
 /** A live row's rewrite over its superseded release's terminal row that failed (#11557). */
 interface OwedSupersededRowReassert {
   /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
@@ -1663,16 +1655,10 @@ export class SessionManager {
     (deviceId: string, frameInvalidation: "generation-only" | "full") => void
   >();
   /**
-   * Release rows a write failed to persist, awaiting a retry: terminal ones (#10959), and the
-   * non-terminal ones of {@link pendingNonTerminalReleaseSnapshots} (#11557).
-   */
-  private readonly pendingTerminalReleaseRetries: Map<string, TerminalReleaseRetry> = new Map();
-  /**
    * Set once shutdown starts draining releases (#11058): a terminal write that fails from then on
    * is retried at once and tracked by the drain, since a backoff timer would outlive the database.
    */
   private releaseDrainStarted = false;
-  private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
   private readonly rowWriter: SessionRowWriter;
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
@@ -1884,7 +1870,7 @@ export class SessionManager {
 
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
-    this.terminalReleaseRetryBackoff = backoff;
+    this.rowWriter.setRetryBackoff(backoff);
   }
 
   /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
@@ -2788,9 +2774,7 @@ export class SessionManager {
     this.rowWriter = SerializedSessionRowWriter.create(networkConditionRestorerFactory, {
       persistence: this.deviceSessionRepository,
       timer,
-      backoff: {
-        delayForAttempt: (attempt) => this.terminalReleaseRetryBackoff.delayForAttempt(attempt),
-      },
+      backoff: DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF,
       logger,
       timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
       timeoutError: SessionReleasePersistTimeoutError,
@@ -7176,6 +7160,7 @@ export class SessionManager {
     additionalReleases: ReadonlyArray<Promise<unknown>> = [],
   ): Promise<boolean> {
     this.releaseDrainStarted = true;
+    this.rowWriter.beginReleaseDrain();
     const releases = [
       ...Array.from(this.sessionSlots.activeReleases, (release) => release.promise),
       ...this.rowWriter.pendingDrainWrites(),
@@ -9145,13 +9130,7 @@ export class SessionManager {
 
   /** The retry of `snapshot` no longer matters: forget it, and a terminal row's journal intent. */
   private dropReleaseRetry(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
-    if (pending?.snapshot === snapshot) {
-      if (pending.handle !== undefined) {
-        this.timer.clearTimeout(pending.handle);
-      }
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
-    }
+    this.rowWriter.cancelRetry(snapshot);
     this.forgetSupersededRowUnder(snapshot);
     if (snapshot.terminal) {
       if (this.volatileTerminalReleaseIntents.get(snapshot.sessionId) === snapshot.releaseReason) {
@@ -9167,60 +9146,11 @@ export class SessionManager {
    * replaces a non-terminal one's for the same UUID, never the reverse.
    */
   private scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
-    if (!snapshot.terminal && pending?.snapshot.terminal) {
-      return;
-    }
-    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
-      this.dropReleaseRetry(snapshot);
-      return;
-    }
-    const attempt = (pending?.snapshot === snapshot ? pending.attempt : 0) + 1;
-    if (pending?.handle !== undefined) {
-      this.timer.clearTimeout(pending.handle);
-    }
-    if (this.releaseDrainStarted) {
-      this.retryTerminalReleaseDuringDrain(snapshot, attempt, pending);
-      return;
-    }
-    const entry: TerminalReleaseRetry = { snapshot, attempt };
-    entry.handle = this.timer.setTimeout(() => {
-      entry.handle = undefined;
-      void this.retryTerminalReleaseWrite(entry);
-    }, this.terminalReleaseRetryBackoff.delayForAttempt(attempt));
-    (entry.handle as { unref?: () => void }).unref?.();
-    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
-    logger.warn(
-      `[SessionManager] The ${snapshot.releaseReason} release of session ${snapshot.sessionId} ` +
-        `is not persisted; retrying the write (attempt ${attempt})`,
-    );
-  }
-
-  /**
-   * Shutdown is draining (#11058): retry the write now and let the drain await it. One attempt per
-   * snapshot during the drain, so a database that keeps failing cannot spin the drain.
-   */
-  private retryTerminalReleaseDuringDrain(
-    snapshot: SessionReleaseSnapshot,
-    attempt: number,
-    pending: TerminalReleaseRetry | undefined,
-  ): void {
-    if (pending?.snapshot === snapshot && pending.shutdownAttempted) {
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
-      logger.warn(
-        `[SessionManager] The ${snapshot.releaseReason} release of session ` +
-          `${snapshot.sessionId} is still not persisted at shutdown` +
-          (snapshot.terminal ? "; the session stays fenced only until this process exits" : ""),
-      );
-      return;
-    }
-    const entry: TerminalReleaseRetry = { snapshot, attempt, shutdownAttempted: true };
-    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
-    logger.warn(
-      `[SessionManager] The ${snapshot.releaseReason} release of session ${snapshot.sessionId} ` +
-        `is not persisted; retrying the write before shutdown (attempt ${attempt})`,
-    );
-    this.trackReleaseDrainWrite(this.retryTerminalReleaseWrite(entry));
+    this.rowWriter.scheduleRetry(snapshot, {
+      isStillOwed: () => this.isTerminalReleaseRetryCurrent(snapshot),
+      drop: () => this.dropReleaseRetry(snapshot),
+      run: (entry) => this.retryTerminalReleaseWrite(entry),
+    });
   }
 
   /** Track a release write the shutdown drain must await before the database closes. */
@@ -9247,7 +9177,7 @@ export class SessionManager {
     );
   }
 
-  private async retryTerminalReleaseWrite(entry: TerminalReleaseRetry): Promise<void> {
+  private async retryTerminalReleaseWrite(entry: ReleaseRowRetry): Promise<void> {
     const { snapshot } = entry;
     if (!(await this.isReleaseRetryDue(entry))) {
       return;
@@ -9360,7 +9290,7 @@ export class SessionManager {
         `[SessionManager] Retrying the ${snapshot.releaseReason} release write of session ` +
           `${snapshot.sessionId} failed: ${errorMessage(error)}`,
       );
-      if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+      if (entry.isCurrent()) {
         this.scheduleTerminalReleaseRetry(snapshot);
       }
       return;
@@ -9370,8 +9300,8 @@ export class SessionManager {
       return;
     }
     this.confirmReleaseWrite(snapshot);
-    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
-      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+    if (entry.isCurrent()) {
+      this.rowWriter.cancelRetry(snapshot);
     }
   }
 
@@ -9381,9 +9311,9 @@ export class SessionManager {
    * flight, so the generation it named is gone and the row still reads as a restart would
    * rehydrate it. A read that fails leaves the write counted as landed, as before the read.
    */
-  private async wasRetriedReleaseWriteSkipped(entry: TerminalReleaseRetry): Promise<boolean> {
+  private async wasRetriedReleaseWriteSkipped(entry: ReleaseRowRetry): Promise<boolean> {
     const { snapshot } = entry;
-    if (snapshot.terminal || this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+    if (snapshot.terminal || !entry.isCurrent()) {
       return false;
     }
     try {
@@ -9391,7 +9321,7 @@ export class SessionManager {
       return (
         row !== undefined &&
         row.release_reason !== snapshot.releaseReason &&
-        this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry &&
+        entry.isCurrent() &&
         this.isRecoverablePersistedSession(row) &&
         !this.isRowOwnedByLivePeer(row) &&
         !this.isSessionBeingRecreated(snapshot.sessionId)
@@ -9407,9 +9337,9 @@ export class SessionManager {
   }
 
   /** The entry is still the UUID's retry and still matters; forgotten when it no longer does. */
-  private isReleaseRetryStillOwed(entry: TerminalReleaseRetry): boolean {
+  private isReleaseRetryStillOwed(entry: ReleaseRowRetry): boolean {
     const { snapshot } = entry;
-    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+    if (!entry.isCurrent()) {
       return false;
     }
     if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
@@ -9425,7 +9355,7 @@ export class SessionManager {
    * pending; if it fails, the row is still this release's to write, so the retry is armed again
    * (or, in shutdown's drain, which arms none, waits for the issue to end).
    */
-  private async isReleaseRetryDue(entry: TerminalReleaseRetry): Promise<boolean> {
+  private async isReleaseRetryDue(entry: ReleaseRowRetry): Promise<boolean> {
     const { snapshot } = entry;
     if (!this.isReleaseRetryStillOwed(entry)) {
       return false;
@@ -9448,7 +9378,7 @@ export class SessionManager {
    * rejects when a write or a read fails.
    */
   private async prepareRetriedReleaseWrite(
-    entry: TerminalReleaseRetry,
+    entry: ReleaseRowRetry,
   ): Promise<MarkReleasedOptions | undefined> {
     const { snapshot } = entry;
     const superseded = this.supersededRowsUnderPendingRelease.get(snapshot.sessionId);
@@ -9463,9 +9393,7 @@ export class SessionManager {
     }
     // Every release preserves peer/terminal rows and names its captured generation, when known.
     const precondition = await this.retriedReleaseWritePrecondition(snapshot);
-    return this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry
-      ? precondition
-      : undefined;
+    return entry.isCurrent() ? precondition : undefined;
   }
 
   /**
@@ -9498,14 +9426,7 @@ export class SessionManager {
 
   /** Issue every pending terminal retry now, skipping its backoff, and return the writes. */
   private retryPendingTerminalReleasesNow(): Promise<void>[] {
-    return Array.from(this.pendingTerminalReleaseRetries.values(), (entry) => {
-      if (entry.handle !== undefined) {
-        this.timer.clearTimeout(entry.handle);
-        entry.handle = undefined;
-      }
-      entry.shutdownAttempted = true;
-      return this.retryTerminalReleaseWrite(entry);
-    });
+    return this.rowWriter.retryPendingNow();
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {
@@ -13544,12 +13465,7 @@ export class SessionManager {
       this.timer.clearTimeout(this.rehydrationFollowUpTimer);
       this.rehydrationFollowUpTimer = null;
     }
-    for (const entry of this.pendingTerminalReleaseRetries.values()) {
-      if (entry.handle !== undefined) {
-        this.timer.clearTimeout(entry.handle);
-        entry.handle = undefined;
-      }
-    }
+    this.rowWriter.stopRetryTimers();
     for (const entry of this.owedSupersededRowReasserts.values()) {
       if (entry.handle !== undefined) {
         this.timer.clearTimeout(entry.handle);

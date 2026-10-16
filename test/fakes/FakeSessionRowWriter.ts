@@ -1,13 +1,21 @@
 import type {
   DesiredReleaseRow,
   ReleaseRowLanded,
+  ReleaseRowRetry,
+  ReleaseRowRetryCallbacks,
   SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
+import type { BackoffPolicy } from "../../src/utils/Backoff";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 
 /** Manually landed release desires, with no persistence or clock access. */
 export class FakeSessionRowWriter implements SessionRowWriter {
   readonly desires = new Map<string, DesiredReleaseRow>();
+  private readonly retries = new Map<
+    string,
+    ReleaseRowRetry & { callbacks: ReleaseRowRetryCallbacks }
+  >();
+  private draining = false;
   private readonly outcomes = new Map<string, ReturnType<typeof Promise.withResolvers<boolean>>>();
   private readonly waiters = new Map<string, Set<() => void>>();
   private readonly listeners = new Set<(event: ReleaseRowLanded) => void | Promise<unknown>>();
@@ -22,8 +30,57 @@ export class FakeSessionRowWriter implements SessionRowWriter {
     this.outcomes.set(uuid, Promise.withResolvers<boolean>());
   }
 
+  scheduleRetry(snapshot: SessionReleaseSnapshot, callbacks: ReleaseRowRetryCallbacks): void {
+    const uuid = snapshot.sessionId;
+    const pending = this.retries.get(uuid);
+    if (!snapshot.terminal && pending?.snapshot.terminal) {
+      return;
+    }
+    if (!callbacks.isStillOwed()) {
+      callbacks.drop();
+      return;
+    }
+    if (this.draining && pending?.snapshot === snapshot && pending.shutdownAttempted) {
+      this.cancelRetry(snapshot);
+      return;
+    }
+    const entry = {
+      snapshot,
+      callbacks,
+      shutdownAttempted: this.draining,
+      isCurrent: () => this.retries.get(uuid) === entry,
+    };
+    this.retries.set(uuid, entry);
+    if (this.draining) {
+      this.trackDrainWrite(callbacks.run(entry));
+    }
+  }
+
+  cancelRetry(snapshot: SessionReleaseSnapshot): void {
+    if (this.retries.get(snapshot.sessionId)?.snapshot !== snapshot) {
+      return;
+    }
+    this.retries.delete(snapshot.sessionId);
+    this.resolveWaiters(snapshot.sessionId);
+  }
+
+  beginReleaseDrain(): void {
+    this.draining = true;
+  }
+
+  retryPendingNow(): Promise<void>[] {
+    return Array.from(this.retries.values(), (entry) => {
+      entry.shutdownAttempted = true;
+      return entry.callbacks.run(entry);
+    });
+  }
+
+  // This fake holds manually driven retries and never arms timers or consumes a backoff.
+  stopRetryTimers(): void {}
+  setRetryBackoff(_backoff: BackoffPolicy): void {}
+
   pending(uuid: string): boolean {
-    return this.desires.has(uuid);
+    return this.desires.has(uuid) || this.retries.has(uuid);
   }
 
   pendingSnapshot(uuid: string): SessionReleaseSnapshot | undefined {
@@ -62,6 +119,13 @@ export class FakeSessionRowWriter implements SessionRowWriter {
     this.desires.delete(uuid);
     this.outcomes.get(uuid)?.resolve(false);
     this.outcomes.delete(uuid);
+    this.resolveWaiters(uuid);
+  }
+
+  private resolveWaiters(uuid: string): void {
+    if (this.pending(uuid)) {
+      return;
+    }
     for (const resolve of this.waiters.get(uuid) ?? []) {
       resolve();
     }
@@ -85,10 +149,17 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   }
 
   async drain(): Promise<void> {
-    while (this.drainWrites.size || this.desires.size) {
+    this.beginReleaseDrain();
+    const retries = this.retryPendingNow();
+    if (retries.length > 0) {
+      await Promise.allSettled(retries);
+    }
+    while (this.drainWrites.size || this.desires.size || this.retries.size) {
       await Promise.all([
         ...this.drainWrites,
-        ...Array.from(this.desires.keys(), (uuid) => this.settled(uuid)),
+        ...Array.from(new Set([...this.desires.keys(), ...this.retries.keys()]), (uuid) =>
+          this.settled(uuid),
+        ),
       ]);
     }
   }

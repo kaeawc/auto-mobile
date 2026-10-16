@@ -3,6 +3,7 @@ import {
   SerializedSessionRowWriter,
   type DesiredReleaseRow,
   type ReleaseRowLanded,
+  type ReleaseRowRetry,
   type SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
@@ -527,4 +528,274 @@ describe("SessionRowWriter release statements", () => {
     await writer.drain();
     expect(writer.pending("uuid")).toBe(false);
   });
+});
+
+describe("SessionRowWriter caller-owned retry writes", () => {
+  test("preserves backoff, timer FIFO order and synchronous callback entry", async () => {
+    const h = await harness();
+    const snapshot = desire().snapshot;
+    const order: string[] = [];
+    const entries: ReleaseRowRetry[] = [];
+    const gate = Promise.withResolvers<void>();
+    const callbacks = {
+      isStillOwed: () => true,
+      drop: () => h.writer.cancelRetry(snapshot),
+      run: (entry: ReleaseRowRetry) => {
+        entries.push(entry);
+        order.push("retry");
+        return gate.promise;
+      },
+    };
+    h.timer.setTimeout(() => order.push("before"), 10);
+    h.writer.scheduleRetry(snapshot, callbacks);
+    h.timer.setTimeout(() => order.push("after"), 10);
+    expect(h.timer.getPendingTimeouts()).toEqual([10, 10, 10]);
+    h.timer.advanceTime(10);
+    expect(order).toEqual(["before", "retry", "after"]);
+    expect(entries[0]?.isCurrent()).toBe(true);
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+    h.writer.scheduleRetry(snapshot, callbacks);
+    expect(entries[0]?.isCurrent()).toBe(false);
+    expect(h.timer.getPendingTimeouts()).toEqual([20]);
+    let settled = false;
+    const completion = h.writer.settled(snapshot.sessionId).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    h.timer.advanceTime(20);
+    expect(entries).toHaveLength(2);
+    h.writer.cancelRetry(snapshot);
+    gate.resolve();
+    await completion;
+    expect(settled).toBe(true);
+    expect(h.writer.pending(snapshot.sessionId)).toBe(false);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a terminal retry replaces a non-terminal retry and never the reverse", async () => {
+    const h = await harness();
+    const nonTerminal = desire("uuid", false).snapshot;
+    const terminal = desire().snapshot;
+    const ran: SessionReleaseSnapshot[] = [];
+    let checks = 0;
+    const callbacks = (snapshot: SessionReleaseSnapshot) => ({
+      isStillOwed: () => {
+        checks++;
+        return true;
+      },
+      drop: () => h.writer.cancelRetry(snapshot),
+      run: () => {
+        ran.push(snapshot);
+        return Promise.resolve();
+      },
+    });
+    h.writer.scheduleRetry(nonTerminal, callbacks(nonTerminal));
+    h.writer.scheduleRetry(nonTerminal, callbacks(nonTerminal));
+    expect(h.timer.getPendingTimeouts()).toEqual([20]);
+    const settled = h.writer.settled("uuid");
+    h.writer.scheduleRetry(terminal, callbacks(terminal));
+    expect(h.timer.getPendingTimeouts()).toEqual([10]);
+    h.writer.scheduleRetry(nonTerminal, callbacks(nonTerminal));
+    expect(checks).toBe(3);
+    h.writer.cancelRetry(nonTerminal);
+    expect(h.writer.pending("uuid")).toBe(true);
+    h.timer.advanceTime(10);
+    expect(ran).toEqual([terminal]);
+    h.writer.cancelRetry(terminal);
+    await settled;
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+  });
+
+  test("a replacement preserves settlement waiters and resets the attempt", async () => {
+    const h = await harness();
+    const old = desire().snapshot;
+    const newer = { ...old, releaseReason: "owner-disconnected" };
+    const callbacks = {
+      isStillOwed: () => true,
+      drop: () => h.writer.cancelRetry(old),
+      run: () => Promise.resolve(),
+    };
+    h.writer.scheduleRetry(old, callbacks);
+    h.writer.scheduleRetry(old, callbacks);
+    let settled = false;
+    const completion = h.writer.settled("uuid").then(() => {
+      settled = true;
+    });
+    h.writer.scheduleRetry(newer, callbacks);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(h.timer.getPendingTimeouts()).toEqual([10]);
+    h.writer.cancelRetry(old);
+    expect(h.writer.pending("uuid")).toBe(true);
+    h.writer.cancelRetry(newer);
+    await completion;
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+  });
+
+  test("drain returns original write promises, cancels timers and gives up after one failure", async () => {
+    const h = await harness();
+    const snapshot = desire().snapshot;
+    const gate = Promise.withResolvers<void>();
+    let runs = 0;
+    const callbacks = {
+      isStillOwed: () => true,
+      drop: () => h.writer.cancelRetry(snapshot),
+      run: (entry: ReleaseRowRetry) => {
+        runs++;
+        expect(entry.shutdownAttempted).toBe(true);
+        return gate.promise;
+      },
+    };
+    h.writer.scheduleRetry(snapshot, callbacks);
+    const settled = h.writer.settled("uuid");
+    h.writer.beginReleaseDrain();
+    const writes = h.writer.retryPendingNow();
+    expect(writes).toEqual([gate.promise]);
+    expect(runs).toBe(1);
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+    h.writer.scheduleRetry(snapshot, callbacks);
+    expect(runs).toBe(1);
+    expect(h.writer.pending("uuid")).toBe(false);
+    expect(h.logger.at("warn").at(-1)?.message).toContain("still not persisted at shutdown");
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+    gate.resolve();
+    await settled;
+    await h.writer.drain();
+  });
+
+  test.each([true, false])(
+    "a new owed snapshot during drain runs immediately, terminal=%s",
+    async (terminal) => {
+      const h = await harness();
+      const snapshot = desire("uuid", terminal).snapshot;
+      const gate = Promise.withResolvers<void>();
+      let runs = 0;
+      const callbacks = {
+        isStillOwed: () => true,
+        drop: () => h.writer.cancelRetry(snapshot),
+        run: () => {
+          runs++;
+          return gate.promise;
+        },
+      };
+      h.writer.beginReleaseDrain();
+      h.writer.scheduleRetry(snapshot, callbacks);
+      expect(runs).toBe(1);
+      expect(Array.from(h.writer.pendingDrainWrites())).toEqual([gate.promise]);
+      expect(h.timer.getPendingTimeouts()).toEqual([]);
+      h.writer.scheduleRetry(snapshot, callbacks);
+      expect(runs).toBe(1);
+      expect(h.writer.pending("uuid")).toBe(false);
+      gate.resolve();
+      await h.writer.drain();
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test("stop clears handles but retains both retry kinds for shutdown", async () => {
+    const h = await harness();
+    const snapshots = [desire().snapshot, desire("other", false).snapshot];
+    const ran: string[] = [];
+    for (const snapshot of snapshots) {
+      h.writer.scheduleRetry(snapshot, {
+        isStillOwed: () => true,
+        drop: () => h.writer.cancelRetry(snapshot),
+        run: () => {
+          ran.push(snapshot.sessionId);
+          h.writer.cancelRetry(snapshot);
+          return Promise.resolve();
+        },
+      });
+    }
+    h.writer.stopRetryTimers();
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+    expect(snapshots.map((snapshot) => h.writer.pending(snapshot.sessionId))).toEqual([true, true]);
+    h.timer.advanceTime(100);
+    expect(ran).toEqual([]);
+    await h.writer.drain();
+    expect(ran).toEqual(["uuid", "other"]);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("an unowed retry calls the owner's drop synchronously", async () => {
+    const h = await harness();
+    const snapshot = desire().snapshot;
+    let drops = 0;
+    let runs = 0;
+    const callbacks = {
+      isStillOwed: () => true,
+      drop: () => {
+        drops++;
+        h.writer.cancelRetry(snapshot);
+      },
+      run: () => {
+        runs++;
+        return Promise.resolve();
+      },
+    };
+    h.writer.scheduleRetry(snapshot, callbacks);
+    const settled = h.writer.settled("uuid");
+    h.writer.scheduleRetry(snapshot, { ...callbacks, isStillOwed: () => false });
+    expect(drops).toBe(1);
+    expect(runs).toBe(0);
+    expect(h.writer.pending("uuid")).toBe(false);
+    expect(h.timer.getPendingTimeouts()).toEqual([]);
+    await settled;
+  });
+
+  test("the manual fake exposes pending and settled for caller-owned retries", async () => {
+    const writer = new FakeSessionRowWriter();
+    const snapshot = desire().snapshot;
+    const write = Promise.resolve();
+    writer.scheduleRetry(snapshot, {
+      isStillOwed: () => true,
+      drop: () => writer.cancelRetry(snapshot),
+      run: () => write,
+    });
+    let settled = false;
+    const completion = writer.settled("uuid").then(() => {
+      settled = true;
+    });
+    expect(writer.pending("uuid")).toBe(true);
+    writer.beginReleaseDrain();
+    expect(writer.retryPendingNow()).toEqual([write]);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    writer.cancelRetry(snapshot);
+    await completion;
+    expect(writer.pending("uuid")).toBe(false);
+  });
+});
+
+test("settled spans row replacement while a caller-owned retry remains pending", async () => {
+  const h = await harness();
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  const snapshot = desire("uuid", false).snapshot;
+  h.park(first.promise);
+  h.writer.desire("uuid", desire("uuid", false));
+  h.writer.scheduleRetry(snapshot, {
+    isStillOwed: () => true,
+    drop: () => h.writer.cancelRetry(snapshot),
+    run: () => Promise.resolve(),
+  });
+  let settled = false;
+  const completion = h.writer.settled("uuid").then(() => {
+    settled = true;
+  });
+  first.resolve();
+  await flush();
+  expect(settled).toBe(false);
+  h.park(second.promise);
+  h.writer.desire("uuid", desire());
+  h.writer.cancelRetry(snapshot);
+  await flush();
+  expect(h.writer.pending("uuid")).toBe(true);
+  expect(settled).toBe(false);
+  second.resolve();
+  await completion;
+  expect(h.writer.pending("uuid")).toBe(false);
+  expect(h.timer.getPendingTimeouts()).toEqual([]);
+  expect(h.timer.getSleepHistory()).toEqual([]);
 });

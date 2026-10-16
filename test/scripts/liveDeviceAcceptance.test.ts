@@ -3483,6 +3483,18 @@ describe("private broker acceptance lane", () => {
         await harness.host.controls.tool("observe", status.sessionUuid!);
       },
       close: async () => {},
+      foreignControl: async (c, foreign) => {
+        const [own, other] = await Promise.all(
+          [c, foreign].map((x) => context.daemonClient.status(x.config.requestId, x.token)),
+        );
+        // Scripted refusal: the real connection gate is only exercised on a device.
+        return {
+          code:
+            own?.outcome === "ready" && other?.outcome === "ready"
+              ? "device_outside_broker_grant"
+              : null,
+        };
+      },
       ownerKill: async (c) => {
         const receipt = await hostClient.status(c.config.requestId, c.token);
         await hostClient.release(receipt!.sessionUuid!, c.token);
@@ -3527,6 +3539,7 @@ describe("private broker acceptance lane", () => {
         "parallel-acquire",
         "release-destroy-verification",
         "multi-client-crash-isolation",
+        "cross-client-isolation-live",
         "capacity-refusal-and-replay",
         "daemon-restart-with-live-sessions",
       ]);

@@ -358,6 +358,36 @@ export async function createBrokerLiveContext(
           .object({ result: z.object({ tools: z.array(z.unknown()) }) })
           .parse(JSON.parse(output)).result.tools;
       },
+      foreignControl: async (c, foreign) => {
+        const names = new Set(clients.map((x) => x.name));
+        if (c.name === foreign.name || !names.has(c.name) || !names.has(foreign.name)) {
+          throw new Error("foreignControl needs two distinct clients of this batch.");
+        }
+        const stored = z
+          .object({ session: z.object({ outcome: z.literal("ready"), sessionUuid: z.string() }) })
+          .parse(JSON.parse(proxy.readFile(join(batchDir, "sessions", foreign.name, "init.json"))));
+        // tapOn is gated by the broker connection; the target matches nothing even if it ran.
+        const reply = await command([
+          "call",
+          "tapOn",
+          JSON.stringify({
+            sessionUuid: stored.session.sessionUuid,
+            text: "__automobile_cross_client_probe_no_match__",
+          }),
+          "--client",
+          c.name,
+          "--allow-foreign-session",
+          foreign.name,
+        ]);
+        const response = z
+          .object({ result: z.record(z.unknown()).optional() })
+          .passthrough()
+          .safeParse(JSON.parse(reply.output));
+        const code = response.success
+          ? readToolEnvelopePayload(response.data.result)?.payload?.code
+          : undefined;
+        return { code: reply.code === 1 && typeof code === "string" ? code : null };
+      },
       ownerKill: async (c) => {
         await checked(["owner-kill", "--client", c.name]);
       },

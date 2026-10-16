@@ -445,3 +445,48 @@ test("a failed close of one client still closes its siblings and then reports th
   expect(new Set(closed)).toEqual(new Set(harness.context.clients.map((c) => c.name)));
   expect(closed).toHaveLength(harness.context.clients.length);
 });
+
+test("foreignControl sends a gated tapOn with the other client's grant and reports the refusal code", async () => {
+  const f = fixture();
+  const [a, b] = ["a-phone", "a-tablet"];
+  for (const [name, uuid] of [
+    [a, "session-a"],
+    [b, "session-b"],
+  ]) {
+    f.files.set(
+      join(f.batchDir, "sessions", name, "init.json"),
+      JSON.stringify({ session: { outcome: "ready", sessionUuid: uuid } }),
+    );
+  }
+  let reply = {
+    code: 1,
+    output: JSON.stringify({
+      ok: false,
+      result: {
+        isError: true,
+        structuredContent: { success: false, code: "device_outside_broker_grant" },
+        content: [],
+      },
+    }),
+  };
+  f.deps.proxyCommand = async (argv) => {
+    f.calls.push(argv);
+    return reply;
+  };
+  const harness = await createBrokerLiveContext(
+    f.batchDir,
+    f.evidence,
+    { clients: [a, b] },
+    f.deps,
+  );
+  const [ca, cb] = harness.context.clients;
+  const foreign = harness.context.deviceOps!.foreignControl!;
+  expect(await foreign(ca, cb)).toEqual({ code: "device_outside_broker_grant" });
+  const argv = f.calls.at(-1)!;
+  expect(argv.slice(0, 2)).toEqual(["call", "tapOn"]);
+  expect(JSON.parse(argv[2]).sessionUuid).toBe("session-b");
+  expect(argv.slice(3)).toEqual(["--client", a, "--allow-foreign-session", b]);
+  reply = { code: 0, output: JSON.stringify({ ok: true, result: {} }) };
+  expect(await foreign(ca, cb)).toEqual({ code: null });
+  await expect(foreign(ca, ca)).rejects.toThrow(/two distinct clients/);
+});

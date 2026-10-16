@@ -195,7 +195,9 @@ private struct PrototypeSubstitutionGuard {
 
     private mutating func actions(
         _ fields: [String: JSONValue], path: String, scope: Scope?, list: String = "onTap"
-    ) throws {
+    )
+        throws
+    {
         guard case let .array(entries)? = fields[list] else { return }
         for (index, entry) in entries.enumerated() {
             guard case let .object(action) = entry else { continue }

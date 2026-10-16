@@ -80,6 +80,7 @@ final class PrototypeRefreshTests: XCTestCase {
         XCTAssertEqual(emit["name"], .string("reload_a"))
     }
 
+    @MainActor
     func testTheRefreshableClosureStaysOpenUntilTheKeyClears() async {
         var polls = 0
         var sleeps = 0

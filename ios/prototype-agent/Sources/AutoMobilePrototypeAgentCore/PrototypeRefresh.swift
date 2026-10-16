@@ -44,11 +44,14 @@ enum PrototypeRefresh {
 
     /// The refreshable closure stays open until the key is false again, which is what keeps the
     /// system indicator spinning. `sleep` and `isRefreshing` are injected so tests run instantly.
+    @MainActor
     static func awaitCompletion(
         isRefreshing: () -> Bool,
         isCancelled: () -> Bool,
         sleep: () async -> Void
-    ) async {
+    )
+        async
+    {
         while isRefreshing(), !isCancelled() {
             await sleep()
         }

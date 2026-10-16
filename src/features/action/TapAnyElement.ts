@@ -90,6 +90,7 @@ import {
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { pollSearchUntil } from "./searchUntilPoller";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
@@ -1492,53 +1493,44 @@ export class TapAnyElement extends BaseVisualChange {
     let requestCount = 0;
     let changeCount = 0;
     let element: Element | null = null;
-    const deadline = startTime + searchDurationMs;
-    while (this.timer.now() < deadline) {
-      throwIfAborted(signal);
-      await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
-      const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-      if (remainingTimeMs <= 0) {
-        break;
-      }
-      const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
-      requestCount += 1;
-      if (!refreshed) {
-        continue;
-      }
+    const polled = await pollSearchUntil({
+      timer: this.timer,
+      startTime,
+      durationMs: searchDurationMs,
+      intervalMs: TapAnyElement.SEARCH_POLL_INTERVAL_MS,
+      pacing: "sleepFirst",
+      // A hierarchy request can consume the last millisecond of the search window. Do not
+      // select from its result after the deadline: CtrlProxy may have served a stale fallback
+      // when its synchronous refresh timed out, and a late candidate must not turn a bounded
+      // search into an unbounded tap.
+      discardLateResult: true,
+      signal,
+      fetch: (remainingTimeMs) => refresh(remainingTimeMs, observeResult.screenSize, signal),
+      accept: (refreshed) => {
+        const hash = this.hashViewHierarchy(refreshed);
+        if (hash && hash !== lastHash) {
+          changeCount += 1;
+          lastHash = hash;
+        }
 
-      // A hierarchy request can consume the last millisecond of the
-      // search window. Do not select from its result after the
-      // deadline: CtrlProxy may have served a stale fallback when its
-      // synchronous refresh timed out, and a late candidate must not
-      // turn a bounded search into an unbounded tap.
-      if (this.timer.now() >= deadline) {
-        break;
-      }
-
-      const hash = this.hashViewHierarchy(refreshed);
-      if (hash && hash !== lastHash) {
-        changeCount += 1;
-        lastHash = hash;
-      }
-
-      selectedCapture = identifyObservedHierarchy(
-        this.device.platform,
-        refreshed,
-        "fresh",
-        this.timer,
-        undefined,
-        { iosMultiPanel: this.iosMultiPanel },
-      );
-      const found = this.findClickableElement(options, selectedCapture.hierarchy, {
-        observationScreenSize: observeResult.screenSize,
-        display: observeResult.viewHierarchy,
-      });
-      element = found.element;
-      containerFoundEver = containerFoundEver || found.containerFound;
-      if (element) {
-        break;
-      }
-    }
+        selectedCapture = identifyObservedHierarchy(
+          this.device.platform,
+          refreshed,
+          "fresh",
+          this.timer,
+          undefined,
+          { iosMultiPanel: this.iosMultiPanel },
+        );
+        const found = this.findClickableElement(options, selectedCapture.hierarchy, {
+          observationScreenSize: observeResult.screenSize,
+          display: observeResult.viewHierarchy,
+        });
+        element = found.element;
+        containerFoundEver = containerFoundEver || found.containerFound;
+        return element !== null;
+      },
+    });
+    requestCount = polled.requestCount;
 
     if (!element) {
       this.throwMissingClickableElement(options, containerFoundEver);

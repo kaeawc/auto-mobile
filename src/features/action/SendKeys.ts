@@ -20,19 +20,15 @@ import type { AndroidModeTyper } from "./sendkeys/AndroidModeTyper";
 import { A11yTyper } from "./sendkeys/A11yTyper";
 import { EventOnlyTyper } from "./sendkeys/EventOnlyTyper";
 import { PasswordRouting } from "./sendkeys/PasswordRouting";
+import { TargetFocus } from "./sendkeys/TargetFocus";
+import { TargetState } from "./sendkeys/TargetState";
+import { SendKeysRequestBudget, isSendKeysBudgetExhausted } from "./sendkeys/SendKeysRequestBudget";
+import { FocusKeyboardRecovery } from "./sendkeys/FocusKeyboardRecovery";
 import { IosTyper } from "./sendkeys/IosTyper";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
-import {
-  resolveTextCtrlProxyTimeoutMs,
-  getTextRequestDeadlineMs,
-  TEXT_MCP_REQUEST_HEADROOM_MS,
-} from "./textTransportTimeout";
-import { combineAbortSignals, getRequestContext } from "../../utils/AbortContext";
+import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { ActionableError } from "../../models/ActionableError";
-import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { selectablePanels, type DisplayPanel } from "../../models/DisplayPanel";
-import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -51,7 +47,6 @@ import {
 } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { scopeObserveResultToLayer } from "../observe/hierarchyLayer";
 import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
@@ -63,7 +58,6 @@ import {
   type PrototypeTextTargetReader,
   type PrototypeTextReading,
 } from "../prototype/prototypeTextTarget";
-import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -89,7 +83,7 @@ import {
   type TapOnFocusResult,
 } from "./TapOnElement";
 import { Keyboard } from "./Keyboard";
-import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
@@ -107,17 +101,6 @@ export {
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
 
-class SendKeysBudgetError extends Error {
-  constructor() {
-    super(
-      "sendKeys request budget exhausted; stopping to allow cancellation and keyboard restoration",
-    );
-  }
-}
-
-function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
-  return signal?.aborted === true && signal.reason instanceof SendKeysBudgetError;
-}
 import type { KeyEventPlan } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
 
@@ -340,7 +323,7 @@ export interface SendKeysResult extends BaseActionResult {
   warning?: string;
 }
 
-interface SendKeysFailure {
+export interface SendKeysFailure {
   index: number;
   error: string;
 }
@@ -431,7 +414,7 @@ export interface SendKeysDependencies {
   timer?: Timer;
 }
 
-interface SendKeysRouting extends SendKeysFocusOptions {
+export interface SendKeysRouting extends SendKeysFocusOptions {
   onCommandStart?: () => void;
   onDispatch?: () => void;
   onCommandResult?: (result: SendKeysCommandResult) => void;
@@ -1477,7 +1460,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
 export class SendKeys {
   private readonly prototypeTextTarget: PrototypeTextTargetReader;
-  private prototypeTargetIdentifiers: readonly string[] = [];
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
   private readonly keyboard?: SendKeysKeyboard;
@@ -1486,9 +1468,10 @@ export class SendKeys {
   private readonly timer: Timer;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly displayTransitionReader: DisplayTransitionReader;
-  /** The selector resolved to a password field during the current execute. */
-  private focusedPasswordTarget = false;
-  private effectiveTargetLayer: HierarchyLayer | undefined;
+  private readonly requestBudget: SendKeysRequestBudget;
+  private readonly focusRecovery: FocusKeyboardRecovery;
+  private readonly target = new TargetState();
+  private readonly targetFocus: TargetFocus;
 
   constructor(
     private readonly device: BootedDevice,
@@ -1548,6 +1531,34 @@ export class SendKeys {
           };
         },
       } satisfies SendKeysTargetFocuser);
+    this.requestBudget = new SendKeysRequestBudget({
+      platform: () => this.device.platform,
+      timer: this.timer,
+      executeUnbounded: (commands, selector, progress, signal, routing) =>
+        this.executeUnbounded(commands, selector, progress, signal, routing),
+    });
+    this.focusRecovery = new FocusKeyboardRecovery({
+      platform: () => this.device.platform,
+      focuser: this.focuser,
+      keyboard: () =>
+        this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer),
+      observer: { execute: (options) => this.observer.execute(options) },
+    });
+    this.targetFocus = new TargetFocus({
+      device: this.device,
+      adb: () => this.adbFactory.create(this.device),
+      observer: this.observer,
+      timer: this.timer,
+      lastRenderedObservation: () => this.lastRenderedObservation,
+      displayTransitionReader: this.displayTransitionReader,
+      target: this.target,
+      isSemanticKey: (key) => isSemanticKey(key),
+      focusWithKeyboardRecovery: (selector, signal, display, options) =>
+        this.focusWithKeyboardRecovery(selector, signal, display, options),
+      setTargetLayer: (layer) => this.executor.setTargetLayer?.(layer),
+      setTargetPasswordField: (passwordField) =>
+        this.executor.setTargetPasswordField?.(passwordField),
+    });
   }
 
   async execute(
@@ -1558,12 +1569,12 @@ export class SendKeys {
     display?: string,
     options?: SendKeysFocusOptions,
   ): Promise<SendKeysResult> {
-    this.focusedPasswordTarget = false;
-    this.prototypeTargetIdentifiers = [selector?.elementId, selector?.testTag].filter(
+    this.target.focusedPassword = false;
+    this.target.prototypeIdentifiers = [selector?.elementId, selector?.testTag].filter(
       (id): id is string => !!id,
     );
-    this.effectiveTargetLayer = options?.layer;
-    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
+    this.target.effectiveLayer = options?.layer;
+    this.executor.setTargetLayer?.(this.target.effectiveLayer);
     this.executor.setTargetPasswordField?.(false);
     const result = await this.executeFocused(
       commands,
@@ -1573,7 +1584,7 @@ export class SendKeys {
       display,
       options,
     );
-    return redactPasswordCommandResults(result, commands, this.focusedPasswordTarget);
+    return redactPasswordCommandResults(result, commands, this.target.focusedPassword);
   }
 
   private async executeFocused(
@@ -1638,7 +1649,7 @@ export class SendKeys {
     return this.executeWithRequestBudget(commands, { selector, progress, signal, routing });
   }
 
-  private async executeWithRequestBudget(
+  private executeWithRequestBudget(
     commands: SendKeysCommand[],
     options: {
       selector?: SendKeysSelector;
@@ -1647,105 +1658,7 @@ export class SendKeys {
       routing: SendKeysRouting;
     },
   ): Promise<SendKeysResult> {
-    const { selector, progress, signal, routing } = options;
-    // Capture the live accessor while request context is active; timers may run outside it.
-    const getDeadlineMs = getRequestContext()?.getDeadlineMs;
-    const deadlineMs = getTextRequestDeadlineMs(getDeadlineMs);
-    if (this.device.platform !== "android" || deadlineMs === undefined) {
-      return this.executeUnbounded(commands, selector, progress, signal, routing);
-    }
-    const controller = new AbortController();
-    const remainingMs = deadlineMs - this.timer.now() - TEXT_MCP_REQUEST_HEADROOM_MS;
-    let handle: NodeJS.Timeout | undefined;
-    const expireOrRearm = () => {
-      const liveRemainingMs =
-        (getTextRequestDeadlineMs(getDeadlineMs) ?? deadlineMs) -
-        this.timer.now() -
-        TEXT_MCP_REQUEST_HEADROOM_MS;
-      if (liveRemainingMs > 0) {
-        handle = this.timer.setTimeout(expireOrRearm, liveRemainingMs);
-      } else {
-        controller.abort(new SendKeysBudgetError());
-      }
-    };
-    expireOrRearm();
-    const combined = combineAbortSignals(signal, controller.signal);
-    const results: SendKeysCommandResult[] = [];
-    let pending = false;
-    try {
-      return await this.executeUnbounded(commands, selector, progress, combined, {
-        ...routing,
-        onCommandStart: () => {
-          pending = true;
-        },
-        onCommandResult: (result) => {
-          pending = false;
-          results.push(result);
-        },
-      });
-    } catch (error) {
-      if (!isImeRestorationFailure(error)) {
-        signal?.throwIfAborted();
-      }
-      if (!isSendKeysBudgetExhausted(combined)) {
-        // Preserve the same error identity as the no-deadline path.
-        throw error;
-      }
-      logger.warn("[SendKeys] Request budget exhausted", error);
-      const result = this.budgetResult(commands.length, results, pending, remainingMs <= 0);
-      if (isImeRestorationFailure(error)) {
-        result.success = false;
-        result.error = `${result.error ?? "Text commit succeeded, but"} ${errorMessage(error)}`;
-      }
-      return result;
-    } finally {
-      if (handle !== undefined) {
-        this.timer.clearTimeout(handle);
-      }
-    }
-  }
-
-  private budgetResult(
-    commandCount: number,
-    results: SendKeysCommandResult[],
-    indeterminate: boolean,
-    refusedAtAdmission: boolean,
-  ): SendKeysResult {
-    const completedCommands = results.filter((result) => result.success).length;
-    const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
-    if (completedCommands === commandCount) {
-      return {
-        success: true,
-        completedCommands,
-        commands: results,
-        warning: [
-          ...warnings,
-          "All commands were delivered; the request budget expired before final observation completed.",
-        ].join(" "),
-      };
-    }
-    const firstUnconfirmed = results.length;
-    const notSent = commandCount - firstUnconfirmed - (indeterminate ? 1 : 0);
-    const error =
-      `sendKeys request budget exhausted: ${completedCommands} command(s) delivered; ` +
-      `${notSent} command(s) not sent.` +
-      (indeterminate
-        ? ` Command ${firstUnconfirmed} outcome is indeterminate: it may have been sent but was not acknowledged. Do not retry automatically; observe before retrying.`
-        : refusedAtAdmission
-          ? " no request budget remained at admission; no commands were sent."
-          : " No further commands were dispatched.");
-    return {
-      success: false,
-      completedCommands,
-      failedIndex: firstUnconfirmed,
-      commands: results,
-      error,
-      warning: [
-        ...warnings,
-        "Partial application: already delivered commands are not rolled back.",
-      ].join(" "),
-      retryable: false,
-    };
+    return this.requestBudget.executeWithRequestBudget(commands, options);
   }
 
   private validateFocusOptions(
@@ -1778,96 +1691,17 @@ export class SendKeys {
     );
   }
 
-  private async prepareExplicitDisplay(
+  private prepareExplicitDisplay(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     display: string,
     signal?: AbortSignal,
     options: SendKeysFocusOptions = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
-    const target = await prepareTargetDisplayAction(
-      this.device,
-      display,
-      { execute: (options) => this.observer.execute({ ...options, skipScreenshot: true }) },
-      this.adbFactory.create(this.device),
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
-    );
-    if (
-      this.device.platform === "android" &&
-      !selector &&
-      commands.some((command) => command.action !== "key" || isSemanticKey(command.key))
-    ) {
-      await this.assertFocusedDisplay(target.observation, signal);
-    }
-    if (selector && this.device.platform === "android") {
-      const focused = await this.focusSelector(selector, signal, display, options);
-      if (!focused.success) {
-        throw new Error(focused.error ?? "Unable to focus target field");
-      }
-      return { displayId: target.displayId, assertCurrent: target.assertCurrent };
-    }
-    return { displayId: target.displayId, selector, assertCurrent: target.assertCurrent };
+    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, signal, options);
   }
 
-  private async assertFocusedDisplay(
-    observation: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (selectablePanels(this.device.displays).length === 1) {
-      return;
-    }
-    // An explicitly captured panel (and its focused node) does not establish global input focus.
-    const focusedWindow = observation.viewHierarchy?.windows?.find((window) => window.isFocused);
-    const focusedPanel = focusedWindow
-      ? await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
-          this.device,
-          this.adbFactory.create(this.device),
-          focusedWindow.displayId,
-          signal,
-          focusedWindow.panelUniqueId,
-        )
-      : undefined;
-    if (focusedPanel?.key === observation.display.key) {
-      return;
-    }
-    // CtrlProxy only returns the pinned display's windows, so an unfocused pin cannot see which
-    // display holds focus. Ask the system, on this refusal path only.
-    const namedPanel = focusedPanel ?? (await this.topFocusedPanel(signal));
-    const retarget = namedPanel
-      ? ` Target it with setActiveDevice {display: "${namedPanel.key}"}, or use`
-      : " Use";
-    throw new ActionableError(
-      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${namedPanel ? `"${namedPanel.key}"` : "unknown"}.${retarget} tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
-    );
-  }
-
-  private async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
-    try {
-      const adb = this.adbFactory.create(this.device);
-      const result = await adb.executeCommand(
-        "shell dumpsys window | grep mTopFocusedDisplayId",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
-      const displayId = parseTopFocusedDisplayId(result.stdout);
-      return await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
-        this.device,
-        adb,
-        displayId,
-        signal,
-      );
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`sendKeys top focused display lookup failed: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-  }
-
-  private async executeBoundedIosIme(
+  private executeBoundedIosIme(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     progress: ProgressCallback | undefined,
@@ -1875,74 +1709,14 @@ export class SendKeys {
     key: SendKeysSemanticKey,
     target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
   ): Promise<SendKeysResult> {
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) {
-      controller.abort();
-    }
-    let dispatched = false;
-    let actionResult: SendKeysCommandResult | undefined;
-    const deadline = Symbol("IME action deadline");
-    let interaction!: Promise<SendKeysResult>;
-    const startInteraction = () =>
-      (interaction = this.executeUnbounded(commands, selector, progress, controller.signal, {
-        onDispatch: () => {
-          dispatched = true;
-        },
-        onCommandResult: (result) => {
-          actionResult = result;
-        },
-        ...target,
-      }));
-    try {
-      try {
-        return await raceWithDeadline(startInteraction, {
-          timer: this.timer,
-          timeoutMs: 5000,
-          label: "iOS IME interaction",
-          timeoutError: () => deadline,
-        });
-      } catch (error) {
-        if (error !== deadline) {
-          throw error;
-        }
-      }
-      controller.abort();
-      void interaction.catch((error) => {
-        // The timed-out interaction can still settle while the connection recovers.
-        logger.debug(
-          `[SendKeys] iOS IME interaction settled after deadline: ${errorMessage(error)}`,
-        );
-      });
-      if (actionResult) {
-        return {
-          success: actionResult.success,
-          completedCommands: actionResult.success ? 1 : 0,
-          ...(!actionResult.success ? { failedIndex: 0, error: actionResult.error } : {}),
-          commands: [actionResult],
-          ...(actionResult.success
-            ? {
-                warning:
-                  "Post-action observation did not complete within 5000ms; the IME action was already applied.",
-              }
-            : {}),
-        };
-      }
-      const error = dispatched
-        ? `IME action '${key}' outcome is indeterminate: the request was dispatched but no result was received within 5000ms. Do not retry automatically.`
-        : `IME action '${key}' timed out before dispatch after 5000ms.`;
-      return {
-        success: false,
-        completedCommands: 0,
-        failedIndex: 0,
-        commands: [{ index: 0, action: "key", key, success: false, error, retryable: !dispatched }],
-        error,
-        retryable: !dispatched,
-      };
-    } finally {
-      signal?.removeEventListener("abort", abort);
-    }
+    return this.requestBudget.executeBoundedIosIme(
+      commands,
+      selector,
+      progress,
+      signal,
+      key,
+      target,
+    );
   }
 
   private async executeUnbounded(
@@ -2059,125 +1833,30 @@ export class SendKeys {
     return undefined;
   }
 
-  private async focusTarget(
+  private focusTarget(
     selector?: SendKeysSelector,
     signal?: AbortSignal,
     routing: SendKeysRouting = {},
   ): Promise<SendKeysFailure | undefined> {
-    if (!selector) {
-      return undefined;
-    }
-    signal?.throwIfAborted();
-    const result = await this.focusSelector(selector, signal, routing.display, {
-      container: routing.container,
-      selectionStrategy: routing.selectionStrategy,
-      layer: routing.layer,
-    });
-    return result.success
-      ? undefined
-      : {
-          index: 0,
-          error: result.error ?? "Failed to focus the target element before sending keys",
-        };
+    return this.targetFocus.focusTarget(selector, signal, routing);
   }
 
-  private async focusSelector(
+  private focusSelector(
     selector: SendKeysSelector,
     signal?: AbortSignal,
     display?: string,
     options: SendKeysFocusOptions = {},
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
-    signal?.throwIfAborted();
-    this.effectiveTargetLayer = options.layer ?? result.layer ?? this.effectiveTargetLayer;
-    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
-    this.focusedPasswordTarget ||= result.passwordField === true;
-    this.executor.setTargetPasswordField?.(this.focusedPasswordTarget);
-    this.prototypeTargetIdentifiers = [
-      ...this.prototypeTargetIdentifiers,
-      ...(result.identifiers ?? []),
-    ];
-    if (!result.success && result[tapFocusFailure]) {
-      return {
-        ...result,
-        error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,
-      };
-    }
-    return result;
+    return this.targetFocus.focusSelector(selector, signal, display, options);
   }
 
-  private async focusWithKeyboardRecovery(
+  private focusWithKeyboardRecovery(
     selector: SendKeysSelector,
     signal?: AbortSignal,
     display?: string,
     options?: SendKeysFocusOptions,
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    signal?.throwIfAborted();
-    try {
-      return await this.focuser.focus(selector, signal, display, options);
-    } catch (error) {
-      signal?.throwIfAborted();
-      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
-        throw error;
-      }
-      // Keyboard.close cannot target a display. Never dismiss on an ambient display
-      // when this action is explicitly routed (including display "0").
-      if (display !== undefined) {
-        logger.warn("[SendKeys] Display-routed target is covered by the IME", error);
-        return { success: false, error: error.message };
-      }
-      logger.warn("[SendKeys] Target is covered by the IME; closing the keyboard", error);
-      try {
-        return await this.retryFocusAfterKeyboardClose(selector, error, signal, options);
-      } catch (recoveryError) {
-        signal?.throwIfAborted();
-        logger.warn(
-          `[SendKeys] IME focus recovery failed: ${errorMessage(recoveryError)}`,
-          recoveryError,
-        );
-        return { success: false, error: errorMessage(recoveryError) };
-      }
-    }
-  }
-
-  private async retryFocusAfterKeyboardClose(
-    selector: SendKeysSelector,
-    occlusion: KeyboardOcclusionError,
-    signal?: AbortSignal,
-    options?: SendKeysFocusOptions,
-  ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    const keyboard =
-      this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
-    let dismissal: Awaited<ReturnType<SendKeysKeyboard["execute"]>>;
-    try {
-      dismissal = await keyboard.execute("close", signal);
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`[SendKeys] Keyboard close failed: ${errorMessage(error)}`, error);
-      return { success: false, error: occlusion.message };
-    }
-    signal?.throwIfAborted();
-    if (!dismissal.success) {
-      return { success: false, error: occlusion.message };
-    }
-    // Mirror SetUIState's fresh observation and verified-focus requirement. Each
-    // focus execution re-resolves the selector against the refreshed hierarchy.
-    await this.observer.execute({
-      signal,
-      freshness: "fresh",
-      minTimestamp: 0,
-      skipScreenshot: true,
-    });
-    signal?.throwIfAborted();
-    const retry = await this.focuser.focus(selector, signal, undefined, options);
-    signal?.throwIfAborted();
-    if (retry.success && retry.focusVerified !== true) {
-      return {
-        success: false,
-        error: "Failed to confirm focus on target field after closing the keyboard",
-      };
-    }
-    return retry;
+    return this.focusRecovery.focusWithKeyboardRecovery(selector, signal, display, options);
   }
 
   private async executeCommands(
@@ -2300,16 +1979,16 @@ export class SendKeys {
     signal?: AbortSignal,
   ): Promise<PrototypeTextReading | undefined> {
     if (
-      this.effectiveTargetLayer !== "prototype" ||
+      this.target.effectiveLayer !== "prototype" ||
       command.action !== "type" ||
       !command.text ||
-      this.focusedPasswordTarget
+      this.target.focusedPassword
     ) {
       return undefined;
     }
     try {
       return await this.prototypeTextTarget.read(
-        { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+        { identifiers: this.target.prototypeIdentifiers, display: routing.display },
         signal,
       );
     } catch (error) {
@@ -2327,18 +2006,18 @@ export class SendKeys {
     before?: PrototypeTextReading,
   ): Promise<SendKeysCommandResult> {
     if (
-      this.effectiveTargetLayer !== "prototype" ||
+      this.target.effectiveLayer !== "prototype" ||
       command.action !== "type" ||
       !command.text ||
       !result.success ||
-      this.focusedPasswordTarget ||
+      this.target.focusedPassword ||
       this.executor.isPasswordTarget?.()
     ) {
       return result;
     }
     const verification = await verifyPrototypeTextTarget({
       reader: this.prototypeTextTarget,
-      target: { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+      target: { identifiers: this.target.prototypeIdentifiers, display: routing.display },
       text: command.text,
       operation: command.operation ?? "insert",
       timer: this.timer,

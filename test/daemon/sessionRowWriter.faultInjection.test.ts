@@ -8,6 +8,7 @@ import {
 import type { SessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { fixedBackoff } from "../../src/utils/Backoff";
+import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -51,7 +52,6 @@ function writerOf(manager: SessionManager): SessionRowWriter {
 
 class Run {
   readonly timer = new FakeTimer();
-  readonly persistence = new FakeDeviceSessionPersistence();
   readonly files = new FakeTerminalReleaseJournalFileSystem();
   readonly plan: FaultPlan;
   readonly violations: string[] = [];
@@ -62,7 +62,11 @@ class Run {
   private unpark?: () => void;
   private parked?: ReturnType<typeof Promise.withResolvers<void>>;
 
-  constructor(at?: number, kind?: FaultKind) {
+  constructor(
+    at?: number,
+    kind?: FaultKind,
+    readonly persistence = new FakeDeviceSessionPersistence(),
+  ) {
     this.plan = new FaultPlan(this.timer, at, kind, (fault, resume) => {
       // A synchronous FS wait freezes this process, including JS deadlines and callbacks.
       this.timer.setCurrentTime(
@@ -106,7 +110,7 @@ class Run {
     return manager;
   }
 
-  create(): Promise<unknown> {
+  create() {
     return this.manager.createSession(UUID, DEVICE, "android", WINDOW, WINDOW, "Fake_AVD");
   }
 
@@ -565,5 +569,93 @@ test("a forced terminal fence carries its known SQL generation across lift and r
     release_reason: null,
     stable_identity_generation: generation,
   });
+  run.manager.stopCleanupTimer();
+});
+
+test("forced release survives rebind and a timed-out re-persist that fails late", async () => {
+  const persistence = new BusyRewritePersistence();
+  const run = new Run(undefined, undefined, persistence);
+  await run.create();
+  const rebindGate = Promise.withResolvers<void>();
+  persistence.duringPlainUpsert = () => rebindGate.promise;
+  const rebind = run.manager.rebindSession(UUID, "fake-rebound", "android");
+  await flush();
+  // A failed first forced write leaves F durable and current while the rebind lands active.
+  persistence.failReleaseWrites = 1;
+  run.manager.setTerminalReleaseRetryBackoff(fixedBackoff(20_000));
+  const released = run.manager.releaseSession(UUID, "heartbeat-timeout");
+  await flush();
+  expect(run.manager.forceStuckRelease(UUID)?.stage).toBe("awaiting-rebind");
+  await flush();
+  expect(await persistence.getSession(UUID)).toMatchObject({ status: "active" });
+  expect(run.manager["sessionSlots"].getTerminalSnapshot(UUID)?.releaseReason).toBe(
+    "heartbeat-timeout",
+  );
+  run.manager.setTerminalReleaseRetryBackoff(fixedBackoff(11));
+  const plan = new FaultPlan(run.timer, 2, "hang-until-released");
+  // The in-flight rebind lands, then its compensating terminal re-persist is parked.
+  persistence.faultPlan = plan;
+  rebindGate.resolve();
+  await flush();
+  expect(plan.points).toEqual(["upsertActiveSession", "markReleased"]);
+  await run.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS + 1);
+  await rebind;
+  await released;
+  persistence.failure = "release";
+  plan.release();
+  await flush();
+  expect(new FileTerminalReleaseJournal(FILE, run.files).loadUnconfirmed()).toHaveLength(1);
+  persistence.failure = null;
+  await run.timer.advanceTimeAsync(11);
+  await flush();
+  expect(await run.manager.drainReleasePromises(30_000)).toBe(true);
+  expect(await persistence.getSession(UUID)).toMatchObject({
+    status: "expired",
+    release_reason: "heartbeat-timeout",
+  });
+  expect(run.manager.findSession(UUID)).toBeNull();
+  await run.restart();
+  expect(run.manager.findSession(UUID)).toBeNull();
+  expect(await persistence.getSession(UUID)).toMatchObject({ release_reason: "heartbeat-timeout" });
+  expect(run.timer.getSleepHistory()).toEqual([]);
+  run.manager.stopCleanupTimer();
+});
+
+test("uncaptured manager terminal fallback cannot overwrite a recreated UUID while parked", async () => {
+  const persistence = new BusyRewritePersistence();
+  const run = new Run(undefined, undefined, persistence);
+  const session = await run.create();
+  // Some manager release paths have no known generation. Remove only that optional capture;
+  // keep the real release, deadline, fallback, lift and publish paths. This guard is in-process
+  // scoped: synchronous bun:sqlite cannot pause mid-statement, so park the read after a miss.
+  const generations = Reflect.get(run.manager, "persistedRowGenerations") as WeakMap<
+    object,
+    number
+  >;
+  generations.delete(session);
+  persistence.refuseGuardedReleaseWrites = 1;
+  const plan = new FaultPlan(run.timer, 1, "hang-until-released");
+  persistence.faultPlan = plan;
+  const released = run.manager.releaseSession(UUID, "explicit-release");
+  await flush();
+  expect(plan.points).toEqual(["getSession"]);
+  const snapshot = run.manager["sessionSlots"].getTerminalSnapshot(UUID)!;
+  const captures = Reflect.get(run.manager, "releaseRowGenerations") as WeakMap<object, number>;
+  expect(captures.has(snapshot)).toBe(false);
+  await run.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS + 1);
+  await released;
+  lift(run.manager);
+  await run.create();
+  const generation = run.lastGeneration;
+  plan.release();
+  await flush();
+  expect(await run.manager.drainReleasePromises(30_000)).toBe(true);
+  expect(await persistence.getSession(UUID)).toMatchObject({
+    status: "active",
+    release_reason: null,
+    stable_identity_generation: generation,
+  });
+  expect(new FileTerminalReleaseJournal(FILE, run.files).loadUnconfirmed()).toEqual([]);
+  expect(run.timer.getSleepHistory()).toEqual([]);
   run.manager.stopCleanupTimer();
 });

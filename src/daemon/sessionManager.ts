@@ -1659,7 +1659,7 @@ export class SessionManager {
    * is retried at once and tracked by the drain, since a backoff timer would outlive the database.
    */
   private releaseDrainStarted = false;
-  private readonly rowWriter: SessionRowWriter;
+  private rowWriter: SessionRowWriter;
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
   private readonly volatileTerminalReleaseIntents = new Map<string, string>();
@@ -2714,14 +2714,9 @@ export class SessionManager {
       undefined,
       timer,
     ),
-    // Resolve the shared barrier per write, not once at construction, so a
-    // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
-    // seen instead of a pinned drained instance (issue #2912). Because the barrier
-    // is resolved per-write here, a same-process daemon restart (tests only) that
-    // re-creates writer singletons needs no reconstruction of this SessionManager:
-    // closeDatabase() -> resetDbWriteBarrier() cold-starts the barrier and the next
-    // track() call picks it up. There is currently no in-process reopen path in
-    // production; revisit this note if one is added (issue #3154, follow-up to #2885).
+    // Resolve per write: closeDatabase() -> resetDbWriteBarrier() makes the next track()
+    // use a fresh barrier, not a pinned drained instance (#2912, #3154, #2885).
+    // Same-process reopen is tests-only; revisit if production adds that path.
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     // Seam for keep-awake restore (issue #2973): defaults to the real manager;
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
@@ -2742,14 +2737,11 @@ export class SessionManager {
       },
     }),
     // Device-wide network conditioning is session-scoped state (issue #6012).
-    // Keep this seam parallel to biometric/keep-awake so lifecycle tests never
-    // invoke adb. The factories object also injects clock restoration while
-    // preserving the existing positional network-restorer contract.
-    // The default restores normal connectivity via the emulator
-    // console; a released session must never leave a device impaired.
+    // Factories inject restoration without adb in tests, preserving the positional contract.
+    // The default restores normal connectivity via the emulator console.
     networkConditionRestorerFactory:
       | ((device: BootedDevice) => NetworkConditionRestorer)
-      | (DeviceStateRestorerFactories & { rowWriter?: SessionRowWriter }) = (device) => ({
+      | DeviceStateRestorerFactories = (device) => ({
       restore: async (profile) => {
         const result = await new DeviceState(device).setState({
           networkCondition: { profile },
@@ -2769,7 +2761,7 @@ export class SessionManager {
       toWall: (sessionClockMs) => this.sessionClockToWall(sessionClockMs),
       toSessionClock: (wallMs) => this.wallToSessionClock(wallMs),
     });
-    this.rowWriter = SerializedSessionRowWriter.create(networkConditionRestorerFactory, {
+    this.rowWriter = SerializedSessionRowWriter.create({
       persistence: this.deviceSessionRepository,
       timer,
       backoff: DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF,
@@ -2840,20 +2832,18 @@ export class SessionManager {
     this.startCleanupTimer();
   }
 
+  /** Inject before creating sessions or scheduling release writes. */
+  setRowWriter(writer: SessionRowWriter): void {
+    this.rowWriter = writer;
+  }
+
   private recoveryExpiryReleaseHandler?: RecoveryExpiryReleaseHandler;
 
   setRecoveryExpiryReleaseHandler(handler: RecoveryExpiryReleaseHandler): void {
     this.recoveryExpiryReleaseHandler = handler;
   }
 
-  /**
-   * The `Timer` this manager was constructed with (issue #7541). Lets
-   * call sites that already receive a `SessionManager` — e.g.
-   * `ToolExecutionContext`'s device-readiness setup — reuse the same
-   * injected `Timer` (a `FakeTimer` in tests) instead of hard-wiring
-   * `defaultTimer`, so retry/backoff delays on that path stay fake-clock
-   * testable rather than sleeping in real time.
-   */
+  /** Reuse the injected Timer for fake-clock readiness, retry and backoff waits (#7541). */
   getTimer(): Timer {
     return this.timer;
   }
@@ -6093,9 +6083,7 @@ export class SessionManager {
     }
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
-    // Recreate the replacement after awaited work: activity and label-routing
-    // updates remain live while persistence is in flight, and publishing the
-    // pre-persistence snapshot would overwrite them.
+    // Recreate after awaited work to preserve activity and label-routing updates made in flight.
     Object.assign(
       existing,
       this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
@@ -7354,7 +7342,7 @@ export class SessionManager {
       }
       this.commitReplacedDeviceTeardown(sessionId, session, options, operation);
       if (!releaseSnapshot.terminal) {
-        this.liftTerminalFence(sessionId);
+        this.liftTerminalFenceIfPresent(sessionId);
         this.sessionSlots.deleteTerminalReasonState(sessionId);
         // The removal dropped the rewrite owed over a superseded release's terminal row, and
         // this release's own write does not replace a terminal row.
@@ -9031,7 +9019,11 @@ export class SessionManager {
   }
 
   private issueReleaseRow(snapshot: SessionReleaseSnapshot, options: MarkReleasedOptions) {
-    if (!this.rowWriter.canIssueRelease(snapshot)) {
+    // A forced-out rebind can noteLive without lifting this snapshot's terminal fence.
+    if (
+      this.sessionSlots.getTerminalSnapshot(snapshot.sessionId) !== snapshot &&
+      !this.rowWriter.canIssueRelease(snapshot)
+    ) {
       return Promise.reject(new TerminalReleaseGenerationRefusedError(snapshot.sessionId));
     }
     return this.deviceSessionRepository.markReleased(
@@ -9119,6 +9111,13 @@ export class SessionManager {
       .finally(() => settleReassert?.());
     this.trackReleaseDrainWrite(settled);
   }
+
+  private liftTerminalFenceIfPresent(uuid: string): void {
+    if (this.sessionSlots.hasTerminalSnapshot(uuid)) {
+      this.liftTerminalFence(uuid);
+    }
+  }
+
   /** Lift/resolve in one synchronous turn. Confirm/refusal retains the terminal admission fence. */
   private liftTerminalFence(
     uuid: string,
@@ -9140,7 +9139,7 @@ export class SessionManager {
     // Match only the resolved desire; a late completion must leave a successor's intent alone.
     if (resolved && "sessionId" in resolved) {
       this.rowWriter.cancel(uuid, resolved as SessionReleaseSnapshot);
-    } else {
+    } else if (!retainFence) {
       this.rowWriter.liftTerminal(uuid);
     }
   }

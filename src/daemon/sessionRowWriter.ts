@@ -131,12 +131,8 @@ interface SessionRowWriterCollaborators {
 
 /** RELEASE statements only. Slots explicitly revoke desires; this module never reads slots. */
 export class SerializedSessionRowWriter implements SessionRowWriter {
-  /** Accept the manager's existing options/function seam without adding constructor branches there. */
-  static create(
-    injection: { rowWriter?: SessionRowWriter } | ((...args: never[]) => unknown),
-    collaborators: SessionRowWriterCollaborators,
-  ): SessionRowWriter {
-    const injected = typeof injection === "function" ? undefined : injection.rowWriter;
+  /** Construct the default manager adapter. */
+  static create(collaborators: SessionRowWriterCollaborators): SessionRowWriter {
     const {
       persistence,
       timer,
@@ -145,14 +141,11 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       timeoutMs,
       timeoutError: TimeoutError,
     } = collaborators;
-    return (
-      injected ??
-      new SerializedSessionRowWriter(persistence, timer, backoff, logger, {
-        timeoutMs,
-        timeoutError: (snapshot) =>
-          new TimeoutError(snapshot.sessionId, snapshot.releaseReason, timeoutMs),
-      })
-    );
+    return new SerializedSessionRowWriter(persistence, timer, backoff, logger, {
+      timeoutMs,
+      timeoutError: (snapshot) =>
+        new TimeoutError(snapshot.sessionId, snapshot.releaseReason, timeoutMs),
+    });
   }
 
   private readonly rows = new Map<string, Row>();

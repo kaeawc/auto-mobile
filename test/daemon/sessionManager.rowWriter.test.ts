@@ -1,6 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SerializedSessionRowWriter } from "../../src/daemon/sessionRowWriter";
+import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeSessionRowWriter } from "../fakes/FakeSessionRowWriter";
@@ -18,9 +20,9 @@ test("manager slots read pending from the injected writer on every call", async 
     {
       networkCondition: () => ({ restore: () => Promise.resolve() }),
       clock: () => ({ restore: () => Promise.resolve() }),
-      rowWriter: writer,
     },
   );
+  manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
   const snapshot: SessionReleaseSnapshot = {
@@ -70,10 +72,8 @@ test("manager delegates drain tracking and awaits writes added during the drain"
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
-    { rowWriter: writer },
   );
+  manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const track = Reflect.get(manager, "trackReleaseDrainWrite") as (write: Promise<void>) => void;
   const first = Promise.withResolvers<void>();
@@ -113,10 +113,8 @@ test("manager drain excludes settled identities from its next writer snapshot", 
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
-    { rowWriter: writer },
   );
+  manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   expect(await manager.drainReleasePromises(1000)).toBe(true);
   expect(reads).toBe(2);
@@ -208,4 +206,63 @@ test("manager stop clears writer handles and drain retains the original retry pr
   expect(await drain).toBe(true);
   expect(timer.getPendingTimeouts()).toEqual([]);
   expect(timer.getSleepHistory()).toEqual([]);
+});
+
+test("startup replay retains its fence without lifting a successor writer desire", async () => {
+  const writer = new FakeSessionRowWriter();
+  const manager = new SessionManager(
+    new FakeTimer(),
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  manager.setRowWriter(writer);
+  manager.stopCleanupTimer();
+  const snapshot: SessionReleaseSnapshot = {
+    sessionId: "replay",
+    deviceId: "fake-device",
+    terminal: true,
+    releaseReason: "heartbeat-timeout",
+    releasedAtMs: 0,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 1000, ageMs: 0 },
+  };
+  manager["sessionSlots"].setTerminalSnapshot(snapshot.sessionId, snapshot);
+  writer.noteRelease(snapshot);
+  writer.desire(snapshot.sessionId, {
+    snapshot,
+    terminal: true,
+    precondition: () => Promise.resolve({}),
+  });
+  const lift = spyOn(writer, "liftTerminal");
+  const publish = spyOn(writer, "noteLive");
+  const journal = new FileTerminalReleaseJournal(
+    "/in-memory/replay.jsonl",
+    new FakeTerminalReleaseJournalFileSystem(),
+  );
+  journal.record({ sessionId: snapshot.sessionId, reason: "explicit-release", at: 0 });
+  manager.attachTerminalReleaseJournal(journal);
+  await manager.applyRecoveredTerminalReleaseIntents();
+  expect(journal.loadUnconfirmed()).toEqual([]);
+  expect(manager["sessionSlots"].getTerminalSnapshot(snapshot.sessionId)).toBe(snapshot);
+  expect(writer.pendingSnapshot(snapshot.sessionId)).toBe(snapshot);
+  expect(writer.canIssueRelease(snapshot)).toBe(true);
+  expect(lift).not.toHaveBeenCalled();
+  expect(publish).not.toHaveBeenCalled();
+});
+
+test("non-terminal commit without a fence does not resolve or reload the journal", async () => {
+  const manager = new SessionManager(
+    new FakeTimer(),
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  manager.stopCleanupTimer();
+  const journal = new FileTerminalReleaseJournal(
+    "/in-memory/unused.jsonl",
+    new FakeTerminalReleaseJournalFileSystem(),
+  );
+  manager.attachTerminalReleaseJournal(journal);
+  const resolve = spyOn(journal, "resolve");
+  await manager.createSession("no-fence", "fake-device", "android", 60_000);
+  await manager.releaseSession("no-fence", "plan-auto-release");
+  expect(resolve).not.toHaveBeenCalled();
 });

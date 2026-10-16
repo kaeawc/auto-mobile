@@ -572,26 +572,37 @@ so they merge serially. S8 can ship any time after S2 and is tracked separately.
 
 ### Part B: #11799 (blocked by S9, except W1)
 
-W2 landed: SessionRowWriter owns lateReleaseWrites, terminal retries and the non-terminal snapshot map; terminal generation guard + journal-lift invariant (liftTerminalFence) added; parked writes free their slot at the deadline (owner decision).
+W2 adapter implemented: SessionRowWriter owns the drain-write set (formerly lateReleaseWrites),
+terminal retry scheduling and the non-terminal snapshot map. Production uses the adapter surface:
+`noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`, drain-write tracking, and the
+non-terminal map. In production `pending(uuid)` means only "retry owed".
+
+The per-UUID desire/settled/drain engine in `sessionRowWriter.ts` is exercised by tests; production
+first-attempt writes do not yet use it and stay manager-side until W3/W4. The owner decision that
+a past-deadline write frees its slot is implemented in that engine. Production has no per-UUID
+serialization, as before.
 
 The behavior-preserving adapter keeps first-attempt persistence, deadline/fallback and late callbacks
-on the manager, and the writer owns retry scheduling and drain tracking. Both first and retried
-statements synchronously consult the writer's snapshot desire sequence immediately before issue;
-publish and rebind publish synchronously call `noteLive`. A sequence refusal is a named subtype of
+on the manager, and the writer owns retry scheduling and drain tracking. At synchronous issue,
+a still-current terminal snapshot remains writable; otherwise first and retried statements consult
+the writer's snapshot desire sequence. Publish and rebind publish synchronously call `noteLive`.
+The current terminal fence takes precedence over a rebind live sequence: no fence lift has revoked
+that terminal desire.
+A sequence refusal after a lift is a named subtype of
 `DeviceSessionRowNotReleasableError` and follows `handleReleaseWriteFailure` -> `confirmReleaseWrite`,
 resolving the journal without SQL-miss reclassification. Forced snapshots capture the session's
 known SQL generation and weak incarnation identity for the existing same-session rebind classifier.
 Real statement refusals keep their existing
 read/classify/retry sequence. There are no new manager awaits or promise hops.
 
-| Path                                                                   | Terminal guard form                                                                                                                                                                        |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `persistSessionRelease` (including forced fence and creation rollback) | Snapshot desire/live sequence at the synchronous issue boundary; captured `expectedRowGeneration` plus `unlessTerminalOrOwnedByLivePeer` at SQL when known.                                |
-| Writer-scheduled manager retry                                         | Same desire/live sequence, cancellation identity, and existing fresh `retriedReleaseWritePrecondition` read; SQL generation whenever known.                                                |
-| Refused-row fallback / physically parked statement                     | Same sequence check before a further statement issues; already-issued SQL keeps its original generation guard. Existing same-incarnation SQL classification and W3/W5 compensation remain. |
-| No captured generation and no newer in-process live generation         | Existing `unlessTerminalOrOwnedByLivePeer` statement guard only; no invented generation.                                                                                                   |
-| Standalone writer desires / retries                                    | Monotonic desire/live sequence checked after asynchronous preconditions and immediately before every issue; supplied SQL generation forwarded unchanged.                                   |
-| Startup replay / peer adoption                                         | Existing statement ownership/terminal guards; replay is before live publication. Resolution routes through `liftTerminalFence`.                                                            |
+| Path                                                                   | Terminal guard form                                                                                                                                                                           |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistSessionRelease` (including forced fence and creation rollback) | Current terminal fence, otherwise snapshot desire/live sequence at the synchronous issue boundary; captured `expectedRowGeneration` plus `unlessTerminalOrOwnedByLivePeer` at SQL when known. |
+| Writer-scheduled manager retry                                         | Same current-fence/desire/live check, cancellation identity, and existing fresh `retriedReleaseWritePrecondition` read; SQL generation whenever known.                                        |
+| Refused-row fallback / physically parked statement                     | Same sequence check before a further statement issues; already-issued SQL keeps its original generation guard. Existing same-incarnation SQL classification and W3/W5 compensation remain.    |
+| No captured generation and no newer in-process live generation         | Existing `unlessTerminalOrOwnedByLivePeer` statement guard only; no invented generation.                                                                                                      |
+| Standalone writer desires / retries                                    | Monotonic desire/live sequence checked after asynchronous preconditions and immediately before every issue; supplied SQL generation forwarded unchanged.                                      |
+| Startup replay / peer adoption                                         | Existing statement ownership/terminal guards; replay is before live publication. Resolution routes through `liftTerminalFence`.                                                               |
 
 `liftTerminalFence` performs deletion, volatile-intent clearing, journal resolution and writer
 cancellation in one synchronous turn. Successful writes, refusals, rejected-creation fence adoption,
@@ -602,7 +613,13 @@ and cancel terminal desires and scheduled retries together. Plan-label minting r
 probe and reason-state deletion between snapshot deletion and journal resolution. Startup retains
 recovered-intent/probe/adopted-owner deletion before resolution; retry-drop retains cancel-retry and
 superseded bookkeeping before resolution. A durable `record` clearing the volatile signal is not a
-fence lift. Non-terminal commit now uses the same synchronous lift boundary.
+fence lift. Two behavior changes previously left unnamed by the W2 note are:
+
+- Non-terminal commit now also deletes the volatile intent, resolves the journal and cancels a
+  terminal retry, matching the intent-implies-fence invariant. The boundary is skipped when no
+  terminal snapshot is fenced, avoiding an unnecessary journal load/resolve.
+- Forced terminal snapshots now capture `expectedRowGeneration` and `releaseRowSessions` (weak
+  incarnation identity), enabling SQL protection and same-session rebind classification.
 
 At most one unexpired standalone desire per UUID may issue; parked statements remain tracked for
 callbacks and drain after their deadline frees the slot. Production bun:sqlite statements are

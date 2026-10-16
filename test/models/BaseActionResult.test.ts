@@ -60,6 +60,7 @@ const EXTENDS_TYPES: Record<string, string> = {
   ClearAppDataResult: "packageName",
   CrashAppResult: "supported",
   DragAndDropResult: "distance",
+  DragPathResult: "points",
   ExitDialogResult: "elementFound",
   InstallAppResult: "artifactPath",
   LaunchAppResult: "packageName",

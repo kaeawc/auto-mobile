@@ -1,5 +1,5 @@
 import { logger } from "../../utils/logger";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import type {
   AccessibilityDetector as IAccessibilityDetector,
   AccessibilityService,
@@ -87,7 +87,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async isAccessibilityEnabled(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean> {
     return (await this.resolveState(deviceId, adb, featureFlags))?.enabled ?? false;
   }
@@ -95,7 +95,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AccessibilityService> {
     return (await this.resolveState(deviceId, adb, featureFlags))?.service ?? "unknown";
   }
@@ -103,7 +103,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async resolveState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AndroidAccessibilityState | null> {
     if (featureFlags?.isEnabled("force-accessibility-mode")) {
       return { enabled: true, service: "talkback", ctrlProxyEnabled: null };
@@ -117,7 +117,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async resolveTalkBackState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
     return (await this.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags)).talkBack;
   }
@@ -125,7 +125,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async resolveTalkBackStateWithConfirmation(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<TalkBackStateConfirmation> {
     const state =
       (await this.resolveState(deviceId, adb, featureFlags)) ??
@@ -170,7 +170,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async isCtrlProxyServiceEnabled(
     deviceId: string,
     adb?: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
     // User-facing force mode is not evidence of CtrlProxy health.
     if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {

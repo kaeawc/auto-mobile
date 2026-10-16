@@ -16,7 +16,7 @@ import {
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 /**
  * Android implementation of {@link TapStrategy}. Filters the response
@@ -31,7 +31,7 @@ export class AndroidTapStrategy implements TapStrategy {
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor,
     private readonly accessibilityDetector: AccessibilityDetector = defaultAccessibilityDetector,
-    private readonly featureFlags?: FeatureFlagService,
+    private readonly featureFlags?: FeatureFlagReader,
   ) {}
 
   prepareViewHierarchyForResponse(

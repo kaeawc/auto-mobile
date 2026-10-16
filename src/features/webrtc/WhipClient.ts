@@ -47,6 +47,18 @@ export interface WhipSession {
   etag: string | null;
 }
 
+/** The WHIP operations the publisher drives; {@link WhipClient} is the HTTP implementation. */
+export interface WhipSignalingClient {
+  publish(offerSdp: string, signal?: AbortSignal): Promise<WhipSession>;
+  patchCandidate(
+    resourceUrl: string,
+    etag: string,
+    sdpFragment: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  delete(resourceUrl: string, signal?: AbortSignal): Promise<void>;
+}
+
 /**
  * Client for the WebRTC-HTTP Ingestion Protocol (WHIP, RFC 9725).
  * The publisher POSTs an SDP offer and receives an SDP answer plus a resource
@@ -59,7 +71,7 @@ export interface WhipSession {
  * - DELETE session termination: §4.2
  * - bearer authentication: §4.7
  */
-export class WhipClient {
+export class WhipClient implements WhipSignalingClient {
   private readonly endpoint: string;
   private readonly bearerToken?: string;
   private readonly fetchImpl: FetchLike;

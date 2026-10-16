@@ -14,6 +14,7 @@ import {
   LONG_PRESS_DEFAULT_MS,
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
+import { dragPathHandler, dragPathSchema } from "./dragPathTool";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
@@ -3801,6 +3802,14 @@ export function registerInteractionTools() {
     tapAtSchema,
     tapAtHandler,
     { defaultEnabled: true, supportsProgress: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "dragPath",
+    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android).",
+    dragPathSchema,
+    dragPathHandler,
+    { defaultEnabled: false, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(

@@ -125,7 +125,7 @@
     {
       "file": "src/features/toolSelection/SqliteSessionToolSelectionRepository.ts",
       "name": "SqliteSessionToolSelectionRepository",
-      "reason": "Consumed by src/features/toolSelection/SessionToolSelectionService.ts (ts-prune misses the cross-module import)"
+      "reason": "Consumed by src/features/toolSelection/SessionToolSelectionService.ts"
     },
     {
       "file": "src/features/toolSelection/toolSelectionPolicy.ts",
@@ -163,31 +163,6 @@
       "reason": "Kysely Insertable table type, part of the DB type API surface"
     },
     {
-      "file": "src/features/action/InputKey.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/models/AndroidAvdConfiguration.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/models/AndroidAvdConfiguration.ts",
-      "name": "Record",
-      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'Record'"
-    },
-    {
-      "file": "src/utils/iosDeviceResourceCatalog.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `as const satisfies Partial<Record<...>>` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/utils/iosDeviceResourceCatalog.ts",
-      "name": "Partial",
-      "reason": "ts-prune parser artifact: misreads the `as const satisfies Partial<Record<...>>` annotation as an export named 'Partial'"
-    },
-    {
       "file": "test/fakes/FakeIOSCtrlProxy.typecheck.ts",
       "name": "FakeIOSCtrlProxyContractChecks",
       "reason": "Compile-only type assertion; the export exists solely so the contract check is evaluated at type-check time"
@@ -223,21 +198,6 @@
       "reason": "Test-only dependency injection seam for the video stream socket server."
     },
     {
-      "file": "src/daemon/client.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/daemon/client.ts",
-      "name": "ZodType",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'ZodType'"
-    },
-    {
-      "file": "src/server/system-tray/notificationHints.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
-    },
-    {
       "file": "test/features/utility/LocationRoutePlayer.typecheck.ts",
       "name": "LocationRouteCleanupContractCheck",
       "reason": "Compile-only type assertion included by tsconfig.json; evaluated at type-check time without a runtime importer"
@@ -246,21 +206,6 @@
       "file": "test/features/utility/LocationRoutePlayer.typecheck.ts",
       "name": "MockLocationCleanupOptionsCheck",
       "reason": "Compile-only type assertion included by tsconfig.json; evaluated at type-check time without a runtime importer"
-    },
-    {
-      "file": "src/features/observe/android/ctrlProxyProtocol.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
-    },
-    {
-      "file": "src/features/observe/android/ctrlProxyProtocol.ts",
-      "name": "readonly",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'readonly'"
-    },
-    {
-      "file": "src/features/observe/ios/iosRunnerFeatureCommands.ts",
-      "name": "satisfies",
-      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
     }
   ]
 }

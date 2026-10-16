@@ -113,7 +113,6 @@ jobs:
             body += '4. Update knip.json configuration if needed to ignore valid exports\n\n';
 
             body += '### Tool Breakdown\n\n';
-            body += `- **ts-prune:** ${jsonReport.byTool.tsPrune} issues\n`;
             body += `- **knip:** ${jsonReport.byTool.knip} issues\n\n`;
 
             if (jsonReport.summary.unusedExports > 0 && jsonReport.issues.length > 0) {
@@ -133,7 +132,6 @@ jobs:
             body += '# Run locally to see full report\n';
             body += 'bun run dead-code:ts\n\n';
             body += '# Run individual tools\n';
-            body += 'bun run dead-code:ts:prune\n';
             body += 'bun run dead-code:ts:knip\n';
             body += '```\n\n';
 

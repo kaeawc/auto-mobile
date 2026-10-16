@@ -2,6 +2,9 @@ import {
   clearDeviceError,
   markDeviceError,
   restoreBinding,
+  snapshotBinding,
+  type BindingStatus,
+  type DeviceHealth,
   unbindDevice,
   isErrored,
   holderOf,
@@ -378,7 +381,8 @@ export interface PooledDevice {
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
   sessionId: string | null; // Session currently using it, null if idle
-  status: DeviceStatus; // Current status
+  status: BindingStatus; // Binding state
+  health?: DeviceHealth; // Absent means healthy
   lastUsedAt: number; // Last usage timestamp
   assignmentCount: number; // How many times assigned
   errorCount: number; // Consecutive errors
@@ -573,7 +577,13 @@ export interface RollbackAssignment {
 
 export type SessionAssignmentSnapshot = Pick<
   PooledDevice,
-  "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
+  | "sessionId"
+  | "status"
+  | "health"
+  | "lastUsedAt"
+  | "assignmentCount"
+  | "errorCount"
+  | "autolockSessionId"
 >;
 
 export interface ShutdownIdentityReservation {
@@ -2459,6 +2469,7 @@ export class DevicePool {
         platform: device.platform,
         sessionId: null,
         status: "idle",
+        health: "ok",
         lastUsedAt: now,
         assignmentCount: 0,
         errorCount: 0,
@@ -2589,6 +2600,7 @@ export class DevicePool {
         platform: device.platform,
         sessionId: null,
         status: "idle",
+        health: "ok",
         lastUsedAt: now,
         assignmentCount: 0,
         errorCount: 0,
@@ -5975,8 +5987,7 @@ export class DevicePool {
 
   private snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot {
     return {
-      sessionId: holderOf(device),
-      status: statusOf(device),
+      ...snapshotBinding(device),
       lastUsedAt: device.lastUsedAt,
       assignmentCount: device.assignmentCount,
       errorCount: device.errorCount,
@@ -5988,9 +5999,9 @@ export class DevicePool {
     device: PooledDevice,
     snapshot: SessionAssignmentSnapshot,
   ): void {
-    const { sessionId, status, ...otherFields } = snapshot;
-    restoreBinding(device, { sessionId, status });
-    Object.assign(device, otherFields);
+    restoreBinding(device, snapshot);
+    const { lastUsedAt, assignmentCount, errorCount, autolockSessionId } = snapshot;
+    Object.assign(device, { lastUsedAt, assignmentCount, errorCount, autolockSessionId });
   }
 
   private async createSessionOrRestore(

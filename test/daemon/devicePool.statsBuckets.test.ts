@@ -1,3 +1,4 @@
+import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -53,6 +54,27 @@ describe("pool stats for an errored device that is also reserved", () => {
     timer.reset();
   });
 
+  test("listing JSON and report text retain legacy status without exposing health", () => {
+    const device = pool.getDevice(SIM_A)!;
+    const listed = () => JSON.stringify(listDevicePayloads([ios(SIM_A)], pool, new Map()));
+    const healthy = listed();
+    expect(healthy).not.toContain('"health"');
+    markDeviceError(device);
+    const errored = healthy.replace('"poolStatus":"idle"', '"poolStatus":"error"');
+    expect(errored).not.toBe(healthy);
+    expect(listed()).toBe(errored);
+    expect(pool.getStatusReport()).toContain(`  ❌ ${SIM_A}: error (0 uses, 0 errors)`);
+    bindDevice(device, "owner");
+    const busy = listed();
+    expect(busy).not.toContain('"health"');
+    expect(statusOf(device)).toBe("busy");
+    markDeviceError(device);
+    const boundError = busy.replace('"poolStatus":"assigned"', '"poolStatus":"error"');
+    expect(boundError).not.toBe(busy);
+    expect(listed()).toBe(boundError);
+    expect(pool.getStatusReport()).toContain(`  ❌ ${SIM_A}: error (owner) (0 uses, 0 errors)`);
+  });
+
   test("each device lands in exactly one stats bucket", async () => {
     await pool.reserveDevicesForRehydration([
       { sessionId: "row-a", target: { platform: "ios", stableDeviceId: SIM_A, deviceId: SIM_A } },
@@ -60,7 +82,7 @@ describe("pool stats for an errored device that is also reserved", () => {
     for (let i = 0; i < 10; i++) {
       pool.recordDeviceError(SIM_A);
     }
-    expect(pool.getDevice(SIM_A)?.status).toBe("error");
+    expect(statusOf(pool.getDevice(SIM_A)!)).toBe("error");
     expect(poolHoldFor(pool, SIM_A)).toEqual({ reserved: true });
 
     const stats = pool.getStats();

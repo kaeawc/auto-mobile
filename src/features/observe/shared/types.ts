@@ -6,6 +6,7 @@
  * duplicated result type definitions.
  */
 
+import type { IdGenerator } from "../../../utils/IdGenerator";
 import type WebSocket from "ws";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -80,6 +81,7 @@ export interface ActionTimingResult extends BaseResult {
  * Provides access to shared state and functionality from the main client.
  */
 export interface DelegateContext {
+  idGenerator?: IdGenerator;
   prototypeAssetCache?: { serial: string; cache: PrototypeAssetCache };
   savedPrototypeMirror?: { serial: string; mirror: SavedPrototypeMirror };
   /** Platform-specific serialization at the request construction boundary. */

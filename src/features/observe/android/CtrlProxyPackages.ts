@@ -7,7 +7,7 @@
 
 import WebSocket from "ws";
 import type { DelegateContext } from "./types";
-import { generateSecureId } from "./types";
+import { createTimestampedId } from "../../../utils/IdGenerator";
 import type {
   A11yInstalledPackagesResult,
   A11yPackageInfoResult,
@@ -80,7 +80,11 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
 
-      const requestId = `installed_packages_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "installed_packages",
+        this.context.timer,
+        this.context.idGenerator,
+      );
       const resultPromise = this.context.requestManager.register<A11yInstalledPackagesResult>(
         requestId,
         "installed_packages",
@@ -155,7 +159,11 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
 
-      const requestId = `package_info_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "package_info",
+        this.context.timer,
+        this.context.idGenerator,
+      );
       const resultPromise = this.context.requestManager.register<A11yPackageInfoResult>(
         requestId,
         "package_info",
@@ -238,7 +246,11 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
 
-      const requestId = `launch_intent_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId(
+        "launch_intent",
+        this.context.timer,
+        this.context.idGenerator,
+      );
       const resultPromise = this.context.requestManager.register<A11yLaunchIntentResult>(
         requestId,
         "launch_intent",

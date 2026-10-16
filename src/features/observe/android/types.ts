@@ -30,14 +30,6 @@ import type { ScreenshotPerformanceMetadata } from "../ScreenshotMetadata";
 export type { DelegateContext } from "../shared/types";
 
 /**
- * Generate a secure ID for request IDs.
- */
-export function generateSecureId(): string {
-  const { randomBytes } = require("crypto");
-  return randomBytes(4).toString("hex");
-}
-
-/**
  * Quote a string for use in ADB shell arguments.
  */
 export const quoteForAdbArg = (value: string): string => {

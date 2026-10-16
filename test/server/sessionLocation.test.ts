@@ -16,7 +16,7 @@ import { DeviceState } from "../../src/features/utility/DeviceState";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../fakes/FakeEmulatorConsoleClient";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import {
   createSessionLocationAppliedCallback,
   createSessionLocationWriteAdmission,
@@ -104,7 +104,7 @@ describe("session location admission", () => {
         platform: "ios" as const,
         name: "iPhone",
       };
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
       registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
       let admitted = false;
@@ -146,7 +146,7 @@ describe("session location admission", () => {
       platform: "ios" as const,
       name: "iPhone",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
     try {
       await manager.createSession("session", device.deviceId, "ios");
@@ -215,7 +215,7 @@ describe("session location admission", () => {
       platform: "ios" as const,
       name: "iPhone",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
     const markSet = spyOn(clears, "markSet");
     registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
@@ -341,7 +341,7 @@ describe("session route cleanup", () => {
     };
     const finished = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
-    class DelayedSet extends FakeSimCtlClient {
+    class DelayedSet extends FakeSimctl {
       override async executeCommandArgs(args: string[], timeoutMs?: number) {
         if (args[2] === "set") {
           entered.resolve();
@@ -419,7 +419,7 @@ describe("session route cleanup", () => {
       platform: "ios" as const,
       name: "iPhone",
     };
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "test-daemon", {
@@ -482,7 +482,7 @@ describe("session route cleanup", () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.kernel.qemu", "1\n");
       const consoleClient = new FakeEmulatorConsoleClient();
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       let outcome: Promise<unknown> | undefined;
       try {
         const { runSessionLocationMutation, createSessionLocationWriteAdmission } =

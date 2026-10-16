@@ -4,7 +4,7 @@ import { OpenURL, waitForIosForegroundChange } from "../../../src/features/actio
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const observation = (appId: string, isFresh = true): ObserveResult => ({
@@ -27,7 +27,7 @@ const simulator = {
 const openWithForeground = async (url: string, before: string, after: string[]) => {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const observe = new FakeObserveScreen();
   observe.setObserveSequence(after.map((appId) => observation(appId)));
   const interactionSpy = spyOn(

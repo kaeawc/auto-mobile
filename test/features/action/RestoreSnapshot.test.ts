@@ -4,7 +4,7 @@ import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../../
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
@@ -808,7 +808,7 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
     name: "iPhone 15",
     platform: "ios",
   };
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const store = new DeviceSnapshotStore(
     "/virtual/snapshot-restore",
     noOpSnapshotDirectorySync,
@@ -927,7 +927,7 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
 
 describe("RestoreSnapshot (iOS)", () => {
   let device: BootedDevice;
-  let simctl: FakeSimCtlClient;
+  let simctl: FakeSimctl;
   let store: DeviceSnapshotStore;
   let testBasePath: string;
 
@@ -938,7 +938,7 @@ describe("RestoreSnapshot (iOS)", () => {
       platform: "ios",
     };
 
-    simctl = new FakeSimCtlClient();
+    simctl = new FakeSimctl();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-restore-"));
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });

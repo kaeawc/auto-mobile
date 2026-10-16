@@ -5,7 +5,7 @@ import {
   ExecNetworkFilterBridge,
   ExpiringControllerVersionMemory,
   NETWORK_FILTER_CONTRACT_VERSION,
-} from "../../../src/features/network-filter/NetworkFilterBridge";
+} from "../../../src/features/networkFilter/NetworkFilterBridge";
 import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,

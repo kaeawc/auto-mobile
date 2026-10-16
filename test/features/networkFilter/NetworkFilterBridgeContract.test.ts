@@ -6,7 +6,7 @@ import {
   ExpiringControllerVersionMemory,
   NETWORK_FILTER_UPGRADE_COMMAND,
   type NetworkFilterRuleCommandResult,
-} from "../../../src/features/network-filter/NetworkFilterBridge";
+} from "../../../src/features/networkFilter/NetworkFilterBridge";
 import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,

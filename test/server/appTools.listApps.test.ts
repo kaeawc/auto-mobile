@@ -3,7 +3,6 @@ import { TerminateApp } from "../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { spyOn } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -11,10 +10,8 @@ import {
   crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
-  resetCrashAppToolDependencies,
   resetListAppsToolDependencies,
   resetTerminateAppToolDependencies,
-  setCrashAppToolDependencies,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,
   setListAppsToolDependencies,
@@ -336,7 +333,7 @@ describe("terminateApp tool", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const target: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
-    const app = new TerminateApp(target, adb as unknown as AdbClient, { timer });
+    const app = new TerminateApp(target, adb, { timer });
     const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
@@ -389,29 +386,30 @@ describe("crashApp tool", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    resetCrashAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
-    resetCrashAppToolDependencies();
   });
 
   test("returns an explicit unsupported result as structured JSON", async () => {
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => ({
-          success: false,
-          supported: false,
-          platform: "ios",
-          appId: "com.example.app",
-          mechanism: "unsupported",
-          timestamp: 1234,
-          confirmed: false,
-          error: "Physical iOS devices are unsupported",
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => ({
+            success: false,
+            supported: false,
+            platform: "ios",
+            appId: "com.example.app",
+            mechanism: "unsupported",
+            timestamp: 1234,
+            confirmed: false,
+            error: "Physical iOS devices are unsupported",
+          }),
         }),
-      }),
+      },
     });
     const tool = ToolRegistry.getTool("crashApp");
 
@@ -433,20 +431,23 @@ describe("crashApp tool", () => {
   });
 
   test("reports the mechanism and OS confirmation on success", async () => {
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => ({
-          success: true,
-          supported: true,
-          platform: "ios",
-          appId: "com.example.app",
-          processId: 42,
-          mechanism: "ios_simulator_sigabrt",
-          timestamp: 1234,
-          wasRunning: true,
-          confirmed: true,
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => ({
+            success: true,
+            supported: true,
+            platform: "ios",
+            appId: "com.example.app",
+            processId: 42,
+            mechanism: "ios_simulator_sigabrt",
+            timestamp: 1234,
+            wasRunning: true,
+            confirmed: true,
+          }),
         }),
-      }),
+      },
     });
     const tool = ToolRegistry.getTool("crashApp");
 
@@ -466,14 +467,17 @@ describe("crashApp tool", () => {
     const controller = new AbortController();
     let invalidations = 0;
     let notifications = 0;
-    setCrashAppToolDependencies({
-      createCrashApp: () => ({
-        execute: async () => {
-          controller.abort();
-          controller.signal.throwIfAborted();
-          throw new Error("unreachable");
-        },
-      }),
+    ToolRegistry.clearTools();
+    registerAppTools({
+      crashApp: {
+        createCrashApp: () => ({
+          execute: async () => {
+            controller.abort();
+            controller.signal.throwIfAborted();
+            throw new Error("unreachable");
+          },
+        }),
+      },
     });
     setInstalledAppResourceRefresh({
       invalidate: () => invalidations++,

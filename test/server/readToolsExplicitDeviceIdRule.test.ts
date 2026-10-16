@@ -48,7 +48,6 @@ import { executionTracker } from "../../src/server/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -162,7 +161,7 @@ function harness(
   }
   const lifecycle = new FakeVirtualDeviceLifecycleCoordinator();
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, discovery, simctl as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, discovery, simctl, {
       window,
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,

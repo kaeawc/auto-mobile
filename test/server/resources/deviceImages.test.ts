@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   createDeviceImageResourcesHandler,
@@ -28,7 +28,7 @@ import { snapshotPlatformDeviceManagerFactory } from "../../helpers/platformDevi
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeAvdManager: FakeAvdManager;
-  let fakeSimCtl: FakeSimCtlClient;
+  let fakeSimCtl: FakeSimctl;
   let restoreFactory: (() => void) | undefined;
 
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe("Device Image Resources with Fakes", () => {
     resetAndroidDeviceImageResourceCache();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAvdManager = new FakeAvdManager();
-    fakeSimCtl = new FakeSimCtlClient();
+    fakeSimCtl = new FakeSimctl();
   });
 
   afterEach(() => {

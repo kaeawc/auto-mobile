@@ -14,7 +14,7 @@ import {
 import type { TccPermissionRow } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isDeviceReadinessLocked } from "../../../src/utils/deviceReadinessLock";
 import type { BootedDevice } from "../../../src/models";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakePhotosAuthorizationVerifier } from "../../fakes/FakePhotosAuthorizationVerifier";
 import { parseIosMajorVersion } from "../../../src/utils/ios-cmdline-tools/iosVersion";
 
@@ -34,7 +34,7 @@ class FakeTccReader implements TccPermissionReader {
   commandCounts: number[] = [];
   constructor(
     private readonly rows: TccPermissionRow[],
-    private readonly simctl: FakeSimCtlClient,
+    private readonly simctl: FakeSimctl,
     private readonly error?: Error,
     private readonly expectLock = false,
   ) {}
@@ -57,7 +57,7 @@ function fixture(
   expectLock = false,
   verifier?: PhotosAuthorizationVerifier,
 ) {
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const reader = new FakeTccReader(rows, simctl, error, expectLock);
   return {
     simctl,
@@ -548,7 +548,7 @@ describe("captured Photos readback", () => {
     ),
   )("full2 overrides stale PhotosAdd for %j", async ({ query }) => {
     const reader = new FixtureTccReader("full2");
-    const permissions = new IosSimulatorPermissions(device27, new FakeSimCtlClient(), reader);
+    const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
     const result = await permissions.getPermissions(appId, query);
     const stored = (await loadPhotosTccCase("full2")).rows.find(
       (row) => row.service === "kTCCServicePhotosAdd",
@@ -579,7 +579,7 @@ describe("captured Photos readback", () => {
 
   test.each(photosTccCases)("native probe agrees with add-only readback: %s", async (name) => {
     const reader = new FixtureTccReader(name);
-    const permissions = new IosSimulatorPermissions(device27, new FakeSimCtlClient(), reader);
+    const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
     const { probe } = await loadPhotosTccCase(name);
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
     const [photos, add] = result.permissions;
@@ -602,7 +602,7 @@ describe("iOS 26.5 Photos captures", () => {
     const reader = new FixtureTccReader(name, "ios26.5");
     const permissions = new IosSimulatorPermissions(
       { ...device, iosVersion: "26.5" },
-      new FakeSimCtlClient(),
+      new FakeSimctl(),
       reader,
     );
     const { probe, rows } = await loadPhotosTccCase(name, "ios26.5");

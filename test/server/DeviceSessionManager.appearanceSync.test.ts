@@ -10,11 +10,9 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeSimctl } from "../fakes/FakeSimctl";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 const config: AppearanceConfig = {
   syncWithHost: true,
@@ -41,7 +39,7 @@ function harness(
     verifyServiceReady: async () => true,
     resetConnectionBudget: () => {},
   } as unknown as AndroidCtrlProxy;
-  const appearanceSimctl = new FakeSimCtlClient();
+  const appearanceSimctl = new FakeSimctl();
   const devices = new FakeDeviceUtils();
   const window = new FakeWindow();
   window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
@@ -66,7 +64,7 @@ function harness(
   });
   const dependencies = { isSyncEnabled, getConfig, resolveMode, apply };
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, devices, simctl as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, devices, simctl, {
       window,
       ctrlProxyManager,
       ctrlProxyClient,

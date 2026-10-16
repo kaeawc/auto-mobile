@@ -39,6 +39,12 @@ internal constructor(
     clock: () -> Long = System::currentTimeMillis,
   ) : this(cacheTtlMs, clock, RecoveryConfigResourceReader(DaemonSocketClientManager::readResource))
 
+  internal constructor(
+    daemon: DaemonToolClient,
+    cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
+    clock: () -> Long = System::currentTimeMillis,
+  ) : this(cacheTtlMs, clock, RecoveryConfigResourceReader(daemon::readResource))
+
   private data class CachedEntry(val config: CachedConfig, val fetchedAt: Long)
 
   private data class CachedConfig(val enabled: Boolean, val maxToolCalls: Int)

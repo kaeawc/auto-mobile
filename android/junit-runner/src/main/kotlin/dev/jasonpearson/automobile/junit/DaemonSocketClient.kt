@@ -31,39 +31,28 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
-internal object DaemonSocketClientManager {
+internal object DaemonSocketClientManager : DaemonToolClient {
   // Use ThreadLocal to give each thread its own socket connection
   // This enables true parallel execution since socket server queues requests per connection
   private val threadLocalClient = ThreadLocal<DaemonSocketClient>()
-  @JvmStatic internal var testClient: DaemonToolClient? = null
 
-  fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse {
-    val overrideClient = testClient
-    if (overrideClient != null) {
-      return overrideClient.callTool(toolName, arguments, timeoutMs)
+  override fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse =
+    getOrCreateClient().callTool(toolName, arguments, timeoutMs)
+
+  override fun readResource(uri: String, timeoutMs: Long): DaemonResponse =
+    getOrCreateClient().readResource(uri, timeoutMs)
+
+  override fun callDaemonMethod(
+    method: String,
+    params: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse = getOrCreateClient().callDaemonMethod(method, params, timeoutMs)
+
+  override var sessionUuid: String
+    get() = getOrCreateClient().sessionUuid
+    set(value) {
+      getOrCreateClient().sessionUuid = value
     }
-    return getOrCreateClient().callTool(toolName, arguments, timeoutMs)
-  }
-
-  fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
-    val overrideClient = testClient
-    if (overrideClient != null) {
-      return overrideClient.readResource(uri, timeoutMs)
-    }
-    return getOrCreateClient().readResource(uri, timeoutMs)
-  }
-
-  fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long): DaemonResponse {
-    val overrideClient = testClient
-    if (overrideClient != null) {
-      return overrideClient.callDaemonMethod(method, params, timeoutMs)
-    }
-    return getOrCreateClient().callDaemonMethod(method, params, timeoutMs)
-  }
-
-  fun sessionUuid(): String {
-    return testClient?.sessionUuid ?: getOrCreateClient().sessionUuid
-  }
 
   // Decides when the daemon must be (re)started before a thread connects. A connect failure on an
   // already-ensured daemon (it died leaving its socket file behind) re-runs the ensure step once

@@ -1,5 +1,6 @@
 import type {
   ForegroundAppReadResult,
+  AdbDeviceState,
   AdbExecuteOptions,
   AdbExecutor,
   AdbProcess,
@@ -8,20 +9,8 @@ import type {
   DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { resolveExecuteCommandOptions } from "../../src/utils/android-cmdline-tools/executeCommandArgs";
-import type { ExecResult } from "../../src/models";
+import type { BootedDevice, DeviceLockState, ExecResult } from "../../src/models";
 import { FakeAdbProcess } from "./FakeAdbProcess";
-
-type FakeAdbClientContract = Pick<
-  AdbExecutor,
-  | "execute"
-  | "executeCommand"
-  | "getForegroundAppChecked"
-  | "getForegroundApp"
-  | "getDeviceTimestampMs"
-  | "getDeviceTimestampMsWithSource"
-  | "listUsers"
-  | "spawn"
->;
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
 interface SpawnBehavior {
@@ -38,7 +27,7 @@ interface SpawnBehavior {
  * Fake implementation of AdbClient for testing
  * Captures commands executed without actually running ADB
  */
-export class FakeAdbClient implements FakeAdbClientContract {
+export class FakeAdbClient implements AdbExecutor {
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;
@@ -55,6 +44,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private commandStdoutChunks = new Map<string, string[]>();
   // Models failures before ADB can dispatch, so beforeDispatch must not run.
   private preDispatchErrors: Map<string, Error> = new Map();
+  private devices: BootedDevice[] = [];
+  private deviceStates: AdbDeviceState[] = [];
+  private screenOn = true;
+  private wakefulness: "Awake" | "Asleep" | "Dozing" | null = "Awake";
+  private deviceLock: DeviceLockState | null = null;
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private readonly displayForegroundApps = new Map<
     number,
@@ -511,5 +505,53 @@ export class FakeAdbClient implements FakeAdbClientContract {
       return this.commandCalls.filter((call) => call.command.includes(commandPattern)).length;
     }
     return this.commandCalls.filter((call) => commandPattern.test(call.command)).length;
+  }
+
+  setDevices(devices: BootedDevice[]): void {
+    this.devices = devices;
+  }
+
+  setDeviceStates(states: AdbDeviceState[]): void {
+    this.deviceStates = states;
+  }
+
+  /** Configure screen state; wakefulness defaults to Awake when on and Asleep when off. */
+  setScreenState(isOn: boolean, wakefulness?: "Awake" | "Asleep" | "Dozing"): void {
+    this.screenOn = isOn;
+    this.wakefulness = wakefulness ?? (isOn ? "Awake" : "Asleep");
+  }
+
+  /** Configure the lock state returned by getDeviceLock (null = unknown). */
+  setDeviceLock(state: DeviceLockState | null): void {
+    this.deviceLock = state;
+  }
+
+  async getBootedAndroidDevices(
+    _options?: Parameters<AdbExecutor["getBootedAndroidDevices"]>[0],
+  ): Promise<BootedDevice[]> {
+    return this.devices;
+  }
+
+  async getDeviceStates(_options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<AdbDeviceState[]> {
+    return this.deviceStates;
+  }
+
+  async isScreenOn(): Promise<boolean> {
+    return this.screenOn;
+  }
+
+  async getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null> {
+    return this.wakefulness;
+  }
+
+  async getDeviceLock(): Promise<DeviceLockState | null> {
+    return this.deviceLock;
+  }
+
+  async getAdbPathOnly(): Promise<string> {
+    return "adb";
   }
 }

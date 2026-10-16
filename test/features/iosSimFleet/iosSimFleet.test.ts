@@ -3,7 +3,7 @@ import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/Booted
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
@@ -626,7 +626,7 @@ describe("command-backed host source", () => {
     const executor = new FakeHostCommandExecutor();
     executor.setCommandResponse("ps -axo", { stdout: PS, stderr: "" } as never);
     executor.setCommandResponse("sysctl", { stdout: "2\n", stderr: "" } as never);
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setCommandArgsResult(["list", "devices", "--json"], SIMCTL);
     const source = new CommandFleetHostSource(
       executor,

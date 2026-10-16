@@ -68,7 +68,12 @@ function fixture(clientCount = 2, timeoutCode = "timeout") {
     sessionUuid: null,
     profile: null,
     cleanupPending: false,
-    failure: { code, message: code, retryable },
+    failure: {
+      code,
+      message: code,
+      retryable,
+      ...(code === "capacity_exhausted" ? { retryRequires: "new_request_id" as const } : {}),
+    },
   });
   const end = (requestId: string, code?: string) => {
     const old = receipts.get(requestId)!;
@@ -132,7 +137,7 @@ function fixture(clientCount = 2, timeoutCode = "timeout") {
       } else if (c.config.preparationTimeoutMs === 1) {
         result = fail(c, timeoutCode, true);
       } else if (resources.filter((r) => r.state === "active").length >= 2) {
-        result = fail(c, "capacity_exhausted");
+        result = fail(c, "capacity_exhausted", true);
       } else {
         result = {
           ...structuredClone(captured.prepareSession),

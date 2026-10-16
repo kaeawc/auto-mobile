@@ -9,11 +9,11 @@ export class FakeVideoRecordingConfigRepository implements ConfigRepository<Vide
 
   async getConfig(key: string = GLOBAL_KEY): Promise<VideoRecordingConfig | null> {
     const config = this.configs.get(key);
-    return config ? { ...config } : null;
+    return config ? structuredClone(config) : null;
   }
 
   async setConfig(config: VideoRecordingConfig, key: string = GLOBAL_KEY): Promise<void> {
-    this.configs.set(key, { ...config });
+    this.configs.set(key, structuredClone(config));
   }
 
   async clearConfig(key: string = GLOBAL_KEY): Promise<void> {

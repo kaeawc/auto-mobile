@@ -9,11 +9,11 @@ export class FakeDeviceSnapshotConfigRepository implements ConfigRepository<Devi
 
   async getConfig(key: string = GLOBAL_KEY): Promise<DeviceSnapshotConfig | null> {
     const config = this.configs.get(key);
-    return config ? { ...config } : null;
+    return config ? structuredClone(config) : null;
   }
 
   async setConfig(config: DeviceSnapshotConfig, key: string = GLOBAL_KEY): Promise<void> {
-    this.configs.set(key, { ...config });
+    this.configs.set(key, structuredClone(config));
   }
 
   async clearConfig(key: string = GLOBAL_KEY): Promise<void> {

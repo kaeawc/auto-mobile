@@ -24,6 +24,7 @@ import org.junit.Test
  * boundary.
  */
 class AutoMobilePlanRedactionTest {
+  private lateinit var collaborators: PlanExecutorCollaborators
   private val secret = "SECRET-hunter2-TOKEN"
   private val visible = "keepme-visible-env"
 
@@ -33,21 +34,20 @@ class AutoMobilePlanRedactionTest {
   @Before
   fun setup() {
     fakeDaemonClient = CapturingDaemonToolClient()
-    DaemonSocketClientManager.testClient = fakeDaemonClient
-    AutoMobileSharedUtils.testDeviceChecker = RedactionDeviceChecker(devicesAvailable = true)
-    DaemonHeartbeat.testController = RedactionDaemonHeartbeat()
     capturingAgent = CapturingAgent()
-    AutoMobilePlanExecutor.testAgent = capturingAgent
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { capturingAgent },
+        deviceChecker = RedactionDeviceChecker(devicesAvailable = true),
+        daemon = fakeDaemonClient,
+        heartbeat = RedactionDaemonHeartbeat(),
+      )
     // Recovery is skipped in CI mode; force it off so the recovery path (and its redaction) runs.
     System.setProperty("automobile.ci.mode", "false")
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
   }
 
@@ -61,6 +61,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-plan.yaml",
       mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
@@ -119,6 +120,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-multiline-flow.yaml",
       mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured) { "recovery must receive a context" }
@@ -154,6 +156,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-multiline-quoted-hash.yaml",
       mapOf("API#TOKEN" to secretA, "PASSWORD" to secretB),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -181,6 +184,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-multiline-escaped-quote.yaml",
       mapOf("a\"]b" to secretA, "PASSWORD" to secretB),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -206,6 +210,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-hex-escape-key.yaml",
       mapOf("APITOKEN" to secret),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -229,6 +234,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-hex-escape-key.yaml",
       mapOf("APITOKEN" to real, "APIx54OKEN" to "DECOY-not-the-secret"),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -251,6 +257,7 @@ class AutoMobilePlanRedactionTest {
         device = "emulator-5554",
         secretParameterKeys = setOf("ENVIRONMENT"),
       ),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -268,6 +275,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-plan.yaml",
       mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -288,6 +296,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-plan.yaml",
       mapOf("SECRET_TOKEN" to "sec-\${AA}-\${ZZ}", "AA" to "alpha", "ZZ" to "zeta"),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -317,6 +326,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-plan.yaml",
       mapOf("SECRET_TOKEN" to "marker-\${SECRET_TOKEN}"),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -342,6 +352,7 @@ class AutoMobilePlanRedactionTest {
       "test-plans/redaction-parameterized-key.yaml",
       mapOf("SECRET_KEY" to "apiToken", "apiToken" to secret),
       AutoMobilePlanExecutionOptions(device = "emulator-5554"),
+      collaborators = collaborators,
     )
 
     val context = requireNotNull(capturingAgent.captured)
@@ -370,6 +381,7 @@ class AutoMobilePlanRedactionTest {
         "test-plans/redaction-plan.yaml",
         mapOf("SECRET_TOKEN" to secret, "ENVIRONMENT" to visible),
         AutoMobilePlanExecutionOptions(device = "emulator-5554", debugMode = true),
+        collaborators = collaborators,
       )
     } finally {
       System.setOut(originalOut)
@@ -442,9 +454,11 @@ private class CapturingAgent :
   var captured: FailedStepContext? = null
   var capturedSecretValues: List<String>? = null
 
-  override fun attemptAiRecovery(
+  internal override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     captured = context
     capturedSecretValues = secretValues

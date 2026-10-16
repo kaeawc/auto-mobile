@@ -43,6 +43,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor
  * `captured/execute-plan-failed-step.json` (test/server/executePlanToolResultsCapture.test.ts).
  */
 class PlanRecoveryInteractionTest {
+  private lateinit var collaborators: PlanExecutorCollaborators
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var daemon: PlanInteractionDaemon
   private lateinit var recordingAgent: PlanInteractionRecordingAgent
@@ -52,20 +53,19 @@ class PlanRecoveryInteractionTest {
   fun setup() {
     daemon = PlanInteractionDaemon()
     recordingAgent = PlanInteractionRecordingAgent()
-    DaemonSocketClientManager.testClient = daemon
-    AutoMobileSharedUtils.testDeviceChecker = PlanInteractionDeviceChecker()
     heartbeat = PlanInteractionHeartbeat()
-    DaemonHeartbeat.testController = heartbeat
-    AutoMobilePlanExecutor.testAgent = recordingAgent
+    collaborators =
+      PlanExecutorCollaborators(
+        agent = { recordingAgent },
+        deviceChecker = PlanInteractionDeviceChecker(),
+        daemon = daemon,
+        heartbeat = heartbeat,
+      )
     System.setProperty("automobile.ci.mode", "false")
   }
 
   @After
   fun tearDown() {
-    DaemonSocketClientManager.testClient = null
-    AutoMobileSharedUtils.testDeviceChecker = null
-    DaemonHeartbeat.testController = null
-    AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
   }
 
@@ -126,7 +126,8 @@ class PlanRecoveryInteractionTest {
     val prompts = mutableListOf<String>()
     val aiAgent = mockk<AIAgent<String, String>>(relaxed = true)
     coEvery { aiAgent.run(capture(prompts)) } returns "done"
-    AutoMobilePlanExecutor.testAgent = realRecoveryAgent(aiAgent)
+    val recoveryAgent = realRecoveryAgent(aiAgent)
+    collaborators = collaborators.copy(agent = { recoveryAgent })
 
     val result = executePlaceholderPlan()
 
@@ -346,6 +347,7 @@ class PlanRecoveryInteractionTest {
         "test-plans/launch-clock-app.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = false),
+        collaborators = collaborators,
       )
 
     assertFalse(result.success)
@@ -394,6 +396,7 @@ class PlanRecoveryInteractionTest {
         "test-plans/launch-clock-app.yaml",
         emptyMap(),
         AutoMobilePlanExecutionOptions(aiAssistance = true, device = "emulator-5558"),
+        collaborators = collaborators,
       )
 
     assertTrue(result.success)
@@ -421,6 +424,7 @@ class PlanRecoveryInteractionTest {
         "target" to "Confirm",
       ),
       AutoMobilePlanExecutionOptions(aiAssistance = true),
+      collaborators = collaborators,
     )
 
   private fun executeSimplePlan(
@@ -431,7 +435,7 @@ class PlanRecoveryInteractionTest {
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
       AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
-      timings,
+      collaborators.copy(timings = timings),
     )
 
   private fun resultMessage(result: AutoMobilePlanExecutionResult, stepIndex: Int): String? {
@@ -707,9 +711,11 @@ private class PlanInteractionRecordingAgent :
   var recoverySucceeds = true
   var onRecovery: (FailedStepContext) -> Unit = {}
 
-  override fun attemptAiRecovery(
+  internal override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
+    timings: PlanExecutorTimings,
+    heartbeat: DaemonHeartbeatController,
   ): RecoveryOutcome {
     contexts.add(context)
     onRecovery(context)

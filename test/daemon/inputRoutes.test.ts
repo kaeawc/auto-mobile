@@ -42,6 +42,12 @@ describe("input/* route table", () => {
     ]);
   });
 
+  test("every route declares its params parser, refusing non-object params by name", () => {
+    for (const route of INPUT_ROUTES) {
+      expect(() => route.parse(undefined)).toThrow(`${route.method} requires params object`);
+    }
+  });
+
   test("unknown and ide/* methods are not input routes", () => {
     expect(inputRouteFor("input/bogus")).toBeUndefined();
     expect(inputRouteFor("ide/status")).toBeUndefined();

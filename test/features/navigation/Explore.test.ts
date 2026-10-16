@@ -808,10 +808,11 @@ describe("Explore", () => {
         );
         expect(result.interactionsPerformed).toBe(1);
         expect(launch).toHaveBeenCalledTimes(1);
-        expect(launch.mock.calls[0]).toEqual([
-          "com.test.app",
-          { clearAppData: false, coldBoot: false, signal: controller.signal },
-        ]);
+        const [launchedPackage, launchOptions] = launch.mock.calls[0];
+        expect(launchedPackage).toBe("com.test.app");
+        expect(launchOptions).toMatchObject({ clearAppData: false, coldBoot: false });
+        // toEqual treats any two AbortSignals as equal; identity proves the caller's signal flowed through.
+        expect(launchOptions?.signal).toBe(controller.signal);
         expect(back).not.toHaveBeenCalled();
         expect(recoverySeams().consecutiveOutOfAppCount).toBe(0);
         expect(result.stopReason).toBe("Reached max interactions limit (1)");

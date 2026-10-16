@@ -55,6 +55,6 @@ Sampling is single-flight and independent of sessions, device epochs and runner 
 
 - `auto-mobile --cli doctor` (macOS): the "iOS Simulator Fleet Cost" check lists each booted
   simulator's memory, CPU, data size and last boot time, and warns when a new boot would exceed capacity.
-- Daemon-internal: `IosSimCapacityGate` and the optional `IosSimFleetMonitor` in
+- Daemon-internal: `IosSimCapacityGate` in
   `src/features/iosSimFleet/`. Every simulator boot passes through one process-wide gate and records its
   duration via `BootDurationHistory`. The shared admission logic lives in `src/features/bootAdmission/`.

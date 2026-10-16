@@ -1578,6 +1578,19 @@ during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
 a plain pinch. Android and iOS share this convention.
 
+To rotate **without zooming**, keep the finger distance constant: pass
+<code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
+together with <code>rotationDegrees</code>. <code>direction</code> is still a required
+argument but is ignored when the distance does not change, so the fingers never
+drift toward a zoom; equal distances are clamped and (on iOS) rounded together
+so they stay equal. Negative and larger-than-360 values are passed through as
+given. This is a two-finger rotate gesture, not the device <code>rotate</code>
+tool, which changes screen orientation.
+
+```json
+{ "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
+```
+
 </details>
 
 ### Semantic accessibility links

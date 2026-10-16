@@ -23,6 +23,14 @@ class MemoryFileSystem implements VerifiedArtifactFileSystem {
     this.files.set(path, content);
     this.modes.set(path, mode);
   }
+  async rename(from: string, to: string): Promise<void> {
+    const content = this.files.get(from);
+    if (content === undefined) {
+      throw new Error(`ENOENT: ${from}`);
+    }
+    this.files.delete(from);
+    this.files.set(to, content);
+  }
   async remove(path: string): Promise<void> {
     if (this.failRemove) {
       throw new Error("remove failed");
@@ -207,6 +215,49 @@ describe("VerifiedArtifactCache", () => {
       checksum.checksum = SHA.toUpperCase();
       await cache.fetch(request());
       expect(published).toHaveLength(1);
+    });
+
+    test("without a pinned sha the hash is skipped and publish sees null", async () => {
+      let seen: unknown = "unset";
+      await cache.fetch(
+        request({
+          expectedSha256: null,
+          publish: async (_archive, sha256) => {
+            seen = sha256;
+          },
+        }),
+      );
+      expect(seen).toBeNull();
+      expect(checksum.computedFiles).toEqual([]);
+    });
+
+    test("an empty pin fails closed instead of skipping verification", async () => {
+      await expect(cache.fetch(request({ expectedSha256: "" }))).rejects.toThrow(/mismatch/);
+      expect(published).toEqual([]);
+    });
+
+    test("without a metadataPath no sidecar is written", async () => {
+      await cache.fetch(request({ metadataPath: undefined }));
+      expect(fs.files.has("/cache/meta.json")).toBe(false);
+    });
+
+    test("finalPath receives the verified archive atomically", async () => {
+      await cache.fetch(request({ finalPath: "/cache/asset" }));
+      expect(fs.files.get("/cache/asset")).toBe("payload");
+      expect(fs.files.has("/cache/asset.download")).toBe(false);
+    });
+
+    test("a failed download or verification never touches an existing finalPath", async () => {
+      fs.files.set("/cache/asset", "old-good");
+      checksum.checksum = "c".repeat(64);
+      await expect(cache.fetch(request({ finalPath: "/cache/asset" }))).rejects.toThrow(/mismatch/);
+      expect(fs.files.get("/cache/asset")).toBe("old-good");
+
+      downloader.failure = new Error("network down");
+      await expect(cache.fetch(request({ finalPath: "/cache/asset" }))).rejects.toThrow(
+        "network down",
+      );
+      expect(fs.files.get("/cache/asset")).toBe("old-good");
     });
 
     test("settle also runs on success", async () => {

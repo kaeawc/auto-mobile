@@ -3110,6 +3110,108 @@ describe("CtrlProxyManager", function () {
       await accessibilityServiceClient.cleanupApk(apkPath);
     });
 
+    test("override is copied without touching the downloader or hashing", async function () {
+      const tempDir = scratch.next();
+      const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+      await fs.writeFile(localApkPath, apkPayload);
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      const hashed: string[] = [];
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async () => {
+          throw new Error("downloader must not run for an override");
+        },
+      });
+      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
+        computeFileSha256: async (file: string) => {
+          hashed.push(file);
+          return { checksum: "x", source: "node" as const };
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      expect(hashed).toEqual([]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("a consumed prefetch bypasses the downloader and is still verified", async function () {
+      const expectedChecksum = crypto.createHash("sha256").update(apkPayload).digest("hex");
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
+      const prefetched = path.join(scratch.next(), "prefetched.apk");
+      await fs.writeFile(prefetched, apkPayload);
+      Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetched);
+      Reflect.set(AndroidCtrlProxyManager, "prefetchPromise", Promise.resolve(prefetched));
+      const hashed: string[] = [];
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async () => {
+          throw new Error("downloader must not run when a prefetch is available");
+        },
+      });
+      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
+        computeFileSha256: async (file: string) => {
+          hashed.push(file);
+          return { checksum: expectedChecksum, source: "node" as const };
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+
+      expect(hashed).toEqual([apkPath]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("a download with no checksum configured skips hashing but still checks structure", async function () {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      const hashed: string[] = [];
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async (_url: string, destination: string) => {
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, apkPayload);
+        },
+      });
+      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
+        computeFileSha256: async (file: string) => {
+          hashed.push(file);
+          return { checksum: "x", source: "node" as const };
+        },
+      });
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      expect(hashed).toEqual([]);
+      await accessibilityServiceClient.cleanupApk(apkPath);
+
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async (_url: string, destination: string) => {
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, "tiny");
+        },
+      });
+      await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(/too small/);
+    });
+
+    test("a checksum mismatch fails the download and leaves no APK behind", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("a".repeat(64));
+      let destination = "";
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async (_url: string, dest: string) => {
+          destination = dest;
+          await fs.mkdir(path.dirname(dest), { recursive: true });
+          await fs.writeFile(dest, apkPayload);
+        },
+      });
+      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
+        computeFileSha256: async () => ({ checksum: "b".repeat(64), source: "node" as const }),
+      });
+
+      await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
+        /Failed to download APK: APK checksum verification failed/,
+      );
+      await expect(fs.access(destination)).rejects.toThrow();
+    });
+
     test("should download remote APK and verify checksum via injected utilities", async function () {
       // Create a valid APK structure (ZIP with AndroidManifest.xml)
       const payload = apkPayload;
@@ -3137,7 +3239,9 @@ describe("CtrlProxyManager", function () {
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
       expect(stats.size).toBe(payload.length);
-      expect(apkPath).toBe(downloadedPath);
+      // Downloaded to a sibling temp file, then renamed into place after verification.
+      expect(downloadedPath).toBe(`${apkPath}.download`);
+      await expect(fs.access(`${apkPath}.download`)).rejects.toThrow();
       await accessibilityServiceClient.cleanupApk(apkPath);
     });
 

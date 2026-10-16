@@ -3,12 +3,10 @@ import {
   type NativeHelperTracker,
 } from "../nativeHelpers/NativeHelperRegistry";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
+import { parseAdbDevicesList } from "./parseAdbDevicesList";
+import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
-import {
-  withAndroidTransportId,
-  copyAndroidTransportId,
-  type AndroidTransportRouting,
-} from "../androidSerial";
+import { copyAndroidTransportId, type AndroidTransportRouting } from "../androidSerial";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -20,13 +18,7 @@ import {
   type HostChildProcess as ChildProcess,
   type SpawnFn,
 } from "../HostCommandExecutor";
-import {
-  BootedDevice,
-  ExecResult,
-  AndroidUser,
-  classifyAndroidUser,
-  DeviceLockState,
-} from "../../models";
+import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import {
   AndroidToolsDetectionAbortError,
   AndroidToolsDetectionTimeoutError,
@@ -1596,33 +1588,17 @@ export class AdbClient implements AdbExecutor {
       }
       throw error;
     }
-    const lines = result.stdout.split("\n").slice(1);
-
     const observedAt = this.observationSequence.next();
-    const devices = lines
-      .filter((line) => line.trim().length > 0)
-      .flatMap((line) => {
-        const [deviceId, state] = line.trim().split(/\s+/);
-        if (!deviceId || state !== "device") {
-          return [];
-        }
-        const transportId = line
-          .trim()
-          .split(/\s+/)
-          .find((field) => field.startsWith("transport_id:"))
-          ?.slice("transport_id:".length);
-        return [
-          withAndroidTransportId(
-            {
-              name: deviceId,
-              platform: "android" as const,
-              deviceId,
-              observedAt,
-            },
-            transportId,
-          ),
-        ];
-      });
+    const devices = parseAdbDevicesList(result.stdout)
+      .filter((state) => state.state === "device")
+      .map((state) =>
+        copyAndroidTransportId(state, {
+          name: state.deviceId,
+          platform: "android" as const,
+          deviceId: state.deviceId,
+          observedAt,
+        }),
+      );
 
     this.publishDeviceList(generation, devices);
     return devices;
@@ -1676,18 +1652,7 @@ export class AdbClient implements AdbExecutor {
       throw error;
     }
 
-    return result.stdout
-      .split("\n")
-      .slice(1)
-      .flatMap((line) => {
-        const [deviceId, state] = line.trim().split(/\s+/);
-        const transportId = line
-          .trim()
-          .split(/\s+/)
-          .find((field) => field.startsWith("transport_id:"))
-          ?.slice("transport_id:".length);
-        return deviceId && state ? [withAndroidTransportId({ deviceId, state }, transportId)] : [];
-      });
+    return parseAdbDevicesList(result.stdout);
   }
 
   async getReadinessDeviceSnapshot(options: {
@@ -1830,7 +1795,7 @@ export class AdbClient implements AdbExecutor {
         true,
         signal,
       );
-      const users = this.parseUsersFromDumpsys(result.stdout);
+      const users = parseDumpsysUsers(result.stdout);
 
       if (users.length > 0) {
         logger.info(
@@ -1851,75 +1816,6 @@ export class AdbClient implements AdbExecutor {
   }
 
   /**
-   * Parse user information from dumpsys user output
-   * Example line: "  UserInfo{0:null:4c13} serialNo=0 isPrimary=true"
-   * Followed by: "    State: RUNNING_UNLOCKED" or "    State: SHUTDOWN"
-   * @param output - Raw dumpsys user output
-   * @returns Array of parsed Android users
-   */
-  private parseUsersFromDumpsys(output: string): AndroidUser[] {
-    const users: AndroidUser[] = [];
-    const lines = output.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // Match UserInfo line: UserInfo{userId:name:flags} ...
-      // Note: name can be "null" in dumpsys output, and flags are hexadecimal
-      const userMatch = line.match(/UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}/);
-      if (!userMatch) {
-        continue;
-      }
-      const userId = parseInt(userMatch[1], 10);
-      let userName = userMatch[2];
-      const flags = parseInt(userMatch[3], 16); // Parse as hexadecimal
-
-      const startState = this.findUserStartState(lines, i);
-      const running = startState === "RUNNING_UNLOCKED" || startState === "RUNNING_LOCKED";
-
-      // If name is "null" in dumpsys, try to get the real name from "Owner name:" line
-      if (userName === "null") {
-        // For user 0, look for "Owner name:" line
-        const ownerMatch = output.match(/Owner name:\s+(.+)/);
-        if (ownerMatch && userId === 0) {
-          userName = ownerMatch[1].trim();
-        } else {
-          userName = `User ${userId}`;
-        }
-      }
-
-      users.push({
-        userId,
-        name: userName,
-        flags,
-        profileType: classifyAndroidUser(flags),
-        running,
-        ...(startState ? { startState } : {}),
-      });
-    }
-
-    return users;
-  }
-
-  private findUserStartState(lines: string[], userLineIndex: number): string | undefined {
-    // Look for the State line in the next few lines
-    for (let j = userLineIndex + 1; j < Math.min(userLineIndex + 10, lines.length); j++) {
-      const stateLine = lines[j];
-
-      // If we hit another UserInfo, stop searching
-      if (stateLine.match(/UserInfo\{/)) {
-        break;
-      }
-
-      const stateMatch = stateLine.match(/State:\s+(\S+)/);
-      if (stateMatch) {
-        return stateMatch[1];
-      }
-    }
-    return undefined;
-  }
-
-  /**
    * Legacy method to list users using pm list users command
    * Used as fallback when dumpsys user is not available or fails
    * Example output:
@@ -1937,25 +1833,7 @@ export class AdbClient implements AdbExecutor {
         true,
         signal,
       );
-      const lines = result.stdout.split("\n");
-      const users: AndroidUser[] = [];
-
-      for (const line of lines) {
-        // Match pattern: UserInfo{userId:name:flags} [running]
-        // Note: flags are hexadecimal (e.g., "4c13")
-        const match = line.match(/UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}\s*(running)?/);
-        if (match) {
-          const userId = parseInt(match[1], 10);
-          const flags = parseInt(match[3], 16);
-          users.push({
-            userId,
-            name: match[2],
-            flags, // Parse as hexadecimal
-            profileType: classifyAndroidUser(flags),
-            running: match[4] === "running",
-          });
-        }
-      }
+      const users = parsePmListUsers(result.stdout);
 
       if (users.length > 0) {
         logger.info(

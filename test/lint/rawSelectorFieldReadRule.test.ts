@@ -29,7 +29,11 @@ test("scope covers debug/server but excludes canonical utility and tests", () =>
   expect(check(code, "src/server/tool.ts")).toHaveLength(1);
   expect(check(code, "src/features/accessibility/SetAccessibilityFocus.ts")).toHaveLength(1);
   expect(check(code, "src/features/observe/ConditionPredicates.ts")).toHaveLength(1);
+  expect(check(code, "src/features/utility/DeepLinkManager.ts")).toHaveLength(1);
+  expect(check(code, "src/features/talkback/FocusElementMatcher.ts")).toHaveLength(1);
+  expect(check(code, "src/features/talkback/nested/Deep.ts")).toHaveLength(1);
   expect(check(code, "src/features/utility/SearchableNode.ts")).toEqual([]);
+  expect(check(code, "src/features/utility/DeepLinkManagerHelper.ts")).toEqual([]);
   expect(check(code, "test/features/action/Test.ts")).toEqual([]);
 });
 

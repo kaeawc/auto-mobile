@@ -27,8 +27,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
@@ -100,105 +98,6 @@ internal object DaemonSocketClientManager {
   private fun ensureDaemonRunning() {
     DaemonLauncher.ensureRunning(
       DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides()),
-    )
-  }
-
-  /**
-   * Wait for daemon device pool to have at least one device This is a blocking health check that
-   * prevents tests from running until devices are available.
-   */
-  private fun waitForDevicePoolReady(timeoutMs: Long) {
-    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
-    val json = Json { ignoreUnknownKeys = true }
-    if (debugMode) {
-      println("Waiting for daemon device pool to initialize...")
-    }
-
-    val startTime = System.currentTimeMillis()
-    var lastDeviceCount = -1
-    var nextRefreshTime = startTime + 2000 // First refresh after 2 seconds
-
-    while (System.currentTimeMillis() - startTime < timeoutMs) {
-      try {
-        val socketClient = DaemonSocketClient(DaemonSocketPaths.socketPath())
-
-        // Trigger device refresh every 2 seconds if pool is still empty
-        val now = System.currentTimeMillis()
-        if (now >= nextRefreshTime && lastDeviceCount == 0) {
-          if (debugMode) {
-            println("Triggering device pool refresh...")
-          }
-          try {
-            val refreshResponse = socketClient.callDaemonMethod("daemon/refreshDevices", 5000)
-            if (debugMode && refreshResponse.success) {
-              val addedDevices =
-                refreshResponse.result?.jsonObject?.get("addedDevices")?.jsonPrimitive?.intOrNull
-                  ?: 0
-              println("Device pool refresh complete: added $addedDevices devices")
-            }
-          } catch (e: Exception) {
-            if (debugMode) {
-              println("Device refresh error: ${e.message}")
-            }
-          }
-          nextRefreshTime = now + 2000 // Schedule next refresh in 2 seconds
-        }
-
-        val response =
-          socketClient.callTool(
-            "listDevices",
-            JsonObject(mapOf("platform" to JsonPrimitive("android"))),
-            5000,
-          )
-        socketClient.close()
-
-        if (response.success) {
-          val payloadText =
-            response.result
-              ?.jsonObject
-              ?.get("content")
-              ?.jsonArray
-              ?.firstOrNull()
-              ?.jsonObject
-              ?.get("text")
-              ?.jsonPrimitive
-              ?.content
-          val parsedResult = payloadText?.let { json.parseToJsonElement(it).jsonObject }
-          val poolStatus = parsedResult?.get("poolStatus")?.jsonObject
-          val totalDevices =
-            poolStatus?.get("total")?.jsonPrimitive?.intOrNull
-              ?: parsedResult?.get("totalCount")?.jsonPrimitive?.intOrNull
-              ?: 0
-
-          if (totalDevices > 0) {
-            if (debugMode) {
-              println("Device pool ready with $totalDevices device(s)")
-            }
-            return
-          }
-
-          // Log only if device count changed
-          if (totalDevices != lastDeviceCount) {
-            if (debugMode) {
-              println("Device pool still empty, waiting...")
-            }
-            lastDeviceCount = totalDevices
-          }
-        }
-      } catch (e: Exception) {
-        // Ignore errors during health check, will retry
-        if (debugMode) {
-          println("Device pool check error: ${e.message}")
-        }
-      }
-
-      Thread.sleep(500)
-    }
-
-    // Device pool is still empty after timeout - throw error
-    throw DaemonUnavailableException(
-      "Daemon device pool is empty after ${timeoutMs}ms. " +
-        "Start an emulator or connect a physical device before running tests.",
     )
   }
 

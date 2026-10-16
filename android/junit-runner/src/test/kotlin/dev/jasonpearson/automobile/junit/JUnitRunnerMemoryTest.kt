@@ -31,25 +31,19 @@ class JUnitRunnerMemoryTest {
   @After
   fun tearDown() {
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
     MemoryMonitor.reset()
   }
 
   @Test
-  fun shouldNotLeakOverManyPlanCacheOperations() {
+  fun shouldNotLeakOverManyPlanEncodeOperations() {
     val maxGrowthBytes = resolveMaxGrowthBytes()
     val baseline = forceGcAndSnapshot()
 
-    // Simulate repeated plan cache operations — the hot path during test execution
     val planContent = "name: memory-test\nsteps:\n  - tool: observe\n    withViewHierarchy: true"
 
     repeat(ITERATIONS) { iteration ->
-      val key = "test-plans/plan-$iteration.yaml"
-      PlanCache.cacheContent(key, planContent)
-      PlanCache.getCachedContent(key)
-
       // Base64 encode (same as the executor does)
       Base64.getEncoder().encodeToString(planContent.toByteArray())
 

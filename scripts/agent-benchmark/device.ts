@@ -110,7 +110,16 @@ export async function bootedIosSimulators(
   } catch (error) {
     throw failure(`unparseable output: ${errorMessage(error)}`);
   }
-  return Object.values(parsed.devices ?? {})
+  const { devices } = parsed ?? {};
+  if (
+    typeof devices !== "object" ||
+    devices === null ||
+    Array.isArray(devices) ||
+    !Object.values(devices).every(Array.isArray)
+  ) {
+    throw failure("output has no devices map");
+  }
+  return Object.values(devices)
     .flat()
     .filter((device) => device.state === "Booted")
     .map((device) => device.name ?? "unnamed simulator");

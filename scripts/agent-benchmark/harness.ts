@@ -342,6 +342,13 @@ async function verifyStartScreen(
   }
 }
 
+function unknownFingerprints(result: BenchmarkResult): string[] {
+  return [
+    ...(result.preflight.appBuild === "unknown" ? ["app build"] : []),
+    ...(result.preflight.device === "unknown" ? ["device"] : []),
+  ];
+}
+
 async function deviceFingerprint(deps: HarnessDeps, serial: string): Promise<string> {
   try {
     return await describeDevice(deps.runner, serial);
@@ -511,6 +518,12 @@ export async function runSuite(
     // Without a reset, earlier runs' databases, permissions, and back stack carry over
     // invisibly; the start-screen check sees only text, so the run is not reproducible.
     deps.log(`[${definition.name}] passed, but clearAppData is false; no baseline.yml written`);
+  } else if (result.comparison.verdict === "passed" && unknownFingerprints(result).length > 0) {
+    // A baseline without these could never flag a later run on another build or device.
+    deps.log(
+      `[${definition.name}] passed, but the ${unknownFingerprints(result).join(" and ")} ` +
+        "fingerprint is unknown; no baseline.yml written",
+    );
   } else if (result.comparison.verdict === "passed" && result.comparison.stumbles === 0) {
     deps.fs.writeFile(join(prepared.runDirectory, "baseline.yml"), renderBaselineSnippet(result));
   } else if (result.comparison.verdict === "passed") {

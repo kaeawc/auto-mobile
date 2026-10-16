@@ -466,6 +466,9 @@ SessionManager
   a restart would terminalize a newer incarnation of the same UUID.
 - Cross-daemon safety keeps `expectedRowGeneration` and `unlessTerminal*` in SQL. The writer adds a
   generation guard to terminal writes (Q2 risk 3); this is a guard change, named as such in W2.
+  Before classifying a generation advance as foreign, the current release path awaits that
+  incarnation's in-flight own row writes after reading the row (#12547). The existing persistence
+  deadline bounds this wait; writes from other incarnations remain protected by the guard.
 - Terminal ordering rule (Q2): `desire(terminal)` is called synchronously after the final fence and
   after `journal.record` returned `durable`; the commit then frees the device. When `record`
   returned `volatile` the release awaits the write first, bounded as today.

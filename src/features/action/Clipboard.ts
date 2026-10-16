@@ -21,6 +21,7 @@ import type { KeyboardHierarchyProvider } from "./Keyboard";
 import { getFocusedTextField, type FocusedTextField } from "./ClearText";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { resolveSignalCall, type ActionCall } from "./ActionCall";
 
 type ClipboardCtrlProxy = {
   requestClipboard(
@@ -101,8 +102,20 @@ export class Clipboard {
   async execute(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    call?: ActionCall,
+  ): Promise<ClipboardResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(
+    action: "copy" | "paste" | "clear" | "get",
+    text?: string,
     signal?: AbortSignal,
+  ): Promise<ClipboardResult>;
+  async execute(
+    action: "copy" | "paste" | "clear" | "get",
+    text?: string,
+    signalOrCall?: AbortSignal | ActionCall,
   ): Promise<ClipboardResult> {
+    const { signal } = resolveSignalCall(signalOrCall);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("clipboard");

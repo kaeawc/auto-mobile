@@ -394,3 +394,13 @@ STUB
   cmp "$root/emu-crash-1.db/real.dmp" "$dir/dumps/real.dmp"
   cmp "$root/core.qemu.42" "$dir/cores/core.qemu.42"
 }
+@test "an outcome with no evidence classifies under Bash 3.2 set -u (empty array)" {
+  # Bash 3.2 aborts on an empty "${arr[@]}" under set -u; Fast Validation's shell-portability
+  # check flagged classify-exit.sh:36 for exactly this. Run the real script under the system bash.
+  [ -x /bin/bash ] || skip "system Bash is unavailable"
+  touch "$dir/load-survived"
+  run /bin/bash "$script/classify-exit.sh" "$dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = survived ]
+  jq -e '.evidence==[]' "$dir/result.json"
+}

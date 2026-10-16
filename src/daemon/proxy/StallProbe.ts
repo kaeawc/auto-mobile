@@ -2,7 +2,6 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DAEMON_STALLED_CODE, type DaemonRestartEvidence } from "../proxyLivenessRecovery";
-import { isRecoverableDaemonHandoffReason } from "../releaseReasons";
 import { daemonInstanceFromError, releaseReasonFromError } from "../types";
 import { RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS } from "./notFoundDecision";
 import { ackDaemonInstance, isDaemonInstanceChangedError } from "./livenessErrorPredicates";
@@ -181,13 +180,11 @@ export class StallProbe {
       releaseReason !== undefined ||
       record.handover.code !== DAEMON_STALLED_CODE ||
       // Typed ownership losses have different codes and fail this not-found check too.
-      !this.port.isDaemonSessionNotFoundError(error) ||
-      (releaseReason !== undefined && !isRecoverableDaemonHandoffReason(releaseReason))
+      !this.port.isDaemonSessionNotFoundError(error)
     ) {
       return false;
     }
     // An unpinned not-found proves the daemon answered but has not rehydrated this execution.
-    record.managedReclaimSince ??= this.timer.now();
     record.probeDaemonInstance = undefined;
     this.port.startProbeInterval();
     const daemonInstance = daemonInstanceFromError(error);

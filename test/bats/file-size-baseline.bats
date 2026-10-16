@@ -41,6 +41,15 @@ lines() {
   grep -q "^8"$'\t' "$FILE_SIZE_BASELINE"
 }
 
+@test "CRLF blank lines do not count" {
+  # A CRLF checkout (Windows) reads an empty line as "\r"; it must still be blank.
+  { lines 8; printf '\r\n\r\n\r\n\r\n'; } > "$TEST_DIR/src/big.ts"
+  bash "$SCRIPT" --update
+  grep -q "^8"$'\t' "$FILE_SIZE_BASELINE"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
 @test "check fails when a baselined file grows" {
   bash "$SCRIPT" --update
   lines 9 > "$TEST_DIR/src/big.ts"

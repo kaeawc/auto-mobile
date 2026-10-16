@@ -29,6 +29,7 @@ import {
   FakeObserveScreenForSetUIState,
   FakeFieldTypeDetector,
 } from "../../fakes/FakeSetUIStateDependencies";
+import type { ActionCall } from "../../../src/features/action/ActionCall";
 
 describe("SetUIState", () => {
   const device: BootedDevice = {
@@ -255,9 +256,9 @@ describe("SetUIState", () => {
         return createObserveResult(hierarchy(dismissCalls > 0 ? "password-fresh" : "password"));
       });
       const executeTap = fakeTap.execute.bind(fakeTap);
-      spyOn(fakeTap, "execute").mockImplementation(async (options, progress, signal) => {
+      spyOn(fakeTap, "execute").mockImplementation(async (options, call) => {
         events.push(`focus:${options.elementId}`);
-        const result = await executeTap(options, progress, signal);
+        const result = await executeTap(options, call);
         if (options.elementId?.startsWith("password") && (keyboardOpen || stillOccluded)) {
           throw dismissCalls > 0
             ? new KeyboardOcclusionError("Still covered after dismissal")
@@ -368,9 +369,7 @@ describe("SetUIState", () => {
         expect(loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]")).toHaveLength(0);
         expect(fakeTap.execute).toHaveBeenCalledWith(
           { elementId: "password", action: "focus" },
-          undefined,
-          undefined,
-          { throwOnKeyboardOcclusion: true },
+          { recovery: { throwOnKeyboardOcclusion: true } },
         );
       } finally {
         warn.mockRestore();
@@ -2368,10 +2367,8 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     // "second" field uses the ordinary 0,10 pattern real tools use.
     const tapReportingFullCompletion = {
       calls: [] as Array<{ elementId?: string }>,
-      async execute(
-        options: { elementId?: string },
-        childProgress?: (p: number, t?: number, m?: string) => Promise<void>,
-      ) {
+      async execute(options: { elementId?: string }, call?: ActionCall) {
+        const childProgress = call?.progress;
         this.calls.push({ elementId: options.elementId });
         if (options.elementId === "first") {
           await childProgress?.(0, 100, "start");
@@ -3197,10 +3194,8 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
 
     const stallingDependencies = {
       tapOnElement: {
-        execute: async (
-          _opts: unknown,
-          progress?: (p: number, t?: number, m?: string) => Promise<void>,
-        ) => {
+        execute: async (_opts: unknown, call?: ActionCall) => {
+          const progress = call?.progress;
           fakeTimer.advanceTime(10_000);
           await progress?.(1, 2, "tap done");
           return { success: true, focusVerified: true };
@@ -3278,10 +3273,8 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: {
-        execute: async (
-          _opts: unknown,
-          progress?: (p: number, t?: number, m?: string) => Promise<void>,
-        ) => {
+        execute: async (_opts: unknown, call?: ActionCall) => {
+          const progress = call?.progress;
           fakeTimer.advanceTime(10_000);
           await progress?.(1, 2, "tap done");
           return { success: true, focusVerified: true };

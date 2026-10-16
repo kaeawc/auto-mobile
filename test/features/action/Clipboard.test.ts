@@ -1076,7 +1076,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
         new FakeKeyboardHierarchyProvider(),
         new FakeTimer(),
       );
-      const result = await clipboard.execute("paste", undefined, controller.signal);
+      const result = await clipboard.execute("paste", undefined, { signal: controller.signal });
       if (["timeout", "socket closed", "abort"].includes(outcome)) {
         expect(result).toEqual({
           success: false,
@@ -1123,9 +1123,9 @@ describe("Clipboard iOS dispatch outcomes", () => {
         return { success: true, totalTimeMs: 0 };
       },
     }));
-    await expect(clipboard.execute("paste", undefined, controller.signal)).rejects.toThrow(
-      "Operation cancelled",
-    );
+    await expect(
+      clipboard.execute("paste", undefined, { signal: controller.signal }),
+    ).rejects.toThrow("Operation cancelled");
     expect(requests).toBe(0);
   });
 

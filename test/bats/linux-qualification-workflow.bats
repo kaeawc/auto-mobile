@@ -72,3 +72,10 @@ setup() {
   [ "$(cat "$CALLS")" = $'df -h\nsudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost\ndf -h' ]
   yq -o=json '.jobs."emulator-sigsegv".steps' "$workflow" | jq -e '(map(.name // "") | index("Free disk space for emulator")) < (map(.run // "") | index("bash scripts/android/ensure-emulator-sdk.sh"))'
 }
+@test "emulator runtime libraries (libpulse0) are installed after the SDK and before the cell" {
+  yq -o=json '.jobs."emulator-sigsegv".steps' "$workflow" | jq -e '
+    (map(.run // "") | index("bash scripts/android/ensure-emulator-sdk.sh")) as $sdk
+    | (map(select((.run // "") | contains("libpulse0"))) | length) == 1
+    and ((map((.run // "") | contains("libpulse0")) | index(true)) > $sdk)
+    and ((map((.run // "") | contains("libpulse0")) | index(true)) < (map(.run // "") | index("bash scripts/ci/linux-qualification/emulator-cell.sh")))'
+}

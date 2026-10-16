@@ -104,6 +104,11 @@ export interface DevicePoolInternals {
     recovery: SessionPreservingRecovery,
     incidentId: string | undefined,
   ): Promise<SessionPreservingRecoveryResult>;
+  replacePooledDeviceForRuntimeIdentity(
+    pooled: PooledDevice,
+    booted: BootedDevice,
+  ): Promise<boolean>;
+  clearDeviceSessionCache(deviceId: string): Promise<void>;
   captureReleasedDevice(sessionId: string, deviceId: string): void;
   runCoordinatedDeviceStart(device: DeviceInfo, deadlineMs: number, op: "start"): Promise<unknown>;
 }

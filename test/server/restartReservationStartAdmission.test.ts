@@ -1,3 +1,4 @@
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
@@ -1107,11 +1108,7 @@ describe("start admission and owner resume for restart reservations", () => {
 
   test("token restore waiting for assignment cannot record a connection that closed", async () => {
     const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
-    const mutex = (
-      f.pool as unknown as {
-        assignmentMutex: { runExclusive<T>(run: () => Promise<T>): Promise<T> };
-      }
-    ).assignmentMutex;
+    const mutex = poolInternals(f.pool).assignmentMutex;
     const gate = Promise.withResolvers<void>();
     const blocked = mutex.runExclusive(() => gate.promise);
     const restore = f.pool.restoreOwnedDeviceSessionsForMcpSession(

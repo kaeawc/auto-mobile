@@ -4,8 +4,8 @@ import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbC
 import type { Timer } from "../../../utils/SystemTimer";
 import type { QrPosterWriter } from "../../../utils/qr/QrPosterWriter";
 import type { EmulatorConsoleClientFactory } from "../../action/Telephony";
-import type { NetworkFilterBridge } from "../../network-filter/NetworkFilterBridge";
-import type { IosAppNetworkRuleCommandContext } from "../../network-filter/IosAppNetworkRuleClient";
+import type { NetworkFilterBridge } from "../../networkFilter/NetworkFilterBridge";
+import type { IosAppNetworkRuleCommandContext } from "../../networkFilter/IosAppNetworkRuleClient";
 import type { LocationRouteRegistry } from "../LocationRoutePlayer";
 import type {
   DeviceClockAdapter,

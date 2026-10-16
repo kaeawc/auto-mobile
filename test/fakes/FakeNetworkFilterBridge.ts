@@ -15,7 +15,7 @@ import {
   type NetworkFilterSnapshotResult,
   type NetworkFilterState,
   type NetworkFilterStatus,
-} from "../../src/features/network-filter/NetworkFilterBridge";
+} from "../../src/features/networkFilter/NetworkFilterBridge";
 
 export type FakeRuleCommand = "apply" | "reset" | "renew";
 

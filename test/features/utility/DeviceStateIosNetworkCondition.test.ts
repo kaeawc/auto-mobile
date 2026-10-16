@@ -10,8 +10,8 @@ import {
   NETWORK_FILTER_INSTALL_COMMAND,
   type NetworkFilterBridge,
   type NetworkFilterState,
-} from "../../../src/features/network-filter/NetworkFilterBridge";
-import type { IosAppNetworkRuleCommandContext } from "../../../src/features/network-filter/IosAppNetworkRuleClient";
+} from "../../../src/features/networkFilter/NetworkFilterBridge";
+import type { IosAppNetworkRuleCommandContext } from "../../../src/features/networkFilter/IosAppNetworkRuleClient";
 import {
   getDeviceStateResultSchema,
   setDeviceStateResultSchema,

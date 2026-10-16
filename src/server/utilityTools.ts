@@ -1,5 +1,5 @@
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
-import type { NetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
+import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import { createSetActiveDeviceHandler } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
@@ -63,7 +63,7 @@ import {
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
 import { runSessionNetworkMutation, type IosAppNetworkRulePlan } from "./sessionNetworkCondition";
-import type { IosAppNetworkRuleCommandContext } from "../features/network-filter/IosAppNetworkRuleClient";
+import type { IosAppNetworkRuleCommandContext } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
 async function resumeCtrlProxyIfCurrentlyBooted(

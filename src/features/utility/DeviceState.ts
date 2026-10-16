@@ -53,8 +53,8 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   ExecNetworkFilterBridge,
   type NetworkFilterBridge,
-} from "../network-filter/NetworkFilterBridge";
-import type { IosAppNetworkRuleCommandContext } from "../network-filter/IosAppNetworkRuleClient";
+} from "../networkFilter/NetworkFilterBridge";
+import type { IosAppNetworkRuleCommandContext } from "../networkFilter/IosAppNetworkRuleClient";
 import {
   defaultEmulatorConsoleClientFactory,
   type EmulatorConsoleClientFactory,

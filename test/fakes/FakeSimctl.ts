@@ -1,16 +1,16 @@
 import {
-  ISimCtl,
+  SimCtl,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,
-} from "../../src/utils/interfaces/Simctl";
+} from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult, DeviceInfo, ScreenSize } from "../../src/models";
 
 /**
- * Fake implementation of ISimCtl for testing
+ * Fake implementation of SimCtl for testing
  * Allows configuring responses for each method and asserting method calls
  */
-export class FakeSimctl implements ISimCtl {
+export class FakeSimctl implements SimCtl {
   // Configuration state
   private currentDevice: BootedDevice | null = null;
   private availableSimulators: DeviceInfo[] = [];
@@ -188,7 +188,7 @@ export class FakeSimctl implements ISimCtl {
     this.methodCalls.get(methodName)!.push(params);
   }
 
-  // Implementation of ISimCtl interface
+  // Implementation of SimCtl interface
 
   setDevice(device: BootedDevice): void {
     this.recordCall("setDevice", { deviceId: device.deviceId });

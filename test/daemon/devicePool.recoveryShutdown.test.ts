@@ -1023,7 +1023,10 @@ test.each([
       object,
       unknown,
       unknown,
-      unknown
+      unknown,
+      object,
+      object,
+      object
     >;
     const acquire = (deadline: number | undefined) =>
       sessions

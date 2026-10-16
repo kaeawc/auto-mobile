@@ -12,6 +12,7 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { VerifiedArtifactCache } from "../../utils/VerifiedArtifactCache";
 import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
 
 /** Owner read/write only — cache files are per-user, never world-readable. */
@@ -93,6 +94,7 @@ export class VideoServerJarProvider {
   private readonly cacheDir: string;
   private readonly usesDefaultCacheDir: boolean;
   private readonly timer: Timer;
+  private readonly cache: VerifiedArtifactCache;
   private readonly env: NodeJS.ProcessEnv;
 
   /** Single-flight guard: concurrent ensure() calls share one download. */
@@ -102,6 +104,11 @@ export class VideoServerJarProvider {
     this.downloader = deps.downloader ?? new DefaultFileDownloader();
     this.checksumCalculator = deps.checksumCalculator ?? new DefaultChecksumCalculator();
     this.timer = deps.timer ?? defaultTimer;
+    this.cache = new VerifiedArtifactCache({
+      downloader: this.downloader,
+      checksumCalculator: this.checksumCalculator,
+      timer: this.timer,
+    });
     this.env = deps.env ?? process.env;
     this.usesDefaultCacheDir = deps.cacheDir === undefined;
     // Anchor on the shared auto-mobile base-dir resolver so the AUTOMOBILE_DATA_DIR
@@ -203,8 +210,8 @@ export class VideoServerJarProvider {
   }
 
   /**
-   * Return the cached jar path iff the sidecar's recorded sha matches the
-   * expected sha and the on-disk file still matches the recorded size.
+   * Cached iff the sidecar's recorded sha matches the expected sha and the on-disk
+   * file still matches the recorded size.
    *
    * The jar was sha256- and structurally-verified before it was atomically
    * renamed into place at download time, so a cache hit does not re-hash or
@@ -214,37 +221,34 @@ export class VideoServerJarProvider {
    * which re-verifies from scratch.
    */
   private async tryCache(expected: string): Promise<string | null> {
-    let metadata: VideoServerJarMetadata;
-    try {
-      metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8")) as VideoServerJarMetadata;
-    } catch (error) {
-      // No/invalid metadata sidecar is the normal cold-cache case, not an error.
-      logger.debug(`[VIDEO_JAR] No usable cache metadata (cache miss): ${error}`);
-      return null;
-    }
+    const hit = await this.cache.isCached<VideoServerJarMetadata>({
+      label: "[VIDEO_JAR]",
+      subject: "jar",
+      expectedSha256: expected,
+      metadataPath: this.metadataPath,
+      parseMetadata: (value) => (isJarMetadata(value) ? value : null),
+      verifyArtifact: (metadata) => this.isCachedJarIntact(metadata),
+    });
+    return hit ? this.cachedJarPath : null;
+  }
 
-    if (metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
-      return null;
-    }
-
+  private async isCachedJarIntact(metadata: VideoServerJarMetadata): Promise<boolean> {
     let stats: Awaited<ReturnType<typeof fs.stat>>;
     try {
       stats = await fs.stat(this.cachedJarPath);
     } catch (error) {
       // Metadata present but the jar file is gone — treat as a cache miss.
       logger.debug(`[VIDEO_JAR] Cached jar file missing despite metadata: ${error}`);
-      return null;
+      return false;
     }
-
     if (stats.size !== metadata.size) {
       logger.warn("[VIDEO_JAR] Cached jar size differs from sidecar; will re-download", {
         expected: metadata.size,
         actual: stats.size,
       });
-      return null;
+      return false;
     }
-
-    return this.cachedJarPath;
+    return true;
   }
 
   /**
@@ -270,62 +274,44 @@ export class VideoServerJarProvider {
     const tempPath = `${jarPath}.download`;
 
     logger.info("[VIDEO_JAR] Downloading persistent-encoder jar", { url, destination: tempPath });
-    try {
-      await this.downloader.download(url, tempPath);
-      await fs.chmod(tempPath, SECURE_FILE_MODE);
-
-      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(tempPath);
-      if (actual.toLowerCase() !== expected.toLowerCase()) {
-        // A downloaded jar that does not match its pinned checksum is corrupted
-        // or tampered — an actionable failure surfaced to the caller, never
-        // silently cached. (The caller decides degrade-vs-fatal for the *absent*
-        // checksum case; a mismatch is unconditional.)
-        throw new ActionableError(
-          `video-server jar checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
+    await this.cache.fetch({
+      label: "[VIDEO_JAR]",
+      expectedSha256: expected,
+      url,
+      archivePath: tempPath,
+      metadataPath: path.join(dir, VIDEO_SERVER_JAR_METADATA_FILENAME),
+      metadataMode: SECURE_FILE_MODE,
+      afterDownload: (downloaded) => fs.chmod(downloaded, SECURE_FILE_MODE),
+      // A downloaded jar that does not match its pinned checksum is corrupted
+      // or tampered — an actionable failure surfaced to the caller, never
+      // silently cached. (The caller decides degrade-vs-fatal for the *absent*
+      // checksum case; a mismatch is unconditional.)
+      mismatchError: (want, actual) =>
+        new ActionableError(
+          `video-server jar checksum verification failed. Expected: ${want}, Got: ${actual}. ` +
             "The downloaded automobile-video.jar does not match the pinned release checksum; " +
             "this indicates a corrupted or tampered download and is never silently accepted.",
-        );
-      }
-
-      // Structural check catches a truncated file or an HTML error page saved
-      // with a .jar name before it is ever pushed to a device.
-      if (!this.hasClassesDex(tempPath)) {
-        throw new ActionableError(
-          "video-server jar is not a valid zip containing classes.dex (truncated or error-page download).",
-        );
-      }
-
-      const { size } = await fs.stat(tempPath);
-      await fs.rename(tempPath, jarPath);
-      await this.writeMetadata(dir, actual, size);
-      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", {
-        path: jarPath,
-        sha256: actual,
-      });
-      return jarPath;
-    } catch (error) {
-      await fs.rm(tempPath, { force: true }).catch((cleanupError) => {
-        logger.warn(
-          `[VIDEO_JAR] Failed to remove partial download ${tempPath}: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
-      });
-      throw error;
-    }
-  }
-
-  private async writeMetadata(dir: string, sha256: string, size: number): Promise<void> {
-    const metadata: VideoServerJarMetadata = {
-      version: resolvePinnedVersion(this.env),
-      sha256,
-      size,
-      downloadedAt: this.timer.now(),
-    };
-    await fs.writeFile(
-      path.join(dir, VIDEO_SERVER_JAR_METADATA_FILENAME),
-      JSON.stringify(metadata, null, 2),
-      { encoding: "utf8", mode: SECURE_FILE_MODE },
-    );
+        ),
+      publish: async (downloaded, sha256) => {
+        // Structural check catches a truncated file or an HTML error page saved
+        // with a .jar name before it is ever pushed to a device.
+        if (!this.hasClassesDex(downloaded)) {
+          throw new ActionableError(
+            "video-server jar is not a valid zip containing classes.dex (truncated or error-page download).",
+          );
+        }
+        const { size } = await fs.stat(downloaded);
+        await fs.rename(downloaded, jarPath);
+        logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", { path: jarPath, sha256 });
+        return {
+          version: resolvePinnedVersion(this.env),
+          sha256,
+          size,
+          downloadedAt: this.timer.now(),
+        } satisfies VideoServerJarMetadata;
+      },
+    });
+    return jarPath;
   }
 
   /** True iff `filePath` is a readable zip containing a `classes.dex` entry. */
@@ -342,4 +328,15 @@ export class VideoServerJarProvider {
       return false;
     }
   }
+}
+
+function isJarMetadata(value: unknown): value is VideoServerJarMetadata {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sha256" in value &&
+    typeof value.sha256 === "string" &&
+    "size" in value &&
+    typeof value.size === "number"
+  );
 }

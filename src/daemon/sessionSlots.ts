@@ -1,5 +1,25 @@
+/** Registration seam lets tests deliver cleanup without relying on real garbage collection. */
+export interface FinalizationRegistryLike<T> {
+  register(target: object, held: T): void;
+}
+
 /** Lifecycle facets retain the legacy maps' identity and insertion order. */
-export class SessionSlots<A, Sh, C, R extends object, Rel, Reb, Cleanup> {
+export class SessionSlots<
+  A,
+  Sh,
+  C,
+  R extends object,
+  Rel,
+  Reb,
+  Cleanup,
+  Op,
+  Snapshot,
+  S extends object,
+  TerminalSnapshot = Snapshot,
+  Reason = unknown,
+  Reservation = unknown,
+  Intent = unknown,
+> {
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments = new Map<string, A>();
   private readonly sharedSessionAssignments = new Map<string, Sh>();
@@ -18,6 +38,262 @@ export class SessionSlots<A, Sh, C, R extends object, Rel, Reb, Cleanup> {
     Cleanup,
     { sessionId: string; deviceId: string }
   >();
+
+  private readonly releasePromises = new Map<string, Op>();
+  /** Every release still running, including an older session that reused a UUID. */
+  private readonly activeReleasePromises = new Set<Op>();
+  /** Forced non-terminal snapshots belong to the exact incarnation, even if teardown stays stuck. */
+  private readonly forcedNonTerminalReleases = new WeakMap<S, Snapshot>();
+  /** Sessions whose teardown has closed admission for further device-state setup. */
+  private readonly releasingSessions = new WeakSet<S>();
+
+  private readonly terminalReleaseSnapshots = new Map<string, TerminalSnapshot>();
+  /** Finalized terminal state used to coalesce UUID-only recovery retries. */
+  private readonly terminalReleaseReasonStates = new Map<string, Reason>();
+  /** UUID admission fences held while a device shutdown decides its terminal outcome. */
+  private readonly terminalReleaseReservations = new Map<string, Reservation>();
+  /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
+  private readonly latestFinalizedSessionIdentities = new Map<string, WeakRef<S>>();
+  private readonly finalizedSessionIdentityRegistry: FinalizationRegistryLike<{
+    sessionId: string;
+    identity: WeakRef<S>;
+  }>;
+  /** Recovered intents fence UUIDs until their terminal row writes land. */
+  private readonly recoveredTerminalReleaseIntents = new Map<string, Intent>();
+  /** Dead peer journals are read only once after startup (#11355). */
+  private readonly adoptedDeadDaemonJournals = new Set<string>();
+  /** An adopted intent applies only while its row still belongs to this dead daemon. */
+  private readonly adoptedTerminalReleaseOwners = new Map<string, string>();
+
+  constructor(
+    options: {
+      createFinalizationRegistry?: (
+        cleanup: (held: { sessionId: string; identity: WeakRef<S> }) => void,
+      ) => FinalizationRegistryLike<{ sessionId: string; identity: WeakRef<S> }>;
+    } = {},
+  ) {
+    const cleanup = ({ sessionId, identity }: { sessionId: string; identity: WeakRef<S> }) => {
+      if (this.latestFinalizedSessionIdentities.get(sessionId) === identity) {
+        this.latestFinalizedSessionIdentities.delete(sessionId);
+      }
+    };
+    this.finalizedSessionIdentityRegistry = options.createFinalizationRegistry
+      ? options.createFinalizationRegistry(cleanup)
+      : new FinalizationRegistry(cleanup);
+  }
+
+  recordFinalizedIdentity(session: S & { sessionId: string }): void {
+    const existingIdentity = this.latestFinalizedSessionIdentities.get(session.sessionId);
+    if (existingIdentity?.deref() === session) {
+      return;
+    }
+    const identity = new WeakRef(session);
+    this.latestFinalizedSessionIdentities.set(session.sessionId, identity);
+    this.finalizedSessionIdentityRegistry.register(session, {
+      sessionId: session.sessionId,
+      identity,
+    });
+  }
+
+  get terminalSnapshots(): ReadonlyMap<string, TerminalSnapshot> {
+    return this.terminalReleaseSnapshots;
+  }
+
+  getTerminalSnapshot(id: string): TerminalSnapshot | undefined {
+    return this.terminalReleaseSnapshots.get(id);
+  }
+
+  hasTerminalSnapshot(id: string): boolean {
+    return this.terminalReleaseSnapshots.has(id);
+  }
+
+  setTerminalSnapshot(id: string, value: TerminalSnapshot): void {
+    this.terminalReleaseSnapshots.set(id, value);
+  }
+
+  deleteTerminalSnapshot(id: string): boolean {
+    return this.terminalReleaseSnapshots.delete(id);
+  }
+
+  get terminalReasonStates(): ReadonlyMap<string, Reason> {
+    return this.terminalReleaseReasonStates;
+  }
+
+  getTerminalReasonState(id: string): Reason | undefined {
+    return this.terminalReleaseReasonStates.get(id);
+  }
+
+  hasTerminalReasonState(id: string): boolean {
+    return this.terminalReleaseReasonStates.has(id);
+  }
+
+  setTerminalReasonState(id: string, value: Reason): void {
+    this.terminalReleaseReasonStates.set(id, value);
+  }
+
+  deleteTerminalReasonState(id: string): boolean {
+    return this.terminalReleaseReasonStates.delete(id);
+  }
+
+  get terminalReservations(): ReadonlyMap<string, Reservation> {
+    return this.terminalReleaseReservations;
+  }
+
+  getTerminalReservation(id: string): Reservation | undefined {
+    return this.terminalReleaseReservations.get(id);
+  }
+
+  hasTerminalReservation(id: string): boolean {
+    return this.terminalReleaseReservations.has(id);
+  }
+
+  setTerminalReservation(id: string, value: Reservation): void {
+    this.terminalReleaseReservations.set(id, value);
+  }
+
+  deleteTerminalReservation(id: string): boolean {
+    return this.terminalReleaseReservations.delete(id);
+  }
+
+  get latestFinalizedIdentities(): ReadonlyMap<string, WeakRef<S>> {
+    return this.latestFinalizedSessionIdentities;
+  }
+
+  getFinalizedIdentity(id: string): WeakRef<S> | undefined {
+    return this.latestFinalizedSessionIdentities.get(id);
+  }
+
+  hasFinalizedIdentity(id: string): boolean {
+    return this.latestFinalizedSessionIdentities.has(id);
+  }
+
+  setFinalizedIdentity(id: string, value: WeakRef<S>): void {
+    this.latestFinalizedSessionIdentities.set(id, value);
+  }
+
+  deleteFinalizedIdentity(id: string): boolean {
+    return this.latestFinalizedSessionIdentities.delete(id);
+  }
+
+  get recoveredTerminalIntents(): ReadonlyMap<string, Intent> {
+    return this.recoveredTerminalReleaseIntents;
+  }
+
+  getRecoveredTerminalIntent(id: string): Intent | undefined {
+    return this.recoveredTerminalReleaseIntents.get(id);
+  }
+
+  hasRecoveredTerminalIntent(id: string): boolean {
+    return this.recoveredTerminalReleaseIntents.has(id);
+  }
+
+  setRecoveredTerminalIntent(id: string, value: Intent): void {
+    this.recoveredTerminalReleaseIntents.set(id, value);
+  }
+
+  deleteRecoveredTerminalIntent(id: string): boolean {
+    return this.recoveredTerminalReleaseIntents.delete(id);
+  }
+
+  get adoptedTerminalOwners(): ReadonlyMap<string, string> {
+    return this.adoptedTerminalReleaseOwners;
+  }
+
+  getAdoptedTerminalOwner(id: string): string | undefined {
+    return this.adoptedTerminalReleaseOwners.get(id);
+  }
+
+  hasAdoptedTerminalOwner(id: string): boolean {
+    return this.adoptedTerminalReleaseOwners.has(id);
+  }
+
+  setAdoptedTerminalOwner(id: string, value: string): void {
+    this.adoptedTerminalReleaseOwners.set(id, value);
+  }
+
+  deleteAdoptedTerminalOwner(id: string): boolean {
+    return this.adoptedTerminalReleaseOwners.delete(id);
+  }
+
+  get adoptedDeadJournals(): ReadonlySet<string> {
+    return this.adoptedDeadDaemonJournals;
+  }
+
+  hasAdoptedDeadJournal(owner: string): boolean {
+    return this.adoptedDeadDaemonJournals.has(owner);
+  }
+
+  addAdoptedDeadJournal(owner: string): void {
+    this.adoptedDeadDaemonJournals.add(owner);
+  }
+
+  deleteAdoptedDeadJournal(owner: string): boolean {
+    return this.adoptedDeadDaemonJournals.delete(owner);
+  }
+
+  get releaseOps(): ReadonlyMap<string, Op> {
+    return this.releasePromises;
+  }
+
+  getReleaseOp(id: string): Op | undefined {
+    return this.releasePromises.get(id);
+  }
+
+  hasReleaseOp(id: string): boolean {
+    return this.releasePromises.has(id);
+  }
+
+  setReleaseOp(id: string, value: Op): void {
+    this.releasePromises.set(id, value);
+  }
+
+  deleteReleaseOp(id: string): boolean {
+    return this.releasePromises.delete(id);
+  }
+
+  get activeReleases(): ReadonlySet<Op> {
+    return this.activeReleasePromises;
+  }
+
+  addActiveRelease(op: Op): void {
+    this.activeReleasePromises.add(op);
+  }
+
+  hasActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.has(op);
+  }
+
+  deleteActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.delete(op);
+  }
+
+  markReleasing(session: S): void {
+    this.releasingSessions.add(session);
+  }
+
+  unmarkReleasing(session: S): boolean {
+    return this.releasingSessions.delete(session);
+  }
+
+  isReleasing(session: S): boolean {
+    return this.releasingSessions.has(session);
+  }
+
+  getForcedNonTerminal(session: S): Snapshot | undefined {
+    return this.forcedNonTerminalReleases.get(session);
+  }
+
+  setForcedNonTerminal(session: S, snapshot: Snapshot): void {
+    this.forcedNonTerminalReleases.set(session, snapshot);
+  }
+
+  hasForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.has(session);
+  }
+
+  deleteForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.delete(session);
+  }
 
   get assignments(): ReadonlyMap<string, A> {
     return this.pendingSessionAssignments;

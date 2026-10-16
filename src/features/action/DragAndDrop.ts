@@ -25,6 +25,7 @@ import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { DRAG_INTENT } from "../utility/SelectionPolicy";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -597,7 +598,7 @@ export class DragAndDrop extends BaseVisualChange {
     target: DragAndDropTarget & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
   ) {
     const selectionOptions = {
-      intentAction: "drag" as const,
+      ...DRAG_INTENT,
       screenSizeOptions: target.screenSizeOptions,
       container: target.container,
       strategy: target.selectionStrategy,

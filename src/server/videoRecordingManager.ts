@@ -1,3 +1,4 @@
+import { ENV, readEnvNumber, type EnvVarSpec } from "../config/env";
 import {
   defaultRecordingCodecProbe,
   probeDurationMs,
@@ -99,19 +100,14 @@ export interface VideoRetentionPolicy {
   inProgressCheckIntervalMs: number;
 }
 
-function parseEnvNumber(raw: string | undefined, fallback: number, allowZero: boolean): number {
-  if (raw === undefined || raw.trim() === "") {
-    return fallback;
-  }
-  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- deliberately lenient: zero (disables the sweep) and fractional values are valid here.
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
-    logger.warn(
-      `[VideoRecording] Ignoring invalid retention env value "${raw}"; using ${fallback}`,
-    );
-    return fallback;
-  }
-  return parsed;
+function parseEnvNumber(spec: EnvVarSpec, env: NodeJS.ProcessEnv, fallback: number): number {
+  return (
+    readEnvNumber(spec, env, (raw) =>
+      logger.warn(
+        `[VideoRecording] Ignoring invalid retention env value "${raw}"; using ${fallback}`,
+      ),
+    ) ?? fallback
+  );
 }
 
 /**
@@ -122,20 +118,16 @@ function parseEnvNumber(raw: string | undefined, fallback: number, allowZero: bo
 export function resolveVideoRetentionPolicy(
   env: NodeJS.ProcessEnv = process.env,
 ): VideoRetentionPolicy {
-  const days = parseEnvNumber(
-    env.AUTOMOBILE_VIDEO_RETENTION_DAYS ?? env.AUTO_MOBILE_VIDEO_RETENTION_DAYS,
-    DEFAULT_RETENTION_DAYS,
-    true,
-  );
+  const days = parseEnvNumber(ENV.VIDEO_RETENTION_DAYS, env, DEFAULT_RETENTION_DAYS);
   const sweepMinutes = parseEnvNumber(
-    env.AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES ?? env.AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES,
+    ENV.VIDEO_RETENTION_SWEEP_MINUTES,
+    env,
     DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES,
-    false,
   );
   const checkSeconds = parseEnvNumber(
-    env.AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS ?? env.AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS,
+    ENV.VIDEO_INPROGRESS_CHECK_SECONDS,
+    env,
     DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS,
-    false,
   );
   return {
     ttlMs: Math.max(0, Math.floor(days * MS_PER_DAY)),

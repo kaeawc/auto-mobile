@@ -49,6 +49,12 @@ jobs:
           # Always preserve the report files even if detection failed
           exit 0
 
+      - name: "Production-Entry Unreachable Files (advisory)"
+        run: |
+          # Test-only production modules look used to the default run because tests
+          # count as entries. This run starts only from the CLI/server entry points.
+          bun run dead-code:ts:production | tee reports/production-unreachable-files.txt || true
+
       - name: "Upload Dead Code Report (JSON)"
         uses: actions/upload-artifact@v6
         if: always()

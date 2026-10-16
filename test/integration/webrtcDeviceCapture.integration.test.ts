@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
-import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
+import { sendWebRtcStreamRequest } from "../../scripts/lib/webrtcStreamClient";
 import { ActionableError } from "../../src/models";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";

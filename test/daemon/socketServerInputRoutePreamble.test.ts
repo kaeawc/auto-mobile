@@ -38,7 +38,15 @@ function fixture() {
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );
-  return { timer, preamble: server as unknown as Preamble };
+  // Bracket access reaches the private preamble helpers without a type-erasing cast.
+  const preamble: Preamble = {
+    inputRouteClock: (request, input) => server["inputRouteClock"](request, input),
+    remainingInputBudgetMs: (toolName, origin, queueEnterMs, totalTimeoutMs) =>
+      server["remainingInputBudgetMs"](toolName, origin, queueEnterMs, totalTimeoutMs),
+    requireLiveInputAttempt: (signal, deviceId, frameContext, label) =>
+      server["requireLiveInputAttempt"](signal, deviceId, frameContext, label),
+  };
+  return { timer, preamble };
 }
 
 const INPUT_METHODS = [

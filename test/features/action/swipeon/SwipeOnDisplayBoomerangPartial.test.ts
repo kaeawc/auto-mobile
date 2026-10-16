@@ -79,7 +79,7 @@ test("cancelling during the display apex pause stops before the return leg", asy
     return new Promise<void>(() => {});
   });
 
-  const error = await h.action.execute(boomerang, undefined, controller.signal).then(
+  const error = await h.action.execute(boomerang, { signal: controller.signal }).then(
     () => undefined,
     (caught: unknown) => caught,
   );

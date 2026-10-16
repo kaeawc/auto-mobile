@@ -334,8 +334,7 @@ describe("explicit action display", () => {
                 : action instanceof SwipeOn
                   ? action.execute(
                       { direction: "up", display: "external" },
-                      undefined,
-                      controller.signal,
+                      { signal: controller.signal },
                     )
                   : action.execute(
                       {
@@ -343,8 +342,7 @@ describe("explicit action display", () => {
                         target: { text: "Notifications" },
                         display: "external",
                       },
-                      undefined,
-                      controller.signal,
+                      { signal: controller.signal },
                     );
           if (outcome.startsWith("abort-")) {
             await expect(pending).rejects.toThrow("Operation cancelled");
@@ -598,7 +596,7 @@ describe("explicit action display", () => {
     });
     const signal = new AbortController().signal;
     expect(
-      (await swipe.execute({ direction: "up", display: "external" }, undefined, signal)).success,
+      (await swipe.execute({ direction: "up", display: "external" }, { signal })).success,
     ).toBe(true);
     expect(fakeAdb.getCommandCalls().at(-1)?.signal).toBe(signal);
     expect(observe.getExecuteOptions().at(-1)?.signal).toBe(signal);
@@ -1723,8 +1721,7 @@ describe("CtrlProxy display-targeted action routing", () => {
               : action instanceof SwipeOn
                 ? await action.execute(
                     { direction: "up", display: "external" },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   )
                 : await action.execute(
                     {
@@ -1732,8 +1729,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                       target: { text: "Notifications" },
                       display: "external",
                     },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   );
         expect(result.success).toBe(true);
         expect(result.observation?.display.key).toBe("external");
@@ -1876,8 +1872,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                 });
                 result = await action.execute(
                   { direction: "up", display: panel },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (gesture === "drag") {
                 const action = new DragAndDrop(
@@ -1893,8 +1888,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                     target: { text: "Settings" },
                     display: panel,
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else {
                 const action = new PinchOn(android, executor as unknown as AdbClient, deps);
@@ -1908,8 +1902,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                     display: panel,
                     autoTarget: false,
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               }
               const calls = [
@@ -2061,24 +2054,21 @@ describe("display routing capability lookup fences", () => {
             });
             pending = action.execute(
               { direction: "up", display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else if (gesture === "drag") {
             const action = new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { source: { text: "Settings" }, target: { text: "Settings" }, display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else {
             const action = new PinchOn(android, executor as unknown as AdbClient, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { direction: "in", display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           }
           if (interrupt === "cancel") {
@@ -2212,17 +2202,15 @@ describe("display gesture dispatch boundary race", () => {
               : action instanceof TapAtCoordinate
                 ? action.execute({ x: 40, y: 50, display }, undefined, controller.signal)
                 : action instanceof SwipeOn
-                  ? action.execute({ direction: "up", display }, undefined, controller.signal)
+                  ? action.execute({ direction: "up", display }, { signal: controller.signal })
                   : action instanceof DragAndDrop
                     ? action.execute(
                         { source: { text: "Settings" }, target: { text: "Settings" }, display },
-                        undefined,
-                        controller.signal,
+                        { signal: controller.signal },
                       )
                     : action.execute(
                         { direction: "in", display, autoTarget: false },
-                        undefined,
-                        controller.signal,
+                        { signal: controller.signal },
                       )
           ).then(
             (result) => ({ result, error: undefined }),

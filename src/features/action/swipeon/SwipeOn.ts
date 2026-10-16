@@ -109,6 +109,7 @@ import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayCon
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { assessSwipeNavigation } from "./swipeNavigation";
 import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle";
+import { resolveActionCall, type ActionCall } from "../ActionCall";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -1138,11 +1139,19 @@ export class SwipeOn extends BaseVisualChange {
     return undefined;
   }
 
+  async execute(options: SwipeOnOptions, call?: ActionCall): Promise<SwipeOnResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     options: SwipeOnOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<SwipeOnResult>;
+  async execute(
+    options: SwipeOnOptions,
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     return withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );
@@ -1436,7 +1445,7 @@ export class SwipeOn extends BaseVisualChange {
     if (normalizedOptions.lookFor) {
       // Scroll-until-visible mode
       logger.info(`[SwipeOn] Mode: scroll-until-visible`);
-      return action.scrollUntilVisible.execute(normalizedOptions, progress, perf, signal);
+      return action.scrollUntilVisible.execute(normalizedOptions, { progress, perf, signal });
     } else if (!normalizedOptions.container) {
       const autoTargetEnabled = normalizedOptions.autoTarget !== false;
       if (!autoTargetEnabled) {

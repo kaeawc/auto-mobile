@@ -10,6 +10,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 /**
  * Executes swipe gestures on specific UI elements
@@ -40,10 +41,25 @@ export class SwipeOnElement extends BaseVisualChange {
   async execute(
     element: Element,
     direction: "up" | "down" | "left" | "right",
-    options: GestureOptions = {},
+    options?: GestureOptions,
+    call?: ActionCall,
+  ): Promise<SwipeResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(
+    element: Element,
+    direction: "up" | "down" | "left" | "right",
+    options?: GestureOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<SwipeResult>;
+  async execute(
+    element: Element,
+    direction: "up" | "down" | "left" | "right",
+    options: GestureOptions = {},
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<SwipeResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOnElement");
 

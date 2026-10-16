@@ -1137,14 +1137,7 @@ export class Explore extends BaseVisualChange {
       container ? "swipeOn" : null,
       container ? { container, direction: "up", speed: "slow" } : {},
       observation,
-      () =>
-        swipeOn.execute(
-          element,
-          "up",
-          { duration: 600 }, // Slow swipe
-          progress,
-          signal,
-        ),
+      () => swipeOn.execute(element, "up", { duration: 600 }, { progress, signal }),
     );
     return result.success;
   }

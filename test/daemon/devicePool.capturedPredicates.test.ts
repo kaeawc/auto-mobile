@@ -1,3 +1,4 @@
+import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
@@ -94,7 +95,7 @@ const rows: PredicateRow[] = [
   {
     name: "error entry with matching owner",
     prepare: ({ device }) => {
-      device.status = "error";
+      markDeviceError(device);
     },
     expected: [true, false, false, true],
   },

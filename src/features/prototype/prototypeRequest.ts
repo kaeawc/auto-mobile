@@ -287,6 +287,47 @@ function entryText(
   return "message" in text ? failure("invalid_request", text.message) : text;
 }
 
+const formPair = (name: string, value: string): string =>
+  new URLSearchParams([[name, value]]).toString();
+const pieceName = (piece: string): string =>
+  new URLSearchParams(piece.split("=", 1)[0]).keys().next().value ?? "";
+
+/**
+ * The URL with each authored entry set, in the given (sorted) order: a key's first existing piece
+ * is replaced in place and its later duplicates removed, an absent key is appended. Only the set
+ * pieces are re-encoded (form encoding, space as `+`); every other piece keeps its exact spelling
+ * (`?flag`, `%20`), and with no entries the query is untouched. Kotlin and Swift do the same.
+ */
+function withQuery(target: URL, entries: readonly [string, string][]): string {
+  if (entries.length === 0) {
+    return target.toString();
+  }
+  const href = target.href;
+  const hashAt = href.indexOf("#");
+  const fragment = hashAt < 0 ? "" : href.slice(hashAt);
+  const beforeFragment = hashAt < 0 ? href : href.slice(0, hashAt);
+  const queryAt = beforeFragment.indexOf("?");
+  const base = queryAt < 0 ? beforeFragment : beforeFragment.slice(0, queryAt);
+  const pieces = (queryAt < 0 ? "" : beforeFragment.slice(queryAt + 1))
+    .split("&")
+    .filter((piece) => piece.length > 0);
+  for (const [name, value] of entries) {
+    const encoded = formPair(name, value);
+    const first = pieces.findIndex((piece) => pieceName(piece) === name);
+    if (first < 0) {
+      pieces.push(encoded);
+      continue;
+    }
+    pieces[first] = encoded;
+    for (let at = pieces.length - 1; at > first; at--) {
+      if (pieceName(pieces[at]!) === name) {
+        pieces.splice(at, 1);
+      }
+    }
+  }
+  return `${base}?${pieces.join("&")}${fragment}`;
+}
+
 /** Swift cannot keep JSON key order, so query entries use one canonical order everywhere. */
 function entriesOf(action: Record<string, unknown>, field: "headers" | "query") {
   const entries = Object.entries((action[field] ?? {}) as Record<string, unknown>);
@@ -301,7 +342,8 @@ const compareUtf16 = ([a]: [string, unknown], [b]: [string, unknown]): number =>
  * committed `state` and `data` at the action. `url` is the action's `url` after the usual text
  * placeholders (`{key}`, `{data:/pointer}`, repeat) are bound; `item` and `index` bindings must
  * already be expanded to `{value}`. Each `query` entry is set (not appended) on the URL, in
- * sorted key order (UTF-16 code units, the rule every runtime shares), so a query key already in `url` is replaced. A binding whose source is missing
+ * sorted key order (UTF-16 code units, the rule every runtime shares), touching only its own
+ * pieces (see `withQuery`), so a query key already in `url` is replaced. A binding whose source is missing
  * or is not a scalar (header, query) fails the request as `invalid_request`.
  */
 export function resolvePrototypeRequest(
@@ -314,6 +356,7 @@ export function resolvePrototypeRequest(
     return target;
   }
   const headers: Record<string, string> = {};
+  const query: [string, string][] = [];
   for (const field of ["headers", "query"] as const) {
     for (const [name, raw] of entriesOf(action, field)) {
       const entry = entryText(raw, `${field}.${name}`, inputs);
@@ -323,7 +366,7 @@ export function resolvePrototypeRequest(
       if (field === "headers") {
         headers[name] = entry.text;
       } else {
-        target.searchParams.set(name, entry.text);
+        query.push([name, entry.text]);
       }
     }
   }
@@ -338,6 +381,11 @@ export function resolvePrototypeRequest(
     (action.method as PrototypeRequestMethod | undefined) ?? PROTOTYPE_REQUEST_DEFAULT_METHOD;
   return {
     success: true,
-    request: { method, url: target.toString(), headers, ...(body ? { body: body.value } : {}) },
+    request: {
+      method,
+      url: withQuery(target, query),
+      headers,
+      ...(body ? { body: body.value } : {}),
+    },
   };
 }

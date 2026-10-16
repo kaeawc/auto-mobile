@@ -577,7 +577,7 @@ state key, header names, entry counts, `timeoutMs` 1 to 30000, follow-up lists o
 `url`, `statusKey`, `into`, header and query strings, binding objects and nested follow-up lists per
 row. Query entries are set on the URL in sorted key order (UTF-16 code units, the same as JS
 `sort()`) on every runtime; the Swift decoder holds `query` as an unordered dictionary, so the rule
-is canonical rather than authored order, and the resolved URL and event `url` match the host's. A
+is canonical rather than authored order, and the resolved URL and event `url` match the host's. The query is edited on its raw `&`-separated pieces, not re-serialized: a set key replaces its first piece in place (later duplicates removed), new keys append, and untouched pieces keep their spelling (`flag`, `%20`); see the request section of the prototype UX doc. A
 string body without an author-set `Content-Type` is sent as `text/plain; charset=utf-8` and any
 other JSON body as `application/json`, as on the host and Android.
 

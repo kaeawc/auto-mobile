@@ -437,6 +437,23 @@ describe("resolvePrototypeRequest", () => {
     expect(resolved).toMatchObject({ request: { url: "http://a.test/p?a=2&z=1" } });
   });
 
+  test("query entries touch only their own pieces, in place, with form encoding", () => {
+    const urlFor = (query: Raw, url: string) => {
+      const resolved = resolvePrototypeRequest(request({ query }), url, inputs);
+      return resolved.success ? resolved.request.url : resolved;
+    };
+    expect(urlFor({ a: "2" }, "http://h.test/p?a=1&b=x%20y&a=3&c")).toBe(
+      "http://h.test/p?a=2&b=x%20y&c",
+    );
+    expect(urlFor({}, "http://h.test/p?flag&x=%20")).toBe("http://h.test/p?flag&x=%20");
+    expect(urlFor({ b: "2" }, "http://h.test/p?a=1")).toBe("http://h.test/p?a=1&b=2");
+    expect(urlFor({ z: "1", a: "2" }, "http://h.test/p")).toBe("http://h.test/p?a=2&z=1");
+    expect(urlFor({ "a b": "x y" }, "http://h/p?a+b=1&c#frag")).toBe("http://h/p?a+b=x+y&c#frag");
+    expect(urlFor({ q: "a&b=c d", é: "~*" }, "http://h/p")).toBe(
+      "http://h/p?q=a%26b%3Dc+d&%C3%A9=%7E*",
+    );
+  });
+
   test("a body binding reads state and data", () => {
     expect(
       resolvePrototypeRequest(

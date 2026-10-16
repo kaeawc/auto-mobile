@@ -133,8 +133,9 @@ enum PrototypeRequestResolver {
 
 /// The resolved request URL: the Swift twin of `new URL(url)` plus `searchParams.set` for the
 /// parts a request needs. It lowercases the scheme and host, drops a default port, percent-encodes
-/// what a URL cannot hold and, when `query` has entries, rewrites the query in
-/// `application/x-www-form-urlencoded` form with each name set (replacing every earlier one).
+/// what a URL cannot hold and, when `query` has entries, sets each name on the raw query pieces (the
+/// first occurrence replaced in place, later ones removed, new names appended), form-encoding only
+/// the pieces it sets.
 /// Dot-segments in the path are not collapsed.
 enum PrototypeRequestURL {
     static func resolve(
@@ -168,7 +169,7 @@ enum PrototypeRequestURL {
         }
         var url = "\(scheme)://\(host)\(path.isEmpty ? "/" : encode(path, allowed: .urlPathAllowed))"
         if !query.isEmpty {
-            url += "?" + formEncoded(setting: query, into: pairs(of: rawQuery ?? ""))
+            url += "?" + settingQuery(query, in: rawQuery.map { encode($0, allowed: .urlQueryAllowed) } ?? "")
         } else if let rawQuery {
             url += "?" + encode(rawQuery, allowed: .urlQueryAllowed)
         }
@@ -225,37 +226,31 @@ enum PrototypeRequestURL {
         return out
     }
 
-    private static func pairs(of query: String) -> [(name: String, value: String)] {
-        query.split(separator: "&", omittingEmptySubsequences: true).map { part in
-            let pieces = part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            return (decode(String(pieces[0])), decode(pieces.count > 1 ? String(pieces[1]) : ""))
-        }
-    }
-
     private static func decode(_ component: String) -> String {
         let plusAsSpace = component.replacingOccurrences(of: "+", with: " ")
         return plusAsSpace.removingPercentEncoding ?? plusAsSpace
     }
 
-    /// `URLSearchParams.set` for each entry in order, then the whole query serialized.
-    private static func formEncoded(
-        setting entries: [(name: String, value: String)], into existing: [(name: String, value: String)]
-    )
-        -> String
-    {
-        var pairs = existing
+    /// Sets each entry (the caller passes them in sorted key order) on the raw `&`-separated pieces:
+    /// a key's first existing piece is replaced in place and its later duplicates removed, an absent
+    /// key is appended. Only set pieces are form-encoded; every other piece keeps its exact spelling
+    /// (`flag`, `%20`). `percentEncodedQuery`-style raw pieces, as on the host and Android.
+    private static func settingQuery(_ entries: [(name: String, value: String)], in rawQuery: String) -> String {
+        var pieces = rawQuery.split(separator: "&", omittingEmptySubsequences: true).map(String.init)
         for entry in entries {
-            if let first = pairs.firstIndex(where: { $0.name == entry.name }) {
-                pairs[first].value = entry.value
-                var cursor = pairs.index(after: first)
-                while cursor < pairs.endIndex {
-                    if pairs[cursor].name == entry.name { pairs.remove(at: cursor) } else { cursor += 1 }
-                }
-            } else {
-                pairs.append(entry)
+            let encoded = "\(formComponent(entry.name))=\(formComponent(entry.value))"
+            let isNamed = { (piece: String) in decode(String(piece.prefix { $0 != "=" })) == entry.name }
+            guard let first = pieces.firstIndex(where: isNamed) else {
+                pieces.append(encoded)
+                continue
+            }
+            pieces[first] = encoded
+            var cursor = pieces.index(after: first)
+            while cursor < pieces.endIndex {
+                if isNamed(pieces[cursor]) { pieces.remove(at: cursor) } else { cursor += 1 }
             }
         }
-        return pairs.map { "\(formComponent($0.name))=\(formComponent($0.value))" }.joined(separator: "&")
+        return pieces.joined(separator: "&")
     }
 
     private static func formComponent(_ text: String) -> String {

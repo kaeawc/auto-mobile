@@ -661,6 +661,25 @@ final class PrototypeRequestTests: XCTestCase {
         XCTAssertEqual(encoded, "http://h/p?q=a%26b%3Dc+d&%C3%A9=%7E*")
     }
 
+    func testUrlQueryEntriesTouchOnlyTheirOwnPieces() throws {
+        let cases: [(String, [(String, String)], String)] = [
+            ("http://h.test/p?a=1&b=x%20y&a=3&c", [("a", "2")], "http://h.test/p?a=2&b=x%20y&c"),
+            ("http://h.test/p?flag&x=%20", [], "http://h.test/p?flag&x=%20"),
+            ("http://h.test/p?a=1", [("b", "2")], "http://h.test/p?a=1&b=2"),
+            ("http://h.test/p", [("a", "2"), ("z", "1")], "http://h.test/p?a=2&z=1"),
+            (
+                "http://localhost:8080/feed?q=old",
+                [("flag", "true"), ("n", "3"), ("q", "cats"), ("z", "9")],
+                "http://localhost:8080/feed?q=cats&flag=true&n=3&z=9"
+            ),
+            ("http://h/p?a+b=1&c", [("a b", "x y")], "http://h/p?a+b=x+y&c"),
+        ]
+        for (input, query, expected) in cases {
+            let named = query.map { (name: $0.0, value: $0.1) }
+            XCTAssertEqual(try PrototypeRequestURL.resolve(input, query: named).get(), expected, input)
+        }
+    }
+
     func testUrlRejections() {
         let cases: [(String, String)] = [
             ("ftp://h/x", "Only http and https URLs are supported, got ftp:"),

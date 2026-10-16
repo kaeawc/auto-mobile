@@ -858,8 +858,8 @@ function revalidationHarness(tool: "tapOn" | "tapAny") {
       };
       const request = { requestDeadlineMs };
       return tool === "tapOn"
-        ? on.tap.execute(options, undefined, undefined, undefined, request)
-        : any.tap.execute(options, undefined, undefined, request);
+        ? on.tap.execute(options, { deadlineMs: request?.requestDeadlineMs })
+        : any.tap.execute(options, { deadlineMs: request?.requestDeadlineMs });
     },
   };
 }

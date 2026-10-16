@@ -2173,8 +2173,7 @@ export async function acceptIosAppOpenAlert(
 
   const result = await tapOnElementFactory(device).execute(
     { text: "Open", action: "tap" },
-    progress,
-    signal,
+    { progress, signal },
   );
   if (!result.success) {
     throw new ActionableError(
@@ -2286,10 +2285,7 @@ export async function tapOnHandler(
       subtext: args.subtext,
       layer: args.layer,
     },
-    progress,
-    signal,
-    undefined,
-    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -2331,9 +2327,7 @@ export async function tapAtHandler(
       durationMs: args.durationMs,
       layer: args.layer,
     },
-    progress,
-    signal,
-    args.__tapAtPlanContext ?? args.__tapAtRecordingContext,
+    { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -2419,9 +2413,7 @@ export async function tapAnyHandler(
       searchUntil: args.searchUntil,
       layer: args.layer,
     },
-    progress,
-    signal,
-    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);

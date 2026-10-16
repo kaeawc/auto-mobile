@@ -67,6 +67,7 @@ import {
 } from "./androidDoubleTap";
 
 import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
+import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 
 class TapAtGeometryError extends ActionableError {}
 
@@ -509,7 +510,29 @@ export class TapAtCoordinate extends BaseVisualChange {
     );
   }
 
+  async execute(options: TapAtOptions, call?: TapAtCall<TapAtPlanContext>): Promise<TapAtResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
+    options: TapAtOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    planContext?: TapAtPlanContext,
+  ): Promise<TapAtResult>;
+  async execute(
+    options: TapAtOptions,
+    progressOrCall?: ProgressCallback | TapAtCall<TapAtPlanContext>,
+    signalArg?: AbortSignal,
+    planContextArg?: TapAtPlanContext,
+  ): Promise<TapAtResult> {
+    const { progress, signal, planContext } = resolveTapAtCall(
+      progressOrCall,
+      signalArg,
+      planContextArg,
+    );
+    return this.executeTap(options, progress, signal, planContext);
+  }
+
+  private async executeTap(
     options: TapAtOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,

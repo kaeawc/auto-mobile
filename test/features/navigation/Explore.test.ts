@@ -1529,7 +1529,7 @@ describe("Explore", () => {
             createMockObservation(),
           ),
         ).toBe(true);
-        expect(tap).toHaveBeenCalledWith({ x: 50, y: 25, action: "tap" }, undefined, undefined);
+        expect(tap).toHaveBeenCalledWith({ x: 50, y: 25, action: "tap" }, { signal: undefined });
         expect(calls).toEqual([]);
       } finally {
         tap.mockRestore();

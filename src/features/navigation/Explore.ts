@@ -1163,15 +1163,13 @@ export class Explore extends BaseVisualChange {
       ? await this.runRecorded("tapOn", publicTapOnArgs(selector), observation, () =>
           new TapOnElement(this.device, this.adb).execute(
             { ...selector, action: "tap" },
-            progress,
-            signal,
+            { progress, signal },
           ),
         )
       : await this.runRecorded("tapAt", { ...coordinates!, action: "tap" }, observation, () =>
           new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
             { ...coordinates!, action: "tap" },
-            progress,
-            signal,
+            { progress, signal },
           ),
         );
     return result.success;

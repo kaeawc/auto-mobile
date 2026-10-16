@@ -34,14 +34,14 @@ export function createPrototypeReverseAdb(
 ): PrototypeReverseAdb {
   return {
     async listReversedPorts() {
-      const result = await adb.executeCommand("reverse --list", REVERSE_TIMEOUT_MS);
+      const result = await adb.executeCommand("reverse --list", { timeoutMs: REVERSE_TIMEOUT_MS });
       return devicePortsFromList(result.stdout);
     },
     async addReverse(port) {
-      await adb.executeCommand(`reverse tcp:${port} tcp:${port}`, REVERSE_TIMEOUT_MS);
+      await adb.executeCommand(`reverse tcp:${port} tcp:${port}`, { timeoutMs: REVERSE_TIMEOUT_MS });
     },
     async removeReverse(port) {
-      await adb.executeCommand(`reverse --remove tcp:${port}`, REVERSE_TIMEOUT_MS);
+      await adb.executeCommand(`reverse --remove tcp:${port}`, { timeoutMs: REVERSE_TIMEOUT_MS });
     },
   };
 }

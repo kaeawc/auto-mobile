@@ -196,9 +196,9 @@ const derivationCases: DerivationCase[] = [
     expected: { tag: "fenced", releaseRequested: false },
   },
   {
-    name: "declined commit is live even with an old fence",
+    name: "declined commit remains releasing while a terminal fence is held",
     build: (v) => v.publish(uuid).startRelease(uuid, { commitDeclined: true }).fenceTerminal(uuid),
-    expected: { tag: "live", releaseRequested: false },
+    expected: { tag: "releasing", fence: "terminal", releaseRequested: false },
   },
   {
     name: "declined commit preserves pending rebind",
@@ -208,27 +208,27 @@ const derivationCases: DerivationCase[] = [
   {
     name: "forced nonterminal release without finalized identity is ended",
     build: (v) => v.publish(uuid).startRelease(uuid, { forced: true }),
-    expected: { tag: "ended", releaseRequested: false },
+    expected: { tag: "ended", releaseRequested: false, residue: true },
   },
   {
     name: "forced terminal release is fenced",
     build: (v) => v.publish(uuid).startRelease(uuid, { forced: true }).fenceTerminal(uuid),
-    expected: { tag: "fenced", releaseRequested: false },
+    expected: { tag: "fenced", releaseRequested: false, residue: true },
   },
   {
     name: "forced release with recovered terminal intent is fenced",
     build: (v) => v.publish(uuid).startRelease(uuid, { forced: true }).recoverIntent(uuid),
-    expected: { tag: "fenced", releaseRequested: false },
+    expected: { tag: "fenced", releaseRequested: false, residue: true },
   },
   {
     name: "committed release finalizing after session removal is ended",
     build: (v) => v.publish(uuid).startRelease(uuid).unpublish(uuid),
-    expected: { tag: "ended", releaseRequested: false },
+    expected: { tag: "ended", releaseRequested: false, residue: true },
   },
   {
     name: "committed release finalizing outlives an older dead identity",
     build: (v) => v.publish(uuid).startRelease(uuid).unpublish(uuid).finalize(uuid, deadIdentity()),
-    expected: { tag: "ended", releaseRequested: false },
+    expected: { tag: "ended", releaseRequested: false, residue: true },
   },
   {
     name: "new creation beats a forced release and its terminal fence",
@@ -259,7 +259,7 @@ const derivationCases: DerivationCase[] = [
   {
     name: "unpublished op alone is ended",
     build: (v) => v.startRelease(uuid),
-    expected: { tag: "ended", releaseRequested: false },
+    expected: { tag: "ended", releaseRequested: false, residue: true },
   },
   {
     name: "creating beats assigning and both terminal maps",
@@ -273,9 +273,9 @@ const derivationCases: DerivationCase[] = [
     expected: { tag: "assigning", releaseRequested: false },
   },
   {
-    name: "published session beats pending work and old fences",
+    name: "published session with a terminal fence remains releasing",
     build: (v) => v.publish(uuid).startCreation(uuid).startAssignment(uuid).fenceTerminal(uuid),
-    expected: { tag: "live", releaseRequested: false },
+    expected: { tag: "releasing", fence: "terminal", releaseRequested: false },
   },
   {
     name: "assigning records release requested",
@@ -300,7 +300,11 @@ describe("legacy slot derivation", () => {
     derivationCases.filter(({ expected }) => !["assigning", "creating"].includes(expected.tag)),
   )("release request stays false for $name", ({ build, expected }) => {
     const view = build(new FakeLegacyLifecycleView()).requestRelease(uuid);
-    expect(deriveSlot(view, uuid)).toEqual(expected);
+    expect(deriveSlot(view, uuid)).toEqual(
+      ["absent", "ended", "fenced"].includes(expected.tag)
+        ? { ...expected, residue: true }
+        : expected,
+    );
   });
 
   test("reads presence rather than truthiness for opaque payload maps", () => {
@@ -328,20 +332,23 @@ describe("legacy slot derivation", () => {
       .finalize("dead", deadIdentity())
       .publish("releasing")
       .startRelease("releasing");
-    const before = Object.values(view).map((map) => new Map(map));
+    const maps = Object.values(view).filter((value) => value instanceof Map);
+    const before = maps.map((map) => new Map(map));
     expect(deriveAllSlots(view)).toEqual(
       new Map<string, DerivedSlot>([
         ["live", { tag: "live", releaseRequested: false }],
         ["assigning", { tag: "assigning", releaseRequested: false }],
         ["creating", { tag: "creating", releaseRequested: true }],
-        ["orphan-op", { tag: "ended", releaseRequested: false }],
+        ["orphan-request", { tag: "absent", releaseRequested: false, residue: true }],
+        ["orphan-rebind", { tag: "absent", releaseRequested: false, residue: true }],
+        ["orphan-op", { tag: "ended", releaseRequested: false, residue: true }],
         ["snapshot", { tag: "fenced", releaseRequested: false }],
         ["intent", { tag: "fenced", releaseRequested: false }],
         ["ended", { tag: "ended", releaseRequested: false }],
         ["releasing", { tag: "releasing", fence: "none", releaseRequested: false }],
       ]),
     );
-    expect(Object.values(view)).toEqual(before);
+    expect(maps).toEqual(before);
   });
 
   test("deriveAllSlots returns an empty map for an empty view", () => {
@@ -349,14 +356,14 @@ describe("legacy slot derivation", () => {
   });
 });
 
-// Only these two of section 4's six predicates are tag-only; the others need identity/device data.
+// Recreation and the occupied-tag part of known membership; S2 adds known residue separately.
 const predicateCases: { tag: SlotPhase; recreated: boolean; known: boolean }[] = [
   { tag: "absent", recreated: false, known: false },
   { tag: "assigning", recreated: true, known: true },
   { tag: "creating", recreated: true, known: true },
   { tag: "live", recreated: true, known: true },
   { tag: "rebinding", recreated: true, known: true },
-  { tag: "releasing", recreated: false, known: true },
+  { tag: "releasing", recreated: true, known: true },
   { tag: "ended", recreated: false, known: false },
   { tag: "fenced", recreated: false, known: false },
 ];

@@ -1,3 +1,4 @@
+import { isBusy, holderOf } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
@@ -96,15 +97,15 @@ export class PlanDeviceLossMonitor {
     const device = this.port.getDevice(deviceId);
     // Allocation/restart owns startup-leased and shutdown-reserved devices. The global
     // plan lease alone is not evidence that a plan has begun using this device.
-    if (!device || device.platform !== "android" || device.status !== "busy" || !device.sessionId) {
+    if (!device || device.platform !== "android" || !isBusy(device) || !holderOf(device)) {
       return undefined;
     }
     const target: PlanLossTarget = {
       device,
       incarnation: device.incarnation,
       assignmentCount: device.assignmentCount,
-      sessionId: device.sessionId,
-      planSessionUuid: this.port.getPlanSessionUuid(device.sessionId),
+      sessionId: holderOf(device)!,
+      planSessionUuid: this.port.getPlanSessionUuid(holderOf(device)!),
     };
     return this.reported.has(deviceId) || !this.hasPlanWork(target) ? undefined : target;
   }
@@ -184,14 +185,14 @@ export class PlanDeviceLossMonitor {
       device === target.device &&
       device.incarnation === target.incarnation &&
       device.assignmentCount === target.assignmentCount &&
-      device.sessionId === target.sessionId &&
+      holderOf(device) === target.sessionId &&
       this.port.getPlanSessionUuid(target.sessionId) === target.planSessionUuid
     );
   }
 
   private hasPlanWork(target: PlanLossTarget): boolean {
     return (
-      target.device.status === "busy" &&
+      isBusy(target.device) &&
       !this.port.isStartupLeased(target.device.id) &&
       this.port.hasPlanExecution(target.device.id, target.planSessionUuid)
     );
@@ -336,11 +337,11 @@ export class DeviceDisconnectHandler {
     device: PooledDevice | undefined,
     onRemovalAttempt: () => void,
   ): Promise<void> {
-    if (device?.sessionId) {
+    if (holderOf(device)) {
       // removeDevice would refuse an assigned entry; keep the marker so it still
       // applies (and suppresses recovery) once the session releases (#6392).
       logger.warn(
-        `[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${device.sessionId} releases it`,
+        `[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${holderOf(device)} releases it`,
       );
       return;
     }
@@ -404,14 +405,14 @@ export class DeviceDisconnectHandler {
       await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
-    if (device.sessionId) {
+    if (holderOf(device)) {
       // removeDevice refuses assigned entries. A disconnect reaching here with
       // sessionId still set is a release deferred behind late session teardown
       // (releaseCapturedDevice); freeing the serial now could hand it out
       // mid-teardown. Retain it — the deferred release returns it to idle and
       // the next disconnect evaluation removes it (#6392).
       logger.warn(
-        `[DevicePool] Retaining disconnected device ${deviceId} until session ${device.sessionId} teardown completes`,
+        `[DevicePool] Retaining disconnected device ${deviceId} until session ${holderOf(device)} teardown completes`,
       );
       await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;

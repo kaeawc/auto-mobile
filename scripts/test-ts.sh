@@ -397,6 +397,8 @@ configure_unit_shard_groups() {
 #                  2 * (budget + overhead) = 2 * (720 + 60) = 1560s (26 min)
 #   A calibrated timeout at >= AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN (default 2.5x)
 #   skips the same-runner retry: one attempt <= 720 + 60 = 780s (13 min).
+#   All shards timing out after two attempts emits RUNNER-STARVED-SUSPECTED,
+#   even below the calibrated contention threshold; exit/retry policy is unchanged.
 #   A retry starts only while elapsed + budget + overhead <= lane cap, so the
 #   lane ends within its cap however many shards retry: retries run in
 #   parallel, each launched as soon as its first attempt is reaped. Attempts
@@ -557,8 +559,46 @@ unit_shard_is_contended() {
   if ! [[ "$contended_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     return 1
   fi
+  if [[ -z "$worst_probe_slowdown" ]] || awk -v slowdown="$contended_slowdown" -v worst="$worst_probe_slowdown" \
+    'BEGIN { exit !(slowdown > worst) }'; then
+    worst_probe_slowdown="$contended_slowdown"
+  fi
   awk -v slowdown="$contended_slowdown" -v threshold="$unit_contended_slowdown" \
     'BEGIN { exit !(slowdown >= threshold) }'
+}
+
+# Called once for every reaped unit timeout, before deciding whether to retry.
+report_unit_timeout_summary() {
+  local shard="$1" sample="no calibration sample"
+  if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    return 0
+  fi
+  if [[ "$contended_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    sample="runner probe slowdown ${contended_slowdown}x (contended threshold ${unit_contended_slowdown}x)"
+  fi
+  printf -- '- Unit shard %d hit its %ss wall-clock budget (attempt %d); %s.\n' \
+    "$shard" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unbounded}" "${shard_attempts[$shard]}" "$sample" >> "$GITHUB_STEP_SUMMARY" || true
+}
+
+report_starved_unit_lane() {
+  local shard message slowdown="n/a"
+  for ((shard = 0; shard < worker_count; shard += 1)); do
+    if [[ "${shard_statuses[$shard]}" -ne 124 || "${shard_attempts[$shard]}" -ne 2 || "${shard_first_statuses[$shard]:-0}" -ne 124 ]]; then
+      return 0
+    fi
+  done
+  if [[ -n "$worst_probe_slowdown" ]]; then
+    slowdown="${worst_probe_slowdown}x"
+  fi
+  printf -v message 'RUNNER-STARVED-SUSPECTED: all %d unit shards hit the %s s wall-clock budget on both attempts (worst probe slowdown %s); every shard being slow on a retried runner points at a starved runner, not a code regression.' \
+    "$worker_count" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unbounded}" "$slowdown"
+  printf '%s\n' "$message" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    printf '::error title=Unit lane runner starvation suspected::%s\n' "$message" >&2
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY" || true
+    fi
+  fi
 }
 
 report_contended_unit_shard() {
@@ -569,7 +609,7 @@ report_contended_unit_shard() {
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
     printf '::error title=Unit shard runner contended::%s\n' "$message" >&2
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-      printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+      printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY" || true
     fi
   fi
 }
@@ -600,6 +640,7 @@ unit_shard_should_retry() {
 
 retry_unit_shard() {
   local shard="$1" status="$2" elapsed reason failing_lines
+  shard_first_statuses[shard]="$status"
   elapsed=$(($(date +%s) - shard_starts[shard]))
   if [[ "$status" -eq 124 ]]; then
     reason="hit its ${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unbounded}s wall-clock budget (exit 124) after ${elapsed}s"
@@ -785,13 +826,14 @@ run_unit_shards() {
   local shard_attempts=()
   local shard_elapsed_seconds=()
   local shard_statuses=()
+  local shard_first_statuses=()
   local retry_shards=()
   local pending_shards=()
   local still_pending=()
   local reaped_any
   local unit_shard_retries="${AUTOMOBILE_UNIT_SHARD_RETRIES:-1}"
   local unit_contended_slowdown="${AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN:-2.5}"
-  local contended_slowdown="" contended_probe_key=""
+  local contended_slowdown="" contended_probe_key="" worst_probe_slowdown=""
   if ! [[ "$unit_contended_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ && "$unit_contended_slowdown" =~ [1-9] ]]; then
     echo "AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN must be a positive number, got: ${unit_contended_slowdown}" >&2
     return 2
@@ -901,6 +943,11 @@ run_unit_shards() {
       reaped_any=1
       shard_status=0
       wait "${pids[$index]}" || shard_status=$?
+      if [[ "$shard_mode" == unit && "$shard_status" -eq 124 ]]; then
+        # shellcheck disable=SC2310 # Missing/below-threshold calibration is expected.
+        unit_shard_is_contended "$index" || true
+        report_unit_timeout_summary "$index"
+      fi
       # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
       if [[ "${shard_attempts[$index]}" -eq 1 ]] && unit_shard_should_retry "$index" "$shard_status"; then
         retry_unit_shard "$index" "$shard_status"
@@ -929,6 +976,7 @@ run_unit_shards() {
     done
     printf 'test-ts: unit shards total wall=%ss status=%s retried=%s\n' \
       "$lane_elapsed" "$rc" "${#retry_shards[@]}" >&2
+    report_starved_unit_lane
   fi
 
   for ((shard = 0; shard < worker_count; shard += 1)); do

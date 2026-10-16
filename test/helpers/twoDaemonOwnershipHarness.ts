@@ -252,10 +252,10 @@ interface DaemonProcess {
  * The session manager's in-progress recoveries/assignments (session id -> promise), read without
  * side effects. Private state, read only by the stranded-claim invariant.
  */
-function pendingSessionAssignments(manager: SessionManager): ReadonlyMap<string, unknown> {
-  const raw: unknown = Reflect.get(manager, "pendingSessionAssignments");
+function sessionAssignments(manager: SessionManager): ReadonlyMap<string, unknown> {
+  const raw: unknown = Reflect.get(Reflect.get(manager, "sessionSlots"), "assignments");
   if (!(raw instanceof Map)) {
-    throw new Error("SessionManager no longer keeps pendingSessionAssignments; update the harness");
+    throw new Error("SessionSlots no longer exposes assignments; update the harness");
   }
   return raw;
 }
@@ -841,7 +841,7 @@ export class TwoDaemonWorld {
         !owner.manager.hasSession(row.session_uuid) &&
         // A recovery still in progress (past the startup deadline, waiting out a restart grace)
         // holds its claim legitimately; only a claim no recovery holds is stranded.
-        !pendingSessionAssignments(owner.manager).has(row.session_uuid)
+        !sessionAssignments(owner.manager).has(row.session_uuid)
       ) {
         this.fail(
           "stranded-claim",

@@ -28,8 +28,9 @@ class RecordingJournal implements TerminalReleaseJournal {
   loadUnconfirmed(): TerminalReleaseIntent[] {
     return this.unconfirmed;
   }
-  record(intent: TerminalReleaseIntent): void {
+  record(intent: TerminalReleaseIntent): "volatile" {
     this.recorded.push(intent);
+    return "volatile";
   }
   resolve(): void {}
 }

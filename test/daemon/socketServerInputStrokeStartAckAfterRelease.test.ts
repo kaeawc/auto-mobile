@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -8,7 +9,6 @@ import {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { releasePlanSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
@@ -163,7 +163,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
         }) as unknown as AndroidCtrlProxyClient,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
@@ -595,9 +596,9 @@ function devicesHeldByOtherSessions(args: StartDeviceArgs): ReadonlySet<string> 
     .filter(
       (device) =>
         device.platform === args.platform &&
-        (device.sessionId === null
+        (holderOf(device) === null
           ? pool.isReservedForReadiness(device.id)
-          : !callerMayReuse(device.id, device.sessionId)),
+          : !callerMayReuse(device.id, holderOf(device)!)),
     )
     .map((device) => device.id);
   return held.length > 0 ? new Set(held) : undefined;

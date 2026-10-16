@@ -1,4 +1,14 @@
-import { clearDeviceError, markDeviceError, restoreBinding, unbindDevice } from "./deviceBinding";
+import {
+  clearDeviceError,
+  markDeviceError,
+  restoreBinding,
+  unbindDevice,
+  isErrored,
+  holderOf,
+  isBusy,
+  isIdle,
+  statusOf,
+} from "./deviceBinding";
 import {
   deviceHold,
   genericAvailabilityOf,
@@ -2559,7 +2569,7 @@ export class DevicePool {
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       // A successful (re)boot of an errored, idle device clears its failure state so
       // criteria autoboot can hand it out instead of failing with "no devices match".
-      if (existing.status === "error" && !existing.sessionId) {
+      if (isErrored(existing) && !holderOf(existing)) {
         clearDeviceError(existing);
         existing.errorCount = 0;
         existing.iosVersion = device.iosVersion ?? existing.iosVersion;
@@ -2716,8 +2726,8 @@ export class DevicePool {
     }
 
     this.sessionManager.flushDeferredRebindCleanups({ deviceId });
-    if (device.sessionId) {
-      logger.warn(`Cannot remove device ${deviceId}: assigned to session ${device.sessionId}`);
+    if (holderOf(device)) {
+      logger.warn(`Cannot remove device ${deviceId}: assigned to session ${holderOf(device)}`);
       return;
     }
 
@@ -3554,7 +3564,7 @@ export class DevicePool {
       return undefined;
     }
     const device = this.devices.get(session.assignedDevice);
-    return device?.sessionId === sessionId ? device : undefined;
+    return holderOf(device) === sessionId ? device : undefined;
   }
 
   /**
@@ -3571,7 +3581,7 @@ export class DevicePool {
         `${this.criteriaMatcher.formatCriteriaSummary(request.criteria)}`
       );
     }
-    if (device.status === "error") {
+    if (isErrored(device)) {
       return "the device is in an error state";
     }
     const marker = this.getDeviceHealthMarker(device.id);
@@ -3768,7 +3778,7 @@ export class DevicePool {
    */
   private isPotentialAllocationSupply(device: PooledDevice): boolean {
     return (
-      device.status !== "error" &&
+      !isErrored(device) &&
       this.androidTransportAliases.isAssignable({
         deviceId: device.id,
         name: device.name,
@@ -4029,9 +4039,8 @@ export class DevicePool {
   }
 
   private countBusyDevices(candidates: PooledDevice[]): number {
-    return candidates.filter(
-      (device) => device.status === "busy" || this.isReservedForAssignment(device),
-    ).length;
+    return candidates.filter((device) => isBusy(device) || this.isReservedForAssignment(device))
+      .length;
   }
 
   /**
@@ -4067,7 +4076,7 @@ export class DevicePool {
   ): Promise<number> {
     let evicted = 0;
     for (const device of Array.from(this.devices.values())) {
-      if (device.status !== "idle" || !matches(device)) {
+      if (!isIdle(device) || !matches(device)) {
         continue;
       }
       if (!(await this.ensurePooledDevicePresentForUse(device, false, false, true))) {
@@ -4106,7 +4115,7 @@ export class DevicePool {
     device: PooledDevice,
     observation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): SessionReleaseReason | undefined {
-    const session = device.sessionId && this.sessionManager.getSession(device.sessionId);
+    const session = holderOf(device) && this.sessionManager.getSession(holderOf(device)!);
     if (session && this.intentionallyCancelledRecoverySessions.has(session)) {
       return undefined;
     }
@@ -4130,7 +4139,7 @@ export class DevicePool {
     incidentId: string | undefined,
     identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): Promise<boolean> {
-    const sessionId = device.sessionId;
+    const sessionId = holderOf(device);
     if (!sessionId) {
       return true;
     }
@@ -4253,7 +4262,7 @@ export class DevicePool {
     attemptDeviceLossRecovery: boolean,
     incidentId: string | undefined,
   ): Promise<boolean> {
-    const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);
+    const sessionId = holderOf(device) ?? this.sessionManager.getSessionForDevice(device.id);
     const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
     if (
       !attemptDeviceLossRecovery ||
@@ -4388,7 +4397,7 @@ export class DevicePool {
     if (expectedDevice !== undefined && device !== expectedDevice) {
       return undefined;
     }
-    const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);
+    const sessionId = holderOf(device) ?? this.sessionManager.getSessionForDevice(device.id);
     if (!sessionId) {
       return undefined;
     }
@@ -4414,7 +4423,7 @@ export class DevicePool {
   }
 
   private isSessionPreservingBinding(device: PooledDevice, session: Session): boolean {
-    return device.sessionId === session.sessionId || session.ownership === "awaiting-owner";
+    return holderOf(device) === session.sessionId || session.ownership === "awaiting-owner";
   }
 
   private isEligibleSessionPreservingRecoveryTarget(
@@ -4458,7 +4467,7 @@ export class DevicePool {
   }
 
   private canRetryDeferredSessionRecovery(device: PooledDevice): boolean {
-    const deferredUntil = this.recoveringSessionLosses.get(device.sessionId ?? "")?.deferredUntil;
+    const deferredUntil = this.recoveringSessionLosses.get(holderOf(device) ?? "")?.deferredUntil;
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
@@ -4706,7 +4715,7 @@ export class DevicePool {
         device &&
         this.devices.get(deviceId) === device &&
         device.assignmentCount === assignmentCount &&
-        device.sessionId === sessionId
+        holderOf(device) === sessionId
       ) {
         try {
           await this.releaseDevice(deviceId, sessionId);
@@ -4972,8 +4981,8 @@ export class DevicePool {
     );
     this.sessionManager.setDeviceReadiness(preservedSessionId, "booted");
     const replacement = this.devices.get(ready.deviceId);
-    if (replacement?.sessionId === preservedSessionId) {
-      replacement.autolockSessionId = preservedAutolockSessionId;
+    if (holderOf(replacement) === preservedSessionId) {
+      replacement!.autolockSessionId = preservedAutolockSessionId;
     }
   }
 
@@ -5596,7 +5605,7 @@ export class DevicePool {
   private async refreshForeignOwnership(requireCurrent = true): Promise<void> {
     const idle = (platform: Platform) =>
       this.getDevicesByPlatform(platform)
-        .filter((device) => device.sessionId === null)
+        .filter((device) => holderOf(device) === null)
         .map((device) => device.id);
     await Promise.all([
       this.foreignDeviceOwnership?.refresh(idle("android")),
@@ -5728,7 +5737,7 @@ export class DevicePool {
     snapshot,
   }: TargetDeviceValidationOptions): void {
     this.assertDeviceCleanupComplete(device.id);
-    if (device.status !== "idle" || device.sessionId) {
+    if (!isIdle(device) || holderOf(device)) {
       return;
     }
     if (this.hasReadinessNameReservation(device, readinessReservationOwners)) {
@@ -5805,7 +5814,7 @@ export class DevicePool {
     const healthyBusy = candidates.some(
       (device) =>
         !this.getDeviceHealthMarker(device.id) &&
-        (device.status === "busy" || this.isReservedForAssignment(device)),
+        (isBusy(device) || this.isReservedForAssignment(device)),
     );
     if (!healthyBusy && candidates.some((device) => this.getDeviceHealthMarker(device.id))) {
       // Health recovery has its own bounded retry budget. Allocation fails
@@ -5887,7 +5896,7 @@ export class DevicePool {
     if (
       device &&
       this.getDeviceHealthMarker(deviceId) &&
-      (!device.sessionId || !this.sessionManager.getSession(device.sessionId))
+      (!holderOf(device) || !this.sessionManager.getSession(holderOf(device)!))
     ) {
       throw this.unhealthyDevicesError([device]);
     }
@@ -5917,7 +5926,7 @@ export class DevicePool {
         const { deviceId, session: allocatedSession } = allocation;
         currentAllocationCancellationScope()?.discard(sessionId);
         const device = this.devices.get(deviceId);
-        if (!device || device.sessionId !== sessionId) {
+        if (!device || holderOf(device) !== sessionId) {
           logger.warn(
             `[DevicePool] Skipping allocation rollback for ${sessionId}: ` +
               `device ${deviceId} is no longer owned by that session`,
@@ -5966,8 +5975,8 @@ export class DevicePool {
 
   private snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot {
     return {
-      sessionId: device.sessionId,
-      status: device.status,
+      sessionId: holderOf(device),
+      status: statusOf(device),
       lastUsedAt: device.lastUsedAt,
       assignmentCount: device.assignmentCount,
       errorCount: device.errorCount,
@@ -5989,7 +5998,7 @@ export class DevicePool {
     snapshot: SessionAssignmentSnapshot,
     createSession: () => Promise<Session>,
   ): Promise<Session> {
-    const attemptedSessionId = device.sessionId;
+    const attemptedSessionId = holderOf(device);
     // Sessionless calls on the device are cancelled once the create commits, not at publish: the
     // checks below can still refuse it or roll it back, leaving the device free (#10905).
     const deferredSessionId = attemptedSessionId;
@@ -6020,11 +6029,11 @@ export class DevicePool {
     snapshot: SessionAssignmentSnapshot,
     createSession: () => Promise<Session>,
   ): Promise<Session> {
-    const attemptedSessionId = device.sessionId;
+    const attemptedSessionId = holderOf(device);
     try {
       const session = await createSession();
       if (session.assignedDevice !== device.id) {
-        if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {
+        if (this.isPooledEntryCurrent(device) && holderOf(device) === attemptedSessionId) {
           this.restoreSessionAssignment(device, snapshot);
         }
         return session;
@@ -6066,7 +6075,7 @@ export class DevicePool {
       this.pooledSessionIdentities.set(device, session);
       return session;
     } catch (error) {
-      if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {
+      if (this.isPooledEntryCurrent(device) && holderOf(device) === attemptedSessionId) {
         this.restoreSessionAssignment(device, snapshot);
       }
       throw error;
@@ -6078,8 +6087,8 @@ export class DevicePool {
   private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
     return (
       this.isPooledEntryCurrent(device) &&
-      device.sessionId === session.sessionId &&
-      device.status === "busy" &&
+      holderOf(device) === session.sessionId &&
+      isBusy(device) &&
       this.sessionManager.getSession(session.sessionId) === session
     );
   }
@@ -6112,7 +6121,7 @@ export class DevicePool {
 
   private captureReleasedDevice(sessionId: string, deviceId: string): void {
     const device = this.devices.get(deviceId);
-    if (!device || device.sessionId !== sessionId) {
+    if (!device || holderOf(device) !== sessionId) {
       return;
     }
     this.releasedDeviceCaptures.set(sessionId, {
@@ -6171,7 +6180,7 @@ export class DevicePool {
       return;
     }
 
-    const sessionId = device.sessionId;
+    const sessionId = holderOf(device);
     unbindDevice(device);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
@@ -6210,22 +6219,22 @@ export class DevicePool {
       logger.debug(`Ignoring stale release for reassigned device ${deviceId}`);
       return false;
     }
-    if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {
+    if (expectedSessionId !== undefined && holderOf(device) !== expectedSessionId) {
       logger.warn(
         `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
-          `but it is owned by ${device.sessionId ?? "no session"}`,
+          `but it is owned by ${holderOf(device) ?? "no session"}`,
       );
       return false;
     }
 
-    if (!device.sessionId) {
+    if (!holderOf(device)) {
       logger.debug(`Device ${deviceId} is already idle`);
       return false;
     }
 
-    if (device.sessionId !== expectedSessionId) {
+    if (holderOf(device) !== expectedSessionId) {
       logger.debug(
-        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,
+        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${holderOf(device)}`,
       );
       return false;
     }
@@ -6268,10 +6277,10 @@ export class DevicePool {
     expectedDevice: PooledDevice,
   ): Promise<boolean> {
     let releaseError: unknown;
-    if (expectedDevice.sessionId) {
+    if (holderOf(expectedDevice)) {
       try {
         await this.releaseDisconnectedRecoverySessionWithRetry(
-          expectedDevice.sessionId,
+          holderOf(expectedDevice)!,
           expectedDevice.id,
           deviceLossCancellationReason(expectedDevice.id),
         );
@@ -6615,7 +6624,7 @@ export class DevicePool {
     if (!this.isReservedForReadiness(deviceId, ownReservations)) {
       return;
     }
-    const holder = this.devices.get(deviceId)?.sessionId;
+    const holder = holderOf(this.devices.get(deviceId));
     if (holder && this.sessionManager.getSession(holder)) {
       return;
     }
@@ -6690,7 +6699,7 @@ export class DevicePool {
     }
     const session = this.pooledSessionIdentities.get(device);
     if (
-      session?.sessionId !== device.sessionId ||
+      session?.sessionId !== holderOf(device) ||
       session.assignedDevice !== deviceId ||
       // Every production assignment path holds assignmentMutex. Once this
       // callback owns it, an outer getOrCreateSession assignment can only be
@@ -6729,7 +6738,7 @@ export class DevicePool {
     forSessionId?: string,
     consumer: "assignment" | "generic" | "bucket" | "observation" | "health" = "assignment",
   ): DeviceHoldFacts {
-    const base: DeviceHoldFacts = { status: device.status, sessionId: device.sessionId };
+    const base: DeviceHoldFacts = { status: statusOf(device), sessionId: holderOf(device) };
     const reservationFacts = (): DeviceHoldFacts => {
       const ownReadiness = this.restartReadinessOwners(device, forSessionId);
       if (this.isReservedForReadiness(device.id, ownReadiness)) {
@@ -6751,7 +6760,7 @@ export class DevicePool {
       return { ...base, rehydrationHolder: holder !== forSessionId ? holder : undefined };
     };
     const observationFacts = (): DeviceHoldFacts => {
-      if (device.sessionId || device.status !== "idle") {
+      if (holderOf(device) || !isIdle(device)) {
         return base;
       }
       const stableId = this.stableDeviceIdFor(device);
@@ -6809,7 +6818,7 @@ export class DevicePool {
       }
       // isPotentialAllocationSupply's order: error, transport alias, then health marker.
       const transportAliasUnassignable =
-        device.status !== "error" &&
+        !isErrored(device) &&
         !this.androidTransportAliases.isAssignable({
           deviceId: device.id,
           name: device.name,
@@ -6819,7 +6828,7 @@ export class DevicePool {
         ...reservations,
         transportAliasUnassignable,
         healthMarker:
-          device.status !== "error" &&
+          !isErrored(device) &&
           !transportAliasUnassignable &&
           !!this.getDeviceHealthMarker(device.id),
       };
@@ -6833,8 +6842,8 @@ export class DevicePool {
         return {
           ...base,
           cleanupInProgress:
-            device.status === "idle" &&
-            !device.sessionId &&
+            isIdle(device) &&
+            !holderOf(device) &&
             this.sessionManager.hasDeviceCleanupInProgress(device.id),
         };
       case "generic":
@@ -7074,7 +7083,7 @@ export class DevicePool {
   ): boolean {
     return (
       device !== undefined &&
-      ((device.sessionId !== null && device.sessionId !== sessionId) ||
+      ((holderOf(device) !== null && holderOf(device) !== sessionId) ||
         this.hasReadinessNameReservation(device, readinessReservationOwners) ||
         this.isReservedForOtherRehydration(device, sessionId))
     );
@@ -7236,7 +7245,7 @@ export class DevicePool {
       return device;
     }
     const replacement = this.devices.get(device.id);
-    if (!replacement || (replacement === device && device.status === "error")) {
+    if (!replacement || (replacement === device && isErrored(device))) {
       throw new ActionableError(unavailableMessage);
     }
     if (replacement.identityUnresolved === true) {
@@ -7835,7 +7844,7 @@ export class DevicePool {
       mcpSessionId && this.mcpSessionAcquiredDeviceSessions.has(mcpSessionId)
         ? this.devices.get(deviceId)
         : undefined;
-    const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
+    const session = holderOf(device) ? this.sessionManager.getSession(holderOf(device)!) : null;
     if (
       !mcpSessionId ||
       !device ||
@@ -8103,7 +8112,7 @@ export class DevicePool {
    */
   private releaseExpiredSessionDevice(sessionId: string, deviceId: string): void {
     const device = this.devices.get(deviceId);
-    if (!device || device.sessionId !== sessionId) {
+    if (!device || holderOf(device) !== sessionId) {
       return;
     }
 
@@ -8208,7 +8217,7 @@ export class DevicePool {
    * Get device assigned to session
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {
-    return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;
+    return Array.from(this.devices.values()).find((d) => holderOf(d) === sessionId) || null;
   }
 
   managedSlotOwnershipGate(sessionId: string): "unconfirmed" | "lost" | undefined {
@@ -8281,16 +8290,14 @@ export class DevicePool {
    * Get all devices currently assigned to sessions
    */
   getAssignedDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter(
-      (d) => d.status === "busy" && d.sessionId !== null,
-    );
+    return Array.from(this.devices.values()).filter((d) => isBusy(d) && holderOf(d) !== null);
   }
 
   /**
    * Get all devices in error state
    */
   getErrorDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((d) => d.status === "error");
+    return Array.from(this.devices.values()).filter((d) => isErrored(d));
   }
 
   /**
@@ -8498,7 +8505,7 @@ export class DevicePool {
       this.isUnresolvedEmulatorWhileAndroidManaged(device) &&
       // A caller-supplied identity (the verified AVD name on acquire) was already judged above.
       !input.stableIds?.some((id) => id !== undefined && id !== "") &&
-      !(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&
+      !(input.requesterSessionUuid && holderOf(device) === input.requesterSessionUuid) &&
       currentManagedSlotReconciler() === undefined
     ) {
       return new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
@@ -8595,7 +8602,7 @@ export class DevicePool {
     // snapshot predates its slot claim. Current successful reads still judge the registry first.
     if (
       input.requesterSessionUuid &&
-      this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid
+      holderOf(this.devices.get(input.deviceId)) === input.requesterSessionUuid
     ) {
       return;
     }
@@ -8739,7 +8746,7 @@ export class DevicePool {
     exact: PooledDevice,
   ): SessionRecoveryIdentityLossError | DevicePoolError | undefined {
     // A restart-recovery reservation made for this very row is not "busy" (#11294).
-    if (exact.status === "busy" || this.isReservedForAssignment(exact, sessionId)) {
+    if (isBusy(exact) || this.isReservedForAssignment(exact, sessionId)) {
       if (this.recoveryWaitingForReadiness(exact, sessionId, target)) {
         return new DevicePoolError("Recovery target is being prepared", true);
       }
@@ -8756,7 +8763,7 @@ export class DevicePool {
     // A request preparing an unheld target is temporary contention, not loss of R's identity.
     // Keep waiting within the original bounds; never bypass that request's readiness symbols.
     return (
-      device.status === "idle" &&
+      isIdle(device) &&
       target.restartRecoveryDeadlineMs !== undefined &&
       this.recoveryNow() < target.restartRecoveryDeadlineMs &&
       !this.isReservedOutsideReadiness(device, sessionId)
@@ -8910,10 +8917,10 @@ export class DevicePool {
     ];
 
     for (const device of this.getAllDevices()) {
-      const status = device.status === "error" ? "❌" : device.sessionId ? "🔴" : "🟢";
-      const session = device.sessionId ? ` (${device.sessionId})` : "";
+      const status = isErrored(device) ? "❌" : holderOf(device) ? "🔴" : "🟢";
+      const session = holderOf(device) ? ` (${holderOf(device)})` : "";
       lines.push(
-        `  ${status} ${device.id}: ${device.status}${session} (${device.assignmentCount} uses, ${device.errorCount} errors)`,
+        `  ${status} ${device.id}: ${statusOf(device)}${session} (${device.assignmentCount} uses, ${device.errorCount} errors)`,
       );
     }
 

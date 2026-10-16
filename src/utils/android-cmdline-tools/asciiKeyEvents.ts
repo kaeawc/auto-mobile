@@ -18,6 +18,8 @@ import { shellQuote } from "../shellQuote";
 /** A sequence of `adb shell input ...` commands that types a single character. */
 export interface KeyEventPlan {
   commands: string[];
+  /** Original input-text run length; omitted for single-character key-event plans. */
+  textLength?: number;
 }
 
 /** API level at which `input keycombination` (used for SHIFT chords) is available. */

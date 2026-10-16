@@ -1,6 +1,6 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { Socket } from "node:net";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -42,7 +42,7 @@ function createHarness(startupCompletion: Promise<void>) {
     getSessionManager: () => ({ getSession: () => null }),
     getDevicePool: () => ({ releaseMcpSessionBindings: () => {} }),
   } as unknown as DaemonStateAccess;
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/fake/socket",
     "http://127.0.0.1:1/mcp",
     state,

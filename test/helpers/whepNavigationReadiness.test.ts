@@ -1,9 +1,20 @@
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+  type Mock,
+} from "bun:test";
 import {
   formatNavigationTimeoutError,
+  probePageStateAfterNavigateTimeout,
   probeWhepPageReachable,
   type WhepPageProbeDependencies,
   type WhepPageProbeResult,
+  type WhepPageState,
 } from "./whepNavigationReadiness";
 
 const url = "http://127.0.0.1:8889/device-capture-ios";
@@ -65,6 +76,71 @@ describe("probeWhepPageReachable", () => {
   );
 });
 
+describe("probePageStateAfterNavigateTimeout", () => {
+  let warn: Mock<typeof console.warn>;
+
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  test.each(["loading", "interactive", "complete"])(
+    "captures %s document state and the current URL",
+    async (readyState) => {
+      const state = { readyState, href: url };
+      expect(await probePageStateAfterNavigateTimeout(async () => state)).toEqual(state);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+
+  test("captures an about:blank page that never navigated", async () => {
+    const state = { readyState: "complete", href: "about:blank" };
+    expect(await probePageStateAfterNavigateTimeout(async () => state)).toEqual(state);
+  });
+
+  test.each([new Error("Runtime.evaluate timed out"), "CDP closed"])(
+    "logs evaluation rejection and returns unavailable: %s",
+    async (error) => {
+      expect(
+        await probePageStateAfterNavigateTimeout(async () => {
+          throw error;
+        }),
+      ).toEqual({ unavailable: error instanceof Error ? error.message : error });
+      expect(warn).toHaveBeenCalledWith("WHEP page state probe failed", error);
+    },
+  );
+
+  test("converts a synchronous evaluation failure into unavailable", async () => {
+    const error = new Error("CDP send failed");
+    expect(
+      await probePageStateAfterNavigateTimeout(() => {
+        throw error;
+      }),
+    ).toEqual({ unavailable: error.message });
+    expect(warn).toHaveBeenCalledWith("WHEP page state probe failed", error);
+  });
+
+  test.each([
+    null,
+    undefined,
+    "complete",
+    42,
+    {},
+    { readyState: "complete" },
+    { href: url },
+    { readyState: 42, href: url },
+    { readyState: "complete", href: 42 },
+  ])("reports invalid page state as unavailable: %j", async (state) => {
+    expect(await probePageStateAfterNavigateTimeout(async () => state)).toEqual({
+      unavailable: "Page state evaluation did not return readyState and href",
+    });
+    expect(warn).toHaveBeenCalledWith("WHEP page state probe failed", expect.any(Error));
+  });
+});
+
 describe("formatNavigationTimeoutError", () => {
   const cases: Array<{
     probe: WhepPageProbeResult;
@@ -103,10 +179,36 @@ describe("formatNavigationTimeoutError", () => {
         probe,
         chromeVersion,
         chromeDiagnostics,
+        pageState: { readyState: "complete", href: "about:blank" },
       });
 
       expect(error).toBeInstanceOf(Error);
-      expect(error.message).toBe(`${original.message}; ${expected}; ${chromeDiagnostics}`);
+      expect(error.message).toBe(
+        `${original.message}; ${expected}; pageState=complete/about:blank; ${chromeDiagnostics}`,
+      );
     },
   );
+
+  test.each<{ pageState: WhepPageState; expected: string }>([
+    {
+      pageState: { readyState: "interactive", href: url },
+      expected: `interactive/${url}`,
+    },
+    {
+      pageState: { unavailable: "Runtime.evaluate timed out" },
+      expected: "unavailable: Runtime.evaluate timed out",
+    },
+  ])("formats page state: $expected", ({ pageState, expected }) => {
+    const error = formatNavigationTimeoutError(new Error("navigate timed out"), {
+      url,
+      probe: { reachable: true, status: 200 },
+      chromeVersion: "Chrome/155.0.8059.79",
+      chromeDiagnostics: "chrome exitCode=null signal=null log=(updater output only)",
+      pageState,
+    });
+
+    expect(error.message).toBe(
+      `navigate timed out; whepPage=reachable status 200; chromeVersion=Chrome/155.0.8059.79; pageState=${expected}; chrome exitCode=null signal=null log=(updater output only)`,
+    );
+  });
 });

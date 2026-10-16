@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -18,7 +19,6 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 import type { DaemonRequest } from "../../src/daemon/types";
@@ -39,7 +39,7 @@ test("device-control replay refuses a restore-retired epoch with actionable tran
   const timer = new FakeTimer();
   const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   await createDeviceRestoreEpochHarness(device, timer);
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/fake/restore.sock",
     "http://localhost:0/mcp",
     DaemonState.getInstance(),
@@ -113,7 +113,7 @@ async function boundRecoveryHarness() {
       emulatorLossIncidentStore: incidents,
     }),
   );
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/fake/recovery.sock",
     "http://localhost:0/mcp",
     {
@@ -613,7 +613,7 @@ test("a failed token declaration is logged and does not stop owned-session resto
       return [];
     },
   };
-  const server = new UnixSocketServer(
+  const server = createTestUnixSocketServer(
     "/tmp/never-listened.sock",
     "http://localhost:0/mcp",
     { isInitialized: () => true, getDevicePool: () => pool },

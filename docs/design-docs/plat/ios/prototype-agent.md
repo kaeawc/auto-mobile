@@ -575,15 +575,20 @@ method, bodies on GET and HEAD, `into` naming an object member, `statusKey` nami
 state key, header names, entry counts, `timeoutMs` 1 to 30000, follow-up lists of 1 to 32, the reserved
 `prototype_request` emit name and `MAX_PROTOTYPE_ACTION_DEPTH`), and `PrototypeRepeat` binds a request's
 `url`, `statusKey`, `into`, header and query strings, binding objects and nested follow-up lists per
-row. The Swift decoder keeps `query` as an unordered dictionary, so entries are set on the URL in
-UTF-16 name order, not authored order (the resolved URL, and so the event `url`, can differ from the
-host's ordering for a request with several query entries).
+row. Query entries are set on the URL in sorted key order (UTF-16 code units, the same as JS
+`sort()`) on every runtime; the Swift decoder holds `query` as an unordered dictionary, so the rule
+is canonical rather than authored order, and the resolved URL and event `url` match the host's. A
+string body without an author-set `Content-Type` is sent as `text/plain; charset=utf-8` and any
+other JSON body as `application/json`, as on the host and Android.
 
 `PrototypeRequestDriver` runs what the session starts, behind a clock and two seams so its tests are
 deterministic:
 
-- **`via: "host"` (the default).** The agent broadcasts a `prototype_request` frame
-  (`prototypeRequestMessageSchema`) to the authenticated host connection and the host's
+- **`via: "host"` (the default).** The agent sends a `prototype_request` frame
+  (`prototypeRequestMessageSchema`) to exactly one connection, the most recently authenticated one
+  (`PrototypeConnectionRegistry.current`, as Android's `WebSocketServer.sendToHost`), so a
+  reconnecting daemon replaces the one it superseded and a side-effecting call never runs twice
+  (events still broadcast to every authenticated connection). The owning connection of each pending call is remembered (`PrototypeHostRouting`), so when that connection closes its calls end at once as `network` even while an older connection remains. The host's
   `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
   never replies to. The host has no cancel frame, so a cancelled call is forgotten and its late response
   ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or
@@ -593,8 +598,9 @@ deterministic:
 - **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library; the agent
   injects `PrototypeURLSessionClient`. It uses a dedicated ephemeral `URLSession` (never
   `URLSession.shared`, so the app's cookies, cache and credentials are untouched) with the contract's
-  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading and fails with `too_large` once
-  the body crosses 262144 bytes (or its `Content-Length` announces more), maps URLSession errors to the
+  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading a 2xx body and fails with `too_large` once
+  it crosses 262144 bytes (or its `Content-Length` announces more; a non-2xx body is never read, so it is
+  an `http_error` however large), maps URLSession errors to the
   contract's codes and reports the duration from the task metrics. Its tests run the real client over a
   `URLProtocol` stub.
 
@@ -700,6 +706,9 @@ when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trail
 Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
+
+`leadingIcon` (`prototype_text_field_leading_icon_v1`) is a built-in icon name drawn before the
+text as an SF Symbol, decoration only, hidden from accessibility.
 
 ## Prototype gesture action lists
 

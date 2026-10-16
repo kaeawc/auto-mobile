@@ -398,6 +398,7 @@ class WebSocketServer(
     add("prototype_gestures_v1")
     add("prototype_text_field_actions_v1")
     add("prototype_carousel_v1")
+    add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")

@@ -127,6 +127,25 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         XCTAssertFalse(seen.httpShouldHandleCookies)
     }
 
+    func testAStringBodyDefaultsToTextPlainUnlessTheAuthorSetAContentType() async throws {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        _ = try await client().perform(call(method: .post, body: Data("x".utf8)))
+        _ = try await client().perform(call(
+            method: .post, headers: ["content-type": "application/xml"], body: Data("x".utf8)
+        ))
+        let seen = StubProtocol.requests
+        XCTAssertEqual(seen[0].value(forHTTPHeaderField: "Content-Type"), "text/plain; charset=utf-8")
+        XCTAssertEqual(seen[1].value(forHTTPHeaderField: "Content-Type"), "application/xml")
+    }
+
+    func testAJsonBodyDefaultsToApplicationJson() {
+        let job = PrototypeRequestJob(
+            requestId: "r", prototypeId: "p", via: .device, method: .post, url: "http://localhost/",
+            headers: [:], body: .object(["a": .number(1)]), timeoutMs: 1000
+        )
+        XCTAssertEqual(PrototypeHttpRequest(job: job).headers["Content-Type"], "application/json")
+    }
+
     func testAGetSendsNoBody() async throws {
         StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
         _ = try await client().perform(call())
@@ -169,7 +188,32 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         StubProtocol.reset { _ in .respond(status: 404, headers: [:], chunks: [Data("missing".utf8)]) }
         let response = try await client().perform(call())
         XCTAssertEqual(response.status, 404)
-        XCTAssertEqual(response.body, Data("missing".utf8))
+        XCTAssertEqual(response.body, Data())
+    }
+
+    func testANon2xxBodyOverTheCapIsAnHttpErrorNotTooLarge() async throws {
+        StubProtocol.reset { _ in
+            .respond(
+                status: 500, headers: ["Content-Length": "100", "X-Id": "9"],
+                chunks: [Data(count: 60), Data(count: 40)]
+            )
+        }
+        let response = try await client().perform(call(maxBytes: 10))
+        XCTAssertEqual(response.status, 500)
+        XCTAssertEqual(response.headers["x-id"], "9")
+        XCTAssertEqual(response.body, Data())
+        let meta = PrototypeRequestMeta(response.requestResponse(for: .get))
+        XCTAssertEqual(meta.error, PrototypeRequestError(.httpError, "HTTP 500"))
+        XCTAssertEqual(meta.status, 500)
+    }
+
+    func testALiteralNullBodyIsAnInvalidResponseButAnEmptyBodyIsNot() async throws {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: [Data("null".utf8)]) }
+        let failed = await failure { try await client().perform(call()) }
+        XCTAssertEqual(failed?.error.code, .invalidResponse)
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        let empty = try await client().perform(call())
+        XCTAssertEqual(empty.body, Data())
     }
 
     // MARK: Size cap

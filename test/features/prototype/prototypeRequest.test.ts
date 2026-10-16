@@ -419,13 +419,22 @@ describe("resolvePrototypeRequest", () => {
       success: true,
       request: {
         method: "POST",
-        url: "http://localhost:8080/feed?q=cats&n=3&flag=true&z=9",
+        url: "http://localhost:8080/feed?q=cats&flag=true&n=3&z=9",
         headers: { A: "lit", B: "cats", C: "Feed", D: "5" },
         body: { k: 1 },
       },
     });
     const bare = resolvePrototypeRequest({ type: "request", url: "x" }, "https://a.test", inputs);
     expect(bare).toMatchObject({ success: true, request: { method: "GET", headers: {} } });
+  });
+
+  test("query entries are applied in sorted key order, not authored order", () => {
+    const resolved = resolvePrototypeRequest(
+      request({ query: { z: "1", a: "2" } }),
+      "http://a.test/p",
+      inputs,
+    );
+    expect(resolved).toMatchObject({ request: { url: "http://a.test/p?a=2&z=1" } });
   });
 
   test("a body binding reads state and data", () => {

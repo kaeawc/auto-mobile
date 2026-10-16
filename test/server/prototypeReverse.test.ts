@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { PrototypeAdbReverseManager } from "../../src/features/prototype/PrototypeAdbReverseManager";
 import {
-  reverseForPatch,
-  reverseForSavedAction,
+  patchReverseStaging,
+  withSavedReverses,
   reverseLifecycle,
   withReverseReport,
 } from "../../src/server/prototypeReverse";
@@ -13,7 +13,7 @@ import type { BootedDevice } from "../../src/models";
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const spec = (id: string, url: string) => ({
   id,
-  root: { onTap: [{ type: "request", via: "device", url }] },
+  root: { type: "box", onTap: [{ type: "request", via: "device", url }] },
 });
 
 /** Records adb commands; `reverse --list` answers with the ports in `existing`. */
@@ -104,15 +104,97 @@ describe("reverseLifecycle", () => {
     expect(ios.adb.commands).toEqual([]);
   });
 
-  test("a first show that fails releases what it reversed, an in-place failure keeps it", async () => {
+  test("a first show that fails releases what it staged", async () => {
     const { adb, dependencies } = setup();
     const show = { action: "show" as const, spec: spec("p", "http://localhost:8080/") };
     const step = reverseLifecycle(dependencies, device, show, { id: "p" });
     await step.prepare([]);
-    await step.settle(false, true);
-    expect(adb.commands).not.toContain("reverse --remove tcp:8080");
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([8080]);
     await step.settle(false, false);
     expect(adb.commands.at(-1)).toBe("reverse --remove tcp:8080");
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([]);
+  });
+
+  describe("a same-id replacement", () => {
+    const replace = async () => {
+      const harness = setup();
+      const first = reverseLifecycle(
+        harness.dependencies,
+        device,
+        { action: "show" as const, spec: spec("p", "http://localhost:1111/") },
+        { id: "p" },
+      );
+      await first.prepare([]);
+      await first.settle(true, false);
+      const second = reverseLifecycle(
+        harness.dependencies,
+        device,
+        { action: "show" as const, spec: spec("p", "http://localhost:2222/") },
+        { id: "p" },
+      );
+      await second.prepare([]);
+      return { ...harness, second };
+    };
+
+    test("stages the new ports without dropping the old ones before the send", async () => {
+      const { dependencies } = await replace();
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111, 2222]);
+    });
+
+    test("a landed replacement releases the ports it no longer needs", async () => {
+      const { adb, dependencies, second } = await replace();
+      await second.settle(true, true);
+      expect(adb.commands.at(-1)).toBe("reverse --remove tcp:1111");
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([2222]);
+    });
+
+    test("a refused replacement keeps the old ports and removes the new ones", async () => {
+      const { adb, dependencies, second } = await replace();
+      await second.settle(false, true);
+      expect(adb.commands.at(-1)).toBe("reverse --remove tcp:2222");
+      expect(adb.commands).not.toContain("reverse --remove tcp:1111");
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111]);
+    });
+
+    test("an exception before dispatch does the same, and a settled call is not undone twice", async () => {
+      const { adb, dependencies, second } = await replace();
+      await second.abandon(false);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111]);
+      const removals = adb.commands.filter((c) => c.startsWith("reverse --remove"));
+      expect(removals).toEqual(["reverse --remove tcp:2222"]);
+      await second.abandon(false);
+      await second.settle(false, true);
+      expect(adb.commands.filter((c) => c.startsWith("reverse --remove"))).toEqual(removals);
+    });
+
+    test("an exception after dispatch keeps the new claims and drops the old", async () => {
+      const { dependencies, second } = await replace();
+      await second.abandon(true);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([2222]);
+    });
+
+    test("a port the replacement shares with the old spec survives a refusal", async () => {
+      const { adb, dependencies } = setup();
+      const url = "http://localhost:1111/";
+      const first = reverseLifecycle(
+        dependencies,
+        device,
+        { action: "show" as const, spec: spec("p", url) },
+        { id: "p" },
+      );
+      await first.prepare([]);
+      await first.settle(true, false);
+      const again = reverseLifecycle(
+        dependencies,
+        device,
+        { action: "show" as const, spec: spec("p", url) },
+        { id: "p" },
+      );
+      await again.prepare([]);
+      await again.settle(false, true);
+      expect(adb.commands.filter((c) => c.startsWith("reverse --remove"))).toEqual([]);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111]);
+    });
   });
 
   test("output reports unreversible urls only for a successful show", async () => {
@@ -130,25 +212,59 @@ describe("reverseLifecycle", () => {
   });
 });
 
+const ok = async () => ({ success: true });
+const refused = async () => ({ success: false });
+
 describe("saved and patched prototypes", () => {
+  const save = (id: string, port: number) => ({
+    action: "save" as const,
+    spec: spec(id, `http://127.0.0.1:${port}/`),
+  });
+
   test("save reverses under a saved claim and deleteSaved removes it", async () => {
     const { adb, dependencies } = setup();
-    await reverseForSavedAction(dependencies, device, {
-      action: "save",
-      spec: spec("p", "http://127.0.0.1:9000/"),
-    });
+    await withSavedReverses(dependencies, device, save("p", 9000), ok);
     expect(adb.commands).toContain("reverse tcp:9000 tcp:9000");
-    await reverseForSavedAction(dependencies, device, { action: "deleteSaved", id: "p" });
+    await withSavedReverses(dependencies, device, { action: "deleteSaved", id: "p" }, ok);
     expect(adb.commands.at(-1)).toBe("reverse --remove tcp:9000");
+  });
+
+  test("a refused or thrown save leaves no claim", async () => {
+    const { dependencies } = setup();
+    await withSavedReverses(dependencies, device, save("p", 9000), refused);
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([]);
+    const boom = async () => {
+      throw new Error("aborted");
+    };
+    await expect(withSavedReverses(dependencies, device, save("p", 9001), boom)).rejects.toThrow(
+      "aborted",
+    );
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([]);
+  });
+
+  test("a failed or thrown delete keeps the claim", async () => {
+    const { dependencies } = setup();
+    await withSavedReverses(dependencies, device, save("p", 9000), ok);
+    const del = { action: "deleteSaved" as const, id: "p" };
+    await withSavedReverses(dependencies, device, del, refused);
+    const boom = async () => {
+      throw new Error("aborted");
+    };
+    await expect(withSavedReverses(dependencies, device, del, boom)).rejects.toThrow("aborted");
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([9000]);
+  });
+
+  test("a failed re-save keeps the earlier saved ports", async () => {
+    const { dependencies } = setup();
+    await withSavedReverses(dependencies, device, save("p", 9000), ok);
+    await withSavedReverses(dependencies, device, save("p", 9001), refused);
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([9000]);
   });
 
   test("a saved claim and a shown prototype of one id share the port", async () => {
     const { adb, dependencies } = setup();
     const url = "http://localhost:8080/";
-    await reverseForSavedAction(dependencies, device, {
-      action: "save",
-      spec: spec("p", url),
-    });
+    await withSavedReverses(dependencies, device, { action: "save", spec: spec("p", url) }, ok);
     await reverseLifecycle(
       dependencies,
       device,
@@ -159,14 +275,73 @@ describe("saved and patched prototypes", () => {
     expect(adb.commands.filter((c) => c.startsWith("reverse --remove"))).toEqual([]);
   });
 
-  test("patch re-syncs to the patched spec, adding and dropping ports, and never refuses", async () => {
-    const { adb, dependencies } = setup();
-    expect(await reverseForPatch(dependencies, device, "p", spec("p", "http://localhost:1/"))).toBe(
-      undefined,
+  describe("patch", () => {
+    const stagedPatch = async () => {
+      const harness = setup();
+      const first = patchReverseStaging(harness.dependencies, device, "p");
+      await first.stage(spec("p", "http://localhost:1/"));
+      await first.settle(true);
+      const patch = patchReverseStaging(harness.dependencies, device, "p");
+      expect(await patch.stage(spec("p", "http://localhost:2/"))).toBeUndefined();
+      return { ...harness, patch };
+    };
+
+    test("a landed patch swaps the old port for the new one", async () => {
+      const { adb, dependencies, patch } = await stagedPatch();
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1, 2]);
+      await patch.settle(true);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([2]);
+      expect(adb.commands).toContain("reverse --remove tcp:1");
+    });
+
+    test("a refused or aborted patch keeps the old port and drops the new one", async () => {
+      const { adb, dependencies, patch } = await stagedPatch();
+      await patch.settle(false);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1]);
+      expect(adb.commands).toContain("reverse --remove tcp:2");
+      expect(adb.commands).not.toContain("reverse --remove tcp:1");
+    });
+  });
+
+  test("a replacing show releases sibling claims but not saved ones", async () => {
+    const { dependencies } = setup();
+    await withSavedReverses(dependencies, device, save("a", 9000), ok);
+    const show = async (id: string, port: number, replaceOthers?: boolean) => {
+      const step = reverseLifecycle(
+        dependencies,
+        device,
+        { action: "show", spec: spec(id, `http://localhost:${port}/`), replaceOthers },
+        { id },
+      );
+      await step.prepare([]);
+      await step.settle(true, false);
+    };
+    await show("a", 1);
+    await show("b", 2, false);
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1, 2, 9000]);
+    await show("c", 3);
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([3, 9000]);
+  });
+
+  test("a failed replacing show releases no sibling", async () => {
+    const { dependencies } = setup();
+    const shown = reverseLifecycle(
+      dependencies,
+      device,
+      { action: "show", spec: spec("a", "http://localhost:1/") },
+      { id: "a" },
     );
-    await reverseForPatch(dependencies, device, "p", spec("p", "http://localhost:2/"));
-    expect(adb.commands).toContain("reverse --remove tcp:1");
-    expect(adb.commands).toContain("reverse tcp:2 tcp:2");
+    await shown.prepare([]);
+    await shown.settle(true, false);
+    const failing = reverseLifecycle(
+      dependencies,
+      device,
+      { action: "show", spec: spec("b", "http://localhost:2/") },
+      { id: "b" },
+    );
+    await failing.prepare([]);
+    await failing.settle(false, false);
+    expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1]);
   });
 
   test("an existing reverse is never removed by dismiss", async () => {

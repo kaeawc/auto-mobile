@@ -8,8 +8,9 @@ import Foundation
 /// It owns a dedicated session, never `URLSession.shared`, so the host app's own networking,
 /// cookies, cache and credentials are untouched: an ephemeral configuration with no cookie jar or
 /// URL cache and the contract's 30 s ceiling. `timeoutMs` is a total deadline enforced here (the
-/// URLSession request timeout only bounds idle time), the body is capped as it arrives, and the
-/// duration comes from the session's own task metrics when it reports them.
+/// URLSession request timeout only bounds idle time), a 2xx body is capped as it arrives (a non-2xx
+/// body is never read), and the duration comes from the session's own task metrics when it reports
+/// them.
 final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable {
     private let session: URLSession
     private let delegate: PrototypeURLSessionDelegate
@@ -158,6 +159,9 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     private var headers: [String: String] = [:]
     private var metricsMs: Int?
     private var tooLarge = false
+    /// A non-2xx status ends the call at the headers: the outcome is `http_error`, so its body is
+    /// never read and the size cap does not apply to it.
+    private var skippedBody = false
     private var timedOut = false
     private var cancelledByCaller = false
     private var deadline: DispatchWorkItem?
@@ -187,19 +191,26 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
         handle.cancel()
     }
 
-    /// Whether the headers announce a body over the cap, which ends the call before it is read.
+    /// Whether the body should be read: a non-2xx status never is, and a 2xx body whose headers
+    /// announce more than the cap ends the call before it is read.
     func accept(status: Int, headers: [String: String], expectedLength: Int64) -> Bool {
         lock.withLock {
             self.status = status
             self.headers = headers
+            if status < 200 || status > 299 {
+                skippedBody = true
+                return false
+            }
             if expectedLength > Int64(maxBytes) { tooLarge = true }
             return !tooLarge
         }
     }
 
-    /// False once the body crossed the cap.
+    /// False once the body crossed the cap (or was skipped).
     func append(_ data: Data) -> Bool {
         lock.withLock {
+            // A cancelled non-2xx body can still deliver chunks; none of it is kept or counted.
+            if skippedBody { return false }
             body.append(data)
             if body.count > maxBytes { tooLarge = true }
             return !tooLarge
@@ -220,12 +231,21 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                 let continuation = self.continuation
                 self.continuation = nil
                 let durationMs = metricsMs ?? measuredMs
-                if tooLarge || error != nil {
+                // Cancelling a non-2xx body ends the task with a cancel error that is ours, not a failure.
+                let skipped = skippedBody && !timedOut && !cancelledByCaller
+                if tooLarge || (error != nil && !skipped) {
                     let mapped = PrototypeURLErrorMapping.map(
                         error ?? URLError(.cancelled), url: url, timeoutMs: timeoutMs, timedOut: timedOut,
                         tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes
                     )
                     return (continuation, .failure(PrototypeHttpFailure(error: mapped, durationMs: durationMs)))
+                }
+                // `null` means "empty body" downstream, so a JSON `null` body cannot be stored.
+                if (200 ..< 300).contains(status), !body.isEmpty, PrototypeHttpBody.decode(body) == .null {
+                    let literalNull = PrototypeRequestError(
+                        .invalidResponse, "A response body of JSON null cannot be stored in /data."
+                    )
+                    return (continuation, .failure(PrototypeHttpFailure(error: literalNull, durationMs: durationMs)))
                 }
                 return (continuation, .success(PrototypeHttpResponse(
                     status: status, headers: headers, body: body, durationMs: durationMs

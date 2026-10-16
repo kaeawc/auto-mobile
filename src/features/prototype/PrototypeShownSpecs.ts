@@ -81,8 +81,8 @@ export class PrototypeShownSpecs {
   endShow(
     deviceId: string,
     ticket: number,
-    shown?: { id: string; spec: ShownSpecJson; replaceOthers?: boolean },
-    refused = false,
+    shown?: { id: string; spec?: ShownSpecJson; replaceOthers?: boolean },
+    refusal?: "typed" | "indeterminate",
   ): void {
     const state = this.devices.get(deviceId);
     const pending = state?.open.get(ticket);
@@ -94,8 +94,10 @@ export class PrototypeShownSpecs {
     if (pending.superseded) {
       return;
     }
-    if (refused) {
-      if (pending.id !== undefined) {
+    if (refusal) {
+      // A typed refusal leaves the previous prototype on screen, so its mirror stays; only an
+      // indeterminate outcome (the device may have replaced it) forgets it.
+      if (refusal === "indeterminate" && pending.id !== undefined) {
         state.entries.delete(pending.id);
         state.dataWrites.delete(pending.id);
       }
@@ -106,7 +108,13 @@ export class PrototypeShownSpecs {
         state.entries.clear();
         state.dataWrites.clear();
       }
-      state.entries.set(shown.id, structuredClone(shown.spec));
+      // No spec means the device may have restored stored `/data` the host cannot see: untracked
+      // until the next show.
+      if (shown.spec) {
+        state.entries.set(shown.id, structuredClone(shown.spec));
+      } else {
+        state.entries.delete(shown.id);
+      }
       // A show makes its spec's data authoritative again, so earlier device writes are void.
       state.dataWrites.delete(shown.id);
     } else {

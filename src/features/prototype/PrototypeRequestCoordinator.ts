@@ -1,6 +1,6 @@
 /**
  * Owns the in-flight registry for host-proxied prototype requests (#12527): the per-device
- * concurrency limit and cancellation by prototype or by device.
+ * concurrency limit and cancellation by prototype, by connection or by device.
  */
 import { logger } from "../../utils/logger";
 import { MAX_PROTOTYPE_REQUESTS_IN_FLIGHT } from "./prototypeRequestLimits";
@@ -19,6 +19,8 @@ export interface PrototypeRequestCancellation {
 interface InFlight {
   deviceId: string;
   prototypeId: string;
+  /** The socket the request arrived on; unset for requests not tied to one. */
+  connection?: symbol;
   controller: AbortController;
 }
 
@@ -37,7 +39,7 @@ export class PrototypeRequestCoordinator implements PrototypeRequestCancellation
   }
 
   async run(
-    target: { deviceId: string; prototypeId: string },
+    target: { deviceId: string; prototypeId: string; connection?: symbol },
     request: PrototypeHttpRequest,
   ): Promise<PrototypeHttpOutcome> {
     if (this.inFlightCount(target.deviceId) >= this.maxInFlight) {
@@ -63,8 +65,17 @@ export class PrototypeRequestCoordinator implements PrototypeRequestCancellation
     this.cancelWhere((entry) => entry.deviceId === deviceId && entry.prototypeId === prototypeId);
   }
 
+  /** Real device removal: ends every request on the device, whichever connection sent it. */
   cancelDevice(deviceId: string): void {
     this.cancelWhere((entry) => entry.deviceId === deviceId);
+  }
+
+  /**
+   * A socket closed: ends only the requests that came in on it, so another app (or a newer
+   * connection) on the same device keeps its requests.
+   */
+  cancelConnection(connection: symbol): void {
+    this.cancelWhere((entry) => entry.connection === connection);
   }
 
   private cancelWhere(match: (entry: InFlight) => boolean): void {

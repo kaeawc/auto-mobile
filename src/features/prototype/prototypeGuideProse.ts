@@ -90,6 +90,8 @@ nonempty accessible \`label\` and optional 1-32 \`onTap\` actions, for example a
 \`onSubmit\` (1-32 actions run when that key is pressed; without \`imeAction\` the key is
 \`done\`). Multiline text has no IME action, so \`imeAction\` and \`onSubmit\` are refused with
 \`multiline: true\`. These need \`prototype_text_field_actions_v1\`, with the same refusal.
+\`leadingIcon\` is a built-in icon name drawn before the text (decoration, no actions; iOS maps it to
+an SF Symbol) and needs \`prototype_text_field_leading_icon_v1\`, with the same refusal.
 
 Open question: a \`secure\` field's value still lives in state and in \`change\` events/\`inspect\`;
 this slice does not redact it.

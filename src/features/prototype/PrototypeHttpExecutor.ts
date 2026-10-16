@@ -64,17 +64,53 @@ function isConnectionRefused(error: unknown): boolean {
   return code === "ECONNREFUSED" || code === "ConnectionRefused";
 }
 
-function parseBody(text: string): PrototypeRequestJson | null {
+/** Markers that cannot collide with a body: a raw-text body may be any string, even `too_large`. */
+const TOO_LARGE = Symbol("too_large");
+const LITERAL_NULL = Symbol("literal_null");
+
+function parseBody(text: string): PrototypeRequestJson | null | typeof LITERAL_NULL {
   if (text.length === 0) {
     return null;
   }
   try {
-    return JSON.parse(text) as PrototypeRequestJson;
+    const parsed = JSON.parse(text) as PrototypeRequestJson;
+    // `null` on the wire means "empty body", so a JSON `null` body is reported apart.
+    return parsed === null ? LITERAL_NULL : parsed;
   } catch (error) {
     // Not JSON is a supported shape: the response carries the raw string.
     logger.debug(`[PrototypeHttpExecutor] body is not JSON: ${errorMessage(error)}`);
     return text;
   }
+}
+
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const FORBIDDEN_HEADER_VALUE = /[\0\r\n]/;
+
+/** RFC 9110 field syntax, checked before fetch so the outcome is `invalid_request`, not `network`. */
+function headerProblemOf(headers: Record<string, string> | undefined): string | undefined {
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (!HEADER_NAME.test(name)) {
+      return `Header name is not an HTTP token: ${JSON.stringify(name)}`;
+    }
+    if (FORBIDDEN_HEADER_VALUE.test(value)) {
+      return `Header ${name} has a value with a CR, LF or NUL character`;
+    }
+  }
+  return undefined;
+}
+
+/** Checks that need no network, so their outcome is deterministic. */
+function requestProblemOf(
+  request: PrototypeHttpRequest,
+): { code: PrototypeRequestErrorCode; message: string } | undefined {
+  const urlProblem = urlProblemOf(request.url);
+  if (urlProblem !== undefined) {
+    return { code: "invalid_url", message: urlProblem };
+  }
+  const headerProblem = headerProblemOf(request.headers);
+  return headerProblem === undefined
+    ? undefined
+    : { code: "invalid_request", message: headerProblem };
 }
 
 function urlProblemOf(raw: string): string | undefined {
@@ -88,6 +124,14 @@ function urlProblemOf(raw: string): string | undefined {
     logger.debug(`[PrototypeHttpExecutor] URL parse failed: ${errorMessage(error)}`);
     return `Not an absolute URL: ${raw}`;
   }
+}
+
+function failed(
+  code: PrototypeRequestErrorCode,
+  message: string,
+  durationMs: number,
+): PrototypeHttpOutcome {
+  return { ok: false, error: { code, message }, durationMs };
 }
 
 function concat(chunks: Uint8Array[], total: number): Uint8Array {
@@ -118,9 +162,9 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
       durationMs: timer.now() - startedAt,
     });
 
-    const urlProblem = urlProblemOf(request.url);
-    if (urlProblem !== undefined) {
-      return fail("invalid_url", urlProblem);
+    const problem = requestProblemOf(request);
+    if (problem !== undefined) {
+      return fail(problem.code, problem.message);
     }
     if (signal.aborted) {
       return fail("cancelled", "Request was cancelled before it started.");
@@ -140,17 +184,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
 
     try {
       const response = await this.fetchImpl(request.url, this.requestInit(request, combined));
-      const body = await this.readBody(response, request.method, combined);
-      if (body === "too_large") {
-        return fail("too_large", `Response body exceeds ${this.maxBytes} bytes.`);
-      }
-      return {
-        ok: true,
-        status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
-        body,
-        durationMs: timer.now() - startedAt,
-      };
+      return await this.outcomeOf(response, request.method, combined, startedAt);
     } catch (error) {
       if (combined.aborted) {
         return timedOut
@@ -165,6 +199,35 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     } finally {
       timer.clearTimeout(handle);
     }
+  }
+
+  /** The outcome of an answered request: the status decides before any body is consumed. */
+  private async outcomeOf(
+    response: Response,
+    method: PrototypeRequestMethod,
+    signal: AbortSignal,
+    startedAt: number,
+  ): Promise<PrototypeHttpOutcome> {
+    const durationMs = (): number => this.options.timer.now() - startedAt;
+    const headers = Object.fromEntries(response.headers.entries());
+    if (response.status < 200 || response.status > 299) {
+      // The status decides the outcome (`http_error`) and a non-2xx body is never used, so it is
+      // neither read nor capped: an oversized error page must not be reported as `too_large`.
+      await response.body?.cancel();
+      return { ok: true, status: response.status, headers, body: null, durationMs: durationMs() };
+    }
+    const body = await this.readBody(response, method, signal);
+    if (body === TOO_LARGE) {
+      return failed("too_large", `Response body exceeds ${this.maxBytes} bytes.`, durationMs());
+    }
+    if (body === LITERAL_NULL) {
+      return failed(
+        "invalid_response",
+        "A response body of JSON null cannot be stored in /data.",
+        durationMs(),
+      );
+    }
+    return { ok: true, status: response.status, headers, body, durationMs: durationMs() };
   }
 
   private requestInit(request: PrototypeHttpRequest, signal: AbortSignal): RequestInit {
@@ -183,16 +246,16 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
     return { method: request.method, headers, body, signal, redirect: "follow" };
   }
 
-  /** Reads incrementally and stops as soon as the cap is crossed. */
+  /** Reads a 2xx body incrementally and stops as soon as the cap is crossed. */
   private async readBody(
     response: Response,
     method: PrototypeRequestMethod,
     signal: AbortSignal,
-  ): Promise<PrototypeRequestJson | null | "too_large"> {
+  ): Promise<PrototypeRequestJson | null | typeof TOO_LARGE | typeof LITERAL_NULL> {
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > this.maxBytes) {
       await response.body?.cancel();
-      return "too_large";
+      return TOO_LARGE;
     }
     if (method === "HEAD" || response.body === null) {
       return null;
@@ -209,7 +272,7 @@ export class FetchPrototypeHttpExecutor implements PrototypeHttpExecutor {
       total += value.byteLength;
       if (total > this.maxBytes) {
         await reader.cancel();
-        return "too_large";
+        return TOO_LARGE;
       }
       chunks.push(value);
     }

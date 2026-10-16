@@ -35,8 +35,11 @@ export interface PrototypeRequestHost {
 
 export function createPrototypeRequestHost(
   deviceId: string,
-  coordinator: PrototypeRequestCoordinator,
+  coordinator: Pick<PrototypeRequestCoordinator, "run" | "cancelConnection">,
 ): PrototypeRequestHost {
+  // One host per socket: closing it must not abort requests another connection on the same
+  // device (a second injected app, or a newer connection) is still waiting on.
+  const connection = Symbol(`prototype-request-host:${deviceId}`);
   return {
     async handleRequest(frame, send) {
       const parsed = prototypeRequestMessageSchema.safeParse(frame);
@@ -53,12 +56,12 @@ export function createPrototypeRequestHost(
       }
       const { requestId, prototypeId, method, url, headers, body, timeoutMs } = parsed.data;
       const outcome = await coordinator.run(
-        { deviceId, prototypeId },
+        { deviceId, prototypeId, connection },
         { method, url, headers, body, timeoutMs },
       );
       reply(send, { type: PROTOTYPE_RESPONSE_MESSAGE_TYPE, requestId, ...outcome });
     },
-    handleDisconnect: () => coordinator.cancelDevice(deviceId),
+    handleDisconnect: () => coordinator.cancelConnection(connection),
   };
 }
 

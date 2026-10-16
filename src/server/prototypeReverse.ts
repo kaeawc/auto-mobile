@@ -4,6 +4,7 @@ import {
   createPrototypeReverseAdb,
   type PrototypeAdbReverseManager,
   type PrototypeReverseReport,
+  type StagedReverses,
 } from "../features/prototype/PrototypeAdbReverseManager";
 import type { PrototypeMutation } from "../features/prototype/PrototypeStatusStore";
 import type { PrototypeResult } from "../features/observe/android/ctrlProxyProtocol";
@@ -40,6 +41,7 @@ export interface ReverseArgs {
   action: string;
   spec?: unknown;
   id?: string;
+  replaceOthers?: boolean;
 }
 
 /** The reverse steps of one show or dismiss, bound to its device, arguments and target. */
@@ -49,15 +51,46 @@ export function reverseLifecycle(
   args: ReverseArgs & { action: PrototypeMutation },
   target: { id?: string; all?: true },
 ) {
+  // The show's new ports are claimed before the send but kept apart from the earlier claims until
+  // the send is settled, so a refused replacement can give them back (see StagedReverses).
+  let staged: StagedReverses | undefined;
+  const takeStaged = () => {
+    const taken = staged;
+    staged = undefined;
+    return taken;
+  };
   return {
-    prepare: (refusals: readonly (PrototypeResult | undefined)[]) =>
-      reverseLoopbackPorts(dependencies, device, args, target, refusals),
-    settle: (success: boolean, previouslyShown: boolean) =>
-      settleReverses(dependencies.reverses, device.deviceId, target, {
+    prepare: async (refusals: readonly (PrototypeResult | undefined)[]) => {
+      const claim = await reverseLoopbackPorts(dependencies, device, args, target, refusals);
+      staged = claim;
+      return claim?.report;
+    },
+    settle: async (success: boolean, previouslyShown: boolean) => {
+      const claim = takeStaged();
+      if (claim) {
+        await (success ? claim.commit() : claim.rollback());
+      }
+      if (claim && success && args.replaceOthers !== false) {
+        await releaseReplaced(dependencies.reverses, device.deviceId, target.id);
+      }
+      await settleReverses(dependencies.reverses, device.deviceId, target, {
         action: args.action,
         success,
         previouslyShown,
-      }),
+        staged: claim !== undefined,
+      });
+    },
+    /**
+     * The call ended without settling (an exception or abort). Before dispatch nothing reached the
+     * device, so the staged claims are given back; after dispatch the show may be on screen, so the
+     * new claims stand.
+     */
+    abandon: async (sent: boolean) => {
+      const claim = takeStaged();
+      if (claim) {
+        await (sent ? claim.commit() : claim.rollback());
+      }
+    },
     output: (report: PrototypeReverseReport | undefined, success: boolean) =>
       reverseOutput(success ? report : undefined),
   };
@@ -91,7 +124,7 @@ export async function reverseLoopbackPorts(
   args: ReverseArgs,
   target: { id?: string },
   refusals: readonly (PrototypeResult | undefined)[],
-): Promise<PrototypeReverseReport | undefined> {
+): Promise<StagedReverses | undefined> {
   if (
     refusals.some((refusal) => refusal !== undefined) ||
     args.action !== "show" ||
@@ -100,57 +133,90 @@ export async function reverseLoopbackPorts(
   ) {
     return undefined;
   }
-  return reverseSync(dependencies, device, target.id, args.spec);
+  return stageReverses(dependencies, device, target.id, args.spec);
 }
 
-/** The saved prototype's reverse claim is keyed apart from a shown prototype of the same id. */
-const savedReverseKey = (id: string) => `saved:${id}`;
+const SAVED_PREFIX = "saved:";
 
-/** Re-syncs the patched prototype's ports to the complete spec the patch produced. */
-export async function reverseForPatch(
+/** A replacing show ended every other prototype on the device; saved claims live apart. */
+const releaseReplaced = (reverses: PrototypeAdbReverseManager, deviceId: string, keep?: string) =>
+  reverses.releaseExcept(deviceId, (key) => key === keep || key.startsWith(SAVED_PREFIX));
+/** The saved prototype's reverse claim is keyed apart from a shown prototype of the same id. */
+const savedReverseKey = (id: string) => `${SAVED_PREFIX}${id}`;
+
+/**
+ * Android patch: stages the ports of the complete patched spec, to be settled by `settle` once the
+ * device has answered. The patch is never refused here.
+ */
+export function patchReverseStaging(
   dependencies: ReverseDependencies,
   device: BootedDevice,
   id: string,
-  spec: unknown,
-): Promise<undefined> {
-  if (dependencies.target.android) {
-    await reverseSync(dependencies, device, id, spec);
-  }
-  return undefined;
+) {
+  let staged: StagedReverses | undefined;
+  return {
+    stage: async (spec: unknown): Promise<undefined> => {
+      if (dependencies.target.android) {
+        staged = await stageReverses(dependencies, device, id, spec);
+      }
+      return undefined;
+    },
+    /** Commit when the patch landed (or may have), roll back on a refusal or an exception. */
+    settle: async (landed: boolean): Promise<void> => {
+      const claim = staged;
+      staged = undefined;
+      await (landed ? claim?.commit() : claim?.rollback());
+    },
+  };
 }
 
 /**
  * Android save puts the spec's ports under a saved claim that lives until deleteSaved or the
- * device goes away; a prototype launched later with no host connected gets no reverse.
+ * device goes away; a prototype launched later with no host connected gets no reverse. The claim
+ * changes only when the device reports success: a failed or thrown save adds none, a failed delete
+ * keeps it.
  */
-export async function reverseForSavedAction(
+export async function withSavedReverses<T extends { success: boolean }>(
   dependencies: ReverseDependencies,
   device: BootedDevice,
   args: ReverseArgs,
-): Promise<PrototypeReverseReport | undefined> {
-  if (!dependencies.target.android) {
-    return undefined;
+  dispatch: () => Promise<T>,
+): Promise<T> {
+  const id = savedId(args);
+  if (!dependencies.target.android || id === undefined) {
+    return dispatch();
   }
-  if (args.action === "save" && args.spec !== undefined) {
-    const id = (args.spec as { id?: unknown }).id;
-    return typeof id === "string"
-      ? reverseSync(dependencies, device, savedReverseKey(id), args.spec)
+  const key = savedReverseKey(id);
+  const staged =
+    args.action === "save" && args.spec !== undefined
+      ? await stageReverses(dependencies, device, key, args.spec)
       : undefined;
+  let result: T | undefined;
+  try {
+    result = await dispatch();
+    return withReverseReport(result, staged?.report) as T;
+  } finally {
+    const landed = result?.success === true;
+    await (landed ? staged?.commit() : staged?.rollback());
+    if (landed && args.action === "deleteSaved") {
+      await dependencies.reverses.release(device.deviceId, key);
+    }
   }
-  if (args.action === "deleteSaved" && args.id !== undefined) {
-    await dependencies.reverses.release(device.deviceId, savedReverseKey(args.id));
-  }
-  return undefined;
 }
 
-function reverseSync(
+function savedId(args: ReverseArgs): string | undefined {
+  const id = args.action === "save" ? (args.spec as { id?: unknown } | undefined)?.id : args.id;
+  return typeof id === "string" ? id : undefined;
+}
+
+function stageReverses(
   dependencies: ReverseDependencies,
   device: BootedDevice,
   key: string,
   spec: unknown,
-): Promise<PrototypeReverseReport> {
+): Promise<StagedReverses> {
   const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create(device);
-  return dependencies.reverses.sync(device.deviceId, key, spec, createPrototypeReverseAdb(adb));
+  return dependencies.reverses.stage(device.deviceId, key, spec, createPrototypeReverseAdb(adb));
 }
 
 /**
@@ -161,10 +227,18 @@ async function settleReverses(
   reverses: PrototypeAdbReverseManager,
   deviceId: string,
   target: { id?: string; all?: true },
-  outcome: { action: PrototypeMutation; success: boolean; previouslyShown: boolean },
+  outcome: {
+    action: PrototypeMutation;
+    success: boolean;
+    previouslyShown: boolean;
+    /** The show's claims were staged and already committed or rolled back. */
+    staged: boolean;
+  },
 ): Promise<void> {
   const ended =
-    outcome.action === "dismiss" ? outcome.success : !outcome.success && !outcome.previouslyShown;
+    outcome.action === "dismiss"
+      ? outcome.success
+      : !outcome.staged && !outcome.success && !outcome.previouslyShown;
   if (!ended) {
     return;
   }

@@ -21,6 +21,8 @@ export const PROTOTYPE_REQUEST_ERROR_CODES = [
   "invalid_request",
   "network",
   "too_many_in_flight",
+  // A 2xx body `/data` cannot hold (the JSON `null` body); the devices also raise it themselves.
+  "invalid_response",
 ] as const;
 export type PrototypeRequestErrorCode = (typeof PROTOTYPE_REQUEST_ERROR_CODES)[number];
 

@@ -113,6 +113,7 @@ import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
 } from "../models/SessionRecoveryAssignmentError";
+import { assertPoolCapacity } from "./poolCapacityError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -2750,9 +2751,7 @@ export class DevicePool {
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
-    this.sessionManager.retireClockRestoration(deviceId);
-    this.sessionManager.retireRotationRestoration(deviceId);
-    this.sessionManager.retireScreenReaderRestoration(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "removal");
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -3221,9 +3220,14 @@ export class DevicePool {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      const stats = shortfall.stats;
-
-      this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
+      assertPoolCapacity(
+        this.criteriaMatcher,
+        shortfall.stats,
+        requiredCount,
+        platform,
+        this.recoveringAndroidImages.size,
+        refreshFailureContext(refreshFailure),
+      );
 
       this.multiDeviceAllocations.enqueue(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
@@ -3752,36 +3756,6 @@ export class DevicePool {
     return undefined;
   }
 
-  private assertMultiDeviceCapacity(
-    stats: ReturnType<DevicePool["getStatsForPlatform"]>,
-    requiredCount: number,
-    platform: Platform | undefined,
-    refreshFailure: string | undefined,
-  ): void {
-    if (
-      !this.criteriaMatcher.hasSufficientCapacityIncludingAndroidRecovery(
-        stats.total,
-        requiredCount,
-        this.recoveringAndroidImages.size,
-        platform,
-      )
-    ) {
-      throw new ActionableError(
-        `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
-          refreshFailureContext(refreshFailure) +
-          `Device pool status:\n` +
-          `  Total devices: ${stats.total}\n` +
-          `  Idle: ${stats.idle}\n` +
-          `  Assigned: ${stats.assigned}\n` +
-          `  Error: ${stats.error}\n\n` +
-          `Suggestions:\n` +
-          `  - Start ${requiredCount - stats.total} more emulator(s) or simulators\n` +
-          `  - Reduce the number of devices required in the test plan\n` +
-          `  - Verify ADB is working: adb devices`,
-      );
-    }
-  }
-
   /**
    * Whether a device could serve a claim once its holder releases it. Error,
    * unhealthy and unassignable transport-alias devices never pass
@@ -4145,6 +4119,22 @@ export class DevicePool {
       : undefined;
   }
 
+  /**
+   * A holder whose assignment moved elsewhere only pins the lost device for deferred rebind
+   * cleanup (cf. isCapturedDisconnectTargetCurrent): drop that hold, leaving the session on its
+   * new device. Returns whether the hold was dropped.
+   */
+  private dropRebindCleanupHold(device: PooledDevice, sessionId: string): boolean {
+    const held = this.sessionManager.findSession(sessionId);
+    if (!held || held.assignedDevice === device.id) {
+      return false;
+    }
+    this.deferredDeviceReleases.delete(device.id);
+    unbindDevice(device, { expectedSessionId: sessionId, status: "keep" });
+    this.notifyDeviceStateChanged(device);
+    return true;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4171,6 +4161,9 @@ export class DevicePool {
           "superseded this eviction",
       );
       return false;
+    }
+    if (this.dropRebindCleanupHold(device, sessionId)) {
+      return true;
     }
     const releaseReason =
       this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
@@ -8208,7 +8201,7 @@ export class DevicePool {
     if (!device) {
       return false;
     }
-    this.sessionManager.retireRestorationsOnIncarnationBump(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "incarnation-bump");
     this.deviceHealthMarkers.clear(deviceId);
     device.incarnation = this.nextDeviceIncarnation();
     // Full: a VM restore can replace the rendered screen even on the same connection/serial.

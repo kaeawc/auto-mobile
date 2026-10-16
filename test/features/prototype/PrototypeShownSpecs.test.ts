@@ -53,9 +53,25 @@ describe("PrototypeShownSpecs", () => {
       store.endShow("d", ticket, { id, spec, replaceOthers: false });
     }
     const refused = store.beginShow("d", "a", false);
-    store.endShow("d", refused, undefined, true);
+    store.endShow("d", refused, undefined, "indeterminate");
     expect(store.read("d", "a")).toEqual({ kind: "unknown" });
     expect(store.read("d", "b")).toMatchObject({ kind: "known", spec });
+  });
+  test("a typed refusal of an additive re-show keeps the previous mirror", () => {
+    const store = new PrototypeShownSpecs();
+    const first = store.beginShow("d", "a", false);
+    store.endShow("d", first, { id: "a", spec, replaceOthers: false });
+    const refused = store.beginShow("d", "a", false);
+    store.endShow("d", refused, undefined, "typed");
+    expect(store.read("d", "a")).toMatchObject({ kind: "known", spec });
+  });
+  test("a show without a spec leaves its id untracked", () => {
+    const store = new PrototypeShownSpecs();
+    const first = store.beginShow("d", "a", false);
+    store.endShow("d", first, { id: "a", spec, replaceOthers: false });
+    const again = store.beginShow("d", "a", false);
+    store.endShow("d", again, { id: "a", replaceOthers: false });
+    expect(store.read("d", "a")).toEqual({ kind: "unknown" });
   });
   test("successful shows clone and reads remain busy while any ticket is open", () => {
     const store = new PrototypeShownSpecs();

@@ -305,6 +305,22 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(harness.clock.live.count, 0)
     }
 
+    func testLosingTheOwningConnectionFailsItsRequestWhileOtherHostsStay() async throws {
+        let harness = RequestHarness()
+        var settled: [String] = []
+        harness.driver.onHostSettled = { settled.append($0) }
+        try harness.show(request())
+        harness.tap()
+        let id = try XCTUnwrap(harness.hostFrames.first?["requestId"] as? String)
+        harness.driver.hostRequestsLost(["not-pending"])
+        harness.driver.hostRequestsLost([id])
+        await harness.driver.settled()
+        XCTAssertEqual(harness.session.state["status"], .string("error"))
+        XCTAssertEqual(harness.data("/feed__meta/error/code"), .string("network"))
+        XCTAssertEqual(harness.clock.live.count, 0)
+        XCTAssertEqual(settled, [id])
+    }
+
     func testDismissingForgetsHostRequestsAndTheirWatchdogs() throws {
         let harness = RequestHarness()
         try harness.show(request())
@@ -465,7 +481,7 @@ final class PrototypeRequestDriverTests: XCTestCase {
             ))
         }
         XCTAssertEqual(job(.post, .string("raw")).body, Data("raw".utf8))
-        XCTAssertNil(job(.post, .string("raw")).headers["Content-Type"])
+        XCTAssertEqual(job(.post, .string("raw")).headers["Content-Type"], "text/plain; charset=utf-8")
         XCTAssertEqual(job(.put, .number(2)).body, Data("2".utf8))
         XCTAssertEqual(job(.put, .number(2)).headers["Content-Type"], "application/json")
         XCTAssertEqual(job(.patch, .object(["a/b": .string("é\"")])).body, Data(#"{"a/b":"é\""}"#.utf8))

@@ -25,6 +25,9 @@ final class PrototypeRequestDriver {
     private var notices: [Task<Void, Never>] = []
     /// Delivers a completion to the session; set by its owner.
     var onComplete: Complete?
+    /// A host request left the waiting set (answered, timed out, cancelled or failed); the owner of
+    /// its connection no longer needs to be remembered.
+    var onHostSettled: ((String) -> Void)?
 
     init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, sendToHost: @escaping SendToHost) {
         self.clock = clock
@@ -46,7 +49,7 @@ final class PrototypeRequestDriver {
                 case .device: startDevice(job)
                 }
             case let .cancel(requestId):
-                hostWatchdogs.removeValue(forKey: requestId)?.cancel()
+                settleHost(requestId)?.cancel()
                 deviceTasks.removeValue(forKey: requestId)?.cancel()
             }
         }
@@ -55,7 +58,7 @@ final class PrototypeRequestDriver {
     /// A `prototype_response` frame from the host. A response nobody waits for is dropped.
     func receiveHostResponse(_ frame: [String: Any]) {
         guard let (requestId, response) = PrototypeRequestWire.decodeResponse(frame),
-              let watchdog = hostWatchdogs.removeValue(forKey: requestId) else { return }
+              let watchdog = settleHost(requestId) else { return }
         watchdog.cancel()
         deliver(requestId, response)
     }
@@ -63,13 +66,26 @@ final class PrototypeRequestDriver {
     /// The last host connection closed: calls waiting on it will never be answered, so each ends now
     /// instead of at its watchdog.
     func hostDisconnected() {
-        for requestId in hostWatchdogs.keys.sorted() {
-            hostWatchdogs.removeValue(forKey: requestId)?.cancel()
+        hostRequestsLost(hostWatchdogs.keys.sorted())
+    }
+
+    /// The connection these host requests went to closed (other connections may remain): each ends
+    /// now as `network`. A request that already ended is ignored.
+    func hostRequestsLost(_ requestIds: [String]) {
+        for requestId in requestIds {
+            guard let watchdog = settleHost(requestId) else { continue }
+            watchdog.cancel()
             announce(requestId, .failed(
                 PrototypeRequestError(.network, "The AutoMobile host disconnected before it answered."),
                 durationMs: 0
             ))
         }
+    }
+
+    private func settleHost(_ requestId: String) -> PrototypeTimerHandle? {
+        let watchdog = hostWatchdogs.removeValue(forKey: requestId)
+        if watchdog != nil { onHostSettled?(requestId) }
+        return watchdog
     }
 
     /// Resolves once every request that is running or about to be announced has been delivered;
@@ -100,7 +116,7 @@ final class PrototypeRequestDriver {
         }
         let waitMs = job.effectiveTimeoutMs + Self.hostGraceMs
         hostWatchdogs[job.requestId] = clock.schedule(afterMilliseconds: waitMs) { [weak self] in
-            guard let self, hostWatchdogs.removeValue(forKey: job.requestId) != nil else { return }
+            guard let self, settleHost(job.requestId) != nil else { return }
             deliver(job.requestId, .failed(
                 PrototypeRequestError(.timeout, "The host did not answer within \(waitMs)ms."),
                 durationMs: waitMs

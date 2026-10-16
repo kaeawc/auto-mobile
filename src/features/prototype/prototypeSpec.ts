@@ -622,6 +622,7 @@ const textFieldBaseSchema = z
     minLines: z.number().int().min(1).max(20).optional(),
     maxLines: z.number().int().min(1).max(20).optional(),
     maxLength: z.number().int().min(1).max(10000).optional(),
+    leadingIcon: iconNameSchema.optional(),
     trailingIcon: appBarActionSchema.optional(),
     imeAction: z.enum(["done", "next", "search", "send", "go"]).optional(),
     onSubmit: actionListSchema.optional(),

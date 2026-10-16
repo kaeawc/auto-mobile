@@ -159,6 +159,11 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
       resultText: "",
     };
     state.audit.toolCalls.push(record);
+    if (state.callsById.has(record.id)) {
+      // A reused id would route the next result to the wrong call and hide the first one.
+      state.audit.parseErrors.push(`duplicate tool_use id ${record.id}`);
+      continue;
+    }
     state.callsById.set(record.id, record);
   }
 }

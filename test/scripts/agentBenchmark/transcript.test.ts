@@ -139,6 +139,24 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result?.finalText).toBe("first");
   });
 
+  test("a reused tool_use id fails the transcript", () => {
+    const use = (name: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_x", name, input: {} }] },
+      });
+    const result = (content: string) =>
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_x", content }] },
+      });
+    const lines = [use("mcp__auto-mobile__observe"), result("WAIT_TIMEOUT")];
+    lines.push(use("mcp__auto-mobile__tapOn"), result("ok"));
+    const audit = auditTranscript(`${lines.join("\n")}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toContain("duplicate tool_use id toolu_x");
+    expect(audit.toolCalls[0].resultText).toBe("WAIT_TIMEOUT");
+  });
+
   test("a non-boolean is_error fails the transcript instead of reading as success", () => {
     const base = new TranscriptBuilder().init().mcp("tapOn", "ok", { noResult: true }).build();
     const id = auditTranscript(base, NO_PATTERNS).toolCalls[0].id;

@@ -1,4 +1,4 @@
-import type { ViewHierarchyResult, ObserveResult } from "../../models";
+import type { ViewHierarchyResult, ObserveResult, Element, ElementBounds } from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 /** Hierarchy transformations required by platform tap strategies. */
 export interface TapViewHierarchy {
@@ -9,6 +9,12 @@ export interface TapViewHierarchy {
     height: number,
     margin?: number,
   ): ViewHierarchyResult;
+}
+
+/** Result of clipping a tap target's bounds to the area a tap can reach. */
+export interface TapBoundsClip {
+  bounds: ElementBounds | null;
+  coveredBy?: string;
 }
 
 /**
@@ -31,6 +37,17 @@ export interface TapStrategy {
     viewHierarchy: TapViewHierarchy,
     screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null;
+
+  /**
+   * Clip a tap target to the area not covered by platform navigation chrome.
+   * Platforms without such chrome return `{ bounds }` unchanged.
+   */
+  clipNavigationTapBounds(
+    bounds: ElementBounds,
+    hierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    elements: readonly Element[],
+  ): TapBoundsClip;
 
   /**
    * Whether the platform's accessibility service (TalkBack / VoiceOver)

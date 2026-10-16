@@ -8,6 +8,7 @@ import { launchAppResultSchema } from "../../../src/server/toolOutputSchemas";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { promises as fsp, readFileSync } from "fs";
 import * as os from "os";
@@ -230,9 +231,11 @@ describe("LaunchApp", () => {
     const execSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
       const result = await execute(...args);
       if (args[0] === "shell dumpsys activity processes") {
-        expect(args[2]).toBe(DUMPSYS_MAX_BUFFER);
+        expect(executeCommandOptionsOf(args).maxBuffer).toBe(DUMPSYS_MAX_BUFFER);
         expect(Buffer.byteLength(result.stdout)).toBeGreaterThan(1024 * 1024);
-        expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(args[2] ?? 1024 * 1024);
+        expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(
+          executeCommandOptionsOf(args).maxBuffer ?? 1024 * 1024,
+        );
       }
       return result;
     });
@@ -418,8 +421,24 @@ describe("LaunchApp", () => {
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
       expect(calls).toEqual([
-        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
-        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
+        [
+          "shell dumpsys activity processes",
+          {
+            timeoutMs: 5_000,
+            maxBuffer: DUMPSYS_MAX_BUFFER,
+            noRetry: true,
+            signal: controller.signal,
+          },
+        ],
+        [
+          "shell dumpsys activity processes",
+          {
+            timeoutMs: 5_000,
+            maxBuffer: DUMPSYS_MAX_BUFFER,
+            noRetry: true,
+            signal: controller.signal,
+          },
+        ],
       ]);
       expect(dispatches).toBe(2);
       expect(fakeTimer.now()).toBe(200);
@@ -1597,13 +1616,7 @@ describe("LaunchApp", () => {
           .getExecutedCommands()
           .filter((command) => command.includes("pm dump") || command.includes("query-activities")),
       ).toEqual([firstCommand]);
-      expect(executeSpy).toHaveBeenCalledWith(
-        firstCommand,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      expect(executeSpy).toHaveBeenCalledWith(firstCommand, { signal: controller.signal });
       const discoveryLabels = trackSpy.mock.calls
         .map(([label]) => label)
         .filter((label) => label.startsWith("activity") || label === "a11yLaunchIntent");

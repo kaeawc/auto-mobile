@@ -94,6 +94,11 @@ import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRe
 import { createObserveScreenWiring, installObserveStores } from "./ObserveScreenWiring";
 import type { HierarchyCollector } from "./collectors/HierarchyCollector";
 import {
+  AndroidDisplayBindingCollector,
+  IosDisplayBindingCollector,
+  type DisplayBindingCollector,
+} from "./collectors/DisplayBindingCollector";
+import {
   DefaultAndroidObservationCollector,
   scopeActiveWindowToBackStack,
   type AndroidObservationCollector,
@@ -157,26 +162,6 @@ function sameObservedPanel(
   observed: ObserveResult["display"],
 ): boolean {
   return cached?.key === observed.key && cached.generation === observed.generation;
-}
-
-function reconcileIosDisplayTransition(
-  deviceId: string,
-  result: ObserveResult,
-  explicitlyRouted: boolean,
-  hasMultiplePanels: boolean,
-): void {
-  if (explicitlyRouted) {
-    return;
-  }
-  displayTransitions.checkIdentity(deviceId, result.display, "ios");
-  if (hasMultiplePanels) {
-    displayTransitions.checkIosGeometry(
-      deviceId,
-      result.screenSize,
-      result.observationId,
-      result.display,
-    );
-  }
 }
 
 /**
@@ -407,11 +392,6 @@ interface SingleDisplayStageContext {
   result: ObserveResult;
 }
 
-interface SingleDisplayTargetContext extends SingleDisplayStageContext {
-  displayRequest: string | undefined;
-  observedAndroid: ObservedAndroidDisplay | undefined;
-}
-
 interface SingleDisplayCaptureContext extends SingleDisplayStageContext {
   options: ObserveScreenExecuteOptions | undefined;
   queryOptions: ObserveScreenExecuteOptions["queryOptions"];
@@ -462,6 +442,7 @@ export class RealObserveScreen implements ObserveScreen {
   private elementsBuilder: ObserveElementsBuilder;
   private readonly reconciler: ActiveWindowAttributionReconciler;
   private readonly androidCollector: AndroidObservationCollector;
+  private readonly displayBinding: DisplayBindingCollector;
   private readonly iosCollector: IosObservationCollector;
   private readonly windowIdentity: WindowIdentityFreshnessResolver;
   private platformValidator: HierarchyPlatformValidator;
@@ -629,6 +610,11 @@ export class RealObserveScreen implements ObserveScreen {
       viewHierarchy: () => this.viewHierarchy,
       device: () => this.device,
     });
+    const displayBindingDeps = { device: () => this.device, adb: () => this.adb };
+    this.displayBinding =
+      device.platform === "ios"
+        ? new IosDisplayBindingCollector(displayBindingDeps)
+        : new AndroidDisplayBindingCollector(displayBindingDeps);
     this.iosCollector = new DefaultIosObservationCollector({
       hierarchyCollector: () => this.hierarchyCollector,
       viewHierarchy: () => this.viewHierarchy,
@@ -1184,19 +1170,6 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
-  private resolveSingleDisplayTarget(context: SingleDisplayTargetContext) {
-    const { result, displayRequest, observedAndroid } = context;
-
-    const explicitlyRouted = displayRequest !== undefined && displayRequest !== "active";
-    const requestedPanel = explicitlyRouted
-      ? resolveTargetDisplay(this.device.displays, displayRequest, {
-          activePanelKey: observedAndroid?.display.key,
-          posture: result.display.posture,
-        })
-      : undefined;
-    return { explicitlyRouted, requestedPanel };
-  }
-
   private captureSingleDisplayData(context: SingleDisplayCaptureContext): Promise<void> {
     const {
       result,
@@ -1329,30 +1302,15 @@ export class RealObserveScreen implements ObserveScreen {
       // Only synchronous reconciliation of this observation may advance its
       // provenance. An intervening transition leaves it stale on either platform.
       let recordProvenance = captureStart;
-      const observedAndroid =
-        this.device.platform === "android"
-          ? await androidDisplayCache.resolve(this.device, this.adb, signal)
-          : undefined;
-      if (observedAndroid) {
-        result.display = observedAndroid.display;
-      }
-      const { explicitlyRouted, requestedPanel } = this.resolveSingleDisplayTarget({
+      const targetBinding = this.displayBinding.resolveTarget({
         result,
         displayRequest,
-        observedAndroid,
+        androidDisplayCache,
+        signal,
       });
-      const requestedDisplayId =
-        requestedPanel && this.device.platform === "android"
-          ? await androidDisplayCache.logicalIdForPanel(
-              this.device,
-              this.adb,
-              requestedPanel.key,
-              signal,
-            )
-          : undefined;
-      if (requestedPanel && this.device.platform === "android") {
-        result.display = { ...result.display, key: requestedPanel.key, role: requestedPanel.role };
-      }
+      // Only the Android resolution is asynchronous; await it only then so iOS adds no tick.
+      const { observedAndroid, explicitlyRouted, requestedPanel, requestedDisplayId } =
+        targetBinding instanceof Promise ? await targetBinding : targetBinding;
 
       const routedAggregateSecondary =
         preserveDisplayState &&
@@ -1579,112 +1537,22 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Reconciliation can replace the tree. Bind the final hierarchy's panel
       // before screenshot routing or transition fencing observes this result.
-      if (this.device.platform === "ios") {
-        result.display = observedIosDisplay(this.device, result.viewHierarchy);
-        if (
-          !observerMode &&
-          !preserveDisplayState &&
-          displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
-        ) {
-          reconcileIosDisplayTransition(
-            this.device.deviceId,
-            result,
-            explicitlyRouted,
-            (this.device.displays?.panels.length ?? 0) > 1,
-          );
-          recordProvenance = {
-            revision: displayTransitions.revision(this.device.deviceId),
-            identityRevision: displayTransitions.identityRevision(this.device.deviceId),
-          };
-        }
-        const panel = resolveTargetDisplay(this.device.displays, displayRequest, {
-          focusedPanelKey: result.display.key,
-          activePanelKey: result.display.key,
-          posture: result.display.posture,
-        });
-        if (explicitlyRouted && panel.key !== result.display.key) {
-          throw new DisplaySelectionError(
-            `Display "${panel.key}" is not the active panel on iOS. Active panel: ${result.display.key}`,
-          );
-        }
-      } else if (this.device.displays?.panels.length) {
-        const reportedId = result.viewHierarchy?.displayId;
-        const panelUniqueId = result.viewHierarchy?.panelUniqueId;
-        if (
-          requestedDisplayId !== undefined &&
-          typeof reportedId !== "number" &&
-          !panelUniqueId &&
-          !(
-            preserveDisplayState &&
-            (result.viewHierarchy?.hierarchy?.error ||
-              result.viewHierarchy?.hierarchy?.unavailableReason ||
-              (result.viewHierarchy?.ctrlProxyIncomplete && !result.viewHierarchy.hierarchy?.node))
-          )
-        ) {
-          throw new DisplaySelectionError(
-            "CtrlProxy APK too old for display routing; update it and retry the observation.",
-          );
-        }
-        if (
-          requestedDisplayId !== undefined &&
-          typeof reportedId === "number" &&
-          reportedId !== requestedDisplayId
-        ) {
-          throw new DisplaySelectionError(
-            `Selected display "${requestedPanel?.key}" returned hierarchy for display ${reportedId}; retry the observation.`,
-          );
-        }
-        const focusedPanel =
-          typeof reportedId === "number" || panelUniqueId
-            ? await androidDisplayCache.panelForLogicalId(
-                this.device,
-                this.adb,
-                reportedId,
-                signal,
-                { panelUniqueId, panelFingerprint: result.viewHierarchy?.panelFingerprint },
-                explicitlyRouted,
-              )
-            : undefined;
-        if (requestedPanel && focusedPanel && requestedPanel.key !== focusedPanel.key) {
-          throw new DisplaySelectionError(
-            `Selected display "${requestedPanel.key}" returned content from "${focusedPanel.key}"; retry the observation.`,
-          );
-        }
-        const geometryChanged = displayTransitions.geometryChanged(
-          this.device.deviceId,
-          result.screenSize,
-        );
-        const refreshed =
-          geometryChanged && !explicitlyRouted
-            ? await androidDisplayCache.resolve(this.device, this.adb, signal, true)
-            : observedAndroid;
-        result.display.posture = await androidDisplayCache.posture(
-          this.device,
-          this.adb,
-          signal,
-          geometryChanged && !explicitlyRouted,
-        );
-        const panel =
-          requestedPanel ??
-          resolveTargetDisplay(this.device.displays, displayRequest, {
-            focusedPanelKey: focusedPanel?.key,
-            activePanelKey: refreshed?.display.key,
-            posture: result.display.posture,
-          });
-        result.display = { ...result.display, key: panel.key, role: panel.role };
-        if (
-          !explicitlyRouted &&
-          !preserveDisplayState &&
-          !observerMode &&
-          displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
-        ) {
-          displayTransitions.checkIdentity(this.device.deviceId, result.display);
-          recordProvenance = {
-            revision: displayTransitions.revision(this.device.deviceId),
-            identityRevision: displayTransitions.identityRevision(this.device.deviceId),
-          };
-        }
-      }
+      const finalBinding = this.displayBinding.bindFinalDisplay({
+        result,
+        displayRequest,
+        androidDisplayCache,
+        observedAndroid,
+        requestedPanel,
+        requestedDisplayId,
+        explicitlyRouted,
+        preserveDisplayState,
+        observerMode,
+        recordProvenance,
+        signal,
+      });
+      // Only the Android binding is asynchronous; await it only then so iOS adds no tick.
+      recordProvenance = (finalBinding instanceof Promise ? await finalBinding : finalBinding)
+        .recordProvenance;
       const panels = this.device.displays?.panels;
       if (panels && panels.length > 1) {
         result.otherDisplays = panels
@@ -2734,13 +2602,7 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     try {
-      const { stdout } = await this.adb.executeCommand(
-        `shell "dumpsys window"`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const { stdout } = await this.adb.executeCommand(`shell "dumpsys window"`, { signal });
       return /mCurrentFocus=Window\{[^}\r\n]*Application (?:Error:|Not Responding)/.test(stdout);
     } catch (error) {
       // This optional confirmation must not fail observe; fall back to the normal mismatch gate.

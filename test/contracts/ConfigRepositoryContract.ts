@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ConfigRepository } from "../../src/db/keyedJsonConfigRepository";
+import type {
+  ConfigRepository,
+  KeyedConfigRepository,
+} from "../../src/db/keyedJsonConfigRepository";
 
 export interface ConfigRepositoryHandle<TConfig> {
   repository: ConfigRepository<TConfig>;
@@ -61,12 +64,66 @@ export function runConfigRepositoryContract<TConfig>(
         expect(await repository.getConfig()).toEqual(samples.first);
       }));
 
-    test("the returned config does not alias stored state", () =>
+    test("neither the stored nor the returned config aliases the caller's objects, at any depth", () =>
       withRepository(async (repository) => {
-        await repository.setConfig(samples.first);
+        const input = structuredClone(samples.second);
+        await repository.setConfig(input);
+        mutateDeep(input);
+        expect(await repository.getConfig()).toEqual(samples.second);
         const read = await repository.getConfig();
-        (read as Record<string, unknown>).__mutated = true;
-        expect(await repository.getConfig()).toEqual(samples.first);
+        mutateDeep(read);
+        expect(await repository.getConfig()).toEqual(samples.second);
       }));
+  });
+}
+
+/** Flip every leaf and add a key at each object level, so any shared reference shows up. */
+function mutateDeep(value: unknown): void {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    const child = record[key];
+    if (typeof child === "object" && child !== null) {
+      mutateDeep(child);
+    } else if (typeof child === "number") {
+      record[key] = child + 1;
+    } else if (typeof child === "boolean") {
+      record[key] = !child;
+    }
+  }
+  record.__mutated = true;
+}
+
+/**
+ * Extra contract for repositories whose rows can be enumerated by key prefix (the
+ * per-session appearance rows, #10976). Run it in addition to {@link runConfigRepositoryContract}.
+ */
+export function runKeyedConfigRepositoryContract<TConfig>(
+  name: string,
+  make: () => Promise<{
+    repository: KeyedConfigRepository<TConfig>;
+    dispose?: () => Promise<void>;
+  }>,
+  sample: TConfig,
+): void {
+  describe(`KeyedConfigRepository contract: ${name}`, () => {
+    test("listKeys returns only keys with the prefix and follows set and clear", async () => {
+      const { repository, dispose } = await make();
+      try {
+        expect(await repository.listKeys("session:")).toEqual([]);
+        await repository.setConfig(sample, "session:a");
+        await repository.setConfig(sample, "session:b");
+        await repository.setConfig(sample, "other");
+        await repository.setConfig(sample);
+        expect((await repository.listKeys("session:")).sort()).toEqual(["session:a", "session:b"]);
+        await repository.clearConfig("session:a");
+        expect(await repository.listKeys("session:")).toEqual(["session:b"]);
+        expect(await repository.listKeys("nothing")).toEqual([]);
+      } finally {
+        await dispose?.();
+      }
+    });
   });
 }

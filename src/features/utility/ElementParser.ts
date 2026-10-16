@@ -4,7 +4,6 @@ import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
-export { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import { setHierarchyNodeSource } from "../observe/output/elementProvenance";
 
 type WindowSearchOrder = "topmost-first" | "bottommost-first";

@@ -396,10 +396,7 @@ export class UninstallApp {
       // Whether the app was running before uninstall is not checked.
       await this.adb.executeCommand(
         `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        false,
-        signal,
+        { noRetry: false, signal },
       );
 
       const cmd = keepData
@@ -407,7 +404,11 @@ export class UninstallApp {
         : `shell pm uninstall --user ${targetUserId} ${shellQuote(packageName)}`;
 
       try {
-        await this.adb.executeCommand(cmd, ANDROID_UNINSTALL_TIMEOUT_MS, undefined, true, signal);
+        await this.adb.executeCommand(cmd, {
+          timeoutMs: ANDROID_UNINSTALL_TIMEOUT_MS,
+          noRetry: true,
+          signal,
+        });
       } catch (error) {
         throwIfAborted(signal);
         if (error instanceof AdbCommandTimeoutError) {
@@ -524,13 +525,11 @@ export class UninstallApp {
     );
     let retryTimedOut = false;
     try {
-      await this.adb.executeCommand(
-        command,
-        ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
-        undefined,
-        true,
+      await this.adb.executeCommand(command, {
+        timeoutMs: ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
     } catch (error) {
       throwIfAborted(signal);
       if (!(error instanceof AdbCommandTimeoutError)) {

@@ -37,7 +37,6 @@ export const sdkCapabilitySnapshotSchema = z.object({
   policy: sdkCapturePolicySchema,
 });
 export type SdkCapabilitySnapshot = z.infer<typeof sdkCapabilitySnapshotSchema>;
-export type SdkCapabilityDescriptor = SdkCapabilitySnapshot["capabilities"][number];
 
 /** Why no snapshot could be read; never conflated with an empty capability set. */
 export const SDK_CAPABILITIES_UNAVAILABLE_REASONS = [

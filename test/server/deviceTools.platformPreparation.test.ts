@@ -1,4 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -16,8 +17,6 @@ import {
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -137,8 +136,8 @@ describe("platform device preparation tools", () => {
 
   test("getAndroid retains a bounded Android discovery failure before lifecycle allocation", async () => {
     const manager = new MultiPlatformDeviceManager(
-      new FakeAdbClient() as unknown as AdbClient,
-      { isAvailable: async () => false } as unknown as SimCtlClient,
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl({ isAvailable: async () => false }),
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => {
           throw new Error(`${"x".repeat(300)}\nsecond line must stay in logs`);

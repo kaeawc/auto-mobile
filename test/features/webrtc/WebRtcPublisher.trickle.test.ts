@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { fakeWhipClient } from "../../helpers/fakeWhipClient";
 import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
-import type { WhipClient } from "../../../src/features/webrtc/WhipClient";
 import { VIDEO_ONLY_WHIP_ANSWER } from "../../helpers/webrtcFakes";
 
 /**
@@ -76,7 +76,7 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
     {
       createPeerConnection: () => pc as unknown as RTCPeerConnection,
       createWhipClient: () =>
-        ({
+        fakeWhipClient({
           publish: async () => ({
             answerSdp: VIDEO_ONLY_WHIP_ANSWER,
             resourceUrl: "https://coord/whip/s",
@@ -86,7 +86,7 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
             patched.push({ url, fragment });
           },
           delete: async () => {},
-        }) as unknown as WhipClient,
+        }),
     },
   );
   return { publisher, patched };
@@ -157,7 +157,7 @@ describe("WebRtcPublisher trickle ICE", () => {
       {
         createPeerConnection: () => peers[peerIndex++] as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: VIDEO_ONLY_WHIP_ANSWER,
               resourceUrl: `https://coord/whip/session-${++publishIndex}`,
@@ -167,7 +167,7 @@ describe("WebRtcPublisher trickle ICE", () => {
               patched.push({ url, fragment });
             },
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 

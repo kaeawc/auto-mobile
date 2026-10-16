@@ -4,6 +4,10 @@ import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/
 import type { AdbDeviceState } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandRest,
+} from "../../fakes/executeCommandOptionsOf";
 
 const result = (stdout = ""): ExecResult => ({
   stdout,
@@ -60,7 +64,8 @@ class SnapshotAdb extends FakeAdbExecutor {
     throw new Error("offline detection must reuse the snapshot");
   }
 
-  override async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
+  override async executeCommand(command: string, ...rest: ExecuteCommandRest): Promise<ExecResult> {
+    const { timeoutMs } = executeCommandOptionsOf([command, ...rest]);
     this.commandBudgets.push({ command, at: this.timer.now(), timeoutMs });
     if (command === "shell pm list packages" && this.slowPackageManagerMs.length > 0) {
       const elapsedMs = this.slowPackageManagerMs.shift() ?? 0;
@@ -69,7 +74,7 @@ class SnapshotAdb extends FakeAdbExecutor {
         throw new Error("package manager probe timed out");
       }
     }
-    return super.executeCommand(command, timeoutMs);
+    return super.executeCommand(command, ...rest);
   }
 }
 

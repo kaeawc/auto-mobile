@@ -63,14 +63,12 @@ import type {
   ProxySetupResult,
 } from "../utils/interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import {
-  type AndroidPrerequisiteDetector,
-  DefaultAndroidPrerequisiteDetector,
-} from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import { DefaultAndroidPrerequisiteDetector } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
 import {
   DefaultCtrlProxyApkPrefetcher,
   type CtrlProxyApkPrefetcher,
+  type CtrlProxyApkPrefetcherDeps,
 } from "./CtrlProxyApkPrefetcher";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
@@ -295,9 +293,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static foreignForwardEvidenceOverride: ForeignCtrlProxyForwardEvidence | null = null;
   private readonly foreignForwardGuardContext = new AsyncLocalStorage<boolean>();
 
-  // Static factory for creating ADB clients
-  private static adbFactory: AdbClientFactory = defaultAdbClientFactory;
-
   private timer: Timer;
   private savedPrototypeMirror: SavedPrototypeMirror = defaultSavedPrototypeMirror();
   private savedPrototypeRestorer: typeof restoreSavedPrototypes = restoreSavedPrototypes;
@@ -316,35 +311,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static readonly defaultChecksumCalculator: ChecksumCalculator =
     new DefaultChecksumCalculator();
 
-  // Gate that decides whether the startup APK prefetch should run at all (#4404).
-  private static androidPrerequisiteDetector: AndroidPrerequisiteDetector =
-    new DefaultAndroidPrerequisiteDetector();
-  // Test seam for the static prefetch's downloader; null uses defaultFileDownloader.
-  private static prefetchFileDownloaderOverride: FileDownloader | null = null;
-  private static prefetchCacheDirOverride: string | null = null;
-  // Seam for tests that stage a completed prefetch without a download.
-  private static get prefetchedApkPath(): string | null {
-    return AndroidCtrlProxyManager.prefetcher.completedPath();
+  // Process-wide prefetch state lives in the prefetcher. Production uses the default one;
+  // tests (or a daemon that owns its lifecycle) swap in their own with `useApkPrefetcher`.
+  private static prefetcher: CtrlProxyApkPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher();
+
+  /**
+   * Build a prefetcher wired to the real release resolvers. Pass `overrides` to inject a
+   * downloader, cache directory, prerequisite detector or checksum source (fakes in tests).
+   */
+  public static createApkPrefetcher(
+    overrides: Partial<CtrlProxyApkPrefetcherDeps> = {},
+  ): CtrlProxyApkPrefetcher {
+    const prerequisiteDetector = new DefaultAndroidPrerequisiteDetector();
+    return new DefaultCtrlProxyApkPrefetcher({
+      downloader: () => AndroidCtrlProxyManager.defaultFileDownloader,
+      checksumCalculator: () => AndroidCtrlProxyManager.defaultChecksumCalculator,
+      prerequisiteDetector: () => prerequisiteDetector,
+      cacheDirOverride: () => null,
+      expectedChecksumOverride: () => AndroidCtrlProxyManager.expectedChecksumOverride,
+      isPinnedVersionUnverifiable: () => AndroidCtrlProxyManager.isPinnedVersionUnverifiable(),
+      describePinnedVersion: () => resolvePinnedVersion(),
+      resolveApkUrl: () => resolveApkUrl(),
+      resolveApkChecksum: () => resolveApkChecksum(),
+      localApkPathOverride: () => process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH,
+      ...overrides,
+    });
   }
-  private static set prefetchedApkPath(apkPath: string | null) {
-    AndroidCtrlProxyManager.prefetcher.adoptCompletedPath(apkPath);
+
+  /** Use `prefetcher` for every manager in this process; null restores a default one. */
+  public static useApkPrefetcher(prefetcher: CtrlProxyApkPrefetcher | null): void {
+    AndroidCtrlProxyManager.prefetcher =
+      prefetcher ?? AndroidCtrlProxyManager.createApkPrefetcher();
   }
-  // Process-wide prefetch state lives in the prefetcher; its collaborators resolve lazily so the
-  // ForTesting setters above keep taking effect.
-  private static readonly prefetcher: CtrlProxyApkPrefetcher = new DefaultCtrlProxyApkPrefetcher({
-    downloader: () =>
-      AndroidCtrlProxyManager.prefetchFileDownloaderOverride ??
-      AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: () => AndroidCtrlProxyManager.defaultChecksumCalculator,
-    prerequisiteDetector: () => AndroidCtrlProxyManager.androidPrerequisiteDetector,
-    cacheDirOverride: () => AndroidCtrlProxyManager.prefetchCacheDirOverride,
-    expectedChecksumOverride: () => AndroidCtrlProxyManager.expectedChecksumOverride,
-    isPinnedVersionUnverifiable: () => AndroidCtrlProxyManager.isPinnedVersionUnverifiable(),
-    describePinnedVersion: () => resolvePinnedVersion(),
-    resolveApkUrl: () => resolveApkUrl(),
-    resolveApkChecksum: () => resolveApkChecksum(),
-    localApkPathOverride: () => process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH,
-  });
 
   private constructor(
     device: BootedDevice,
@@ -353,11 +351,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
     checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
   ) {
-    // home should either be process.env.HOME or bash resolution of home for current user
-    const homeDir = process.env.HOME || require("os").homedir();
-    if (!homeDir) {
-      throw new Error("Home directory for current user not found");
-    }
     this.device = device;
     this.adb = adb;
     this.timer = timer;
@@ -367,31 +360,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   public static getInstance(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
-    return getOrCreateDeviceInstance(AndroidCtrlProxyManager.instances, device.deviceId, () => {
-      let adb: AdbExecutor;
-      let factory: AdbClientFactory;
-      // Detect if the argument is a factory (has create method) or an executor
-      if (
-        adbFactoryOrExecutor &&
-        typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-      ) {
-        factory = adbFactoryOrExecutor as AdbClientFactory;
-        adb = factory.create(device);
-      } else if (adbFactoryOrExecutor) {
-        // Legacy path: wrap the executor in a factory for downstream dependencies
-        const executor = adbFactoryOrExecutor as AdbExecutor;
-        adb = executor;
-        factory = { create: () => executor };
-      } else {
-        factory = defaultAdbClientFactory;
-        adb = factory.create(device);
-      }
-      AndroidCtrlProxyManager.adbFactory = factory;
-      return new AndroidCtrlProxyManager(device, adb);
-    });
+    return getOrCreateDeviceInstance(
+      AndroidCtrlProxyManager.instances,
+      device.deviceId,
+      () => new AndroidCtrlProxyManager(device, adbFactory.create(device)),
+    );
   }
 
   /** Fresh diagnostic reads without registering or replacing live session dependencies. */
@@ -550,10 +526,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return AndroidCtrlProxyManager.prefetcher.cleanup();
   }
 
-  public static setPrefetchCacheDirForTesting(cacheDir: string | null): void {
-    AndroidCtrlProxyManager.prefetchCacheDirOverride = cacheDir;
-  }
-
   /** Best-effort startup sweep for orphaned `auto-mobile-prefetch-*` scratch directories (#4334). */
   public static sweepStalePrefetchDirsOnStartup(tempRoot?: string, timer?: Timer): Promise<void> {
     return AndroidCtrlProxyManager.prefetcher.sweepStaleDirs(tempRoot, timer);
@@ -565,19 +537,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   public static setAccessibilityDetectorForTesting(detector: AccessibilityDetector | null): void {
     AndroidCtrlProxyManager.accessibilityDetectorOverride = detector;
-  }
-
-  /** Override the Android-prerequisite gate for the prefetch (#4404). Null restores the default detector. */
-  public static setAndroidPrerequisiteDetectorForTesting(
-    detector: AndroidPrerequisiteDetector | null,
-  ): void {
-    AndroidCtrlProxyManager.androidPrerequisiteDetector =
-      detector ?? new DefaultAndroidPrerequisiteDetector();
-  }
-
-  /** Override the downloader used by the static prefetch (#4404). Null restores the default. */
-  public static setPrefetchFileDownloaderForTesting(downloader: FileDownloader | null): void {
-    AndroidCtrlProxyManager.prefetchFileDownloaderOverride = downloader;
   }
 
   private getAccessibilityDetector(): AccessibilityDetector {
@@ -635,9 +594,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is installed");
       const result = await this.adb.executeCommand(
         `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
       if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -771,11 +728,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
-    const result = await this.adb.executeCommand(
-      "shell dumpsys accessibility",
-      undefined,
-      DUMPSYS_MAX_BUFFER,
-    );
+    const result = await this.adb.executeCommand("shell dumpsys accessibility", {
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
       throw new ActionableError(diagnostic);
@@ -1091,7 +1046,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private async runShieldedCommand(command: string): Promise<ExecResult> {
     const shield = new AbortController();
     return raceWithDeadline(
-      () => this.adb.executeCommand(command, undefined, undefined, undefined, shield.signal, true),
+      () =>
+        this.adb.executeCommand(command, {
+          signal: shield.signal,
+          waitForProcessSettlementAfterAbort: true,
+        }),
       {
         timer: this.timer,
         timeoutMs: REBIND_MUTATION_COMMAND_TIMEOUT_MS,
@@ -1986,9 +1945,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const result = await this.adb.executeCommand(
         `shell pm list packages ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       if (!packageListingContains(result.stdout, AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
         return;
@@ -2002,7 +1959,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       uninstallAttempted = true;
       await this.adb.executeCommand(
         `shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
-        CTRL_PROXY_INSTALL_TIMEOUT_MS,
+        { timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS },
       );
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
@@ -2047,13 +2004,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           }),
       },
       async (signal) => {
-        const result = await this.adb.executeCommand(
-          command,
-          CTRL_PROXY_INSTALL_TIMEOUT_MS,
-          undefined,
-          undefined,
+        const result = await this.adb.executeCommand(command, {
+          timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS,
           signal,
-        );
+        });
         signal.throwIfAborted();
         return result;
       },
@@ -2655,12 +2609,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async isEmulator(): Promise<[boolean, boolean]> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell getprop ro.kernel.qemu",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", {
+        noRetry: true,
+      });
       const qemuProp = result.stdout.trim();
       // ro.kernel.qemu is "1" on emulators, empty or "0" on physical devices
       if (qemuProp === "1") {
@@ -2668,12 +2619,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       // Fallback: check ro.product.model for common emulator strings
-      const modelResult = await this.adb.executeCommand(
-        "shell getprop ro.product.model",
-        undefined,
-        undefined,
-        true,
-      );
+      const modelResult = await this.adb.executeCommand("shell getprop ro.product.model", {
+        noRetry: true,
+      });
       const model = modelResult.stdout.trim().toLowerCase();
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
@@ -2693,12 +2641,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async getApiLevel(): Promise<[number | null, boolean]> {
     try {
-      const result = await this.adb.executeCommand(
-        "shell getprop ro.build.version.sdk",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", {
+        noRetry: true,
+      });
       const apiLevel = parseInt(result.stdout.trim(), 10);
       return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
@@ -2837,10 +2782,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       throwIfAborted();
-      await this.adb.executeCommand(
-        `pull "${apkPath}" "${localApkPath}"`,
-        CTRL_PROXY_PULL_TIMEOUT_MS,
-      );
+      await this.adb.executeCommand(`pull "${apkPath}" "${localApkPath}"`, {
+        timeoutMs: CTRL_PROXY_PULL_TIMEOUT_MS,
+      });
       const apkBuffer = await fs.readFile(localApkPath);
       const sha256 = crypto.createHash("sha256").update(apkBuffer).digest("hex");
       return {
@@ -2880,9 +2824,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const pathResult = await this.adb.executeCommand(
         `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
-        undefined,
-        undefined,
-        true,
+        { noRetry: true },
       );
       const line = pathResult.stdout
         .split("\n")

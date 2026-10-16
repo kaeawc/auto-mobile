@@ -73,5 +73,9 @@
   "includeEntryExports": true,
   "typescript": {
     "config": "tsconfig.dead-code.json"
+  },
+  "ignoreIssues": {
+    "test/**/*.typecheck.ts": ["exports", "types"],
+    "src/daemon/managedSlots/migrations/**": ["exports"]
   }
 }

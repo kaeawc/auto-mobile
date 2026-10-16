@@ -4,7 +4,17 @@ import {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { ChildProcess, SpawnOptions } from "child_process";
 import { BootedDevice, ExecResult, DeviceInfo, ScreenSize } from "../../src/models";
+import type { SimulatorDisplay } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+
+const buildExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
+  stdout,
+  stderr,
+  toString: () => stdout,
+  trim: () => stdout.trim(),
+  includes: (value: string) => stdout.includes(value),
+});
 
 /**
  * Fake implementation of SimCtl for testing
@@ -43,6 +53,23 @@ export class FakeSimctl implements SimCtl {
     includes: () => false,
   };
   private createdSimulatorUdid: string = "created-simulator-udid-123";
+  private deviceInfoError: Error | null = null;
+  private runtimesError: Error | null = null;
+  private deviceTypesError: Error | null = null;
+  private containerPaths = new Map<string, string>();
+  private containerErrors = new Map<string, Error>();
+  private commandResults = new Map<string, ExecResult>();
+  private commandErrors = new Map<string, Error>();
+  private argvResults = new Map<string, ExecResult>();
+  private argvErrors = new Map<string, Error>();
+  private argvResultSequences = new Map<
+    string,
+    Array<{ stdout: string; stderr: string } | Error>
+  >();
+  private argvSequenceCursor = new Map<string, number>();
+  private openSimulatorAppError: Error | null = null;
+  private simulatorAppHeadless = false;
+  private pushNotificationResult: { success: boolean; error?: string } = { success: true };
 
   // Call tracking
   private methodCalls: Map<string, Array<Record<string, unknown>>> = new Map();
@@ -148,6 +175,99 @@ export class FakeSimctl implements SimCtl {
     this.createdSimulatorUdid = udid;
   }
 
+  setOpenSimulatorAppError(error: Error | null): void {
+    this.openSimulatorAppError = error;
+  }
+
+  /**
+   * When true, {@link openSimulatorApp} reports a headless no-op (no GUI
+   * launch performed) the way the real client does on a host with no Aqua
+   * session, instead of reporting a completed launch.
+   */
+  setSimulatorAppHeadless(headless: boolean): void {
+    this.simulatorAppHeadless = headless;
+  }
+
+  setDeviceInfoError(error: Error | null): void {
+    this.deviceInfoError = error;
+  }
+
+  setRuntimesError(error: Error | null): void {
+    this.runtimesError = error;
+  }
+
+  setDeviceTypesError(error: Error | null): void {
+    this.deviceTypesError = error;
+  }
+
+  setContainerPath(bundleId: string, containerPath: string): void {
+    this.containerPaths.set(bundleId, containerPath);
+  }
+
+  setContainerError(bundleId: string, error: Error): void {
+    this.containerErrors.set(bundleId, error);
+  }
+
+  setCommandError(command: string, error: Error): void {
+    this.commandErrors.set(command, error);
+  }
+
+  setPushNotificationResult(result: { success: boolean; error?: string }): void {
+    this.pushNotificationResult = result;
+  }
+
+  setCommandResult(command: string, stdout: string, stderr: string = ""): void {
+    this.commandResults.set(command, {
+      stdout,
+      stderr,
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (value: string) => stdout.includes(value),
+    });
+  }
+
+  /**
+   * Stub a result keyed by the exact argv array. Unlike {@link setCommandResult},
+   * this survives values containing spaces or empty strings, which a joined
+   * command string cannot distinguish (issue #4196).
+   */
+  setCommandArgsResult(args: string[], stdout: string, stderr: string = ""): void {
+    this.argvResults.set(JSON.stringify(args), {
+      stdout,
+      stderr,
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (value: string) => stdout.includes(value),
+    });
+  }
+
+  /** Stub an error keyed by the exact argv array. See {@link setCommandArgsResult}. */
+  setCommandArgsError(args: string[], error: Error): void {
+    this.argvErrors.set(JSON.stringify(args), error);
+  }
+
+  /**
+   * Stub a sequence of results/errors keyed by the exact argv array: each call
+   * consumes the next entry, and the final entry repeats once exhausted. Lets a
+   * pre-mutation read and a post-mutation read of the SAME argv (e.g. two
+   * `appearance` gets) diverge — the second failing while the first succeeds —
+   * without monkeypatching the fake (mirrors
+   * `FakeAdbClient.setCommandResultSequence`).
+   */
+  setCommandArgsResultSequence(
+    args: string[],
+    entries: Array<{ stdout: string; stderr?: string } | Error>,
+  ): void {
+    const key = JSON.stringify(args);
+    this.argvResultSequences.set(
+      key,
+      entries.map((entry) =>
+        entry instanceof Error ? entry : { stdout: entry.stdout, stderr: entry.stderr ?? "" },
+      ),
+    );
+    this.argvSequenceCursor.set(key, 0);
+  }
+
   /**
    * Get list of method calls for a specific method (for test assertions)
    */
@@ -197,7 +317,79 @@ export class FakeSimctl implements SimCtl {
 
   async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
     this.recordCall("executeCommand", { command, timeoutMs });
+    const commandError = this.commandErrors.get(command);
+    if (commandError) {
+      throw commandError;
+    }
+
+    const commandResult = this.commandResults.get(command);
+    if (commandResult) {
+      return commandResult;
+    }
+
+    const match = command.match(/get_app_container\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+data/);
+    const bundleId = match?.[2];
+    if (bundleId) {
+      const error = this.containerErrors.get(bundleId);
+      if (error) {
+        throw error;
+      }
+      return buildExecResult(this.containerPaths.get(bundleId) ?? "");
+    }
+
     return this.executeCommandResult;
+  }
+
+  async executeCommandArgs(
+    args: string[],
+    timeoutMs?: number,
+    _signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    this.recordCall("executeCommandArgs", { args, timeoutMs });
+
+    const argvKey = JSON.stringify(args);
+
+    const sequence = this.argvResultSequences.get(argvKey);
+    if (sequence && sequence.length > 0) {
+      const cursor = this.argvSequenceCursor.get(argvKey) ?? 0;
+      const entry = sequence[Math.min(cursor, sequence.length - 1)];
+      this.argvSequenceCursor.set(argvKey, cursor + 1);
+      if (entry instanceof Error) {
+        throw entry;
+      }
+      return buildExecResult(entry.stdout, entry.stderr);
+    }
+
+    const argvError = this.argvErrors.get(argvKey);
+    if (argvError) {
+      throw argvError;
+    }
+    const argvResult = this.argvResults.get(argvKey);
+    if (argvResult) {
+      return argvResult;
+    }
+
+    const command = args.join(" ");
+    const commandError = this.commandErrors.get(command);
+    if (commandError) {
+      throw commandError;
+    }
+
+    const commandResult = this.commandResults.get(command);
+    if (commandResult) {
+      return commandResult;
+    }
+
+    if (args[0] === "get_app_container" && args[3] === "data") {
+      const bundleId = args[2];
+      const error = this.containerErrors.get(bundleId);
+      if (error) {
+        throw error;
+      }
+      return buildExecResult(this.containerPaths.get(bundleId) ?? "");
+    }
+
+    return buildExecResult("");
   }
 
   async isAvailable(): Promise<boolean> {
@@ -259,6 +451,9 @@ export class FakeSimctl implements SimCtl {
 
   async getDeviceInfo(udid: string): Promise<AppleDevice | null> {
     this.recordCall("getDeviceInfo", { udid });
+    if (this.deviceInfoError) {
+      throw this.deviceInfoError;
+    }
     return this.deviceInfoMap.get(udid) || null;
   }
 
@@ -351,5 +546,76 @@ export class FakeSimctl implements SimCtl {
   async getScreenSize(deviceId?: string): Promise<ScreenSize> {
     this.recordCall("getScreenSize", { deviceId });
     return this.screenSize;
+  }
+
+  // Operations no test configures yet: recorded, then refused like the methods this fake lacked.
+  private unconfigured(name: string, args: Record<string, unknown>): never {
+    this.recordCall(name, args);
+    throw new TypeError(`FakeSimctl.${name} is not configured`);
+  }
+
+  async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
+    return this.unconfigured("startCommandArgs", { args, options });
+  }
+
+  async eraseSimulator(udid: string): Promise<void> {
+    return this.unconfigured("eraseSimulator", { udid });
+  }
+
+  async enumerateDisplays(
+    deviceId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<SimulatorDisplay[]> {
+    return this.unconfigured("enumerateDisplays", { deviceId, timeoutMs, signal });
+  }
+
+  async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+    return this.unconfigured("screenshot", { deviceId, display, signal });
+  }
+
+  async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
+    return this.unconfigured("setAppearance", { mode, deviceId });
+  }
+
+  async presentSimulatorAfterStart(
+    udid: string,
+    bootGeneration: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.unconfigured("presentSimulatorAfterStart", { udid, bootGeneration, signal });
+  }
+
+  async getDeviceTypesChecked(): Promise<AppleDeviceType[]> {
+    this.recordCall("getDeviceTypesChecked", {});
+    if (this.deviceTypesError) {
+      throw this.deviceTypesError;
+    }
+    return this.deviceTypes;
+  }
+
+  async getRuntimesChecked(): Promise<AppleDeviceRuntime[]> {
+    this.recordCall("getRuntimesChecked", {});
+    if (this.runtimesError) {
+      throw this.runtimesError;
+    }
+    return this.runtimes;
+  }
+
+  async openSimulatorApp(udid?: string, _signal?: AbortSignal): Promise<boolean> {
+    this.recordCall("openSimulatorApp", { udid });
+    if (this.openSimulatorAppError) {
+      throw this.openSimulatorAppError;
+    }
+    return !this.simulatorAppHeadless;
+  }
+
+  async pushNotification(
+    deviceId: string,
+    bundleId: string,
+    payloadJson: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    this.recordCall("pushNotification", { deviceId, bundleId, payloadJson });
+    return this.pushNotificationResult;
   }
 }

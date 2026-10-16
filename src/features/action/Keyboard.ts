@@ -18,7 +18,6 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
@@ -88,14 +87,12 @@ export class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvid
     if (options?.forceFresh) {
       this.cache.invalidateCache();
     }
-    return this.viewHierarchy.getViewHierarchy(
-      undefined,
-      new NoOpPerformanceTracker(),
-      false,
-      0,
+    return this.viewHierarchy.getViewHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
       signal,
-      options?.timeoutMs,
-    );
+      timeoutMs: options?.timeoutMs,
+    });
   }
 }
 
@@ -624,13 +621,7 @@ export class Keyboard {
 
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(
-      this.adb.executeCommand(
-        "shell input keyevent KEYCODE_BACK",
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
+      this.adb.executeCommand("shell input keyevent KEYCODE_BACK", { signal }),
       signal,
     );
 
@@ -863,14 +854,10 @@ export class Keyboard {
     try {
       // Do not stop waiting on abort: the adb process is terminated and awaited (bounded by
       // the adb client's grace period) so a started tap has settled before callers restore state.
-      await this.adb.executeCommand(
-        `shell input tap ${x} ${y}`,
-        undefined,
-        undefined,
-        undefined,
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, {
         signal,
-        true,
-      );
+        waitForProcessSettlementAfterAbort: true,
+      });
     } catch (error) {
       // The tap command had started, so it may have reached the device.
       if (signal?.aborted) {

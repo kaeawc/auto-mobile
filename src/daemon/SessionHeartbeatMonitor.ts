@@ -3,7 +3,7 @@ import {
   MAX_CREDIBLE_DAEMON_STALL_MS,
   splitScheduleGap,
 } from "./timerLateness";
-export { DEFAULT_STALL_MARGIN_MS, MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
+export { MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";

@@ -4,7 +4,6 @@ import {
   normalizeSharedStorageNamespace,
   sharedStorageFileSchema,
   type SharedStorageFileInput,
-  type SharedStorageIndexingResult,
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
 
@@ -52,7 +51,7 @@ export type StageSessionDownloadsResult =
   | StageSessionDownloadsSuccess
   | StageSessionDownloadsUnavailable;
 
-export type { SharedStorageIndexingResult, StagedSharedStorageFile };
+export type { StagedSharedStorageFile };
 
 // JSON-Schema patterns that advertise the runtime path/source refinements to
 // clients generating calls from `tools/list`. Without them the served schema

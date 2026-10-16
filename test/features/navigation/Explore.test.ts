@@ -2701,9 +2701,9 @@ describe("Explore", () => {
       } as BootedDevice;
       const sessions = new FakeDeviceSessionManager();
       sessions.setConnectedDevices([iosA, iosB]);
-      const registry = ToolRegistry as unknown as { deviceSessionManager: unknown };
-      const originalDeviceSessionManager = registry.deviceSessionManager;
-      registry.deviceSessionManager = sessions;
+      const originalDeviceSessionManager =
+        ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: sessions });
       const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
       });
@@ -2726,7 +2726,9 @@ describe("Explore", () => {
         expect(selectedDeviceIds).toEqual([iosB.deviceId]);
       } finally {
         restorePipelineOverrides();
-        registry.deviceSessionManager = originalDeviceSessionManager;
+        ToolRegistry.setCollaboratorsForTesting({
+          deviceSessionManager: originalDeviceSessionManager,
+        });
       }
     });
 

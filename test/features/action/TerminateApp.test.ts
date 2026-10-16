@@ -9,6 +9,7 @@ import { terminateAppResultSchema } from "../../../src/server/toolOutputSchemas"
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   DefaultDeviceWindowCacheInvalidator,
@@ -18,7 +19,6 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -55,7 +55,7 @@ describe("TerminateApp (Android install listing)", () => {
     adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    app = new TerminateApp(device, adb as unknown as AdbClient, { timer });
+    app = new TerminateApp(device, adb, { timer });
     ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
@@ -212,7 +212,7 @@ describe("TerminateApp (Android install listing)", () => {
     const commandSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
       const result = await executeCommand(...args);
       if (args[0] === "shell pm list packages --user 0") {
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new Error("listing interrupted");
       }
@@ -259,7 +259,7 @@ describe("TerminateApp (iOS)", () => {
   });
 
   test("preserves default dependency implementations with omitted options", () => {
-    const app = new TerminateApp(iosDevice, new FakeAdbClient() as unknown as AdbClient);
+    const app = new TerminateApp(iosDevice, new FakeAdbClient());
     expect(app["cacheInvalidator"]).toBeInstanceOf(DefaultDeviceWindowCacheInvalidator);
     expect(app["deviceTerminator"]).toBeInstanceOf(DeviceAppManager);
     expect(app["simctl"]).toBeInstanceOf(SimCtlClient);
@@ -869,7 +869,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     fakeAdb.setCommandResult("shell dumpsys activity processes", "no processes");
 
-    await new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+    await new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
     }).execute("com.example.app", { skipObservation: true });
 
@@ -1293,7 +1293,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     ]);
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });

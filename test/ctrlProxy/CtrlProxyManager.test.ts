@@ -7,6 +7,7 @@ import {
   REBIND_BIND_WAIT_BUDGET_MS,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { CtrlProxyApkPrefetcher } from "../../src/ctrlProxy/CtrlProxyApkPrefetcher";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -96,6 +97,7 @@ describe("CtrlProxyManager", function () {
   let originalSkipShaEnv: string | undefined;
   let originalLaunchCwdEnv: string | undefined;
   let prefetchCacheDir: string;
+  let testPrefetcher: CtrlProxyApkPrefetcher;
   let apkPayload: Buffer;
   const scratch = useScratchRoot("ctrlproxy-manager-test-");
 
@@ -402,11 +404,12 @@ describe("CtrlProxyManager", function () {
     // These tests exercise download/checksum/retry behavior, not the prefetch
     // prerequisite gate (#4404). Neutralize the gate so the default detector
     // doesn't skip the prefetch on CI hosts without Android tooling (e.g. Windows).
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting({
-      hasAndroidPrerequisites: async () => true,
-    });
     prefetchCacheDir = scratch.next();
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
+    testPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher({
+      prerequisiteDetector: () => ({ hasAndroidPrerequisites: async () => true }),
+      cacheDirOverride: () => prefetchCacheDir,
+    });
+    AndroidCtrlProxyManager.useApkPrefetcher(testPrefetcher);
 
     accessibilityServiceClient = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
     accessibilityServiceClient.clearAvailabilityCache();
@@ -415,9 +418,8 @@ describe("CtrlProxyManager", function () {
   afterEach(async function () {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    AndroidCtrlProxyManager.useApkPrefetcher(null);
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -1790,7 +1792,8 @@ describe("CtrlProxyManager", function () {
 
       let pullTimeoutMs: number | undefined;
       const localFakeAdb: any = {
-        executeCommand: async (command: string, timeoutMs?: number) => {
+        executeCommand: async (command: string, options?: { timeoutMs?: number }) => {
+          const timeoutMs = options?.timeoutMs;
           if (command.includes("shell pm path")) {
             return createExecResult(`package:${expectedApkPath}\n`, "");
           }
@@ -2152,7 +2155,7 @@ describe("CtrlProxyManager", function () {
       const tempDir = scratch.next();
       const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
       await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+      testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
       const localFakeAdb = new FakeAdbExecutor();
       localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
@@ -2195,7 +2198,7 @@ describe("CtrlProxyManager", function () {
       const tempDir = scratch.next();
       const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
       await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+      testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
       const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
       const localFakeAdb = new FakeAdbExecutor();
@@ -2266,7 +2269,7 @@ describe("CtrlProxyManager", function () {
         const tempDir = scratch.next();
         const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-        Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetchedApkPath);
+        testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponseSequence(
@@ -2313,7 +2316,7 @@ describe("CtrlProxyManager", function () {
         const tempDir = scratch.next();
         const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-        (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+        testPrefetcher.adoptCompletedPath(prefetchedApkPath);
 
         const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
         const localFakeAdb = new FakeAdbExecutor();
@@ -2555,7 +2558,7 @@ describe("CtrlProxyManager", function () {
         if (strippedCommand.includes("install -r -d")) {
           throw new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]");
         }
-        return localFakeAdb.executeCommand(strippedCommand, undefined, maxBuffer);
+        return localFakeAdb.executeCommand(strippedCommand, { maxBuffer });
       };
 
       // Create AdbClient with custom executor that throws on install, wrap in factory

@@ -11,11 +11,9 @@ import {
   type BootedDevice,
   type DeviceSnapshotManifest,
 } from "../../../src/models";
-import type { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../../src/utils/logger";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -23,7 +21,7 @@ const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
 const PHYSICAL_IDS = ["00008030-001C2D3E1234567A", "a".repeat(40)];
 
 function simulatorBackend(deviceId = UDID) {
-  const simctl = new FakeSimCtlClient();
+  const simctl = new FakeSimctl();
   const backend = resolveIosSnapshotBackend(deviceId, { simctl });
   if (backend.kind !== "simulator") {
     throw new Error("Expected a simulator backend");
@@ -32,12 +30,12 @@ function simulatorBackend(deviceId = UDID) {
 }
 
 // No store methods run in guard/metadata tests; avoid initializing the real DB or filesystem.
-function actions(options: { deviceId: string; simctl: FakeSimCtlClient }) {
+function actions(options: { deviceId: string; simctl: FakeSimctl }) {
   const device: BootedDevice = { deviceId: options.deviceId, name: "iPhone", platform: "ios" };
   const adb = new FakeAdbClient();
-  const factory = { create: () => adb as unknown as AdbExecutor };
+  const factory = { create: () => adb };
   const store = {} as DeviceSnapshotStore;
-  const simctl = options.simctl as unknown as SimCtlClient;
+  const simctl = options.simctl;
   const timer = new FakeTimer();
   return {
     capture: new CaptureSnapshot(device, factory, undefined, timer, store, simctl),
@@ -68,13 +66,13 @@ describe("IosSnapshotBackend", () => {
 
   for (const deviceId of PHYSICAL_IDS) {
     test(`physical backend exposes no simctl operations for ${deviceId}`, () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       expect(resolveIosSnapshotBackend(deviceId, { simctl })).toEqual({ kind: "physical" });
       expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
     });
 
     test(`both actions preserve the exact physical guard for ${deviceId}`, async () => {
-      const simctl = new FakeSimCtlClient();
+      const simctl = new FakeSimctl();
       const { capture, restore } = actions({ deviceId, simctl });
       const message = `Device snapshots are not supported on physical iOS devices (${deviceId}); they require a Simulator (simctl).`;
       await expect(capture.execute({ snapshotName: "snapshot" })).rejects.toThrow(message);
@@ -186,7 +184,7 @@ describe("IosSnapshotBackend", () => {
   });
 
   test("actions use the backend for metadata and preserve distinct warning texts", async () => {
-    const simctl = new FakeSimCtlClient();
+    const simctl = new FakeSimctl();
     simctl.setDeviceInfoError(new Error("metadata failure"));
     const { capture, restore } = actions({ deviceId: UDID, simctl });
     const backendSpy = spyOn(SimulatorIosSnapshotBackend.prototype, "getDeviceInfo");

@@ -45,7 +45,7 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
       },
       timer,
     );
-    const manager = AndroidCtrlProxyManager.getInstance(device, adb);
+    const manager = AndroidCtrlProxyManager.getInstance(device, { create: () => adb });
     spyOn(manager, "isAvailable").mockResolvedValue(true);
 
     const hierarchyPromise = client.getLatestHierarchy(true, 2_000);

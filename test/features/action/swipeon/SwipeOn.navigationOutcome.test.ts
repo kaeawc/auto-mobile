@@ -3,7 +3,6 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { screenshotPathProtection } from "../../../../src/features/observe/ScreenshotPathProtection";
 import type { ObserveResult } from "../../../../src/models";
-import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import type { SdkRouteSource } from "../../../../src/features/action/swipeon/sdkRouteSettle";
 import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
@@ -58,7 +57,7 @@ function harness(
   timer.enableAutoAdvance();
   const action = new SwipeOn(
     { name: `${platform} fake`, deviceId: `${platform}-navigation`, platform },
-    new FakeAdbClient() as unknown as AdbClient,
+    new FakeAdbClient(),
     {
       observeScreen,
       executeGesture: new FakeGestureExecutor(),

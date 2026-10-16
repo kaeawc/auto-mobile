@@ -126,7 +126,7 @@ describe("Rotate", () => {
   test("non-default display uses per-display rotation without global settings writes", async () => {
     fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
     fakeAdb.setCommandResponse("shell wm size -d 2", createExecResult("Physical size: 1080x1920"));
-    const result = await rotate.execute("landscape", undefined, true, undefined, 2);
+    const result = await rotate.execute("landscape", { lockOrientation: true, display: 2 });
     expect(result.success).toBe(true);
     // The display's rotation read-back is covered in Rotate.displayReadBack.test.ts.
     expect(
@@ -145,9 +145,9 @@ describe("Rotate", () => {
     // The fake matches by substring in insertion order, so the per-display response goes first.
     fakeAdb.setCommandResponse("shell wm size -d 2", createExecResult("Physical size: 1280x720"));
     fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
-    const landscape = await rotate.execute("landscape", undefined, true, undefined, 2);
+    const landscape = await rotate.execute("landscape", { lockOrientation: true, display: 2 });
     expect(landscape.value).toBe(0);
-    const portrait = await rotate.execute("portrait", undefined, true, undefined, 2);
+    const portrait = await rotate.execute("portrait", { lockOrientation: true, display: 2 });
     expect(portrait.value).toBe(1);
     expect(
       fakeAdb.getExecutedCommands().filter((command) => !command.includes("dumpsys window")),
@@ -164,7 +164,7 @@ describe("Rotate", () => {
   test("missing non-default display reports available ids without rotating", async () => {
     fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
     const error = await rotate
-      .execute("landscape", undefined, true, undefined, 7)
+      .execute("landscape", { lockOrientation: true, display: 7 })
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ActionableError);
     expect((error as Error).message).toBe("display 7 not found; available: 0, 2");
@@ -175,7 +175,7 @@ describe("Rotate", () => {
     fakeAdb.clearHistory();
     fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
     fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(mirrorPortrait));
-    await rotate.execute("landscape", undefined, true);
+    await rotate.execute("landscape", { lockOrientation: true });
     expect(
       fakeAdb.getExecutedCommands().filter((command) => command.includes("settings put system")),
     ).toEqual([
@@ -186,16 +186,16 @@ describe("Rotate", () => {
 
   test("iOS rejects non-default display", async () => {
     mockDevice.platform = "ios";
-    await expect(rotate.execute("portrait", undefined, undefined, undefined, 1)).rejects.toThrow(
+    await expect(rotate.execute("portrait", { display: 1 })).rejects.toThrow(
       "supported only on Android",
     );
   });
 
   test("per-display user-rotation failure is surfaced as an ActionableError", async () => {
     fakeAdb.setCommandError("cmd window user-rotation -d 2", new Error("window manager failed"));
-    await expect(rotate.execute("landscape", undefined, true, undefined, 2)).rejects.toBeInstanceOf(
-      ActionableError,
-    );
+    await expect(
+      rotate.execute("landscape", { lockOrientation: true, display: 2 }),
+    ).rejects.toBeInstanceOf(ActionableError);
   });
 
   describe("live rotation request budget", () => {
@@ -407,11 +407,9 @@ describe("Rotate", () => {
             window: fakeWindow,
           });
         }
-        const result = await rotate.execute(
-          "landscape",
-          undefined,
-          mode === "session" ? undefined : true,
-        );
+        const result = await rotate.execute("landscape", {
+          lockOrientation: mode === "session" ? undefined : true,
+        });
         expect(result.success).toBe(true);
         expect(result.currentOrientation).toBe("landscape");
         expect(result.orientationLockState).toBe("locked");
@@ -433,7 +431,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      const result = await rotate.execute("landscape", undefined, true);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
       expect(result.success).toBe(false);
       expect(result.currentOrientation).toBe("portrait");
       expect(result.orientationLockState).toBe("locked");
@@ -494,9 +492,9 @@ describe("Rotate", () => {
     test("propagates request cancellation during the end-of-call read", async () => {
       const controller = new AbortController();
       scriptLandscapeRotation(() => fakeAdb.abortAfterCommand(liveCommand, controller));
-      await expect(
-        rotate.execute("landscape", undefined, undefined, controller.signal),
-      ).rejects.toThrow("Rotation cancelled");
+      await expect(rotate.execute("landscape", { signal: controller.signal })).rejects.toThrow(
+        "Rotation cancelled",
+      );
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
       ).toHaveLength(4);
@@ -578,7 +576,7 @@ describe("Rotate", () => {
     test("session true records the same restore slot and stays locked", async () => {
       const original = useSession();
       settingsSequence(["1", "0"]);
-      const result = await rotate.execute("landscape", undefined, true);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
       expect(result.orientationLockState).toBe("locked");
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
     });
@@ -625,7 +623,7 @@ describe("Rotate", () => {
           createExecResult(`mRotation=${live}`),
         );
         fakeAdb.setCommandResponse(`shell settings get system ${key}`, createExecResult("null"));
-        await expect(rotate.execute("landscape", undefined, true)).rejects.toBeInstanceOf(
+        await expect(rotate.execute("landscape", { lockOrientation: true })).rejects.toBeInstanceOf(
           ActionableError,
         );
         expect(original()).toBeUndefined();
@@ -648,7 +646,7 @@ describe("Rotate", () => {
           createExecResult(key === "user_rotation" ? "2" : "1"),
           createExecResult("0"),
         ]);
-        const result = await rotate.execute("landscape", undefined, true);
+        const result = await rotate.execute("landscape", { lockOrientation: true });
         expect(result.success).toBe(true);
         expect(original()).toEqual({
           accelerometerRotation: 1,
@@ -901,9 +899,7 @@ describe("Rotate", () => {
       const controller = new AbortController();
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
       fakeAdb.abortAfterCommand("shell settings put system user_rotation 1", controller);
-      await expect(
-        rotate.execute("landscape", undefined, undefined, controller.signal),
-      ).rejects.toThrow();
+      await expect(rotate.execute("landscape", { signal: controller.signal })).rejects.toThrow();
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
     });
   });
@@ -1085,7 +1081,7 @@ describe("Rotate", () => {
       Object.assign(rotate, { observeScreen: fakeObserveScreen });
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
 
-      const result = await rotate.execute("portrait", undefined, true);
+      const result = await rotate.execute("portrait", { lockOrientation: true });
 
       expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(false);
@@ -1338,7 +1334,7 @@ describe("Rotate", () => {
         );
       }) as typeof fakeAdb.executeCommand;
 
-      const rotation = rotate.execute("landscape", undefined, true);
+      const rotation = rotate.execute("landscape", { lockOrientation: true });
       for (let i = 0; i < 50 && !disableWriteStarted; i++) {
         await Promise.resolve();
       }
@@ -1428,7 +1424,7 @@ describe("Rotate", () => {
         createExecResult("mRotation=0"),
       ]);
 
-      const result = await rotate.execute("portrait", undefined, true);
+      const result = await rotate.execute("portrait", { lockOrientation: true });
 
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(true);
@@ -1450,7 +1446,7 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"),
       ]);
 
-      const result = await rotate.execute("landscape", undefined, true);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
 
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(true);
@@ -1477,7 +1473,7 @@ describe("Rotate", () => {
       ]);
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
 
-      const result = await rotate.execute("landscape", undefined, true);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
 
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(false);
@@ -1501,7 +1497,7 @@ describe("Rotate", () => {
       ]);
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=2"));
 
-      const result = await rotate.execute("portrait", undefined, true);
+      const result = await rotate.execute("portrait", { lockOrientation: true });
 
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(false);
@@ -1530,7 +1526,7 @@ describe("Rotate", () => {
           createExecResult(liveRotation),
         ]);
 
-        const result = await rotate.execute("portrait", undefined, true);
+        const result = await rotate.execute("portrait", { lockOrientation: true });
 
         expect(result.success).toBe(false);
         expect(result.rotationPerformed).toBe(true);
@@ -1554,7 +1550,7 @@ describe("Rotate", () => {
         new Error("settings provider unavailable"),
       );
 
-      const result = await rotate.execute("portrait", undefined, true);
+      const result = await rotate.execute("portrait", { lockOrientation: true });
 
       expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(false);
@@ -1578,7 +1574,7 @@ describe("Rotate", () => {
       ]);
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
 
-      const result = await rotate.execute("portrait", undefined, false);
+      const result = await rotate.execute("portrait", { lockOrientation: false });
 
       expect(result.success).toBe(true);
       expect(result.rotationPerformed).toBe(false);

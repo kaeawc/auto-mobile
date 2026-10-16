@@ -3,7 +3,6 @@ import { AndroidTapStrategy } from "../../../src/features/action/strategies/Andr
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../src/ctrlProxy/constants";
-import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult, BootedDevice, AndroidUser } from "../../../src/models";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -494,7 +493,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(enabled).toBe(true);
       expect(fakeAdb.getCallCount()).toBe(0);
@@ -502,7 +501,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const service = await detector.detectMethod(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(service).toBe("talkback");
     });
@@ -515,7 +514,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(enabled).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(0);
@@ -523,7 +522,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const service = await detector.detectMethod(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(service).toBe("unknown");
     });
@@ -537,7 +536,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled1 = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(enabled1).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(1);
@@ -548,7 +547,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled2 = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService,
+        fakeFeatureFlags,
       );
       expect(enabled2).toBe(true);
       // Should not call ADB again because force flag overrides

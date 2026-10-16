@@ -136,7 +136,9 @@ test("swipeOn preserves the resolver diagnostic instead of reconstructing its le
 
 test("dragAndDrop preserves its fallback diagnostic through wrapping and result serialization", async () => {
   const adb = new FakeAdbClient();
-  const manager = AndroidCtrlProxyManager.getInstance(device, new FakeAdbExecutor());
+  const manager = AndroidCtrlProxyManager.getInstance(device, {
+    create: () => new FakeAdbExecutor(),
+  });
   const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
   const action = new DragAndDrop(device, adb as AdbClient, new FakeTimer(), {
     hierarchyCapture: new FakeHierarchyCapture(() => capture),

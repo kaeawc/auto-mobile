@@ -4,10 +4,10 @@ src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to ty
 src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
+src/features/observe/android/AndroidAppEventRecorder.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
-# swap-fp: 11 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 # swap-fp: 19 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 45 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
+# swap-fp: 9 :: src/features/observe/android/AndroidAppEventRecorder.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.

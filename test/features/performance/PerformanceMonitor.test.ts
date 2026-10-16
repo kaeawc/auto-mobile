@@ -19,6 +19,10 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { ExecResult } from "../../../src/models";
+import {
+  executeCommandOptionsOf,
+  type ExecuteCommandRest,
+} from "../../fakes/executeCommandOptionsOf";
 
 /**
  * Helper to advance time and wait for async callbacks to complete.
@@ -33,22 +37,9 @@ class AbortableSamplingAdbClient extends FakeAdbClient {
   readonly sampleStarted = Promise.withResolvers<void>();
   readonly sampleSettled = Promise.withResolvers<void>();
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult> {
-    const result = await super.executeCommand(
-      command,
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      signal,
-      waitForProcessSettlementAfterAbort,
-    );
+  override async executeCommand(command: string, ...rest: ExecuteCommandRest): Promise<ExecResult> {
+    const { signal } = executeCommandOptionsOf([command, ...rest]);
+    const result = await super.executeCommand(command, ...rest);
     if (!command.includes("dumpsys gfxinfo")) {
       return result;
     }
@@ -1254,7 +1245,7 @@ class FakeSimCtl implements SimCtl {
 /**
  * Fake SimCtlClientFactory for testing.
  */
-class FakeSimCtlClientFactory implements SimCtlClientFactory {
+class FakeSimctlFactory implements SimCtlClientFactory {
   private fakeSimCtl: FakeSimCtl;
 
   constructor(fakeSimCtl: FakeSimCtl) {
@@ -1310,7 +1301,7 @@ describe("PerformanceMonitor iOS", () => {
   let fakeAdbFactory: FakeAdbClientFactory;
   let fakeAdbClient: FakeAdbClient;
   let fakeSimCtl: FakeSimCtl;
-  let fakeSimCtlFactory: FakeSimCtlClientFactory;
+  let fakeSimCtlFactory: FakeSimctlFactory;
   let fakePusher: FakePerformancePusher;
   let serverGetter: ServerGetter;
   let monitor: PerformanceMonitor;
@@ -1320,7 +1311,7 @@ describe("PerformanceMonitor iOS", () => {
     fakeAdbClient = new FakeAdbClient();
     fakeAdbFactory = new FakeAdbClientFactory(fakeAdbClient);
     fakeSimCtl = new FakeSimCtl();
-    fakeSimCtlFactory = new FakeSimCtlClientFactory(fakeSimCtl);
+    fakeSimCtlFactory = new FakeSimctlFactory(fakeSimCtl);
     fakePusher = new FakePerformancePusher();
     serverGetter = () => fakePusher;
   });

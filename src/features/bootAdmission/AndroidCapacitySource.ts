@@ -12,7 +12,7 @@ import {
 } from "./processTableRetry";
 import type { CapacityHostResources } from "./capacityLimits";
 
-export type { ProcessTableFailure, ProcessTableFailureReason } from "./processTableRetry";
+export type { ProcessTableFailure } from "./processTableRetry";
 
 /** What the Android boot admission gate counts. Missing data is reported, never read as zero load. */
 export interface AndroidCapacitySample {

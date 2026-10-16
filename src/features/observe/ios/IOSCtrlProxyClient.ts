@@ -38,7 +38,6 @@ import {
   ScreenScaleMetadata,
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
-import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
@@ -103,11 +102,7 @@ import {
 } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
-import {
-  ScreenshotBackoffScheduler,
-  DefaultScreenshotBackoffScheduler,
-  ScreenshotCaptureResult,
-} from "../ScreenshotBackoffScheduler";
+import { ScreenshotBackoffScheduler, ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
 import {
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,
@@ -776,7 +771,6 @@ export function getRequiredIosRunnerFeatureFlags(
 export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
   private readonly streamedCaptureSequences = new WeakMap<XCTestHierarchy, number>();
   private static instances: Map<string, IOSCtrlProxyClient> = new Map();
-  private closed = false;
 
   // Default port matches CtrlProxy on iOS
   public static readonly DEFAULT_PORT = 8765;
@@ -808,7 +802,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
-  private supportedCommands: Set<string> | null = null;
+
   private readonly rejectedCommands = new Set<string>();
   private supportedFeatures: Set<string> | null = null;
   private sdkCapabilities: IosSdkCapabilities | null = null;
@@ -824,7 +818,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private lastForegroundBundleId: string | null = null;
 
   // Platform-specific dependencies
-  private readonly device: BootedDevice;
   private port: number;
 
   // Delegate instances (lazy initialized)
@@ -844,8 +837,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Logging tag for base class
   protected readonly logTag = "IOSCtrlProxyClient";
 
-  // Screenshot backoff scheduler for real-time screenshot streaming
-  private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
   private readonly screenGeometry = new TrackedScreenGeometry();
@@ -854,8 +845,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // current behavior reads it — screenGeometry above stays the points * screenScale computation.
   private reportedScaleMetadata: ScreenScaleMetadata | null = null;
 
-  // Connection failure tracking for auto-restart
-  private consecutiveConnectionFailures: number = 0;
   private isRequestingServiceRestart: boolean = false;
   /**
    * Bumped for every established (non-transient) connection. A restart trigger
@@ -864,7 +853,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   private connectionIncarnation = 0;
   private lastDeniedRestartState: string | undefined;
-  private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
+
   /**
    * Shorter command budgets (e.g. a 1 s settle-gate read) can expire on a
    * healthy runner, so only a timeout at least this long is stall evidence.
@@ -1344,32 +1333,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
   }
 
-  /**
-   * Bind this client to a session for multi-agent NavigationGraphManager isolation.
-   */
-  public bindSession(sessionId: string): void {
-    // Binding means this session is live again — clear any released-tombstone so a
-    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
-    // gets its own manager rather than the unattributed global (#4984).
-    NavigationGraphManager.clearReleasedSession(sessionId);
-    if (this.boundSessionId !== sessionId) {
-      // See AndroidCtrlProxyClient.bindSession: a per-device client is
-      // last-writer-wins. Trace a transition off a previously-bound session so a
-      // concurrent-share regression is diagnosable, but stay at debug so the
-      // common released-then-reassigned case is not noisy.
-      if (this.boundSessionId !== null) {
-        logger.debug(
-          `[IOSCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
-            `${this.boundSessionId} to ${sessionId}`,
-        );
-      }
-      this.boundSessionId = sessionId;
-      // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
-      if (this.hierarchyNavigationDetector) {
-        this.hierarchyNavigationDetector.dispose();
-        this.hierarchyNavigationDetector = null;
-      }
-    }
+  protected override onSessionRebound(): void {
+    // iOS deliberately does not rearm on session changes: IOSCtrlProxyManager owns
+    // the shared ForcedRestartBudget and rearms it on explicit start or device reappearance.
   }
 
   /**
@@ -2534,22 +2500,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.sdkEventPollAbortController = null;
   }
 
-  protected override onConnectAttemptFailed(): void {
-    if (this.closed || !this.autoReconnectEnabled) {
-      return;
-    }
-
-    // Track connection failure and potentially trigger service restart
-    this.consecutiveConnectionFailures++;
-    logger.info(
-      `[IOSCtrlProxyClient] Connection attempt failed (failure count: ${this.consecutiveConnectionFailures})`,
-    );
-
-    if (
-      this.consecutiveConnectionFailures > 0 &&
-      this.consecutiveConnectionFailures % IOSCtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
-      !this.isRequestingServiceRestart
-    ) {
+  protected override onConnectionFailureThresholdReached(): void {
+    if (!this.isRequestingServiceRestart) {
       this.triggerServiceRestart("connection-failures");
     }
   }
@@ -2616,7 +2568,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  private async pollSdkEvents(): Promise<SdkEventPollResult> {
+  /**
+   * Run one SDK event poll (joining an in-flight one for the same generation). Public so
+   * tests can drive polling directly with an injected FakeTimer instead of waiting on the
+   * scheduler.
+   */
+  async pollSdkEvents(): Promise<SdkEventPollResult> {
     const generation = this.sdkEventPollGeneration;
     if (this.sdkEventPollInFlight?.generation === generation) {
       return this.sdkEventPollInFlight.promise;
@@ -3621,68 +3578,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
   }
 
-  /**
-   * Runner-identity accessor for diagnostics (doctor). Connects if needed so the
-   * `connected` handshake's `supportedCommands` set is available, then returns it
-   * sorted. Returns null when the runner cannot be reached (no handshake), which
-   * the caller surfaces as an `unknown` runner status rather than a false pass.
-   */
-  public async getSupportedCommands(): Promise<string[] | null> {
-    if (this.supportedCommands === null) {
-      const connected = await this.ensureConnected();
-      // ensureConnected resolves on the WebSocket `open` event, but the runner's
-      // `supportedCommands` arrive a beat later in the `connected` handshake
-      // message. Without waiting for it, the first probe (e.g. doctor) of a
-      // healthy runner reads null and misreports it as `unknown`. Poll briefly
-      // for the handshake before reading.
-      if (connected) {
-        await this.waitForHandshake();
-      }
-    }
-    return this.getCachedSupportedCommands();
-  }
-
-  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
-  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
-
-  private async waitForHandshake(
-    timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  protected override beforeHandshakeWait(signal?: AbortSignal): void {
     signal?.throwIfAborted();
-    const deadline = this.timer.now() + timeoutMs;
-    while (this.supportedCommands === null && this.timer.now() < deadline) {
-      if (!signal) {
-        await this.timer.sleep(IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
-        continue;
-      }
-      let timeout: ReturnType<Timer["setTimeout"]> | undefined;
-      try {
-        await raceWithDeadline(
-          () =>
-            new Promise<void>((resolve) => {
-              timeout = this.timer.setTimeout(
-                resolve,
-                IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS,
-              );
-            }),
-          { timer: this.timer, signal, label: "iOS diagnostic handshake" },
-        );
-      } finally {
-        if (timeout !== undefined) {
-          this.timer.clearTimeout(timeout);
-        }
-      }
-    }
   }
 
-  /**
-   * Cheap, connection-free view of the last advertised command set. Used by the
-   * booted-devices resource hot path, which must not open a WebSocket just to
-   * report status. Returns null when no handshake has been seen.
-   */
-  public getCachedSupportedCommands(): string[] | null {
-    return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
+  protected override awaitHandshakePoll(
+    work: () => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    return raceWithDeadline(work, { timer: this.timer, signal, label: "iOS diagnostic handshake" });
   }
 
   /** Runner feature flags from the most recent connected handshake. */
@@ -3754,23 +3658,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    ...args: Parameters<CtrlProxyHierarchyDelegate["getAccessibilityHierarchy"]>
   ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(
-      queryOptions,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      disableAllFiltering,
-      signal,
-      timeoutMs,
-    );
+    return this.hierarchy.getAccessibilityHierarchy(...args);
   }
 
   // Thin pass-throughs: like the delegated methods below, these do NOT restate the
@@ -3778,21 +3668,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // CtrlProxyHierarchy (the single source of truth) applies its own defaults —
   // keeping the two-copies drift class from issue #3505 unrepresentable.
   async getLatestHierarchy(
-    waitForFresh?: boolean,
-    timeout?: number,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
+    ...args: Parameters<CtrlProxyHierarchyDelegate["getLatestHierarchy"]>
   ): Promise<CtrlProxyHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(
-      waitForFresh,
-      timeout,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-    );
+    return this.hierarchy.getLatestHierarchy(...args);
   }
 
   async requestHierarchySync(
@@ -4656,40 +4534,27 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     source: XCTestHierarchy | undefined,
     frameContext?: string,
   ): void {
-    const server = getDeviceDataStreamServer();
-    if (!server) {
-      return;
-    }
-
-    try {
-      // Derive geometry from the hierarchy BEING FORWARDED, before the push, so the identity
-      // recorded below belongs to the geometry it actually describes.
-      //
-      // Reading this.cachedHierarchy here would be wrong on the request/response path: processMessage
-      // forwards the converted response before CtrlProxyHierarchy.requestHierarchySync resumes and
-      // installs it in the cache, so the cache still holds the PREVIOUS hierarchy (or nothing at
-      // all on the first response). A resolution-changing response would then associate its capture
-      // id with the old dimensions and screenshots could not pair until another hierarchy arrived.
-      this.updateScreenGeometryFrom(source);
-      const captureSequence = server.pushHierarchyUpdate(
-        this.device.deviceId,
-        hierarchy,
-        frameContext,
-      );
-      // Record the identity the daemon assigned, so screenshot requests initiated from here on are
-      // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
-      // geometry untracked, and the daemon then omits the identity so a control client fails closed.
-      if (captureSequence !== null) {
-        hierarchy.captureSequence = captureSequence;
+    this.forwardHierarchyToObservationStream(hierarchy, frameContext, {
+      logTag: "IOSCtrlProxyClient",
+      prepare: () => {
+        // Derive geometry from the hierarchy BEING FORWARDED, before the push, so the identity
+        // recorded below belongs to the geometry it actually describes.
+        //
+        // Reading this.cachedHierarchy here would be wrong on the request/response path: processMessage
+        // forwards the converted response before CtrlProxyHierarchy.requestHierarchySync resumes and
+        // installs it in the cache, so the cache still holds the PREVIOUS hierarchy (or nothing at
+        // all on the first response). A resolution-changing response would then associate its capture
+        // id with the old dimensions and screenshots could not pair until another hierarchy arrived.
+        this.updateScreenGeometryFrom(source);
+      },
+      recordForwarded: (captureSequence) => {
         if (source) {
           source.captureSequence = captureSequence;
           this.streamedCaptureSequences.set(source, captureSequence);
         }
         this.screenGeometry.markForwarded(captureSequence);
-      }
-    } catch (error) {
-      logger.warn(`[IOSCtrlProxyClient] Failed to push hierarchy to observation stream: ${error}`);
-    }
+      },
+    });
   }
 
   /**
@@ -4773,49 +4638,36 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {
-    if (!this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler = new DefaultScreenshotBackoffScheduler(
-        async (): Promise<ScreenshotCaptureResult> => {
-          return this.captureScreenshotForBackoff();
-        },
-        (result: ScreenshotCaptureResult) => {
-          if (!result.data) {
-            return;
-          }
-          // Get screen dimensions from cached hierarchy or use defaults. A fallback has no capture
-          // provenance at all, so it must never be asserted as tracked.
-          // Declare the geometry the request was BOUND to, not whatever the cache holds now.
-          // Without a binding, fall back to a nominal size and send no identity, so a control
-          // client fails closed.
-          const binding = result.captureBinding;
-          const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1170;
-          const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2532;
-          this.pushScreenshotToObservationStream({
-            screenshotBase64: result.data,
-            screenWidth,
-            screenHeight,
-            metadata: result,
-            captureSequence: binding?.captureSequence,
-            coordinateSpace: binding?.coordinateSpace,
-            nativeScale: binding?.nativeScale,
-            frameContext: result.frameContext,
-            rotation: result.rotation,
-          });
-        },
-        {
-          getKeepAliveIntervalMs: () => {
-            const server = getDeviceDataStreamServer();
-            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
-          },
-        },
-        this.timer,
-        () => {
-          const server = getDeviceDataStreamServer();
-          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
-        },
-      );
+    return this.createScreenshotBackoffScheduler(
+      async () => this.captureScreenshotForBackoff(),
+      (result) => this.emitBackoffScreenshot(result),
+      {},
+    );
+  }
+
+  private emitBackoffScreenshot(result: ScreenshotCaptureResult): void {
+    if (!result.data) {
+      return;
     }
-    return this.screenshotBackoffScheduler;
+    // Get screen dimensions from cached hierarchy or use defaults. A fallback has no capture
+    // provenance at all, so it must never be asserted as tracked.
+    // Declare the geometry the request was BOUND to, not whatever the cache holds now.
+    // Without a binding, fall back to a nominal size and send no identity, so a control
+    // client fails closed.
+    const binding = result.captureBinding;
+    const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1170;
+    const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2532;
+    this.pushScreenshotToObservationStream({
+      screenshotBase64: result.data,
+      screenWidth,
+      screenHeight,
+      metadata: result,
+      captureSequence: binding?.captureSequence,
+      coordinateSpace: binding?.coordinateSpace,
+      nativeScale: binding?.nativeScale,
+      frameContext: result.frameContext,
+      rotation: result.rotation,
+    });
   }
 
   private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {

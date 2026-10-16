@@ -348,13 +348,12 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
   ): Promise<AndroidLogcatWindowResult> {
     const adb = this.adbFactory.create(device);
     try {
-      const pidResult = await adb.executeCommand(
-        `shell pidof ${shellQuote(appId)}`,
-        10_000,
-        4096,
-        true,
+      const pidResult = await adb.executeCommand(`shell pidof ${shellQuote(appId)}`, {
+        timeoutMs: 10_000,
+        maxBuffer: 4096,
+        noRetry: true,
         signal,
-      );
+      });
       const pid = Number(pidResult.stdout.trim().split(/\s+/)[0]);
       if (!Number.isSafeInteger(pid) || pid <= 0) {
         throw new ActionableError(`No running process was found for ${appId}.`);
@@ -366,13 +365,12 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
       const command =
         `shell logcat -d -v brief --pid ${pid} -T "$(( $(date +%s) - ${lastSeconds} )).000" ` +
         `-m ${lineLimit} ${shellQuote(levelFilter)}`;
-      const output = await adb.executeCommand(
-        command,
-        20_000,
-        ANDROID_LOG_READ_MAX_BUFFER,
-        true,
+      const output = await adb.executeCommand(command, {
+        timeoutMs: 20_000,
+        maxBuffer: ANDROID_LOG_READ_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       const source = Buffer.from(output.stdout, "utf8");
       const byteLimit = Math.min(maxBytes, SESSION_LOG_MAX_BYTES_LIMIT);
       const bounded = source.byteLength > byteLimit ? source.subarray(0, byteLimit) : source;

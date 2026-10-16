@@ -629,13 +629,10 @@ export class InstallApp {
       );
     }
     try {
-      const output = await this.adb.executeCommand(
-        `shell pm list packages --user ${userId}`,
-        undefined,
-        undefined,
-        true,
+      const output = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+        noRetry: true,
         signal,
-      );
+      });
       return packageListingContains(output.toString(), packageName);
     } catch (error) {
       logger.warn(`[InstallApp] Package presence query failed: ${errorMessage(error)}`, error);
@@ -956,10 +953,7 @@ export class InstallApp {
     try {
       const result = await this.adb.executeCommand(
         `shell pm install-existing --user ${userId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        true,
-        signal,
+        { noRetry: true, signal },
       );
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       if (
@@ -1018,13 +1012,11 @@ export class InstallApp {
     signal?: AbortSignal,
   ): Promise<AndroidInstallAttempt> {
     try {
-      const result = await this.adb.executeCommand(
-        installArgs,
-        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-        undefined,
-        true,
+      const result = await this.adb.executeCommand(installArgs, {
+        timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+        noRetry: true,
         signal,
-      );
+      });
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       return { success: output.includes("Success"), output, diagnostics: output, threw: false };
     } catch (error) {
@@ -1077,10 +1069,7 @@ export class InstallApp {
     try {
       await this.adb.executeCommand(
         `shell am force-stop --user ${userId} ${shellQuote(packageName)}`,
-        undefined,
-        undefined,
-        true,
-        signal,
+        { noRetry: true, signal },
       );
     } catch (error) {
       // Force-stop is best-effort; uninstall can still remove a package that is not running.
@@ -1089,13 +1078,10 @@ export class InstallApp {
         error,
       );
     }
-    await this.adb.executeCommand(
-      `uninstall ${packageName}`,
-      ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-      undefined,
-      undefined,
+    await this.adb.executeCommand(`uninstall ${packageName}`, {
+      timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
       signal,
-    );
+    });
   }
 
   private extractErrorText(error: unknown): string {
@@ -1544,13 +1530,10 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const result = await this.adb.executeCommand(
-      `shell pm list packages --user ${userId}`,
-      undefined,
-      undefined,
-      true,
+    const result = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+      noRetry: true,
       signal,
-    );
+    });
     const packages = new Set<string>();
     for (const line of result.stdout.split("\n")) {
       const trimmed = line.trim();

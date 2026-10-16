@@ -2564,7 +2564,7 @@ export async function pressButtonHandler(
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   try {
     const pressButton = pressButtonFactory(device);
-    const result: PressButtonResult = await pressButton.execute(args.button, progress, signal);
+    const result: PressButtonResult = await pressButton.execute(args.button, { progress, signal });
 
     const message = result.success
       ? `Pressed button ${args.button}`
@@ -2694,13 +2694,12 @@ export async function rotateHandler(
       sessionRotation: (mutation) =>
         runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
     });
-    const result = await rotate.execute(
-      args.orientation,
+    const result = await rotate.execute(args.orientation, {
       progress,
-      args.lockOrientation,
+      lockOrientation: args.lockOrientation,
       signal,
-      args.display,
-    );
+      display: args.display,
+    });
     const response = createStructuredToolResponse({
       observation: result.observation,
       ...result,
@@ -3620,8 +3619,7 @@ export function registerInteractionTools() {
           duration: args.duration ?? 1000,
           intensity: args.intensity ?? 100,
         },
-        progress,
-        signal,
+        { progress, signal },
       );
 
       const response = createJSONToolResponse({
@@ -3685,7 +3683,7 @@ export function registerInteractionTools() {
   ) => {
     try {
       const recentApps = recentAppsFactory(device);
-      const result = await recentApps.execute(progress, signal);
+      const result = await recentApps.execute({ progress, signal });
 
       const response = createJSONToolResponse({
         message: formatRecentAppsMessage(result),
@@ -3708,7 +3706,7 @@ export function registerInteractionTools() {
     try {
       throwIfAborted(signal);
       const homeScreen = new HomeScreen(device);
-      const result = await homeScreen.execute(progress, signal);
+      const result = await homeScreen.execute({ progress, signal });
 
       const response = createJSONToolResponse({
         message: "Pressed home button to return to the home screen",

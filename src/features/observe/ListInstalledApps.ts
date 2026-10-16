@@ -844,20 +844,8 @@ export class ListInstalledApps {
     }
 
     const [allRes, systemRes] = await Promise.all([
-      this.adb.executeCommand(
-        `shell pm list packages --user ${userId}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
-      this.adb.executeCommand(
-        `shell pm list packages -s --user ${userId}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      ),
+      this.adb.executeCommand(`shell pm list packages --user ${userId}`, { signal }),
+      this.adb.executeCommand(`shell pm list packages -s --user ${userId}`, { signal }),
     ]);
     const systemPackages = this.parsePackages(systemRes.stdout);
     const systemSet = new Set(systemPackages);
@@ -885,13 +873,7 @@ export class ListInstalledApps {
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const result = await this.adb.executeCommand(
-        launcherActivitiesCommand(userId),
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const result = await this.adb.executeCommand(launcherActivitiesCommand(userId), { signal });
       signal?.throwIfAborted();
       applyLauncherPackages(catalog, packageNames, parseLauncherPackages(result.stdout));
     } catch (error) {

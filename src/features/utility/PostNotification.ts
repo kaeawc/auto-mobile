@@ -303,13 +303,7 @@ export class PostNotification {
 
     const probeCommand = `shell cmd package query-receivers --brief -a ${NOTIFICATION_ACTION} -p ${shellQuote(appId)}`;
     try {
-      const probeResult = await this.adb.executeCommand(
-        probeCommand,
-        undefined,
-        undefined,
-        true,
-        signal,
-      );
+      const probeResult = await this.adb.executeCommand(probeCommand, { noRetry: true, signal });
       const probeOutput = `${probeResult.stdout}\n${probeResult.stderr}`;
       const probeVerdict = this.parseReceiverProbe(probeOutput, appId);
       if (probeVerdict === "absent") {
@@ -333,7 +327,7 @@ export class PostNotification {
     }
 
     try {
-      const result = await this.adb.executeCommand(command, undefined, undefined, true, signal);
+      const result = await this.adb.executeCommand(command, { noRetry: true, signal });
       const output = `${result.stdout}\n${result.stderr}`;
 
       if (this.isReceiverUnavailable(output)) {
@@ -497,19 +491,13 @@ export class PostNotification {
     const devicePath = `${DEVICE_IMAGE_DIR}/${fileName}`;
 
     try {
-      await this.adb.executeCommand(
-        `shell mkdir -p ${DEVICE_IMAGE_DIR}`,
-        undefined,
-        undefined,
-        true,
+      await this.adb.executeCommand(`shell mkdir -p ${DEVICE_IMAGE_DIR}`, {
+        noRetry: true,
         signal,
-      );
+      });
       await this.adb.executeCommand(
         `push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`,
-        NOTIFICATION_IMAGE_PUSH_TIMEOUT_MS,
-        undefined,
-        true,
-        signal,
+        { timeoutMs: NOTIFICATION_IMAGE_PUSH_TIMEOUT_MS, noRetry: true, signal },
       );
       return { success: true, devicePath, warning: validation.warning };
     } catch (error) {

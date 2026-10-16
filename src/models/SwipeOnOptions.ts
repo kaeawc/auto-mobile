@@ -14,6 +14,9 @@ export type SwipeDirection = "up" | "down" | "left" | "right";
  */
 export type GestureType = "swipeFingerTowardsDirection" | "scrollTowardsDirection";
 
+/** Screen or panel edge a raw swipe can start from (#12537). */
+export type SwipeEdge = "left" | "right" | "top" | "bottom";
+
 export interface SwipeOnOptions {
   display?: string;
   // Include system insets (status/navigation bars)
@@ -60,6 +63,11 @@ export interface SwipeOnOptions {
   // Boomerang-only settings (internal only)
   apexPause?: number; // Pause at the far end of the swipe in ms (default 100)
   returnSpeed?: number; // Multiplier for return speed (default 1.0)
+
+  // Start the swipe at a screen/panel edge, moving inward (#12537)
+  fromEdge?: SwipeEdge;
+  edgeInset?: number; // Distance in px (points on iOS) the start sits inside the edge (default 4)
+  at?: number; // Normalized 0-1 position along the edge (default 0.5)
 
   // Gesture options
   speed?: "slow" | "normal" | "fast"; // Speed preset

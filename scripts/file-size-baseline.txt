@@ -17,7 +17,7 @@
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
-13331	src/daemon/sessionManager.ts
+13327	src/daemon/sessionManager.ts
 9093	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
@@ -40,7 +40,7 @@
 5407	src/features/action/TapOnElement.ts
 1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
-1804	src/features/action/swipeon/SwipeOn.ts
+1833	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5883	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
@@ -80,7 +80,7 @@
 1170	src/server/executionTracker.ts
 1642	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts
-3691	src/server/interactionTools.ts
+3735	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2874	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts

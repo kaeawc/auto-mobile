@@ -612,6 +612,7 @@ data class PrototypeTextFieldNode(
   val minLines: Int? = null,
   val maxLines: Int? = null,
   val maxLength: Int? = null,
+  val leadingIcon: String? = null,
   val trailingIcon: PrototypeAppBarAction? = null,
   val imeAction: String? = null,
   val onSubmit: List<PrototypeAction>? = null,

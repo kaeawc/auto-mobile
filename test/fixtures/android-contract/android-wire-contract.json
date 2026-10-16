@@ -10030,6 +10030,12 @@
         "hasDefault": true
       },
       {
+        "name": "leadingIcon",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "trailingIcon",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAppBarAction",
         "nullable": true,

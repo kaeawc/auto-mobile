@@ -1711,6 +1711,8 @@ export class SessionManager {
    * release captures it so its write cannot land on a row a later incarnation re-upserted.
    */
   private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** Statements may land before settlement records this incarnation's own generation (#12547). */
+  private readonly inFlightOwnRowWrites = new WeakMap<Session, Set<Promise<unknown>>>();
   private readonly activityRowRePersists = new SingleFlight<Session, void>();
   private readonly retiredCreationRows = new WeakSet<Session>();
   /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
@@ -8059,13 +8061,33 @@ export class SessionManager {
     releaseOptions: {
       unlessDaemonShutdown?: boolean;
       resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
+      incarnation?: Session;
     } = {},
   ): Promise<T> {
+    const resolveRow = (row: DeviceSession | undefined) => {
+      const withGuard = (current: DeviceSession | undefined) => ({
+        row: current,
+        guard: releaseOptions.resolveRowGeneration
+          ? { ...guard, expectedRowGeneration: releaseOptions.resolveRowGeneration(current) }
+          : guard,
+      });
+      const ownWrites =
+        releaseOptions.resolveRowGeneration &&
+        this.awaitInFlightOwnRowWrites(
+          releaseOptions.incarnation,
+          row,
+          guard.expectedRowGeneration,
+        );
+      // Read first: a statement can settle during that read. The release deadline bounds
+      // this wait; re-read afterwards so later generations and peer ownership stay guarded.
+      return ownWrites
+        ? ownWrites.then(() => this.deviceSessionRepository.getSession(sessionId)).then(withGuard)
+        : withGuard(row);
+    };
     for (let attempt = 0; attempt < 2; attempt++) {
-      const row = await this.deviceSessionRepository.getSession(sessionId);
-      const currentGuard = releaseOptions.resolveRowGeneration
-        ? { ...guard, expectedRowGeneration: releaseOptions.resolveRowGeneration(row) }
-        : guard;
+      const { row, guard: currentGuard } = await resolveRow(
+        await this.deviceSessionRepository.getSession(sessionId),
+      );
       if (
         this.rowWritePermanentlyRefused(
           row,
@@ -8770,14 +8792,14 @@ export class SessionManager {
     };
   }
 
-  private async resolveTerminalReleaseWrite(
+  private resolveTerminalReleaseWrite(
     snapshot: SessionReleaseSnapshot,
     precondition: MarkReleasedOptions,
     write: (options: MarkReleasedOptions) => Promise<void>,
     error: DeviceSessionRowNotReleasableError,
   ): Promise<void> {
     const guard = precondition.unlessTerminalOrOwnedByLivePeer!;
-    return await this.retryRefusedRowWrite(
+    return this.retryRefusedRowWrite(
       error,
       snapshot.sessionId,
       {
@@ -8794,6 +8816,7 @@ export class SessionManager {
       snapshot.releaseReason,
       {
         unlessDaemonShutdown: precondition.unlessDaemonShutdown,
+        incarnation: this.releaseRowSessions.get(snapshot)?.deref(),
         resolveRowGeneration: (row) => {
           const incarnation = this.releaseRowSessions.get(snapshot)?.deref();
           const held = this.sessions.get(snapshot.sessionId);
@@ -13634,12 +13657,22 @@ export class SessionManager {
         this.sessionNow(),
         options,
       );
-      void statement.then((rowGeneration) => {
-        // Record at statement settlement, before release/refusal continuations can observe the
-        // advance, even if the later ownership write fails. Retries use this same boundary.
-        this.recordPersistedRowGeneration(incarnation, rowGeneration);
+      const ownWrites = this.inFlightOwnRowWrites.get(incarnation) ?? new Set<Promise<unknown>>();
+      this.inFlightOwnRowWrites.set(incarnation, ownWrites);
+      ownWrites.add(statement);
+      const settled = () => {
+        ownWrites.delete(statement);
+        if (ownWrites.size === 0) {
+          this.inFlightOwnRowWrites.delete(incarnation);
+        }
         closeJoinableFlight();
-      }, closeJoinableFlight);
+      };
+      void statement.then((rowGeneration) => {
+        // Record before waking terminal releases waiting on this same statement (#12547),
+        // even if the later ownership write fails. Retries use this same boundary.
+        this.recordPersistedRowGeneration(incarnation, rowGeneration);
+        settled();
+      }, settled);
       return statement;
     };
     const guard = upsertOptions?.rewriteOverSupersededRelease;
@@ -13660,6 +13693,35 @@ export class SessionManager {
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );
+  }
+
+  private awaitInFlightOwnRowWrites(
+    incarnation: Session | undefined,
+    row: DeviceSession | undefined,
+    expectedRowGeneration: number | undefined,
+  ): Promise<void> | undefined {
+    if (
+      !incarnation ||
+      row?.stable_identity_generation === expectedRowGeneration ||
+      this.persistedRowGenerations.get(incarnation) === row?.stable_identity_generation
+    ) {
+      return undefined;
+    }
+    const writes = this.inFlightOwnRowWrites.get(incarnation);
+    if (!writes?.size) {
+      return undefined;
+    }
+    return Promise.allSettled(writes).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          // The originating persistence caller handles rejection; release only waits for settlement.
+          logger.debug(
+            "[SessionManager] Own row write rejected during terminal release",
+            result.reason,
+          );
+        }
+      }
+    });
   }
 
   private recordPersistedRowGeneration(incarnation: Session, rowGeneration: number | void): void {

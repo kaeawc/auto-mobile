@@ -292,11 +292,11 @@ describe("pickAndroidSystemImage", () => {
   }
 
   it("rejects a release version it cannot map instead of silently widening the range", () => {
-    expect(() => pickAndroidSystemImage(images, { minOsVersion: "17" }, "x64")).toThrow(
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "18" }, "x64")).toThrow(
       ActionableError,
     );
-    expect(() => pickAndroidSystemImage(images, { minOsVersion: "17" }, "x64")).toThrow(
-      /minOsVersion '17'/,
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "18" }, "x64")).toThrow(
+      /minOsVersion '18'/,
     );
     expect(() => pickAndroidSystemImage(images, { maxOsVersion: "4.4" }, "x64")).toThrow(
       /maxOsVersion '4.4'/,

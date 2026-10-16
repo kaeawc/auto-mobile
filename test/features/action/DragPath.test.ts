@@ -16,7 +16,6 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { observation } from "../../helpers/tapAtCoordinate";
-import type { Window } from "../../../src/features/observe/Window";
 
 const android = { name: "a", platform: "android", deviceId: "emulator-5554" } as BootedDevice;
 const ios = { name: "i", platform: "ios", deviceId: "ios-1" } as BootedDevice;
@@ -284,7 +283,7 @@ describe("DragPath", () => {
       androidClient: client,
       idGenerator: new CountingIdGenerator("stroke"),
     });
-    dragPath.window = new FakeWindow() as unknown as Window;
+    dragPath.window = new FakeWindow();
     dragPath.observeScreen = observe;
     return dragPath;
   }
@@ -345,7 +344,7 @@ describe("DragPath", () => {
       const observe = new FakeObserveScreen();
       observe.setObserveResult(observation(100, 200, "frame-7"));
       const dragPath = new DragPath(ios_, new FakeAdbExecutor(), { timer, iosClient: ios });
-      dragPath.window = new FakeWindow() as unknown as Window;
+      dragPath.window = new FakeWindow();
       dragPath.observeScreen = observe;
       return dragPath;
     }

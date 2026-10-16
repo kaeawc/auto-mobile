@@ -1,8 +1,10 @@
+import type { FaultPlan } from "./FaultPlan";
 import path from "node:path";
 import type { TerminalReleaseJournalDirectory } from "../../src/daemon/terminalReleaseJournal";
 
 /** In-memory durable file store; contents survive a "crash" because tests share the instance. */
 export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJournalDirectory {
+  faultPlan?: FaultPlan;
   readonly files = new Map<string, string>();
   readonly appends: string[] = [];
   readonly syncedDirectories: string[] = [];
@@ -34,9 +36,18 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
       this.failNextAppend = undefined;
       throw failure;
     }
-    this.appends.push(text);
-    this.files.set(filePath, (this.files.get(filePath) ?? "") + text);
+    const append = () => {
+      this.appends.push(text);
+      this.files.set(filePath, (this.files.get(filePath) ?? "") + text);
+    };
+    if (this.faultPlan) {
+      this.faultPlan.sync("append", append);
+      this.faultPlan.sync("fsync", () => {});
+    } else {
+      append();
+    }
     if (syncDirectory) {
+      this.faultPlan?.sync("fsyncDir", () => {});
       this.syncedDirectories.push(path.dirname(filePath));
       if (this.failDirectorySync) {
         throw this.failDirectorySync;
@@ -48,8 +59,10 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
     if (this.failCompaction) {
       throw this.failCompaction;
     }
+    this.faultPlan?.sync("fsync", () => {});
     this.replaces++;
     this.files.set(filePath, text);
+    this.faultPlan?.sync("fsyncDir", () => {});
   }
 
   remove(filePath: string): void {

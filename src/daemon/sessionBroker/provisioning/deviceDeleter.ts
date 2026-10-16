@@ -6,12 +6,11 @@ import type {
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
+import { getDaemonDeviceDeletion, type DaemonDeviceDeletion } from "../../../server/deviceTools";
 import {
-  getDaemonDeviceDeletion,
   isTeardownFailure,
-  type DaemonDeviceDeletion,
   type TeardownToolResponse,
-} from "../../../server/deviceTools";
+} from "../../../features/deviceLifecycle/deviceLifecycleCore";
 
 // Only read-only resolution and ownership admission failures prove no native mutation.
 const PRE_NATIVE_REFUSALS = [

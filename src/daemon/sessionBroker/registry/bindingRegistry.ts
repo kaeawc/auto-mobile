@@ -103,14 +103,6 @@ export interface BindingAssignmentRecord extends BindingKey {
   updatedAtMs: number;
 }
 
-/**
- * How long a `stopping` claim holds against other daemons and against adoption. Past it the claimer
- * is presumed dead: another daemon may re-drive the stop, and a binding may adopt the device. Twice the
- * binding journal's step budget (120 s), which bounds one delete-or-stop step, so a live claimer that
- * is merely slow is not pre-empted.
- */
-export const FREE_DEVICE_STOP_CLAIM_STALE_MS = 2 * 120_000;
-
 /** One statement's consistent view of the total-resource ledger. */
 export interface BindingResourceSnapshot {
   managed: ManagedDeviceEntry[];

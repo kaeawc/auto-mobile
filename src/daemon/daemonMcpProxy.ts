@@ -2063,6 +2063,7 @@ export class DaemonMcpProxy {
     }
     const handleStallHandoverRelease = (): boolean => {
       const keepsHandover =
+        this.sessionBrokerSessions.has(releasedSessionUuid) &&
         this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
         isRecoverableDaemonHandoffReason(notification.reason ?? "");
       if (!keepsHandover) {

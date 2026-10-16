@@ -33,5 +33,5 @@ jq -n --slurpfile meta "$dir/environment.json" --arg outcome "$outcome" \
   --arg op "$(cat "$dir/op-in-flight" 2>/dev/null || true)" --argjson duration "$duration" \
   --arg frames "$(head -5 "$dir/top-frames.txt" 2>/dev/null || true)" \
   --args '$meta[0] + {outcome:$outcome,time_to_exit_seconds:$duration,op_in_flight:$op,
-    evidence:$ARGS.positional,top_frames:($frames|split("\n")|map(select(length>0)))}' "${evidence[@]}" > "$dir/result.json"
+    evidence:$ARGS.positional,top_frames:($frames|split("\n")|map(select(length>0)))}' ${evidence[@]+"${evidence[@]}"} > "$dir/result.json"
 printf '%s\n' "$outcome"

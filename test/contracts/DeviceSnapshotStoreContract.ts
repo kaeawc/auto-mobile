@@ -110,6 +110,19 @@ export function runDeviceSnapshotStoreContract(
         expect(await store.getSnapshotSizeBytes("snap")).toBe(7);
       }));
 
+    test("sizes are per scope and survive deleting another scope", () =>
+      withStore(async ({ store, materialize }) => {
+        await store.replaceSnapshotData("snap", ANDROID_A, () =>
+          materialize("snap", ANDROID_A, 10),
+        );
+        await store.replaceSnapshotData("snap", ANDROID_B, () => materialize("snap", ANDROID_B, 1));
+        expect(await store.getSnapshotSizeBytes("snap", ANDROID_A)).toBe(10);
+        expect(await store.getSnapshotSizeBytes("snap", ANDROID_B)).toBe(1);
+        await store.deleteSnapshotData("snap", ANDROID_B);
+        expect(await store.snapshotDirectoryExists("snap", ANDROID_A)).toBe(true);
+        expect(await store.getSnapshotSizeBytes("snap", ANDROID_A)).toBe(10);
+      }));
+
     test("deleteSnapshotData removes only its scope and tolerates a missing snapshot", () =>
       withStore(async ({ store, materialize }) => {
         await store.replaceSnapshotData("snap", ANDROID_A, () => materialize("snap", ANDROID_A, 1));

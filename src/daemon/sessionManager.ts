@@ -1,4 +1,5 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
+import { SerializedSessionRowWriter, type SessionRowWriter } from "./sessionRowWriter";
 import {
   SessionSlots,
   deriveSlotTag,
@@ -1674,6 +1675,7 @@ export class SessionManager {
    */
   private releaseDrainStarted = false;
   private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
+  private readonly rowWriter: SessionRowWriter;
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
   private readonly volatileTerminalReleaseIntents = new Map<string, string>();
@@ -1771,7 +1773,7 @@ export class SessionManager {
    * see {@link runNetworkConditionMutationExclusive}.
    */
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
-  private readonly sessionSlots = /* rowPending stubbed until W2 (#11799) */ new SessionSlots<
+  private readonly sessionSlots = new SessionSlots<
     Promise<Session>,
     SharedSessionAssignment,
     PendingSessionCreation,
@@ -1786,7 +1788,10 @@ export class SessionManager {
     ReleaseReasonState,
     TerminalReleaseReservation,
     TerminalReleaseIntent
-  >({ onFinalizedIdentityCollected: (uuid) => this.slotShadowProbe.transitionGuard.forget(uuid) });
+  >({
+    rowPending: { pending: (uuid) => this.rowWriter.pending(uuid) },
+    onFinalizedIdentityCollected: (uuid) => this.slotShadowProbe.transitionGuard.forget(uuid),
+  });
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
   /**
@@ -2762,7 +2767,7 @@ export class SessionManager {
     // console; a released session must never leave a device impaired.
     networkConditionRestorerFactory:
       | ((device: BootedDevice) => NetworkConditionRestorer)
-      | DeviceStateRestorerFactories = (device) => ({
+      | (DeviceStateRestorerFactories & { rowWriter?: SessionRowWriter }) = (device) => ({
       restore: async (profile) => {
         const result = await new DeviceState(device).setState({
           networkCondition: { profile },
@@ -2781,6 +2786,16 @@ export class SessionManager {
     this.deviceSessionRepository = onSessionClock(deviceSessionRepository, {
       toWall: (sessionClockMs) => this.sessionClockToWall(sessionClockMs),
       toSessionClock: (wallMs) => this.wallToSessionClock(wallMs),
+    });
+    this.rowWriter = SerializedSessionRowWriter.create(networkConditionRestorerFactory, {
+      persistence: this.deviceSessionRepository,
+      timer,
+      backoff: {
+        delayForAttempt: (attempt) => this.terminalReleaseRetryBackoff.delayForAttempt(attempt),
+      },
+      logger,
+      timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      timeoutError: SessionReleasePersistTimeoutError,
     });
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;

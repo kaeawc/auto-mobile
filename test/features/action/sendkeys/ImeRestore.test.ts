@@ -1,3 +1,4 @@
+import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { describe, expect, test } from "bun:test";
 import {
   ImeRestore,
@@ -10,8 +11,8 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 function harness() {
   const adb = new FakeAdbExecutor();
   const calls: string[] = [];
-  let userId: number | undefined;
   const host: ImeRestoreHost = {
+    session: new TypingSession(),
     adb,
     device: { deviceId: "ime-restore-unit" },
     textClient: {
@@ -20,10 +21,6 @@ function harness() {
         calls.push(id);
         return { success: true };
       },
-    },
-    getImeUserId: () => userId,
-    setImeUserId: (value) => {
-      userId = value;
     },
     checkAbort: (signal, error) => {
       signal?.throwIfAborted();
@@ -41,13 +38,13 @@ describe("ImeRestore", () => {
     expect(() => restoration.imeUserFlag()).toThrow(
       "IME user was not pinned before an IME command.",
     );
-    host.setImeUserId(10);
+    host.session.imeUserId = 10;
     adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
       stdout: "keyboard/.Ime\n",
       stderr: "",
     });
     expect(await restoration.readDefaultIme()).toEqual({ success: true, imeId: "keyboard/.Ime" });
-    host.setImeUserId(0);
+    host.session.imeUserId = 0;
     expect(restoration.imeUserFlag()).toBe("");
     expect(await restoration.readDefaultIme()).toEqual({ success: true, imeId: null });
     expect(adb.getExecutedCommands()).toEqual([
@@ -58,7 +55,7 @@ describe("ImeRestore", () => {
 
   test("does not report activation success until the default IME read-back matches", async () => {
     const { restoration, host, adb } = harness();
-    host.setImeUserId(10);
+    host.session.imeUserId = 10;
     adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
       stdout: AUTO_MOBILE_IME_ID,
       stderr: "",

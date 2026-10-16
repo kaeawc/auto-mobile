@@ -1,3 +1,4 @@
+import type { TypingSession } from "./TypingSession";
 import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
 import type { AndroidModeTyper, AndroidModeTypeRequest } from "./AndroidModeTyper";
 import type {
@@ -13,21 +14,21 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../../utils/toolUtils";
-import { CARET_UNKNOWN_WARNING, IME_COMMIT_READ_BACK_SETTLE_MS } from "../SendKeys";
-import { ANDROID_READ_BACK_ATTEMPTS } from "./AndroidTypingConstants";
+import { CARET_UNKNOWN_WARNING } from "./AndroidTypingConstants";
+import { readBackWithSettle } from "./readBackWithSettle";
 /** Field text and collapsed caret expected after the eventLast prefix insert (UTF-16 units). */
 interface EventLastCaretExpectation {
   text: string;
   caret: number;
 }
 export interface EventLastTyperHost {
+  session: TypingSession;
   preExistingFieldText(
     hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
     operation: SendKeysOperation,
   ): string;
   markPartialAfterMutation(result: TextActionResult): TextActionResult;
   textClient: Pick<SendKeysTextClient, "replace" | "readInsertTextState">;
-  isCaretUnsafe(): boolean;
   timer: Timer;
   resetCaretState(): void;
   insertText(
@@ -95,7 +96,7 @@ export class EventLastTyper implements AndroidModeTyper {
       return { ...result, resolvedMode: "a11y" };
     }
 
-    if (this.host.isCaretUnsafe()) {
+    if (this.host.session.androidCaretUnsafe) {
       return {
         success: false,
         error:
@@ -234,30 +235,26 @@ export class EventLastTyper implements AndroidModeTyper {
   }
 
   /** Read the insert state back (bounded) and require exactly the expected text and caret. */
-  private async isCaretProvenAfterPrefix(
+  private isCaretProvenAfterPrefix(
     expected: EventLastCaretExpectation,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
-      if (attempt > 0) {
-        await this.host.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
-      }
-      this.host.checkAbort(signal);
-      try {
-        const state = await this.readInsertTextStateWhileLive(signal);
-        if (state && stateMatchesExpectation(state, expected)) {
-          return true;
-        }
-      } catch (error) {
-        this.host.checkAbort(signal, error);
-        logger.warn(
-          `[SendKeys] eventLast caret read-back unavailable: ${errorMessage(error)}`,
-          error,
-        );
-        return false;
-      }
-    }
-    return false;
+    return readBackWithSettle(
+      () => this.readInsertTextStateWhileLive(signal),
+      (state) => !!state && stateMatchesExpectation(state, expected),
+      {
+        timer: this.host.timer,
+        finish: (_state, accepted) => accepted,
+        beforeRead: () => this.host.checkAbort(signal),
+        onReadError: (error) => {
+          this.host.checkAbort(signal, error);
+          logger.warn(
+            `[SendKeys] eventLast caret read-back unavailable: ${errorMessage(error)}`,
+            error,
+          );
+        },
+      },
+    );
   }
 
   private withoutCaretUnknownWarning(result: TextActionResult): TextActionResult {

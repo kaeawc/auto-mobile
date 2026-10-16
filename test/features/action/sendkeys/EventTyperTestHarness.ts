@@ -1,3 +1,4 @@
+import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import type { EventAllTyperHost } from "../../../../src/features/action/sendkeys/EventAllTyper";
 import type { EventLastTyperHost } from "../../../../src/features/action/sendkeys/EventLastTyper";
 import type { ObserveResult } from "../../../../src/models";
@@ -16,8 +17,8 @@ export function observation(text = "old"): ObserveResult {
 export function eventHost() {
   const calls: unknown[] = [];
   const timer = new FakeTimer();
-  let password = false;
   const host: EventLastTyperHost & EventAllTyperHost = {
+    session: new TypingSession(),
     preExistingFieldText: (_hierarchy, operation) => (operation === "replace" ? "" : "old"),
     markPartialAfterMutation: (result) =>
       result.success ? result : { ...result, partialApplication: true },
@@ -41,11 +42,6 @@ export function eventHost() {
       readInsertTextState: async () => ({ text: "old", selectionStart: 3, selectionEnd: 3 }),
     },
     timer,
-    isCaretUnsafe: () => false,
-    isPasswordField: () => password,
-    setPasswordField: (value) => {
-      password = value;
-    },
     insertText: async (text, options, signal) => {
       calls.push({ insert: text, options, signal });
       return { success: true };

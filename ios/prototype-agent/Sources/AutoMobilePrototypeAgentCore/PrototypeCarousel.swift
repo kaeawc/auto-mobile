@@ -14,6 +14,8 @@ enum PrototypeCarousel {
     /// One flag per page: true for the page drawn as the filled dot. The selection is clamped, so a
     /// transient out-of-range value still fills exactly one dot.
     static func indicatorDots(count: Int, selected: Int) -> [Bool] {
+        // `count` is the page count parameter, not a collection.
+        // swiftlint:disable:next empty_count
         guard count > 0 else { return [] }
         let current = min(max(selected, 0), count - 1)
         return (0 ..< count).map { $0 == current }

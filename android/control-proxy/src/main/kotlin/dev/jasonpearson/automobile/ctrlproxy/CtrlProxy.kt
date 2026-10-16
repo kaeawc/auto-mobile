@@ -4104,32 +4104,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo(it.width, it.height)
       }
 
-  /** Get the top system inset (status bar height) for coordinate adjustment. */
-  @Suppress("DEPRECATION")
-  private fun getTopSystemInset(): Int {
-    return try {
-      val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      if (windowManager != null) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          val metrics = windowManager.currentWindowMetrics
-          val insets =
-            metrics.windowInsets.getInsetsIgnoringVisibility(
-              android.view.WindowInsets.Type.systemBars(),
-            )
-          insets.top
-        } else {
-          val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
-          if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
-        }
-      } else {
-        0
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get top system inset", e)
-      0
-    }
-  }
-
   /** Get current display rotation. Returns 0=portrait, 1=landscape90, 2=reverse, 3=landscape270. */
   @Suppress("DEPRECATION")
   private fun getRotation(): Int {

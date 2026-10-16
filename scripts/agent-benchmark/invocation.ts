@@ -298,22 +298,23 @@ const PROVIDER_FLAGS = [
   "CLAUDE_CODE_USE_ANTHROPIC_AWS",
   "CLAUDE_CODE_USE_MANTLE",
 ];
-const PROVIDER_URLS = [
-  "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_BEDROCK_BASE_URL",
-  "ANTHROPIC_VERTEX_BASE_URL",
-];
+// Every provider's endpoint override (ANTHROPIC_BASE_URL, ANTHROPIC_BEDROCK_BASE_URL,
+// ANTHROPIC_FOUNDRY_BASE_URL, ANTHROPIC_AWS_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL, ...).
+const PROVIDER_URL = /^ANTHROPIC_(?:\w+_)?BASE_URL$/;
 const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
 const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
+// The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb
+// route changes every device call's latency. These name a socket or host and port, no secret.
+const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROID_ADB_SERVER_PORT"];
 
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
  * host and a digest of the path (never credentials, the path itself, or the query) of any
- * base URL or proxy, the proxy bypass list, the
- * region, and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
+ * provider base URL or proxy, the proxy bypass list, the region, the adb server endpoint,
+ * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
 export function providerIdentity(env: Record<string, string | undefined>): string {
@@ -332,15 +333,14 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
     }
   };
   const set = (key: string) => env[key] !== undefined && env[key] !== "";
+  const urls = Object.keys(env).filter((key) => PROVIDER_URL.test(key));
   const routing = Object.keys(env)
     .filter((key) => /^ANTHROPIC_(?:DEFAULT_\w+_)?MODEL$|^ANTHROPIC_SMALL_FAST_MODEL$/.test(key))
     .filter(set);
   return [
     ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
-    ...[...PROVIDER_URLS, ...PROXY_URLS]
-      .filter(set)
-      .map((key) => `${key}=${host(env[key] as string)}`),
-    ...[...PROVIDER_REGIONS, ...PROXY_BYPASS, ...routing]
+    ...[...urls, ...PROXY_URLS].filter(set).map((key) => `${key}=${host(env[key] as string)}`),
+    ...[...PROVIDER_REGIONS, ...PROXY_BYPASS, ...ADB_ENDPOINT, ...routing]
       .filter(set)
       .map((key) => `${key}=${env[key]}`),
   ]

@@ -1,4 +1,5 @@
 import { bindDevice, unbindDevice } from "./deviceBinding";
+import { releasePoolDevice } from "./releaseSessionAndDevice";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { throwIfRequestAborted } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -836,7 +837,7 @@ export class ExplicitDeviceBind {
         );
       }
       await this.cancelOldDeviceWorkForRebind(previousDeviceId, sessionId);
-      await this.port.releaseDevice(previousDeviceId, sessionId);
+      await releasePoolDevice(this.port, previousDeviceId, sessionId);
       return session;
     };
   }

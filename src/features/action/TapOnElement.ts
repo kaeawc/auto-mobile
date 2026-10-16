@@ -223,6 +223,7 @@ import {
   resolveIosOwnedTapPoint,
 } from "./iosTapTargetOwnership";
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -3819,7 +3820,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           return dispatchedResult;
         },
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
           display: target.observation.display.key,
           previousObservation: target.observation,
           signal,
@@ -4528,15 +4529,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             elementId: options.elementId,
             containerElementId: options.container?.elementId,
           },
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
           display: options.display,
-          timeoutMs: 800, // Reduce timeout for faster execution
+          timeoutMs: SETTLE_BUDGET_MS.gesture, // Reduce timeout for faster execution
           progress,
           perf,
           signal,
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
-          resolvesTargetFromRead: true,
           ...(options.ensureChecked !== undefined
             ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),

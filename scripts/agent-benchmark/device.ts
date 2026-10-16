@@ -8,6 +8,8 @@
  * rather than trusting the agent's own summary.
  */
 
+import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
+
 export interface CommandResult {
   exitCode: number;
   stdout: string;
@@ -140,6 +142,25 @@ async function seedSharedPreferences(
   return log;
 }
 
+/**
+ * `am start` can print "Error: Activity not started…" and still exit 0 (older
+ * Android releases), which would start a paid run on the wrong screen; reuse
+ * LaunchApp's failure detection on both streams.
+ */
+async function launchDeepLink(
+  runner: CommandRunner,
+  serial: string,
+  packageName: string,
+  uri: string,
+): Promise<void> {
+  const args = ["-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW"];
+  const result = await runner.run("adb", [...args, "-d", uri, packageName], ADB_TIMEOUT_MS);
+  if (result.exitCode !== 0 || amStartReportedFailure(result.stdout, result.stderr)) {
+    const output = `${result.stderr}${result.stdout}`.trim();
+    throw new Error(`Deep link ${uri} did not start (exit ${result.exitCode}): ${output}`);
+  }
+}
+
 /** Run preflight steps and return a log of what was done, one line per step. */
 export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): Promise<string[]> {
   const log: string[] = [];
@@ -167,18 +188,7 @@ export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): 
   }
   log.push(...(await seedSharedPreferences(runner, spec)));
   if (spec.launchUri) {
-    await adb(runner, [
-      ...target,
-      "shell",
-      "am",
-      "start",
-      "-W",
-      "-a",
-      "android.intent.action.VIEW",
-      "-d",
-      spec.launchUri,
-      spec.packageName,
-    ]);
+    await launchDeepLink(runner, spec.serial, spec.packageName, spec.launchUri);
     log.push(`launched ${spec.launchUri}`);
   }
   return log;

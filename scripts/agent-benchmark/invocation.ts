@@ -7,22 +7,23 @@
  * - Claude runs from an empty temp directory outside the repository: Claude Code
  *   loads CLAUDE.md from the cwd and every ancestor, so a cwd under the checkout
  *   (even the artifact directory) would still pick up this repository's context.
+ *   CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 is forced as well, so the operator's user-level
+ *   ~/.claude/CLAUDE.md and auto-memory never shape a run.
  * - The auto-mobile server talks to a private daemon (`AUTOMOBILE_AUX_SOCKET_DIR`)
  *   with a fresh database and its own log directory, so a resident daemon or a
  *   learned navigation graph from an earlier run cannot change the result. Every
- *   inherited state override (current and legacy names, e.g. AUTOMOBILE_DB_PATH or
- *   AUTOMOBILE_DAEMON_SOCKET_PATH) is stripped first, since explicit overrides win
- *   over the run's values. The ADB coordination directory is deliberately kept:
- *   device claims must stay shared with any resident daemon.
+ *   inherited AutoMobile variable (current `AUTOMOBILE_*` and legacy `AUTO_MOBILE_*`
+ *   names) is stripped first: state overrides such as AUTOMOBILE_DB_PATH would win
+ *   over the run's values, and settings such as AUTOMOBILE_DISABLED_TOOLS would
+ *   silently change the agent's toolset. The ADB coordination directory is the one
+ *   exception: device claims must stay shared with any resident daemon.
  * - The prompt is passed on stdin, never as a positional argument, because the
  *   variadic `--allowedTools`/`--disallowedTools` flags would swallow it.
  */
-import { privateClientEnvironment } from "../manual-test/privateDaemonEnv";
-import { STATE_PATH_VARIABLES } from "../manual-test/productPathEnv";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
-/** State the private daemon must share with any resident daemon: device claims. */
-const SHARED_STATE_VARIABLES = new Set(["AUTOMOBILE_ADB_SERVER_COORDINATION_DIR"]);
+/** The one AutoMobile setting shared with any resident daemon: device claims. */
+const SHARED_AUTOMOBILE_VARIABLES = new Set(["AUTOMOBILE_ADB_SERVER_COORDINATION_DIR"]);
 
 /** Orphaned private daemons shut down after this idle window once Claude exits. */
 const PRIVATE_DAEMON_ORPHAN_IDLE_MS = "5000";
@@ -48,18 +49,24 @@ export function privateServerEnv(paths: ServerPaths): Record<string, string> {
   };
 }
 
+function isAutoMobileVariable(key: string): boolean {
+  return key.startsWith("AUTOMOBILE_") || key.startsWith("AUTO_MOBILE_");
+}
+
 /**
- * The inherited environment with every AutoMobile state override removed (the
- * manual-test harness's `privateClientEnvironment`, plus current-name state paths
- * that this harness does not set), then the run's private-daemon values on top.
+ * The inherited environment with every AutoMobile variable removed except the
+ * shared ADB coordination directory, then the run's private-daemon values on top,
+ * so each run starts from a clean AutoMobile configuration.
  */
 export function isolatedServerEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
 ): Record<string, string> {
   const base = Object.fromEntries(
-    Object.entries(privateClientEnvironment(inherited, {})).filter(
-      ([key]) => SHARED_STATE_VARIABLES.has(key) || !STATE_PATH_VARIABLES.includes(key),
+    Object.entries(inherited).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined &&
+        (SHARED_AUTOMOBILE_VARIABLES.has(entry[0]) || !isAutoMobileVariable(entry[0])),
     ),
   );
   return { ...base, ...privateServerEnv(paths) };

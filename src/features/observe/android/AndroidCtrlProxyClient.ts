@@ -6,20 +6,14 @@ import {
   type PrototypePatchRequest,
   type PrototypePatchReply,
 } from "../../prototype/prototypePatchWire";
-import {
-  describeForeignCtrlProxyForwards,
-  listedCtrlProxyForwardPorts,
-  parseOwnPortForward,
-  localPortFromForward,
-  rememberForeignForwardClients,
-  liveRememberedForwardClients,
-  pruneForeignForwardMemory,
-  resetForeignCtrlProxyForwardEvidenceForTesting,
-} from "./foreignCtrlProxyForwardEvidence";
+import { resetForeignCtrlProxyForwardEvidenceForTesting } from "./foreignCtrlProxyForwardEvidence";
 import { isProcessRunning } from "../../../utils/processLiveness";
 
-// Three attempts preserve the existing connection retry bound.
-export const CTRL_PROXY_CONNECT_ATTEMPTS = 3;
+export { CTRL_PROXY_CONNECT_ATTEMPTS } from "./AndroidCtrlProxyPortForwarder";
+import {
+  AndroidCtrlProxyPortForwarder,
+  type ForwardClientEvidence,
+} from "./AndroidCtrlProxyPortForwarder";
 
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
@@ -50,7 +44,6 @@ import { linkWindowRoots } from "../linkWindowRoots";
 import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
 import type { ScreenIdentity } from "../../../models/ObserveResult";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
-import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
   HostForwardClientConnectionProbe,
   NoForwardClientConnectionProbe,
@@ -76,7 +69,7 @@ import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { exponentialBackoff, fixedBackoff } from "../../../utils/Backoff";
+import { fixedBackoff } from "../../../utils/Backoff";
 import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
@@ -98,7 +91,6 @@ import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/install
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
-import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
@@ -108,7 +100,6 @@ import {
 } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -221,7 +212,6 @@ import {
   FileCtrlProxyForwardLease,
   NoOpCtrlProxyForwardLease,
   type CtrlProxyForwardLease,
-  type ForwardLeaseReclaimResult,
 } from "./CtrlProxyForwardLease";
 
 // Import delegates
@@ -1466,76 +1456,6 @@ function portAllocationIdForClient(
 }
 
 /**
- * Actionable message for a CtrlProxy forwarding-lease conflict (issue #6260).
- * Named the owning PID when known, so a client is pointed at the orphan
- * process rather than left to guess or, worse, blame the device. When the
- * owner was asked and refused the takeover (issue #10497), the message names
- * its socket and the reason, such as its live session.
- */
-function describeCtrlProxyForwardingLeaseConflict(
-  deviceId: string,
-  ownerPid: number | undefined,
-  refusal?: ForwardLeaseReclaimResult,
-): string {
-  if (ownerPid !== undefined && refusal?.ownerSocketPath !== undefined) {
-    return (
-      `Another AutoMobile process (PID ${ownerPid}, socket ${refusal.ownerSocketPath}) owns ` +
-      `CtrlProxy forwarding for ${deviceId} and kept it because ${refusal.reason}. Release that ` +
-      `session or stop that process (\`kill ${ownerPid}\`), then retry.`
-    );
-  }
-  if (ownerPid !== undefined) {
-    return (
-      `Another AutoMobile process (PID ${ownerPid}) owns CtrlProxy forwarding for ${deviceId}. ` +
-      `This is usually a stale/orphaned AutoMobile daemon left behind by an incomplete ` +
-      `\`--daemon restart\` — stop it (\`kill ${ownerPid}\`) and retry.`
-    );
-  }
-  return (
-    `Another AutoMobile process owns CtrlProxy forwarding for ${deviceId}. This is usually a ` +
-    `stale/orphaned AutoMobile daemon — run \`--daemon restart\` or find and stop it directly.`
-  );
-}
-
-/** What the host TCP table says about who uses a set of CtrlProxy forwards. */
-type ForwardClientEvidence = { clientPidsByPort: Map<number, number[]> } | { probeFailure: string };
-
-/**
- * Raise the appropriate error for a failed {@link CtrlProxyForwardLease.tryAcquire}
- * (issue #6260 / PRRT_kwDOP-GF5M6fuKn9). Split out of `setupPortForwarding` to keep
- * that method's branching complexity down; always throws.
- */
-function throwCtrlProxyForwardingLeaseConflict(
-  deviceId: string,
-  ownerPid: number | undefined,
-  refusal?: ForwardLeaseReclaimResult,
-): never {
-  if (ownerPid === process.pid) {
-    // Same-process transient, NOT an orphan: shutdown recovery can evict a
-    // singleton while its in-flight setup still holds the lease, so a
-    // REPLACEMENT client constructed in THIS SAME process can observe its own
-    // PID as the current owner. Naming and suggesting `kill` on that PID would
-    // tell the caller to kill itself. This case must keep waiting for the live
-    // in-process lease to release rather than reclaim it (see
-    // `FileCtrlProxyForwardLease.tryAcquire` — reclaiming mid-setup would let
-    // two instances race the same port forward), so throw the same plain,
-    // non-actionable-kill error this path threw before this diagnostic existed
-    // and let the caller's existing retry path recover once the lease frees.
-    throw new Error(describeCtrlProxyForwardingLeaseConflict(deviceId, undefined));
-  }
-  // Named explicitly (issue #6260): this typed error is detected by
-  // RunnerReadinessService to replace a generic, device-blaming
-  // "runner did not become responsive" failure with the real, actionable
-  // cause, and to fail fast rather than retry to the deadline (#10485).
-  throw new CtrlProxyForwardingLeaseConflictError(
-    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid, refusal),
-    ownerPid,
-    refusal?.ownerSocketPath,
-    refusal?.transient === true,
-  );
-}
-
-/**
  * Narrow Android manager seam for connection-failure escalation (issue #7532),
  * analogous to `IOSCtrlProxyClient`'s `serviceManagerFactory`. Exposes only what
  * recovery needs: the binding-health probe, the crashed/unbound rebind added by
@@ -1560,9 +1480,6 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
  */
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
-
-/** adb's bind failure for `forward`: "cannot bind listener: Address already in use". */
-const ADB_FORWARD_ADDRESS_IN_USE_PATTERN = /address already in use|EADDRINUSE/i;
 
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
   protected override get clientLogTag(): string {
@@ -1613,9 +1530,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
   /** @internal Injected liveness probe for sticky foreign-forward evidence. */
   forwardClientProcessIsRunning: (pid: number) => boolean = isProcessRunning;
-  private static readonly FORWARD_CLIENT_PROBES = 2;
-  private static readonly FORWARD_PORT_ATTEMPTS = 4;
-  private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS = 1_000;
+  private static readonly FORWARD_CLIENT_PROBES =
+    AndroidCtrlProxyPortForwarder.FORWARD_CLIENT_PROBES;
+  private static readonly FORWARD_PORT_ATTEMPTS =
+    AndroidCtrlProxyPortForwarder.FORWARD_PORT_ATTEMPTS;
+  private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS =
+    AndroidCtrlProxyPortForwarder.FORWARD_CLIENT_REPROBE_INTERVAL_MS;
   private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   /** Set when shutdown released this client's lease before its close finished. */
   private forwardLeaseForceReleased: boolean = false;
@@ -1755,6 +1675,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private readonly certificateFileSystem: CertificateFileSystem | undefined;
+
+  private portForwarder: AndroidCtrlProxyPortForwarder | null = null;
 
   private appEventRecorder: AndroidAppEventRecorder | null = null;
 
@@ -2395,6 +2317,67 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       });
     }
     return this.sdkEventIngestorInstance;
+  }
+
+  /** Keep mutable test seams and post-await state live without exposing connection lifecycle. */
+  private getPortForwarder(): AndroidCtrlProxyPortForwarder {
+    if (!this.portForwarder) {
+      const client = this;
+      this.portForwarder = new AndroidCtrlProxyPortForwarder({
+        get adb() {
+          return client.adb;
+        },
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get ctrlProxyForwardLease() {
+          return client.ctrlProxyForwardLease;
+        },
+        get forwardClientProbe() {
+          return client.forwardClientProbe;
+        },
+        get forwardClientProcessIsRunning() {
+          return client.forwardClientProcessIsRunning;
+        },
+        get closed() {
+          return client.closed;
+        },
+        get localPort() {
+          return client.localPort;
+        },
+        set localPort(value) {
+          client.localPort = value;
+        },
+        get portAllocationId() {
+          return client.portAllocationId;
+        },
+        get portForwardingSetup() {
+          return client.portForwardingSetup;
+        },
+        set portForwardingSetup(value) {
+          client.portForwardingSetup = value;
+        },
+        get forwardLeaseForceReleased() {
+          return client.forwardLeaseForceReleased;
+        },
+        set forwardSetupFailure(failure: string | undefined) {
+          client.forwardSetupFailure = failure;
+        },
+        getLiveLocalPorts: () =>
+          new Set(
+            [
+              ...AndroidCtrlProxyClient.instances.values(),
+              ...AndroidCtrlProxyClient.activeObservers,
+            ]
+              .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
+              .map((other) => other.localPort),
+          ),
+      });
+    }
+    return this.portForwarder;
   }
 
   /** Resolve collaborators lazily so injected stores and session-bound ingestors stay live. */
@@ -5317,49 +5300,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async ensureLocalPortAvailableForForwarding(signal?: AbortSignal): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    const currentAllocation = PortManager.getPort(this.portAllocationId);
-    let currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
-    if (currentAllocation === this.localPort) {
-      const backoff = fixedBackoff(50);
-      for (let attempt = 1; attempt <= CTRL_PROXY_CONNECT_ATTEMPTS; attempt++) {
-        if (currentPortIsAvailable) {
-          return;
-        }
-        if (this.closed) {
-          return;
-        }
-        throwIfAborted(signal);
-        // adb tears down its listener asynchronously after --remove; this short busy window is expected and bounded.
-        logger.debug(
-          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/${CTRL_PROXY_CONNECT_ATTEMPTS})`,
-        );
-        await awaitWhileRequestIsLive(this.timer.sleep(backoff.delayForAttempt(attempt)), signal);
-        if (this.closed) {
-          return;
-        }
-        throwIfAborted(signal);
-        currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
-      }
-    }
-    if (currentAllocation === this.localPort && currentPortIsAvailable) {
-      return;
-    }
-
-    const additionalReservedPorts = currentPortIsAvailable ? [] : [this.localPort];
-    PortManager.release(this.portAllocationId);
-    const nextPort = PortManager.allocate(this.portAllocationId, {
-      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, ...additionalReservedPorts],
-    });
-    if (nextPort !== this.localPort) {
-      logger.info(
-        `[CTRL_PROXY] Reallocated local port from ${this.localPort} to ${nextPort} before adb forward`,
-      );
-      this.localPort = nextPort;
-    }
+  private ensureLocalPortAvailableForForwarding(signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().ensureLocalPortAvailableForForwarding(signal);
   }
 
   /**
@@ -5367,133 +5309,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * next free port when the probe fails or adb still reports the port in use
    * (another forward or process claimed it after allocation, #10795).
    */
-  private async forwardOnFreeLocalPort(signal?: AbortSignal): Promise<void> {
-    for (let attempt = 1; ; attempt++) {
-      const isLastAttempt = attempt >= AndroidCtrlProxyClient.FORWARD_PORT_ATTEMPTS;
-      if (!isLastAttempt && !(await isCtrlProxyHostPortFree(this.localPort))) {
-        logger.info(`[CTRL_PROXY] Local port ${this.localPort} is busy; selecting another port`);
-        await this.moveToNextFreeLocalPort(signal);
-        continue;
-      }
-      try {
-        await this.adb.execute(
-          ["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`],
-          { signal },
-        );
-        return;
-      } catch (error) {
-        if (isLastAttempt || !ADB_FORWARD_ADDRESS_IN_USE_PATTERN.test(errorMessage(error))) {
-          throw error;
-        }
-        logger.warn(
-          `[CTRL_PROXY] adb forward on tcp:${this.localPort} reported the port in use; retrying on the next port`,
-        );
-        await this.moveToNextFreeLocalPort(signal);
-      }
-    }
+  private forwardOnFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().forwardOnFreeLocalPort(signal);
   }
 
-  private async moveToNextFreeLocalPort(signal?: AbortSignal): Promise<void> {
-    const busyPort = this.localPort;
-    PortManager.release(this.portAllocationId);
-    this.localPort = PortManager.allocate(this.portAllocationId, {
-      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, busyPort],
-    });
-    if (!(await this.removeCtrlProxyPortForward(this.localPort, signal))) {
-      throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
-    }
+  private moveToNextFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().moveToNextFreeLocalPort(signal);
   }
 
   /**
    * Acquire this device's cross-process forwarding lease, taking it over from a
    * live owner that reports it no longer uses the device (issue #10497).
    */
-  private async acquireCtrlProxyForwardLease(): Promise<void> {
-    const lease = this.ctrlProxyForwardLease;
-    if (lease.tryAcquire()) {
-      return;
-    }
-    const ownerPid = lease.getLastOwnerPid();
-    const reclaim =
-      ownerPid !== undefined && ownerPid !== process.pid
-        ? await lease.tryReclaimFromStaleOwner?.()
-        : undefined;
-    if (reclaim?.acquired) {
-      return;
-    }
-    throwCtrlProxyForwardingLeaseConflict(
-      this.device.deviceId,
-      reclaim?.ownerPid ?? ownerPid,
-      reclaim,
-    );
+  private acquireCtrlProxyForwardLease(): Promise<void> {
+    return this.getPortForwarder().acquireCtrlProxyForwardLease();
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  async setupPortForwarding(
+  setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    this.forwardSetupFailure = undefined;
-    await this.acquireCtrlProxyForwardLease();
-    // Verify port forwarding is still active even if we think it's set up
-    // Port forwarding can be lost if ADB server restarts or emulator restarts
-    if (this.portForwardingSetup) {
-      const isActive = await this.isPortForwardingActive(signal);
-      if (isActive) {
-        logger.debug(`[CTRL_PROXY] Port forwarding already active (localhost:${this.localPort})`);
-        return;
-      }
-      logger.debug(`[CTRL_PROXY] Port forwarding was lost, re-establishing...`);
-      this.portForwardingSetup = false;
-    }
-
-    try {
-      await this.sweepOrphanedCtrlProxyPortForwards(signal);
-
-      const previousLocalPort = this.localPort;
-      const clearedCurrentPort = await perf.track(
-        "clearPortForward",
-        async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
-      );
-      if (!clearedCurrentPort) {
-        throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
-      }
-      await this.ensureLocalPortAvailableForForwarding(signal);
-      if (this.closed) {
-        return;
-      }
-      logger.debug(
-        `[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`,
-      );
-
-      if (this.localPort !== previousLocalPort) {
-        const clearedReallocatedPort = await perf.track(
-          "clearReallocatedPortForward",
-          async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
-        );
-        if (!clearedReallocatedPort) {
-          throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
-        }
-      }
-
-      await perf.track("setupPortForward", () => this.forwardOnFreeLocalPort(signal));
-      this.ctrlProxyForwardLease.recordOwnedForward?.(this.localPort);
-
-      if (this.closed) {
-        await this.removeCtrlProxyPortForward(this.localPort);
-        return;
-      }
-
-      this.portForwardingSetup = true;
-      logger.debug(`[CTRL_PROXY] Port forwarding setup complete (localhost:${this.localPort})`);
-    } catch (error) {
-      this.forwardSetupFailure = `Failed to establish adb forward for ${this.device.deviceId}: ${errorMessage(error)}`;
-      logger.warn(`[CTRL_PROXY] Failed to setup port forwarding: ${error}`);
-      throw error;
-    }
+    return this.getPortForwarder().setupPortForwarding(perf, signal);
   }
 
   /**
@@ -5505,44 +5342,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * its allocated port is treated as live even before port forwarding completes.
    */
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
-    let stdout: string;
-    const listedAt = this.timer.now();
-    try {
-      const result = await this.adb.execute(["forward", "--list"], { signal });
-      stdout = result.stdout;
-    } catch (error) {
-      logger.warn(
-        `[CTRL_PROXY] Failed to list forwards while reconciling device ${this.device.deviceId}: ${error}`,
-        error,
-      );
-      throw error;
-    }
-
-    const listedPorts = this.listedCtrlProxyForwardPorts(stdout);
-    this.pruneStaleCtrlProxyForwardRecords(listedPorts, listedAt);
-    const livePorts = new Set(
-      [...AndroidCtrlProxyClient.instances.values(), ...AndroidCtrlProxyClient.activeObservers]
-        .filter((client) => client.device.deviceId === this.device.deviceId && !client.closed)
-        .map((client) => client.localPort),
-    );
-    const listed = [...listedPorts];
-    // No record in this coordination directory: possibly another daemon's (#10690).
-    const unrecordedPorts = listed.filter((port) => !this.ownsCtrlProxyPortForward(port));
-    const orphanedPorts = listed.filter(
-      (port) => this.ownsCtrlProxyPortForward(port) && !livePorts.has(port),
-    );
-
-    pruneForeignForwardMemory(this.device.deviceId, new Set(unrecordedPorts));
-    if (unrecordedPorts.length > 0) {
-      await this.resolveUnrecordedCtrlProxyForwards(unrecordedPorts, signal);
-    }
-    await this.reclaimRecordedOrphanForwards(orphanedPorts, signal);
+  sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().sweepOrphanedCtrlProxyPortForwards(signal);
   }
 
   /** Host ports of this device's forwards to the CtrlProxy device port. */
   private listedCtrlProxyForwardPorts(stdout: string): Set<number> {
-    return listedCtrlProxyForwardPorts(this.device.deviceId, stdout);
+    return this.getPortForwarder().listedCtrlProxyForwardPorts(stdout);
   }
 
   /**
@@ -5555,45 +5361,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * connections cannot be read, the pruned record is the best evidence left.
    * Re-probes like the unrecorded path and reports a retryable conflict (#11106).
    */
-  private async reclaimRecordedOrphanForwards(
-    ports: number[],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (ports.length === 0) {
-      return;
-    }
-    const evidence = await this.findForeignForwardClients(
-      ports,
-      AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
-      signal,
-    );
-    const clients = "clientPidsByPort" in evidence ? evidence.clientPidsByPort : new Map();
-    const contested = ports.filter((port) => clients.has(port));
-    for (const port of contested) {
-      logger.warn(
-        `[CTRL_PROXY] Dropping CtrlProxy forward record for ${this.device.deviceId} tcp:${port}: ` +
-          `PID ${clients.get(port)?.join(", ")} is connected to it`,
-      );
-      this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
-    }
-    for (const port of ports.filter((candidate) => !clients.has(candidate))) {
-      logger.info(
-        `[CTRL_PROXY] Reclaiming orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
-      );
-      if (!(await this.removeCtrlProxyPortForward(port, signal))) {
-        throw new Error(
-          `Failed to reclaim orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
-        );
-      }
-    }
-    if (contested.length > 0) {
-      // Transient (#11106): the record proves this coordination domain made the
-      // forward, so a client still connected after the bounded re-probes is
-      // usually a stray dialing the fixed host port. The record is dropped
-      // above, so the retry re-judges the port as unrecorded and fails closed
-      // (non-transient) if a live daemon really owns it.
-      this.throwForeignCtrlProxyForwards(contested, { clientPidsByPort: clients }, true);
-    }
+  private reclaimRecordedOrphanForwards(ports: number[], signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().reclaimRecordedOrphanForwards(ports, signal);
   }
 
   /**
@@ -5608,47 +5377,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * A failed probe cannot rule a client out, so it
    * refuses rather than risk removing a live forward.
    */
-  private async resolveUnrecordedCtrlProxyForwards(
-    ports: number[],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const evidence = await this.findForeignForwardClients(
-      ports,
-      AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
-      signal,
-      true,
-    );
-    const rememberedOnly = "clientPidsByPort" in evidence && evidence.clientPidsByPort.size === 0;
-    if ("clientPidsByPort" in evidence) {
-      for (const port of ports) {
-        const remembered = liveRememberedForwardClients(
-          this.device.deviceId,
-          port,
-          this.forwardClientProcessIsRunning,
-        );
-        if (remembered.length > 0) {
-          evidence.clientPidsByPort.set(port, [
-            ...new Set([...(evidence.clientPidsByPort.get(port) ?? []), ...remembered]),
-          ]);
-        }
-      }
-    }
-    if ("probeFailure" in evidence || evidence.clientPidsByPort.size > 0) {
-      this.throwForeignCtrlProxyForwards(ports, evidence, false, rememberedOnly);
-    }
-    for (const port of ports) {
-      logger.warn(
-        `[CTRL_PROXY] Reclaiming legacy/unrecorded CtrlProxy forward on ${this.device.deviceId} ` +
-          `tcp:${port}: no other process is connected to it`,
-      );
-      // Removed without writing a record first, so a failed removal cannot
-      // leave a record claiming another daemon's forward (#10690).
-      if (!(await this.removeCtrlProxyPortForward(port, signal, { reclaimUnrecorded: true }))) {
-        throw new Error(
-          `Failed to reclaim unrecorded CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
-        );
-      }
-    }
+  private resolveUnrecordedCtrlProxyForwards(ports: number[], signal?: AbortSignal): Promise<void> {
+    return this.getPortForwarder().resolveUnrecordedCtrlProxyForwards(ports, signal);
   }
 
   private throwForeignCtrlProxyForwards(
@@ -5657,20 +5387,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     transient = false,
     rememberedOnly = false,
   ): never {
-    const clientPids =
-      "clientPidsByPort" in evidence
-        ? [...new Set([...evidence.clientPidsByPort.values()].flat())]
-        : [];
-    throw new CtrlProxyForwardingLeaseConflictError(
-      describeForeignCtrlProxyForwards(
-        this.device.deviceId,
-        ports,
-        this.ctrlProxyForwardLease.ownershipDirectory?.(),
-        "probeFailure" in evidence ? evidence : { clientPids, rememberedOnly },
-      ),
-      clientPids[0],
-      undefined,
+    return this.getPortForwarder().throwForeignCtrlProxyForwards(
+      ports,
+      evidence,
       transient,
+      rememberedOnly,
     );
   }
 
@@ -5678,50 +5399,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Other processes' client connections to each of `ports`, unioned over
    * `probes` reads spaced {@link FORWARD_CLIENT_REPROBE_INTERVAL_MS} apart.
    */
-  private async findForeignForwardClients(
+  private findForeignForwardClients(
     ports: number[],
     probes: number,
     signal?: AbortSignal,
     rememberUnrecorded = false,
   ): Promise<ForwardClientEvidence> {
-    const clientPidsByPort = new Map<number, number[]>();
-    const remember = rememberUnrecorded ? rememberForeignForwardClients : undefined;
-    try {
-      for (let probe = 0; probe < probes; probe++) {
-        if (probe > 0) {
-          await this.timer.sleep(AndroidCtrlProxyClient.FORWARD_CLIENT_REPROBE_INTERVAL_MS);
-        }
-        for (const [port, pids] of await this.probeForwardClientsOnce(ports, signal)) {
-          remember?.(this.device.deviceId, port, pids);
-          clientPidsByPort.set(port, [
-            ...new Set([...(clientPidsByPort.get(port) ?? []), ...pids]),
-          ]);
-        }
-      }
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(
-        `[CTRL_PROXY] Could not read host connections to CtrlProxy forwards on ` +
-          `${this.device.deviceId}: ${errorMessage(error)}`,
-        error,
-      );
-      return { probeFailure: errorMessage(error) };
-    }
-    return { clientPidsByPort };
+    return this.getPortForwarder().findForeignForwardClients(
+      ports,
+      probes,
+      signal,
+      rememberUnrecorded,
+    );
   }
 
   /** Other processes' client connections to each of `ports` with any, read once. */
-  private async probeForwardClientsOnce(
+  private probeForwardClientsOnce(
     ports: number[],
     signal?: AbortSignal,
   ): Promise<Array<[number, number[]]>> {
-    const perPort = await Promise.all(
-      ports.map(async (port): Promise<[number, number[]]> => {
-        const pids = await this.forwardClientProbe.findClientPids(port, signal);
-        return [port, pids.filter((pid) => pid !== process.pid)];
-      }),
-    );
-    return perPort.filter(([, pids]) => pids.length > 0);
+    return this.getPortForwarder().probeForwardClientsOnce(ports, signal);
   }
 
   /**
@@ -5730,16 +5427,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * recorded later may have been created after the listing was taken.
    */
   private pruneStaleCtrlProxyForwardRecords(listedPorts: Set<number>, listedAt: number): void {
-    for (const record of this.ctrlProxyForwardLease.recordedForwards?.() ?? []) {
-      if (listedPorts.has(record.localPort) || record.createdAt >= listedAt) {
-        continue;
-      }
-      logger.info(
-        `[CTRL_PROXY] Dropping stale CtrlProxy forward record for ${this.device.deviceId} ` +
-          `tcp:${record.localPort}: ADB no longer lists the forward`,
-      );
-      this.ctrlProxyForwardLease.forgetOwnedForward?.(record.localPort);
-    }
+    return this.getPortForwarder().pruneStaleCtrlProxyForwardRecords(listedPorts, listedAt);
   }
 
   /**
@@ -5748,7 +5436,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * #10690 and treats every forward as its own.
    */
   private ownsCtrlProxyPortForward(port: number): boolean {
-    return this.ctrlProxyForwardLease.ownsForward?.(port) ?? true;
+    return this.getPortForwarder().ownsCtrlProxyPortForward(port);
   }
 
   /**
@@ -5759,111 +5447,32 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * @returns `true` when no matching forward remains; `false` when adb failed
    * to establish that state.
    */
-  private async removeCtrlProxyPortForward(
+  private removeCtrlProxyPortForward(
     port: number,
     signal?: AbortSignal,
     options: { reclaimUnrecorded?: boolean } = {},
   ): Promise<boolean> {
-    try {
-      const expectedLocal = `tcp:${port}`;
-      if (!(await this.hasCtrlProxyPortForward(port, signal))) {
-        this.markCtrlProxyPortForwardGone(port);
-        return true;
-      }
-      if (this.forwardLeaseForceReleased) {
-        // Shutdown gave this client's lease away while its close was stuck; a
-        // successor may already own a forward on this port (#10690).
-        logger.warn(
-          `[CTRL_PROXY] Leaving CtrlProxy forward on ${this.device.deviceId} tcp:${port} in place: ` +
-            `this client's forwarding lease was released before its close finished`,
-        );
-        return false;
-      }
-      if (options.reclaimUnrecorded !== true && !this.ownsCtrlProxyPortForward(port)) {
-        // Never remove or replace another daemon's forward (#10690).
-        logger.warn(
-          `[CTRL_PROXY] Leaving CtrlProxy forward on ${this.device.deviceId} tcp:${port} in place: ` +
-            `this process did not create it`,
-        );
-        return false;
-      }
-
-      this.assertNoLiveRememberedForeignForward(port);
-      await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
-      const startedAt = this.timer.now();
-      const confirmationDeadlineMs = 2_000;
-      const backoff = exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 800 });
-      for (let attempt = 1; ; attempt++) {
-        if (!(await this.hasCtrlProxyPortForward(port, signal))) {
-          this.markCtrlProxyPortForwardGone(port);
-          return true;
-        }
-        const remainingMs = confirmationDeadlineMs - (this.timer.now() - startedAt);
-        if (remainingMs <= 0) {
-          break;
-        }
-        await this.timer.sleep(Math.min(backoff.delayForAttempt(attempt), remainingMs));
-      }
-      logger.warn(
-        `[CTRL_PROXY] CtrlProxy forward on ${this.device.deviceId} tcp:${port} remained after removal confirmation`,
-      );
-      PortManager.quarantine(port);
-      return false;
-    } catch (error) {
-      if (error instanceof CtrlProxyForwardingLeaseConflictError) {
-        throw error;
-      }
-      logger.warn(
-        `[CTRL_PROXY] Failed to remove CtrlProxy forward on ${this.device.deviceId} tcp:${port}: ${error}`,
-        error,
-      );
-      return false;
-    }
+    return this.getPortForwarder().removeCtrlProxyPortForward(port, signal, options);
   }
 
   private assertNoLiveRememberedForeignForward(port: number): void {
-    if (this.ownsCtrlProxyPortForward(port)) {
-      return;
-    }
-    const pids = liveRememberedForwardClients(
-      this.device.deviceId,
-      port,
-      this.forwardClientProcessIsRunning,
-    );
-    if (pids.length > 0) {
-      this.throwForeignCtrlProxyForwards(
-        [port],
-        { clientPidsByPort: new Map([[port, pids]]) },
-        false,
-        true,
-      );
-    }
+    return this.getPortForwarder().assertNoLiveRememberedForeignForward(port);
   }
 
   private markCtrlProxyPortForwardGone(port: number): void {
-    PortManager.clearQuarantine(port);
-    if (!this.forwardLeaseForceReleased) {
-      // After a forced release the record on this port may be a successor's.
-      this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
-    }
+    return this.getPortForwarder().markCtrlProxyPortForwardGone(port);
   }
 
-  private async hasCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
-    const result = await this.adb.execute(["forward", "--list"], { signal });
-    const expectedLocal = `tcp:${port}`;
-    const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
-    return result.stdout.split(/\r?\n/).some((line) => {
-      const forward = this.parseOwnPortForward(line);
-      return forward?.local === expectedLocal && forward.remote === expectedRemote;
-    });
+  private hasCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
+    return this.getPortForwarder().hasCtrlProxyPortForward(port, signal);
   }
 
   private parseOwnPortForward(line: string): { local: string; remote: string } | null {
-    return parseOwnPortForward(this.device.deviceId, line);
+    return this.getPortForwarder().parseOwnPortForward(line);
   }
 
   private localPortFromForward(value: string | undefined): number | null {
-    return localPortFromForward(value);
+    return this.getPortForwarder().localPortFromForward(value);
   }
 
   private async finishInvalidatedConnectionCleanup(): Promise<void> {
@@ -5899,29 +5508,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /**
    * Check if port forwarding is still active by querying adb forward --list
    */
-  private async isPortForwardingActive(signal?: AbortSignal): Promise<boolean> {
-    try {
-      const result = await this.adb.execute(["forward", "--list"], { signal });
-      // Format is exactly: "serial tcp:localPort tcp:remotePort". Requiring
-      // the serial prevents another device's same-number forward from being
-      // mistaken for this client's forward.
-      const isActive = result.stdout.split(/\r?\n/).some((line) => {
-        const forward = this.parseOwnPortForward(line);
-        return (
-          forward?.local === `tcp:${this.localPort}` &&
-          forward.remote === `tcp:${PortManager.DEVICE_PORT}`
-        );
-      });
-      if (!isActive) {
-        logger.debug(
-          `[CTRL_PROXY] Port forwarding not found for ${this.device.deviceId} on tcp:${this.localPort}`,
-        );
-      }
-      return isActive;
-    } catch (error) {
-      logger.debug(`[CTRL_PROXY] Failed to check port forwarding status: ${error}`);
-      return false;
-    }
+  private isPortForwardingActive(signal?: AbortSignal): Promise<boolean> {
+    return this.getPortForwarder().isPortForwardingActive(signal);
   }
 
   /** Resolve request responses only when the runner supplies a truthy request ID. */

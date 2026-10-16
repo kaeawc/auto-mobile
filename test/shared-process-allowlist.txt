@@ -261,8 +261,10 @@ test/daemon/sessionInfoWallClock.test.ts
 test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.displayPin.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
+test/daemon/sessionManager.terminalWriteSettlement.test.ts
 test/daemon/sessionSlotShadowProbe.test.ts
 test/daemon/sessionSlots.agreement.test.ts
+test/daemon/sessionSlots.releasingInvariant.test.ts
 test/daemon/sessionSlots.store.test.ts
 test/daemon/sessionSlots.test.ts
 test/daemon/sessionSlots.windows.test.ts
@@ -862,6 +864,7 @@ test/lint/deviceBindingSingleReader.test.ts
 test/lint/deviceBindingSingleWriter.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
+test/lint/envRegistry.test.ts
 test/lint/errorHandlingConvention.test.ts
 test/lint/exclusiveLockGenerationProbe.test.ts
 test/lint/expensiveHookWork.test.ts
@@ -1363,6 +1366,7 @@ test/utils/execResult.property.test.ts
 test/utils/fileLockOperationCounts.test.ts
 test/utils/fileLockRealFs.test.ts
 test/utils/filesystem/DefaultFileSystem.test.ts
+test/utils/filesystem/pathContainment.test.ts
 test/utils/filesystem/securePermissions.test.ts
 test/utils/flagTokens.test.ts
 test/utils/float32ToJavaString.test.ts

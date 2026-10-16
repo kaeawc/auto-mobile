@@ -185,6 +185,11 @@ function handleUser(event: JsonRecord, state: AuditState): void {
 }
 
 function handleResult(event: JsonRecord, state: AuditState): void {
+  if (state.audit.result) {
+    // A second terminal result would replace the first (an error, its cost) and hide it.
+    state.audit.parseErrors.push("duplicate result event");
+    return;
+  }
   const usage = event.usage;
   state.audit.result = {
     subtype: asString(event.subtype) ?? "unknown",

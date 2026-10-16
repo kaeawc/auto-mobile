@@ -158,8 +158,10 @@ async function claudeVersion(deps: HarnessDeps, command: string): Promise<string
   try {
     const result = await deps.runner.run(command, ["--version"], VERSION_TIMEOUT_MS);
     // "2.1.301 (Claude Code)" -> "2.1.301", the form the stream's init event reports.
-    const version = result.stdout.trim().split(/\s+/)[0];
-    return result.exitCode === 0 && version ? version : undefined;
+    // Only the CLI's own "X.Y.Z (Claude Code)" line, or a bare version, counts: a wrapper
+    // banner or warning must leave the version unknown rather than fingerprint as one.
+    const version = result.stdout.match(/^\s*(\d+\.\d+\.\d+)(?:\s+\(Claude Code\))?\s*$/m)?.[1];
+    return result.exitCode === 0 ? version : undefined;
   } catch (error) {
     // The version is report metadata only; a missing CLI fails loudly at launch instead.
     deps.log(`claude --version failed: ${errorMessage(error)}`);

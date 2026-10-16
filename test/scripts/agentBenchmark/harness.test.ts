@@ -92,7 +92,7 @@ function setup(transcript: string, launchMs = 42_000) {
     })
     .onAdb("getprop", {
       stdout:
-        "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
+        "36\npixel\nen-US\nAP4A\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
     })
     .onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
@@ -537,7 +537,7 @@ describe("agent benchmark harness", () => {
       })
       .onAdb("getprop", {
         stdout:
-          "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
+          "36\npixel\nen-US\nAP4A\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
       });
     const suite = loadedSuite({
       preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
@@ -546,7 +546,7 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");
     expect(result.preflight.device).toBe(
-      "sdk=36 model=pixel locale=en-US size=1x2 density=3 font=1 anim=1/1/1 theme=light rotation=0",
+      "sdk=36 model=pixel locale=en-US build=AP4A size=1x2 density=3 font=1 anim=1/1/1 theme=light rotation=0",
     );
     // Fingerprinting runs before the settle and start-screen check, never between it and launch.
     const calls = runner.adbCalls();
@@ -616,6 +616,17 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(loadedSuite(), options, deps);
     expect(result.claude.version).toBe("2.1.301");
     expect(fs.readFile(artifact("baseline.yml"))).toContain("claudeCodeVersion: 2.1.301");
+  });
+
+  test("a --version banner without a CLI version leaves the version unknown", async () => {
+    const noVersion = PASSING.split("\n")
+      .map((line) => line.replace(/"claude_code_version":"[^"]*",?/, ""))
+      .join("\n");
+    const { runner, deps, options } = setup(noVersion);
+    runner.on("claude", () => ({ stdout: "warning: update 9.9.9 available\n" }));
+    expect((await runSuite(loadedSuite(), options, deps)).claude.version).toBeUndefined();
+    runner.on("claude", () => ({ stdout: "notice\n2.1.301 (Claude Code)\n" }));
+    expect((await runSuite(loadedSuite(), options, deps)).claude.version).toBe("2.1.301");
   });
 
   test("the version the stream reports wins over a wrapper's own --version", async () => {

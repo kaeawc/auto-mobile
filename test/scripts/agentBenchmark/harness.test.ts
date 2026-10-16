@@ -543,6 +543,11 @@ describe("agent benchmark harness", () => {
     expect(result.preflight.device).toBe(
       "sdk=36 model=pixel locale=en-US size=1x2 density=3 font=1 rotation=0",
     );
+    // Fingerprinting runs before the settle and start-screen check, never between it and launch.
+    const calls = runner.adbCalls();
+    expect(calls.findIndex((call) => call.includes("getprop"))).toBeLessThan(
+      calls.findIndex((call) => call.includes("exec-out")),
+    );
   });
 
   test("a failed preflight releases the device claim", async () => {

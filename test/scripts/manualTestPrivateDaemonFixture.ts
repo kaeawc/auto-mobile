@@ -23,7 +23,7 @@ export function brokerBatchInput() {
             { archetype: "tablet", profileId: "medium_tablet" },
           ],
         },
-        os: { selector: { kind: "major", major: 35 }, preferredVersion: "35" },
+        os: { selector: { kind: "major", major: 16 }, preferredVersion: "16" },
       },
       ios: {
         platform: "ios",
@@ -41,6 +41,13 @@ export function brokerBatchInput() {
         os: { selector: { kind: "exact", version: "26.5" }, preferredVersion: "26.5" },
       },
     },
+    androidProfileArchetypes: { medium_phone: "phone", medium_tablet: "tablet" },
+    iosClassifications: [
+      {
+        simulatorDeviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+        modelType: { family: "iphone", variant: "pro" },
+      },
+    ],
     clients: [
       { name: "a-phone", platform: "android", hardware: "phone" },
       { name: "a-tablet", platform: "android", hardware: "tablet" },

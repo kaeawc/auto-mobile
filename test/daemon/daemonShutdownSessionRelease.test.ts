@@ -709,8 +709,12 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
       await expect(daemon.stop()).resolves.toBeUndefined();
 
-      expect(releaseSpy).toHaveBeenCalledWith(brokenSessionId, "daemon-shutdown", true);
-      expect(releaseSpy).toHaveBeenCalledWith(healthySessionId, "daemon-shutdown", true);
+      expect(releaseSpy).toHaveBeenCalledWith(brokenSessionId, "daemon-shutdown", {
+        allowExpired: true,
+      });
+      expect(releaseSpy).toHaveBeenCalledWith(healthySessionId, "daemon-shutdown", {
+        allowExpired: true,
+      });
       expect(sessionManager.getSession(healthySessionId)).toBeNull();
       expect(repository.sessions.get(healthySessionId)).toMatchObject({
         status: "released",

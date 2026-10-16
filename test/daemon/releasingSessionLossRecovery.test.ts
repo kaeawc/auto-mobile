@@ -162,12 +162,9 @@ test("superseded release settles loss as active without starting recovery", asyn
   try {
     const incidentId = await pool.recordEmulatorLossIncident(device.id, "device-discovery-miss");
     const setup = sessions.trackSessionSetup(session, () => finishSetup.promise);
-    const release = sessions.releaseSession(
-      sessionId,
-      "explicit-release",
-      false,
-      () => shouldCommit,
-    );
+    const release = sessions.releaseSession(sessionId, "explicit-release", {
+      commitFence: () => shouldCommit,
+    });
     await flush();
     const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(device.id, incidentId, device);
     await flush();

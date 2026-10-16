@@ -1606,7 +1606,9 @@ describe("post-handler cancellation guard scope", () => {
       sessionManager,
       () => false,
       async (reapedSessionUuid, reason) => {
-        const deviceId = await sessionManager.releaseSession(reapedSessionUuid, reason, true);
+        const deviceId = await sessionManager.releaseSession(reapedSessionUuid, reason, {
+          allowExpired: true,
+        });
         if (deviceId) {
           await pool.releaseDevice(deviceId, reapedSessionUuid);
         }

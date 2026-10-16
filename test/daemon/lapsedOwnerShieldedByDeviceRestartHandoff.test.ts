@@ -305,7 +305,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       await start(restoreMs);
       await monitor.stop();
       await timer.advanceTimeAsync(silenceMs, () => drainMicrotasks(20));
-      const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+      const release = manager.releaseSession(SESSION, "daemon-shutdown", { allowExpired: true });
       await drainMicrotasks(100);
       await timer.advanceTimeAsync(restoreMs, () => drainMicrotasks(50));
       expect(await release).toBe(DEVICE);

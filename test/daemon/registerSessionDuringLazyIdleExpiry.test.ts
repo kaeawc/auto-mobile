@@ -338,7 +338,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
   test("an overdue daemon-shutdown handoff stays bare before the fence and answers expired after restore", async () => {
     expireWithoutLookup();
-    const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+    const release = manager.releaseSession(SESSION, "daemon-shutdown", { allowExpired: true });
     try {
       await drainUntil(() => restoreStarted, { description: "daemon-shutdown keep-awake restore" });
       expectPreFenceRestore();
@@ -383,7 +383,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     const release = manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => true,
+      { commitFence: () => true },
     );
     try {
       await drainUntil(() => restoreStarted, { description: "device-loss keep-awake restore" });

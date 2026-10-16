@@ -146,7 +146,7 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
       manager,
       () => false,
       async (sessionId, reason) => {
-        await manager.releaseSession(sessionId, reason, true);
+        await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );

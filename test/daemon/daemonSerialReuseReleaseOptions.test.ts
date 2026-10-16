@@ -71,7 +71,11 @@ test("daemon serial-reuse wiring forwards identity replacement and sends no rest
   try {
     h.manager.bootedDevices = [{ ...original, name: "AVD-B", observedAt: 10 }];
     expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
-    expect(h.release.mock.calls[0]?.[4]).toEqual({ deviceIdentityReplaced: true });
+    expect(h.release.mock.calls[0]?.[2]).toEqual({
+      allowExpired: false,
+      commitFence: expect.any(Function),
+      deviceIdentityReplaced: true,
+    });
     expect(h.restores).toEqual([]);
     expect(h.sessions.getSession("holder")).toBeNull();
     expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
@@ -90,7 +94,7 @@ for (const fenced of [true, false]) {
         "device-disconnected:emulator-5554",
         fenced ? () => true : undefined,
       );
-      expect(h.release.mock.calls[0]?.[4]?.deviceIdentityReplaced).toBeUndefined();
+      expect(h.release.mock.calls[0]?.[2]?.deviceIdentityReplaced).toBeUndefined();
       expect(h.restores).toEqual([original.deviceId]);
     } finally {
       h.cleanup();

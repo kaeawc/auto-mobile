@@ -569,7 +569,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await flush();
       const snapshot = h.manager["sessionSlots"].getTerminalSnapshot("old")!;
@@ -689,7 +689,7 @@ describe("a superseded device-loss release leaves the live session's row active 
     const release = h.manager.releaseSessionUnlessSuperseded(
       "old",
       `device-disconnected:${device.deviceId}`,
-      () => !superseded,
+      { commitFence: () => !superseded },
     );
     await flush();
     // The serial is re-observed with a newer identity while the terminal write is in flight.
@@ -716,7 +716,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await flush();
       superseded = true;

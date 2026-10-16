@@ -7,7 +7,10 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -96,7 +99,7 @@ export interface ExploreArgs extends ExploreOptions {
   sessionUuid?: string;
 }
 
-function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
+function getNavigationManager(sessionUuid?: string): NavigationGraphService {
   return sessionUuid
     ? NavigationGraphManager.getInstanceForSession(sessionUuid)
     : NavigationGraphManager.getInstance();

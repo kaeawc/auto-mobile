@@ -20,7 +20,7 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
     });
 
     expect(fake.getCurrentScreen()).toBe("Home");
-    expect(fake.exportGraph().nodes).toEqual([
+    expect((await fake.exportGraph()).nodes).toEqual([
       { screenName: "Home", firstSeenAt: 123, lastSeenAt: 123, visitCount: 1 },
     ]);
     expect(write).toBeDefined();

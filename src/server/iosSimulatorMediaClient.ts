@@ -7,7 +7,9 @@ export interface IosSimulatorMediaClient {
 }
 
 export class SimctlIosSimulatorMediaClient implements IosSimulatorMediaClient {
-  constructor(private readonly simctlFactory: (device: BootedDevice) => SimCtl) {}
+  constructor(
+    private readonly simctlFactory: (device: BootedDevice) => Pick<SimCtl, "executeCommandArgs">,
+  ) {}
 
   async importMedia(device: BootedDevice, paths: string[], signal?: AbortSignal): Promise<void> {
     await this.simctlFactory(device).executeCommandArgs(

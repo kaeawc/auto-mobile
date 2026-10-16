@@ -30,9 +30,7 @@ describe("ExploreValidateMode", () => {
     fakeGraph = new FakeNavigationGraphManager();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    getInstanceSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      fakeGraph as unknown as NavigationGraphManager,
-    );
+    getInstanceSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(fakeGraph);
   });
 
   afterEach(() => {
@@ -67,7 +65,7 @@ describe("ExploreValidateMode", () => {
 
   describe("initializeGraphTraversal", () => {
     test("should create empty state for empty graph", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
 
       expect(state.visitedNodes.size).toBe(0);
       expect(state.traversedEdges.size).toBe(0);
@@ -126,7 +124,7 @@ describe("ExploreValidateMode", () => {
         }
       }
 
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
 
       expect(state.pendingEdges.size).toBe(3);
       expect(state.totalEdgesInGraph).toBe(state.pendingEdges.size);
@@ -307,7 +305,7 @@ describe("ExploreValidateMode", () => {
 
   describe("markNodeVisited", () => {
     test("should add node to visited set", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
 
       expect(state.visitedNodes.has("Screen1")).toBe(false);
 
@@ -317,7 +315,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should not duplicate nodes", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
 
       markNodeVisited(state, "Screen1");
       markNodeVisited(state, "Screen1");
@@ -328,7 +326,7 @@ describe("ExploreValidateMode", () => {
 
   describe("markEdgeTraversed", () => {
     test("should add edge to traversed set", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
@@ -344,7 +342,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should record validation result", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
@@ -364,7 +362,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should record failed validation", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
@@ -383,7 +381,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should remove edge from pending", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
@@ -405,7 +403,7 @@ describe("ExploreValidateMode", () => {
 
   describe("markEdgeSkipped", () => {
     test("removes the edge from pending without counting it as traversed or failed", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("A", "B");
       addPendingEdge(state, edge);
 
@@ -425,7 +423,7 @@ describe("ExploreValidateMode", () => {
 
   describe("selectNextEdgeToTraverse", () => {
     test("should return edge from current screen", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("CurrentScreen", "NextScreen", {
         interaction: {
           toolName: "tapOn",
@@ -441,7 +439,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should return null if no edges from current screen", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("OtherScreen", "NextScreen");
       addPendingEdge(state, edge);
 
@@ -451,7 +449,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should return null for empty pending edges", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
 
       const selected = selectNextEdgeToTraverse(state, "CurrentScreen");
 
@@ -459,7 +457,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should return first matching edge", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge1 = createMockEdge("Current", "A");
       const edge2 = createMockEdge("Current", "B");
       addPendingEdge(state, edge1);
@@ -471,7 +469,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should keep the from-index in sync as edges are traversed", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge1 = createMockEdge("Current", "A", {
         interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 },
       });
@@ -493,7 +491,7 @@ describe("ExploreValidateMode", () => {
     });
 
     test("addPendingEdge deduplicates by edge key", async () => {
-      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const state = await initializeGraphTraversal(fakeGraph);
       const edge = createMockEdge("Current", "A", {
         interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 },
       });

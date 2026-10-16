@@ -153,3 +153,19 @@ for (const autolock of [false, true]) {
     }
   });
 }
+
+// The owner-mismatch check is the single fence for a release naming a session that no longer
+// holds the device; a second, later mismatch check was unreachable and was deleted (#11802).
+test("captured release is refused when another session holds the device", async () => {
+  const { pool, manager, device, session } = await createContext(false);
+  try {
+    const assignmentCount = device.assignmentCount;
+    device.sessionId = "other-session";
+    expect(pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount)).toBe(
+      false,
+    );
+    expect(pool["isCapturedReleaseCurrent"](device, "other-session", assignmentCount)).toBe(true);
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});

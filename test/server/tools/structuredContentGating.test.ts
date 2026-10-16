@@ -89,8 +89,8 @@ describe("structuredContent gating (issue #2759)", () => {
       await fixture.teardown();
     }
     // Surgically remove the throwaway tools from the singleton registry.
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(NO_SCHEMA_TOOL);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(SCHEMA_TOOL);
+    ToolRegistry.removeToolForTesting(NO_SCHEMA_TOOL);
+    ToolRegistry.removeToolForTesting(SCHEMA_TOOL);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     restoreHermeticServer();
   });

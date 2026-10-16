@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
-import { deriveSlot, isSlotKnown, isLegacySessionIdKnown } from "../../src/daemon/sessionSlots";
+import { deriveSlot, isSlotKnown, type LegacyLifecycleView } from "../../src/daemon/sessionSlots";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -27,6 +27,34 @@ export function slotAgreementRig(
   manager.attachDaemonSessionId("shadow-daemon");
   manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));
   manager.setSlotShadowProbeMode("throw");
+  const oracle = slotPredicateOracle(manager.getLegacyLifecycleView());
+  const readRecreated = Reflect.get(manager, "isSessionBeingRecreated") as (
+    uuid: string,
+  ) => boolean;
+  const compare = (name: string, actual: boolean, expected: boolean) => {
+    if (actual !== expected) {
+      throw new Error(`hook: ${name} disagrees with pre-S7 oracle`);
+    }
+    return expected;
+  };
+  // The production hook probe gets its reference only from tests. Compare the real wrappers
+  // at every hook as well as each external microtask checkpoint, not derivation against itself.
+  const probe = Reflect.get(manager, "slotShadowProbe") as SessionManager["slotShadowProbe"];
+  probe.setReferencePredicates({
+    isCurrentSession: (s) => compare("current", manager.isCurrentSession(s), oracle.current(s)),
+    isAdmittedForAutomation: (s) =>
+      compare("admitted", manager.isAdmittedForAutomation(s), oracle.admitted(s)),
+    isLatestSessionIdentity: (s) =>
+      compare("latest", manager.isLatestSessionIdentity(s), oracle.latest(s)),
+    isSessionBeingRecreated: (id) =>
+      compare("recreated", readRecreated.call(manager, id), oracle.recreated(id)),
+    isKnownSessionId: (id) =>
+      compare(
+        "known",
+        manager.getAllKnownSessionIds().includes(id),
+        oracle.knownIds().includes(id),
+      ),
+  });
   const pool: SessionDeviceAssigner = {
     assignDeviceToSession: async (uuid) => {
       await manager.createSession(
@@ -53,17 +81,40 @@ export function assertSlotAgreement(
   event: string,
 ): void {
   const view = rig.manager.getLegacyLifecycleView();
-  const known = new Set(rig.manager.getAllKnownSessionIds());
+  const oracle = slotPredicateOracle(view);
+  const actualIds = rig.manager.getAllKnownSessionIds();
+  if (JSON.stringify(actualIds) !== JSON.stringify(oracle.knownIds())) {
+    throw new Error(`${event}: known order disagrees`);
+  }
+  const recreated = Reflect.get(rig.manager, "isSessionBeingRecreated") as (
+    uuid: string,
+  ) => boolean;
+  for (const session of new Set([
+    ...identities,
+    ...view.sessions.values(),
+    ...[...view.releaseOps.values()].map((op) => op.session),
+  ])) {
+    if (
+      rig.manager.isCurrentSession(session) !== oracle.current(session) ||
+      rig.manager.isAdmittedForAutomation(session) !== oracle.admitted(session) ||
+      rig.manager.isLatestSessionIdentity(session) !== oracle.latest(session) ||
+      rig.manager.isLatestSessionIdentity(session, { ignorePendingAssignment: true }) !==
+        oracle.latest(session, true)
+    ) {
+      throw new Error(`${event}: identity predicates disagree for ${session.sessionId}`);
+    }
+  }
+  const known = new Set(actualIds);
   for (const uuid of ids) {
+    if (recreated.call(rig.manager, uuid) !== oracle.recreated(uuid)) {
+      throw new Error(`${event}: recreation disagrees for ${uuid}`);
+    }
     rig.manager.checkSlotShadowAgreement(
       uuid,
       event,
       identities.filter((s) => s.sessionId === uuid),
     );
-    if (
-      isSlotKnown(deriveSlot(view, uuid)) !== known.has(uuid) ||
-      isLegacySessionIdKnown(view, uuid) !== known.has(uuid)
-    ) {
+    if (isSlotKnown(deriveSlot(view, uuid)) !== known.has(uuid)) {
       throw new Error(`${event}: known membership disagrees for ${uuid}`);
     }
   }
@@ -281,5 +332,48 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
     violations,
     observed: [...observed],
     incarnations: identities.filter((s) => s.sessionId === ids[0]).length,
+  };
+}
+
+/** Frozen pre-S7 hand semantics. Deliberately independent of all derivation helpers. */
+export function slotPredicateOracle(view: LegacyLifecycleView<Session>) {
+  const current = (session: Session) =>
+    view.sessions.get(session.sessionId) === session &&
+    !view.terminalSnapshots.has(session.sessionId);
+  return {
+    current,
+    admitted: (session: Session) => current(session) && !view.isReleasing(session),
+    latest: (session: Session, ignorePendingAssignment = false): boolean => {
+      const uuid = session.sessionId;
+      const published = view.sessions.get(uuid);
+      if (published) {
+        return published === session;
+      }
+      if (
+        view.pendingCreations.has(uuid) ||
+        (!ignorePendingAssignment && view.pendingAssignments.has(uuid))
+      ) {
+        return false;
+      }
+      const op = view.releaseOps.get(uuid);
+      if (op) {
+        return op.session === session;
+      }
+      return view.latestFinalizedIdentities.get(uuid)?.deref() === session;
+    },
+    recreated: (uuid: string) =>
+      view.sessions.has(uuid) ||
+      view.pendingCreations.has(uuid) ||
+      view.pendingAssignments.has(uuid),
+    knownIds: () => [
+      ...new Set([
+        ...view.sessions.keys(),
+        ...view.pendingCreations.keys(),
+        ...view.pendingAssignments.keys(),
+        ...view.pendingRebinds.keys(),
+        ...view.pendingReleases.keys(),
+        ...view.releaseOps.keys(),
+      ]),
+    ],
   };
 }

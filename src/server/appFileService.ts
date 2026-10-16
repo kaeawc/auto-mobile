@@ -222,11 +222,14 @@ export interface ForegroundAppLookup {
   getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
 }
 
+/** The simctl operations app file transfers use. */
+export type AppFileSimCtl = Pick<SimCtlClient, "executeCommand" | "executeCommandArgs">;
+
 export interface AppFileServiceDependencies {
   timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
   adbFactory?: AdbClientFactory;
-  simctlFactory?: (device: BootedDevice) => SimCtlClient;
+  simctlFactory?: (device: BootedDevice) => AppFileSimCtl;
   fileSystem?: AppFileFileSystem;
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
@@ -1839,7 +1842,7 @@ class IosSimulatorAppFileProvider
   private tempIndex = 0;
 
   constructor(
-    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly simctlFactory: (device: BootedDevice) => AppFileSimCtl,
     private readonly fileSystem: AppFileFileSystem,
   ) {}
 

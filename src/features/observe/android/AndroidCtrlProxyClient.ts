@@ -103,7 +103,7 @@ import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/Wo
 import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
@@ -4164,6 +4164,58 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /** These legacy client requests bypass the generic capability/deadline gate. */
+  private async sendClientCommand<
+    T extends { success: boolean; totalTimeMs: number; error?: string },
+  >(
+    requestId: string,
+    serializeRequest: (requestId: string) => string,
+    options: Pick<
+      SendCommandOptions<T>,
+      "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
+    > & { timeoutError: (timeoutMs: number) => T },
+    cancellation?: { signal: AbortSignal | undefined; startTime: number },
+    perf?: PerformanceTracker,
+  ): Promise<T> {
+    const dispatch = () =>
+      sendCommand<T>(
+        {
+          ...this.createDelegateContext(),
+          isCommandSupported: undefined,
+          wireDeadlineParams: undefined,
+          serializeRequest: () => serializeRequest(requestId),
+        },
+        {
+          ...options,
+          responseError: options.responseError ?? null,
+          idPrefix: options.responseType,
+          createRequestId: () => requestId,
+          requireExistingConnection: true,
+          cancelScreenshotBackoff: false,
+          // A socket lost after the caller's connection check must take its catch path.
+          notConnectedError: () => {
+            throw new Error("WebSocket not connected");
+          },
+          unsupportedCommandError: (_type, error) => {
+            throw new Error(error);
+          },
+        },
+      );
+    const { promise } = perf
+      ? await perf.track("sendRequest", async () => ({ promise: dispatch() }))
+      : { promise: dispatch() };
+    // sendCommand's abortSignal rejects. These callers instead settle a typed
+    // cancellation through RequestManager, including an abort during ws.send.
+    return cancellation
+      ? this.awaitCancellableRequest(
+          requestId,
+          promise,
+          cancellation.signal,
+          cancellation.startTime,
+        )
+      : promise;
+  }
+
   private async dispatchActionRequest(
     action: string,
     serializeRequest: (requestId: string) => string,
@@ -4202,44 +4254,38 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
       );
 
-      const actionPromise = this.requestManager.register<A11yActionResult>(
+      const cancellableAction = this.sendClientCommand<A11yActionResult>(
         requestId,
-        "action",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Action timeout after ${timeout}ms`,
-          acknowledged: false,
-        }),
-        (error, totalTimeMs) => ({
-          success: false,
-          action,
-          totalTimeMs,
-          error,
-          acknowledged: true,
-        }),
+        serializeRequest,
+        {
+          responseType: "action",
+          messageType: "request_action",
+          timeoutMs,
+          beforeSend: () => combinedSignal?.throwIfAborted(),
+          onDispatch: () => {
+            dispatched = true;
+            logger.debug(
+              `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
+            );
+          },
+          timeoutError: (timeout) => ({
+            success: false,
+            action,
+            totalTimeMs: this.timer.now() - startTime,
+            error: `Action timeout after ${timeout}ms`,
+            acknowledged: false,
+          }),
+          responseError: (error, totalTimeMs) => ({
+            success: false,
+            action,
+            totalTimeMs,
+            error,
+            acknowledged: true,
+          }),
+        },
+        { signal: combinedSignal, startTime },
+        perf,
       );
-
-      const cancellableAction = this.awaitCancellableRequest(
-        requestId,
-        actionPromise,
-        combinedSignal,
-        startTime,
-      );
-      await perf.track("sendRequest", async () => {
-        combinedSignal?.throwIfAborted();
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeRequest(requestId);
-        this.ws.send(message);
-        dispatched = true;
-        logger.debug(
-          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
-        );
-      });
 
       const result = await perf.track("waitForAction", () => cancellableAction);
       combinedSignal?.throwIfAborted();
@@ -4375,40 +4421,37 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       }
       requestId = this.requestManager.generateId("accessibility-link");
-      const resultPromise = this.requestManager.register<A11yActionResult>(
+      const result = await this.sendClientCommand<A11yActionResult>(
         requestId,
-        "accessibility-link",
-        timeoutMs,
-        () => unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
-        (error, totalTimeMs) => ({
-          success: false,
-          action,
-          totalTimeMs,
-          error,
-          acknowledged: true,
-        }),
-      );
-      checkCancellation();
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      this.ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestActivateAccessibilityLink({
-            requestId,
-            text,
-            occurrence,
-            selector,
+        (requestId) =>
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestActivateAccessibilityLink({
+              requestId,
+              text,
+              occurrence,
+              selector,
+            }),
+          ),
+        {
+          responseType: "accessibility-link",
+          messageType: "request_activate_accessibility_link",
+          timeoutMs,
+          beforeSend: checkCancellation,
+          onDispatch: () => {
+            dispatched = true;
+            onDispatch?.();
+          },
+          timeoutError: () =>
+            unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
+          responseError: (error, totalTimeMs) => ({
+            success: false,
+            action,
+            totalTimeMs,
+            error,
+            acknowledged: true,
           }),
-        ),
-      );
-      dispatched = true;
-      onDispatch?.();
-      const result = await this.awaitCancellableRequest(
-        requestId,
-        resultPromise,
-        combinedSignal,
-        startTime,
+        },
+        { signal: combinedSignal, startTime },
       );
       checkCancellation();
       return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
@@ -4474,38 +4517,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       requestId = this.requestManager.generateId("clipboard");
       const clipboardRequestId = requestId;
 
-      const clipboardPromise = this.requestManager.register<
+      const clipboardPromise = this.sendClientCommand<
         A11yClipboardResult & { acknowledged?: boolean }
-      >(clipboardRequestId, "clipboard", timeoutMs, (_id, _type, timeout) => ({
-        success: false,
-        acknowledged: false,
-        action,
-        totalTimeMs: this.timer.now() - startTime,
-        error: `Clipboard ${action} timeout after ${timeout}ms`,
-      }));
-
-      await perf.track("sendRequest", async () => {
-        combinedSignal?.throwIfAborted();
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestClipboard({ requestId: clipboardRequestId, action, text }),
-        );
-        this.ws.send(message);
-        onDispatch?.();
-        logger.debug(
-          `[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`,
-        );
-      });
-
+      >(
+        clipboardRequestId,
+        (requestId) =>
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestClipboard({ requestId, action, text }),
+          ),
+        {
+          responseType: "clipboard",
+          messageType: "request_clipboard",
+          timeoutMs,
+          beforeSend: () => combinedSignal?.throwIfAborted(),
+          onDispatch: () => {
+            onDispatch?.();
+            logger.debug(
+              `[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`,
+            );
+          },
+          responseError: null,
+          timeoutError: (timeout) => ({
+            success: false,
+            acknowledged: false,
+            action,
+            totalTimeMs: this.timer.now() - startTime,
+            error: `Clipboard ${action} timeout after ${timeout}ms`,
+          }),
+        },
+        { signal: combinedSignal, startTime },
+        perf,
+      );
       const result = await perf.track("waitForClipboard", () =>
-        this.awaitCancellableRequest(
-          clipboardRequestId,
-          clipboardPromise,
-          combinedSignal,
-          startTime,
-        ).then((result) => ({
+        clipboardPromise.then((result) => ({
           ...result,
           // Only a device reply confirms an outcome; timeout and local cancellation do not.
           acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
@@ -4695,40 +4739,43 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       requestId = this.requestManager.generateId("global_action");
-      const promise = this.requestManager.register<{
+      return await this.sendClientCommand<{
         success: boolean;
         action: string;
         totalTimeMs: number;
         error?: string;
         acknowledged?: boolean;
-      }>(requestId, "global_action", timeoutMs, (_id, _type, timeout) => ({
-        success: false,
-        action,
-        totalTimeMs: this.timer.now() - startTime,
-        error: `Global action timeout after ${timeout}ms`,
-        acknowledged: false,
+      }>(
+        requestId,
+        (requestId) =>
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext }),
+          ),
+        {
+          responseType: "global_action",
+          messageType: "request_global_action",
+          timeoutMs,
+          onDispatch: () => {
+            onDispatch?.();
+            logger.debug(
+              `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
+            );
+          },
+          responseError: null,
+          timeoutError: (timeout) => ({
+            success: false,
+            action,
+            totalTimeMs: this.timer.now() - startTime,
+            error: `Global action timeout after ${timeout}ms`,
+            acknowledged: false,
+          }),
+        },
+        { signal: combinedSignal, startTime },
+      ).then((result) => ({
+        ...result,
+        // Only a device reply confirms an outcome; timeout and local cancellation do not.
+        acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
       }));
-
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      this.ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext }),
-        ),
-      );
-      onDispatch?.();
-      logger.debug(
-        `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
-      );
-
-      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime).then(
-        (result) => ({
-          ...result,
-          // Only a device reply confirms an outcome; timeout and local cancellation do not.
-          acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
-        }),
-      );
     } catch (error) {
       const logger = this.loggerInstance;
       // The local alias keeps the injected logger visible to the catch-convention lint rule.
@@ -4779,26 +4826,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       requestId = this.requestManager.generateId("validate_frame_context");
-      const promise = this.requestManager.register<{
-        success: boolean;
-        totalTimeMs: number;
-        error?: string;
-      }>(requestId, "validate_frame_context", timeoutMs, (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: this.timer.now() - startTime,
-        error: `Frame context validation timeout after ${timeout}ms`,
-      }));
-
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      this.ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.validateFrameContext({ requestId, frameContext }),
-        ),
+      return await this.sendClientCommand(
+        requestId,
+        (requestId) =>
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.validateFrameContext({ requestId, frameContext }),
+          ),
+        {
+          responseType: "validate_frame_context",
+          messageType: "validate_frame_context",
+          timeoutMs,
+          timeoutError: (timeout) => ({
+            success: false,
+            totalTimeMs: this.timer.now() - startTime,
+            error: `Frame context validation timeout after ${timeout}ms`,
+          }),
+        },
+        { signal: combinedSignal, startTime },
       );
-
-      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
       const logger = this.loggerInstance;
       logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
@@ -4885,24 +4930,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       requestId = this.requestManager.generateId("device_info");
-      const promise = this.requestManager.register<any>(
+      return await this.sendClientCommand(
         requestId,
-        "device_info",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Device info timeout after ${timeout}ms`,
-        }),
+        (requestId) =>
+          serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId })),
+        {
+          responseType: "device_info",
+          messageType: "request_device_info",
+          timeoutMs,
+          onDispatch: () =>
+            logger.debug(`[CTRL_PROXY] Sent device info request (requestId: ${requestId})`),
+          timeoutError: (timeout) => ({
+            success: false,
+            totalTimeMs: this.timer.now() - startTime,
+            error: `Device info timeout after ${timeout}ms`,
+          }),
+        },
       );
-
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      this.ws.send(serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId })));
-      logger.debug(`[CTRL_PROXY] Sent device info request (requestId: ${requestId})`);
-
-      return await promise;
     } catch (error) {
       const logger = this.loggerInstance;
       logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);

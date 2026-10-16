@@ -152,10 +152,6 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
       discard(requestId)
     }
 
-  // Debounce tracking (shared)
-  private var debounceCount = 0
-  private var lastDebounceTime: Long? = null
-
   /** Start a serial block (operations run sequentially). */
   fun serial(name: String) {
     val state = local()
@@ -239,16 +235,6 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
     }
   }
 
-  /** Track a suspend operation with automatic start/end timing. Returns the result of the block. */
-  suspend inline fun <T> trackSuspend(name: String, crossinline block: suspend () -> T): T {
-    startOperation(name)
-    try {
-      return block()
-    } finally {
-      endOperation(name)
-    }
-  }
-
   /** Start tracking an operation manually. */
   fun startOperation(name: String) {
     val state = local()
@@ -290,13 +276,6 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
     }
   }
 
-  /** Record a debounce event (when hierarchy updates are debounced). */
-  fun recordDebounce() {
-    debounceCount++
-    lastDebounceTime = timeProvider.currentTimeMillis()
-    Log.d(TAG, "Debounce recorded (total: $debounceCount)")
-  }
-
   /**
    * Flush timing data for the current request context and reset it. Returns the timing data as a
    * JsonElement for inclusion in WebSocket messages.
@@ -325,30 +304,6 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
     afterSnapshot()
     val entries = completed.mapTo(mutableListOf()) { it.toTiming() }
 
-    // Include debounce info if any
-    val debounceInfo =
-      if (debounceCount > 0) {
-        val info =
-          PerfTiming(
-            name = "debounce",
-            durationMs = 0,
-            children =
-              listOf(
-                PerfTiming(name = "count", durationMs = debounceCount.toLong()),
-                PerfTiming(name = "lastTime", durationMs = lastDebounceTime ?: 0),
-              ),
-          )
-        debounceCount = 0
-        lastDebounceTime = null
-        info
-      } else {
-        null
-      }
-
-    if (debounceInfo != null) {
-      entries.add(debounceInfo)
-    }
-
     return if (entries.isEmpty()) {
       null
     } else {
@@ -374,7 +329,7 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
   /** Check if there's any accumulated timing data. */
   fun hasData(): Boolean {
     val hasCompleted = synchronized(completedEntriesLock) { completedEntries.isNotEmpty() }
-    return hasCompleted || local().currentRoot != null || debounceCount > 0
+    return hasCompleted || local().currentRoot != null
   }
 
   /** Clear all timing data without returning it. */
@@ -386,7 +341,5 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
       completedEntries.clear()
       completedEntryCount = 0
     }
-    debounceCount = 0
-    lastDebounceTime = null
   }
 }

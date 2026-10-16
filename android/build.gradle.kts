@@ -1,6 +1,3 @@
-import com.vanniktech.maven.publish.MavenPublishBaseExtension
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 buildscript {
   dependencies {
     // Necessary if we are to override R8
@@ -34,24 +31,10 @@ plugins {
 // former `allprojects {}` block was an Isolated Projects blocker).
 group = property("GROUP") as String
 
-version = property("VERSION_NAME") as String
-
-plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
-  if (project.path != ":compiler") {
-    apply(plugin = "org.jetbrains.dokka")
-  }
-
-  // Configure vanniktech to publish to Maven Central with automatic release
-  configure<MavenPublishBaseExtension> {
-    publishToMavenCentral(automaticRelease = true)
-    signAllPublications()
-  }
-
-  // configuration required to produce unique META-INF/*.kotlin_module file names
-  tasks.withType<KotlinCompile>().configureEach {
-    compilerOptions { moduleName.set(project.property("POM_ARTIFACT_ID") as String) }
-  }
-}
+version =
+  property("VERSION_NAME")
+    as
+    String
 
 // The Maven publication manifest preflight's local `centralManifest` repository
 // (issue #4853) moved to the automobile.maven-central-manifest convention so no

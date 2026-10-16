@@ -3141,8 +3141,9 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
       const prefetched = path.join(scratch.next(), "prefetched.apk");
       await fs.writeFile(prefetched, apkPayload);
-      Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetched);
-      Reflect.set(AndroidCtrlProxyManager, "prefetchPromise", Promise.resolve(prefetched));
+      testPrefetcher.adoptCompletedPath(prefetched);
+      // consume() waits on the in-flight promise, which adoptCompletedPath does not stage.
+      Reflect.set(testPrefetcher, "prefetchPromise", Promise.resolve(prefetched));
       const hashed: string[] = [];
       Reflect.set(accessibilityServiceClient, "fileDownloader", {
         download: async () => {
@@ -3190,6 +3191,59 @@ describe("CtrlProxyManager", function () {
         },
       });
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(/too small/);
+    });
+
+    test("concurrent downloads use private temp dirs, so a failed one leaves the other intact", async function () {
+      const expectedChecksum = crypto.createHash("sha256").update(apkPayload).digest("hex");
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
+      const destinations: string[] = [];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let call = 0;
+      let bothStarted: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => {
+        bothStarted = resolve;
+      });
+      Reflect.set(accessibilityServiceClient, "fileDownloader", {
+        download: async (_url: string, destination: string) => {
+          const mine = ++call;
+          destinations.push(destination);
+          if (destinations.length === 2) {
+            bothStarted();
+          }
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, apkPayload);
+          await gate;
+          if (mine === 1) {
+            throw new Error("connection reset");
+          }
+        },
+      });
+      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
+        computeFileSha256: async () => ({ checksum: expectedChecksum, source: "node" as const }),
+      });
+
+      // Which call reaches download() first depends on scheduling, so assert on the pair.
+      const pending = [
+        accessibilityServiceClient.downloadApk(),
+        accessibilityServiceClient.downloadApk(),
+      ];
+      const settledPair = Promise.allSettled(pending);
+      await started;
+      expect(path.dirname(destinations[0])).not.toBe(path.dirname(destinations[1]));
+      release();
+      const results = await settledPair;
+      const rejected = results.filter((result) => result.status === "rejected");
+      const fulfilled = results.filter((result) => result.status === "fulfilled");
+      expect(rejected).toHaveLength(1);
+      expect(String(rejected[0].reason)).toContain("connection reset");
+      expect(fulfilled).toHaveLength(1);
+      const apkPath = fulfilled[0].value;
+
+      expect((await fs.readFile(apkPath)).equals(apkPayload)).toBe(true);
+      await accessibilityServiceClient.cleanupApk(apkPath);
     });
 
     test("a checksum mismatch fails the download and leaves no APK behind", async function () {

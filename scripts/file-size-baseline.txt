@@ -1,8 +1,8 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
 1033	src/constants/release.ts
-2814	src/ctrlProxy/CtrlProxyManager.ts
+2869	src/ctrlProxy/CtrlProxyManager.ts
 4150	src/ctrlProxy/IOSCtrlProxyManager.ts
-1843	src/ctrlProxy/IosCtrlProxyBuilder.ts
+1888	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1345	src/daemon/cli/runDaemonCommand.ts
 1539	src/daemon/client.ts
@@ -34,7 +34,7 @@
 1528	src/features/action/InstallApp.ts
 2258	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
-2342	src/features/action/SendKeys.ts
+2026	src/features/action/SendKeys.ts
 1897	src/features/action/SetUIState.ts
 1981	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
@@ -61,7 +61,7 @@
 1249	src/features/prototype/prototypeSpec.ts
 1184	src/features/prototype/prototypeValidation.ts
 2878	src/features/systemTray/systemTrayHelpers.ts
-1674	src/features/utility/DeepLinkManager.ts
+1684	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
@@ -70,7 +70,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1558	src/server/appTools.ts
+1559	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 4879	src/server/deviceTools.ts
@@ -86,7 +86,7 @@
 2867	src/server/prototypeTools.ts
 1009	src/server/proxyServer.ts
 1884	src/server/toolOutputSchemas.ts
-4285	src/server/toolRegistry.ts
+4283	src/server/toolRegistry.ts
 1048	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts

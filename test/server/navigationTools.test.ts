@@ -473,11 +473,8 @@ describe("navigation tool session graph selection", () => {
     const fakeDevices = new FakeDeviceSessionManager();
     fakeDevices.setConnectedDevices([device]);
     fakeDevices.setCurrentDevice(device, "ios");
-    const registry = ToolRegistry as unknown as {
-      deviceSessionManager: FakeDeviceSessionManager;
-    };
-    const originalDevices = registry.deviceSessionManager;
-    registry.deviceSessionManager = fakeDevices;
+    const originalDevices = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDevices });
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -525,14 +522,14 @@ describe("navigation tool session graph selection", () => {
       expect(fakeDevices.getEnsureDeviceReadyCallCount()).toBe(3);
 
       await expect(
-        registry.tools
-          .get("navigateTo")!
-          .handler(navigateToSchema.parse({ targetScreen: "Settings", platform: "android" })),
+        ToolRegistry.getRegisteredTool("navigateTo")!.handler(
+          navigateToSchema.parse({ targetScreen: "Settings", platform: "android" }),
+        ),
       ).rejects.toThrow("No android device found");
       expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("android");
     } finally {
       restorePipelineOverrides();
-      registry.deviceSessionManager = originalDevices;
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDevices });
       graphSpy.mockRestore();
       exploreSpy.mockRestore();
     }

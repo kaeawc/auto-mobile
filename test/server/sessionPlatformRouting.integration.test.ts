@@ -20,8 +20,12 @@ import type { BootedDevice } from "../../src/models";
 const android: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const ios: BootedDevice = { deviceId: "iphone", platform: "ios", name: "iPhone" };
 let fixture: McpTestFixture | undefined;
-let originalManager: unknown;
-let originalRepository: unknown;
+let originalManager: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["deviceSessionManager"];
+let originalRepository: ReturnType<
+  typeof ToolRegistry.getCollaboratorsForTesting
+>["toolCallRepository"];
 let featureFlags: ReturnType<typeof spyOn> | undefined;
 let restorePipelineOverrides: (() => void) | undefined;
 let deviceSessionManagerSpy: ReturnType<typeof spyOn> | undefined;
@@ -48,15 +52,17 @@ beforeEach(async () => {
   featureFlags = spyOn(FeatureFlagService, "getInstance").mockReturnValue(
     new FeatureFlagService(new FakeFeatureFlagRepository(), new FakeFeatureFlagApplier()),
   );
-  originalRepository = (ToolRegistry as any).toolCallRepository;
-  (ToolRegistry as any).toolCallRepository = { recordToolCall: async () => {} };
+  originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+  ToolRegistry.setCollaboratorsForTesting({
+    toolCallRepository: { recordToolCall: async () => {} },
+  });
   ToolRegistry.clearTools();
   clearDirectSessionDevices();
   received.length = 0;
-  originalManager = (ToolRegistry as any).deviceSessionManager;
+  originalManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
   const manager = new FakeDeviceSessionManager();
   manager.setConnectedDevices([android, ios]);
-  (ToolRegistry as any).deviceSessionManager = manager;
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
   fixture = new McpTestFixture();
   await fixture.setup();
   for (const [name, sessionUuid, device] of [
@@ -102,8 +108,8 @@ afterEach(async () => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     PlatformDeviceManagerFactory.setInstance(null);
-    (ToolRegistry as any).toolCallRepository = originalRepository;
-    (ToolRegistry as any).deviceSessionManager = originalManager;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalManager });
     ToolRegistry.clearTools();
     clearDirectSessionDevices();
   }
@@ -142,7 +148,7 @@ test("direct setActiveDevice rebinds the default to a free device", async () => 
   const manager = new FakeDeviceSessionManager();
   manager.setConnectedDevices([android, ios, other]);
   deviceSessionManagerSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue(manager);
-  (ToolRegistry as any).deviceSessionManager = manager;
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
   registerUtilityTools();
   // Leave `other` out of the fake booted list so the legacy handler's
   // resumeCtrlProxyIfCurrentlyBooted call exits before touching CtrlProxy.

@@ -32,7 +32,9 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
   let daemonSessionManager: SessionManager | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
   let spiedSessionIds: string[];
@@ -83,8 +85,8 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -101,7 +103,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

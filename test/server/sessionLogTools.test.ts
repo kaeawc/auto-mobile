@@ -54,9 +54,10 @@ describe("resetAppLogs tool (#7006)", () => {
       },
     };
     registerSessionLogTools(() => service);
-    const registryInternals = ToolRegistry as unknown as { toolCallRepository: unknown };
-    const originalRepository = registryInternals.toolCallRepository;
-    registryInternals.toolCallRepository = { recordToolCall: async () => {} };
+    const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => ({
@@ -104,7 +105,7 @@ describe("resetAppLogs tool (#7006)", () => {
       });
     } finally {
       restore();
-      registryInternals.toolCallRepository = originalRepository;
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalRepository });
     }
   });
 });

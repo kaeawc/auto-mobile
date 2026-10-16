@@ -46,8 +46,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   }
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
-  let originalAfterToolCall: unknown;
+  let originalDeviceSessionManager: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["deviceSessionManager"];
+  let originalAfterToolCall: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["afterToolCall"];
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
@@ -156,18 +160,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     // #6866: the after-tool-call pipeline now settles a navigation-class action's
     // embedded observation against the DEVICE before finalizing. These tests drive
     // stub handlers with canned observations against a fake device, so swap in a
     // settle factory that resolves no delegate — the gate then leaves the stub's
     // observation exactly as the handler built it, which is what they assert on.
-    originalAfterToolCall = (ToolRegistry as any).afterToolCall;
-    (ToolRegistry as any).afterToolCall = new DefaultAfterToolCallHandler(
-      undefined,
-      () => undefined,
-    );
+    originalAfterToolCall = ToolRegistry.getCollaboratorsForTesting().afterToolCall;
+    ToolRegistry.setPipelineOverridesForTesting({
+      afterToolCall: new DefaultAfterToolCallHandler(undefined, () => undefined),
+    });
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     originalNoObserve = serverConfig.isActionsNoObserveEnabled();
     originalCompact = serverConfig.isActionsCompactMetadataEnabled();
@@ -183,8 +186,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
-    (ToolRegistry as any).afterToolCall = originalAfterToolCall;
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
+    ToolRegistry.setPipelineOverridesForTesting({ afterToolCall: originalAfterToolCall });
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

@@ -39,10 +39,6 @@ import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
 // capture stop on a dead device) starved every stage behind it. Each stage now draws a deadline
 // from one budget table that sums to less than the process limit.
 
-interface DaemonTransportInternals {
-  transports: Map<string, { close(): Promise<void> }>;
-}
-
 /** stop() for a daemon with a stage that never settles: the messages it rejected with. */
 async function stopLeavingWorkRunning(daemon: Daemon): Promise<string[]> {
   try {
@@ -332,7 +328,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     );
     const events: string[] = [];
     // A stage that outlives its deadline by seconds, the way a recording finalizer can.
-    (daemon as unknown as DaemonTransportInternals).transports.set("slow-http", {
+    daemon.registerTransportForTesting("slow-http", {
       close: async () => {
         await timer.sleep(6_000);
         events.push("straggler:done");
@@ -362,7 +358,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       timer,
       new FakeDeviceSessionRepository(),
     );
-    (daemon as unknown as DaemonTransportInternals).transports.set("wedged-http", {
+    daemon.registerTransportForTesting("wedged-http", {
       close: () => new Promise<void>(() => {}),
     });
 

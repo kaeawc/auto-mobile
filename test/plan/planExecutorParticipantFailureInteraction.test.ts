@@ -33,8 +33,9 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
   let barrierCalls: string[];
   let seenPlatforms: Record<string, string | undefined>;
   let releaseTimeout: () => void;
-  let toolCallRepository: { toolCallRepository: unknown };
-  let originalToolCallRepository: unknown;
+  let originalToolCallRepository: ReturnType<
+    typeof ToolRegistry.getCollaboratorsForTesting
+  >["toolCallRepository"];
 
   beforeAll(() => {
     if (!ToolRegistry.getToolForPlan("barrier")) {
@@ -92,9 +93,10 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
     }
 
     // Same no-op pipeline as planExecutorParticipantFailure.test.ts (no real DB, no device I/O).
-    toolCallRepository = ToolRegistry as unknown as { toolCallRepository: unknown };
-    originalToolCallRepository = toolCallRepository.toolCallRepository;
-    toolCallRepository.toolCallRepository = { recordToolCall: async () => {} };
+    originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async (input) => {
@@ -121,7 +123,7 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
 
   afterEach(() => {
     restorePipeline();
-    toolCallRepository.toolCallRepository = originalToolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     coordinator.reset();
     restoreCoordinator();
     ToolRegistry.unregister(prefixTool);

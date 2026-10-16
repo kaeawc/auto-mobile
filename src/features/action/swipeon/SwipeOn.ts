@@ -93,6 +93,7 @@ import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible, type ScrollUntilVisibleStrategy } from "./ScrollUntilVisible";
 import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
+import { edgeSwipeCoordinates, validateEdgeSwipeOptions } from "./edgeSwipe";
 import {
   effectiveSwipeInsets,
   insetSwipeBounds,
@@ -187,6 +188,20 @@ function assertSwipeStartOnLayer(
   );
 }
 
+function screenEdgeSwipe(
+  options: Pick<SwipeOnOptions, "edgeInset" | "at">,
+  edge: NonNullable<SwipeOnOptions["fromEdge"]>,
+  bounds: Element["bounds"],
+): { startX: number; startY: number; endX: number; endY: number } {
+  const { x1, y1, x2, y2 } = edgeSwipeCoordinates({
+    edge,
+    bounds,
+    inset: options.edgeInset,
+    at: options.at,
+  });
+  return { startX: x1, startY: y1, endX: x2, endY: y2 };
+}
+
 function displaySwipeCoordinates(
   options: SwipeOnOptions,
   observation: ObserveResult,
@@ -198,6 +213,14 @@ function displaySwipeCoordinates(
     right: observation.screenSize.width,
     bottom: observation.screenSize.height,
   };
+  if (options.fromEdge) {
+    return edgeSwipeCoordinates({
+      edge: options.fromEdge,
+      bounds: rect,
+      inset: options.edgeInset,
+      at: options.at,
+    });
+  }
   const centerX = Math.round((rect.left + rect.right) / 2);
   const centerY = Math.round((rect.top + rect.bottom) / 2);
   const dx = Math.round((rect.right - rect.left) * 0.6) / 2;
@@ -1086,7 +1109,9 @@ export class SwipeOn extends BaseVisualChange {
         if (unsupported) {
           throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
         }
-        const validationError = validateSwipeTimingOptions(options, this.getDuration(options));
+        const validationError =
+          validateSwipeTimingOptions(options, this.getDuration(options)) ??
+          validateEdgeSwipeOptions(options);
         if (validationError) {
           throw new ActionableError(validationError);
         }
@@ -1492,7 +1517,13 @@ export class SwipeOn extends BaseVisualChange {
       }
     }
 
-    return validateSwipeTimingOptions(options, this.getDuration(options));
+    return (
+      validateSwipeTimingOptions(options, this.getDuration(options)) ??
+      validateEdgeSwipeOptions({
+        ...options,
+        direction: resolveSwipeDirection(options).direction ?? options.direction,
+      })
+    );
   }
 
   private buildPredictionArgs(options: SwipeOnOptions): Record<string, unknown> {
@@ -1640,10 +1671,9 @@ export class SwipeOn extends BaseVisualChange {
         }
         const bounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
 
-        const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
-          options.direction,
-          bounds,
-        );
+        const { startX, startY, endX, endY } = options.fromEdge
+          ? screenEdgeSwipe(options, options.fromEdge, bounds)
+          : this.geometry.getSwipeWithinBounds(options.direction, bounds);
         assertSwipeStartOnLayer(observeResult.viewHierarchy, options.layer, startX, startY);
 
         const duration = this.getDuration(options);

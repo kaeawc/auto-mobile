@@ -1,7 +1,7 @@
 src/models/ActionableError.ts	src/server/elementSelectorSchemas
 src/models/ActionableError.ts	src/utils/describeUnknownError
 src/models/BootedDeviceDiscoveryIncompleteError.ts	src/devices/deviceUtils
-src/models/DeviceInfo.ts	src/features/device-control/virtualDeviceCapabilities
+src/models/DeviceInfo.ts	src/features/device/virtualDeviceCapabilities
 src/models/DispatchedObservationError.ts	src/utils/describeUnknownError
 src/models/EmulatorLaunchCancelledError.ts	src/utils/HostCommandExecutor
 src/models/ImageRelativePoint.ts	src/features/observe/screenshot/observeCrop

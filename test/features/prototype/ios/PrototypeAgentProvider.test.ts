@@ -8,14 +8,14 @@ import {
   PrototypeAgentProvider,
   SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD_ENV,
   type PrototypeAgentProviderDeps,
-} from "../../../src/features/prototype-agent/PrototypeAgentProvider";
-import { logger } from "../../../src/utils/logger";
-import { sortedReaddir } from "../../../src/utils/io";
-import { createFileBackedDbHarness, type FileBackedDbHarness } from "../../db/withFileBackedDb";
-import { FakeChecksumCalculator } from "../../fakes/FakeChecksumCalculator";
-import { FakeFileDownloader } from "../../fakes/FakeFileDownloader";
-import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../../../src/features/prototype/ios/PrototypeAgentProvider";
+import { logger } from "../../../../src/utils/logger";
+import { sortedReaddir } from "../../../../src/utils/io";
+import { createFileBackedDbHarness, type FileBackedDbHarness } from "../../../db/withFileBackedDb";
+import { FakeChecksumCalculator } from "../../../fakes/FakeChecksumCalculator";
+import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
+import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const EXPECTED_SHA = "b".repeat(64);
 const DYLIB = Buffer.from("fake dylib bytes; never loaded");

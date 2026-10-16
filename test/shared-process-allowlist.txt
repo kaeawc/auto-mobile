@@ -460,7 +460,7 @@ test/features/bootAdmission/inFlightBootRssSizing.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
-test/features/device-control/virtualDeviceCapabilities.test.ts
+test/features/device/virtualDeviceCapabilities.test.ts
 test/features/element-resolution/ConsumerAgreement.test.ts
 test/features/element-resolution/ElementResolver.acceptance.test.ts
 test/features/element-resolution/ElementResolver.review.test.ts

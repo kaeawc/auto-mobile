@@ -49,6 +49,31 @@ class PrototypeSpecContentScreenshotTest {
 
   // Pending: #12395 added these cases (and changed material_slider_chip_card's render) without
   // Linux baselines; record them with the Linux workflow, commit the PNGs, then drop pending.
+  // Pending: #12071 carousel and pager indicator cases; no Linux baselines recorded yet.
+  @Test
+  fun carouselMultiBrowse() =
+    prototypeScreenshotTest(
+      "carousel_multi_browse",
+      validPrototypeFixture("carousel-multi-browse"),
+      pending = true,
+    )
+
+  @Test
+  fun carouselHeroRepeat() =
+    prototypeScreenshotTest(
+      "carousel_hero_repeat",
+      validPrototypeFixture("carousel-hero-repeat"),
+      pending = true,
+    )
+
+  @Test
+  fun pagerIndicatorDots() =
+    prototypeScreenshotTest(
+      "pager_indicator_dots",
+      validPrototypeFixture("pager-indicator-dots"),
+      pending = true,
+    )
+
   @Test
   fun flowBasic() =
     prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"), pending = true)

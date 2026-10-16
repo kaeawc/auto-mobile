@@ -92,3 +92,52 @@ export class DeviceStateRestoreQueue<S extends object> {
     this.targets.delete(deviceId);
   }
 }
+
+/** How one restore attempt ended before any retry. */
+export type RestoreAttemptOutcome = { outcome: "restored" } | { outcome: "failed"; error: unknown };
+
+/** The per-target pieces of a kind's restore, built once when its restoration starts. */
+export interface RestoreRun {
+  /** One full dispatch of the restore; resolves once restored and cleared. */
+  restore(): Promise<void>;
+  /** Called when the first attempt failed or timed out and the device will be quarantined. */
+  quarantined(outcome: "failed" | "timed-out", error: unknown): void;
+  /** The retry loop that runs after a failed first attempt. */
+  retry(restoration: Promise<RestoreAttemptOutcome>): Promise<void>;
+}
+
+/** What differs between kinds in starting a restoration; the skeleton is shared (#11794). */
+export interface RestoreKindSpec<S extends object> {
+  queue: DeviceStateRestoreQueue<S>;
+  /** Sentence-case name used in labels and messages, such as "Screen reader". */
+  name: string;
+  timeoutMs: number;
+  /** Maps an unexpected failure of the first attempt's own wait; the clock rethrows it as is. */
+  mapStartError(error: unknown): unknown;
+  prepare(deviceId: string, target: PendingRestore<S>): RestoreRun;
+}
+
+/** Bounded retries with backoff, then abandonment with the state remembered (rotation, screen reader). */
+export interface BoundedRetrySpec<S extends object> {
+  attempts: number;
+  delayForAttempt(attempt: number): number;
+  isNonRetryable(error: unknown): boolean;
+  logFirstFailure(deviceId: string, error: unknown): void;
+  logRetryFailure(deviceId: string, attempt: number, error: unknown): void;
+  /** Give up: release the device from quarantine and remember the state still on it. */
+  abandon(deviceId: string, target: PendingRestore<S>, lastError: unknown, when: string): void;
+}
+
+/** The one extra attempt at a baseline an earlier release gave up on. */
+export interface AbandonedRestoreSpec<S extends object> {
+  memory: Map<string, S>;
+  inFlight: Map<string, Promise<void>>;
+  timeoutMs: number;
+  label: string;
+  /** Run one dispatch of the restore; the signal aborts it. */
+  restore(deviceId: string, state: S, signal: AbortSignal): Promise<void>;
+  /** The restore succeeded. */
+  restored(deviceId: string, state: S): void;
+  /** The restore failed; the record is kept unless this forgets it. */
+  failed(deviceId: string, state: S, error: unknown): void;
+}

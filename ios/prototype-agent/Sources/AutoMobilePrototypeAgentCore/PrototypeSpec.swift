@@ -125,6 +125,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
+        try PrototypeCarousel.validate(expanded)
         try PrototypeRefresh.validate(expanded)
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
@@ -640,6 +641,10 @@ final class PrototypeNode: Decodable {
     let pageSpacing: Double?
     let peek: PrototypePagerPeek?
     let pageSize: PrototypePagerPageSize?
+    /// Pager page dots (`none` or `dots`, #12071) and the `carousel` node's item sizing.
+    let indicator: String?
+    let itemWidth: Double?
+    let itemSpacing: Double?
     let items: [NavItem]?
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
@@ -708,7 +713,8 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
-             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, dismissOnSwipe, supportingText,
+             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
+             dismissOnSwipe, supportingText,
              keyboardType, secure, multiline, minLines, maxLength
     }
 
@@ -789,6 +795,9 @@ final class PrototypeNode: Decodable {
         pageSpacing = try container.decodeIfPresent(Double.self, forKey: .pageSpacing)
         peek = try container.decodeIfPresent(PrototypePagerPeek.self, forKey: .peek)
         pageSize = try container.decodeIfPresent(PrototypePagerPageSize.self, forKey: .pageSize)
+        indicator = try container.decodeIfPresent(String.self, forKey: .indicator)
+        itemWidth = try container.decodeIfPresent(Double.self, forKey: .itemWidth)
+        itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
         dismissOnSwipe = try container.decodeIfPresent(Bool.self, forKey: .dismissOnSwipe)
         supportingText = try container.decodeIfPresent(String.self, forKey: .supportingText)
         keyboardType = try container.decodeIfPresent(String.self, forKey: .keyboardType)

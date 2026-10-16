@@ -907,6 +907,17 @@ const pagerBaseSchema = z
         z.object({ dp: z.number().finite().min(1e-6).max(MAX_PROTOTYPE_PAGER_DP) }).strict(),
       ])
       .optional(),
+    indicator: z.enum(["none", "dots"]).optional(),
+  })
+  .strict();
+const carouselBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    ...repeatShape,
+    type: z.enum(["carousel"]),
+    variant: z.enum(["multiBrowse", "hero", "uncontained"]).optional(),
+    itemWidth: z.number().finite().min(1e-6).max(MAX_PROTOTYPE_PAGER_DP),
+    itemSpacing: pagerDpSchema.optional(),
   })
   .strict();
 const tabBarBaseSchema = z
@@ -954,6 +965,7 @@ export type PrototypeNode =
   | (z.infer<typeof columnBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof flowBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof gridBaseSchema> & { children: PrototypeNode[] })
+  | (z.infer<typeof carouselBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof textBaseSchema>
   | z.infer<typeof imageBaseSchema>
   | z.infer<typeof iconBaseSchema>
@@ -1029,6 +1041,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       columnBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       flowBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       gridBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
+      carouselBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
       textBaseSchema,
       imageBaseSchema,
       iconBaseSchema,
@@ -1181,6 +1194,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "column",
   "flow",
   "grid",
+  "carousel",
   "text",
   "image",
   "icon",

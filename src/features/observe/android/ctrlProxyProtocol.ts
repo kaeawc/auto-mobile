@@ -1144,6 +1144,9 @@ export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 
+/** Draws the `carousel` node and the pager `indicator` option. */
+export const PROTOTYPE_CAROUSEL_CAPABILITY = "prototype_carousel_v1";
+
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 

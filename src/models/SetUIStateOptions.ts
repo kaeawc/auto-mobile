@@ -1,7 +1,7 @@
 /**
  * Selector for targeting a UI element
  */
-export interface ElementSelector {
+export interface SetUIStateElementSelector {
   /** Element text or accessibility label */
   text?: string;
   /** Element resource ID / accessibility identifier */
@@ -13,7 +13,7 @@ export interface ElementSelector {
  */
 export interface FieldSpec {
   /** Selector to find the field element */
-  selector: ElementSelector;
+  selector: SetUIStateElementSelector;
   /** Value to set (for text inputs and dropdowns) */
   value?: string;
   /** Target selection state (for checkboxes and toggles) */

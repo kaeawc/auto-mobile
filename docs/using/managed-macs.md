@@ -106,7 +106,7 @@ profile installed by hand doesn't count.
 ## For contributors
 
 `scripts/network-filter/generate-mdm-profile.ts` generates the profile from the Team ID in
-`src/constants/appleTeam.ts` and the bundle identifiers in `ios/network-filter/Packaging/`.
+`scripts/network-filter/appleTeam.ts` and the bundle identifiers in `ios/network-filter/Packaging/`.
 Tests check that the committed file matches the generator byte for byte and that
 `plutil -lint` accepts it. After changing an identifier, regenerate it:
 

@@ -2750,9 +2750,7 @@ export class DevicePool {
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
-    this.sessionManager.retireClockRestoration(deviceId);
-    this.sessionManager.retireRotationRestoration(deviceId);
-    this.sessionManager.retireScreenReaderRestoration(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "removal");
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -8208,7 +8206,7 @@ export class DevicePool {
     if (!device) {
       return false;
     }
-    this.sessionManager.retireRestorationsOnIncarnationBump(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "incarnation-bump");
     this.deviceHealthMarkers.clear(deviceId);
     device.incarnation = this.nextDeviceIncarnation();
     // Full: a VM restore can replace the rendered screen even on the same connection/serial.

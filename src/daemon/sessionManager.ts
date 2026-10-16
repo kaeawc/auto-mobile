@@ -1825,16 +1825,29 @@ export class SessionManager {
   private readonly clockRestorerFactory: (device: BootedDevice) => ClockRestorer;
   private readonly clockRestores = new DeviceStateRestoreQueue<ClockSessionState>(
     clockRestorePolicy,
+    (deviceId) => {
+      const incarnation = this.deviceHealth?.incarnation(deviceId);
+      if (incarnation !== undefined) {
+        this.deviceHealth?.markers.clear(deviceId, incarnation, "clock");
+      }
+      defaultDeviceClockRestoreRegistry.retire(deviceId);
+    },
   );
   private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
   private readonly rotationRestorerFactory: (device: BootedDevice) => RotationRestorer;
   private readonly rotationRestores = new DeviceStateRestoreQueue<RotationSessionState>(
     rotationRestorePolicy,
+    (deviceId) => {
+      this.abandonedRotations.delete(deviceId);
+    },
   );
   private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
   private readonly screenReaderRestorerFactory: (device: BootedDevice) => ScreenReaderRestorer;
   private readonly screenReaderRestores = new DeviceStateRestoreQueue<ScreenReaderSessionState>(
     screenReaderRestorePolicy,
+    (deviceId) => {
+      this.abandonedScreenReaders.delete(deviceId);
+    },
   );
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
   private readonly rotationRestoreBackoff: BackoffPolicy;
@@ -7590,9 +7603,7 @@ export class SessionManager {
       dropped.add("screen-reader");
     }
     this.dropReplacedDeviceRestoreState(session, dropped);
-    this.retireClockRestoration(deviceId);
-    this.retireRotationRestoration(deviceId);
-    this.retireScreenReaderRestoration(deviceId);
+    this.retireRestorations(deviceId, "removal");
     if (dropped.size > 0) {
       logger.warn(
         `Dropped restore state for session ${sessionId} on replaced serial ${deviceId}: ${[...dropped].join(", ")}`,
@@ -9996,29 +10007,16 @@ export class SessionManager {
     }
   }
 
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireClockRestoration(deviceId: string): void {
-    const incarnation = this.deviceHealth?.incarnation(deviceId);
-    if (incarnation !== undefined) {
-      this.deviceHealth?.markers.clear(deviceId, incarnation, "clock");
-    }
-    defaultDeviceClockRestoreRegistry.retire(deviceId);
-    this.clockRestores.retire(deviceId);
-  }
-
   /**
-   * The restores a VM restore (incarnation bump) retires. Today that is the clock only; the
-   * policy table records which kinds, so the open question stays visible (#11794).
+   * Retire every restore queue the cause applies to: removal retires all kinds; a VM restore
+   * (incarnation bump) retires the kinds whose policy says so, today the clock only (#11794).
+   * No retries may target a replacement device.
    */
-  retireRestorationsOnIncarnationBump(deviceId: string): void {
-    if (this.clockRestores.policy.retiredOnIncarnationBump) {
-      this.retireClockRestoration(deviceId);
-    }
-    if (this.rotationRestores.policy.retiredOnIncarnationBump) {
-      this.retireRotationRestoration(deviceId);
-    }
-    if (this.screenReaderRestores.policy.retiredOnIncarnationBump) {
-      this.retireScreenReaderRestoration(deviceId);
+  retireRestorations(deviceId: string, cause: "removal" | "incarnation-bump"): void {
+    for (const queue of [this.clockRestores, this.rotationRestores, this.screenReaderRestores]) {
+      if (cause === "removal" || queue.policy.retiredOnIncarnationBump) {
+        queue.retire(deviceId);
+      }
     }
   }
 
@@ -10132,12 +10130,6 @@ export class SessionManager {
     return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
   }
 
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireRotationRestoration(deviceId: string): void {
-    this.rotationRestores.retire(deviceId);
-    this.abandonedRotations.delete(deviceId);
-  }
-
   /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */
   private async getPendingScreenReaderRestoration(
     session: Session,
@@ -10223,12 +10215,6 @@ export class SessionManager {
   /** One bounded attempt at a state an earlier release gave up on; never on a timer. */
   private retryAbandonedScreenReaderRestore(deviceId: string): Promise<void> {
     return this.retryAbandonedRestore(this.abandonedScreenReaderRestore, deviceId);
-  }
-
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireScreenReaderRestoration(deviceId: string): void {
-    this.screenReaderRestores.retire(deviceId);
-    this.abandonedScreenReaders.delete(deviceId);
   }
 
   /**

@@ -199,11 +199,11 @@ describe("session clock restoration", () => {
       await flush();
       expect(settled).toBe(true);
       expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       await changing;
     } finally {
       finish.resolve();
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -221,7 +221,7 @@ describe("session clock restoration", () => {
       const second = await h.manager["getPendingClockRestoration"](session, null);
       expect(second.pending).toBe(first.pending);
       expect(h.restored).toHaveLength(1);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
       const calls = h.adapter.calls.length;
       h.timer.advanceTime(1000);
@@ -229,7 +229,7 @@ describe("session clock restoration", () => {
       expect(h.adapter.calls).toHaveLength(calls);
       await Promise.all([first.pending, second.pending]);
     } finally {
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -260,7 +260,7 @@ describe("session clock restoration", () => {
         h.manager.getSession("second-session")!,
         null,
       );
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(h.restoreSignals).toHaveLength(2);
       expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
       const calls = h.adapter.calls.length;
@@ -269,7 +269,7 @@ describe("session clock restoration", () => {
       expect(h.adapter.calls).toHaveLength(calls);
       await Promise.all([first.pending, second.pending]);
     } finally {
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -343,7 +343,7 @@ describe("session clock restoration", () => {
     try {
       await state.setState({ clock: set });
       expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()?.rootedByUs).toBe(true);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeUndefined();
       h.adapter.rootedByUs = false;
       await state.setState({ clock: { mode: "reset" } });
@@ -777,7 +777,7 @@ describe("session clock restoration", () => {
       await flush();
       await release;
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       finish.resolve();
       await mutation;
       await pending;

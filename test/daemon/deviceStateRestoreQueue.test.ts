@@ -1,6 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { DeviceStateRestoreQueue } from "../../src/daemon/deviceStateRestoreQueue";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -76,28 +77,68 @@ test("a start that rejects rejects the joined result", async () => {
   await expect(result).rejects.toThrow("boom");
 });
 
+test("onRetire runs before the queue state is retired", () => {
+  const seen: number[] = [];
+  const queue = new DeviceStateRestoreQueue<object>(policy, () =>
+    seen.push(queue.generation("d1")),
+  );
+  queue.retire("d1");
+  expect(seen).toEqual([0]);
+  expect(queue.generation("d1")).toBe(1);
+});
+
+const kinds = ["clock", "rotation", "screen-reader"] as const;
+type Kind = (typeof kinds)[number];
+
 // Open question for the owner (#11794): a VM restore retires only the clock restore, while device
 // removal retires all three. This pins today's behaviour; it does not endorse it.
-test("the policy table retires only the clock on an incarnation bump", () => {
-  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
-    barrier: () => new FakeDbWriteBarrier(),
-  });
-  try {
-    const clock = spyOn(manager, "retireClockRestoration");
-    const rotation = spyOn(manager, "retireRotationRestoration");
-    const screenReader = spyOn(manager, "retireScreenReaderRestoration");
-    manager.retireRestorationsOnIncarnationBump("emulator-5554");
-    expect(clock).toHaveBeenCalledTimes(1);
-    expect(rotation).not.toHaveBeenCalled();
-    expect(screenReader).not.toHaveBeenCalled();
-  } finally {
-    manager.stopCleanupTimer();
-  }
-});
+const causeTable: Array<["removal" | "incarnation-bump", readonly Kind[]]> = [
+  ["removal", ["clock", "rotation", "screen-reader"]],
+  ["incarnation-bump", ["clock"]],
+];
+
+test.each(causeTable)(
+  "retireRestorations(%s) retires %j and runs only their side effects",
+  (cause, retired) => {
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    const deviceId = "emulator-5554";
+    const internals = {
+      clockRestores: manager["clockRestores"],
+      rotationRestores: manager["rotationRestores"],
+      screenReaderRestores: manager["screenReaderRestores"],
+      abandonedRotations: manager["abandonedRotations"] as Map<string, object>,
+      abandonedScreenReaders: manager["abandonedScreenReaders"] as Map<string, object>,
+    };
+    const queues: Record<Kind, DeviceStateRestoreQueue<object>> = {
+      clock: internals.clockRestores,
+      rotation: internals.rotationRestores,
+      "screen-reader": internals.screenReaderRestores,
+    };
+    internals.abandonedRotations.set(deviceId, {});
+    internals.abandonedScreenReaders.set(deviceId, {});
+    const registryRetire = spyOn(defaultDeviceClockRestoreRegistry, "retire");
+    try {
+      manager.retireRestorations(deviceId, cause);
+      for (const kind of kinds) {
+        expect(queues[kind].generation(deviceId)).toBe(retired.includes(kind) ? 1 : 0);
+      }
+      expect(registryRetire).toHaveBeenCalledTimes(retired.includes("clock") ? 1 : 0);
+      expect(internals.abandonedRotations.has(deviceId)).toBe(!retired.includes("rotation"));
+      expect(internals.abandonedScreenReaders.has(deviceId)).toBe(
+        !retired.includes("screen-reader"),
+      );
+    } finally {
+      registryRetire.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  },
+);
 
 afterEach(() => PlatformDeviceManagerFactory.reset());
 
-test("DevicePool: bumpDeviceIncarnation retires the clock restore only, removeDevice retires all three", async () => {
+test("DevicePool: bumpDeviceIncarnation and removeDevice route through retireRestorations with their cause", async () => {
   const timer = new FakeTimer();
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
     barrier: () => new FakeDbWriteBarrier(),
@@ -109,20 +150,14 @@ test("DevicePool: bumpDeviceIncarnation retires the clock restore only, removeDe
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "restore-queue", { timer, deviceManager: utils }),
   );
-  const clock = spyOn(manager, "retireClockRestoration");
-  const rotation = spyOn(manager, "retireRotationRestoration");
-  const screenReader = spyOn(manager, "retireScreenReaderRestoration");
+  const retire = spyOn(manager, "retireRestorations");
   try {
     await pool.initializeWithDevices([device]);
     expect(pool.bumpDeviceIncarnation(device.deviceId)).toBe(true);
-    expect(clock).toHaveBeenCalledTimes(1);
-    expect(rotation).not.toHaveBeenCalled();
-    expect(screenReader).not.toHaveBeenCalled();
+    expect(retire.mock.calls).toEqual([[device.deviceId, "incarnation-bump"]]);
 
     await pool.removeDevice(device.deviceId);
-    expect(clock.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(rotation).toHaveBeenCalled();
-    expect(screenReader).toHaveBeenCalled();
+    expect(retire.mock.calls.at(-1)).toEqual([device.deviceId, "removal"]);
   } finally {
     manager.stopCleanupTimer();
   }

@@ -90,6 +90,11 @@ export interface HarnessDeps {
   /** Progress lines; the CLI sends these to stderr so `--json` stdout stays clean. */
   log(line: string): void;
   env: Record<string, string | undefined>;
+  /**
+   * Names of connected physical iOS devices. `simctl` sees only simulators, but the private
+   * daemon also discovers hardware through devicectl; either would make selection ambiguous.
+   */
+  physicalIosDevices(): Promise<string[]>;
 }
 
 export interface RunOptions {
@@ -195,6 +200,13 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
     throw new Error(
       `Booted iOS simulator(s) (${simulators.join(", ")}) would also be visible to the ` +
         "benchmark's AutoMobile server and make device selection ambiguous; shut them down first.",
+    );
+  }
+  const phones = await deps.physicalIosDevices();
+  if (phones.length > 0) {
+    throw new Error(
+      `Connected iOS device(s) (${phones.join(", ")}) would also be visible to the ` +
+        "benchmark's AutoMobile server and make device selection ambiguous; disconnect them first.",
     );
   }
   // Preflight clears app data, so hold this device's allocation claim through it: another
@@ -453,7 +465,11 @@ export async function runSuite(
   );
   // A run that recovered from stumbles still passes, but its error count and recovery
   // calls would make a misleading baseline; only clean passes produce a snippet.
-  if (result.comparison.verdict === "passed" && result.comparison.stumbles === 0) {
+  if (result.comparison.verdict === "passed" && !definition.preflight.clearAppData) {
+    // Without a reset, earlier runs' databases, permissions, and back stack carry over
+    // invisibly; the start-screen check sees only text, so the run is not reproducible.
+    deps.log(`[${definition.name}] passed, but clearAppData is false; no baseline.yml written`);
+  } else if (result.comparison.verdict === "passed" && result.comparison.stumbles === 0) {
     deps.fs.writeFile(join(prepared.runDirectory, "baseline.yml"), renderBaselineSnippet(result));
   } else if (result.comparison.verdict === "passed") {
     deps.log(

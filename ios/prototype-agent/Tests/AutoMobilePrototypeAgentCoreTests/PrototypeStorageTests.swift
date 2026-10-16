@@ -401,6 +401,32 @@ final class PrototypeStorageTests: XCTestCase {
         XCTAssertEqual(harness.store.records["shop"], stored(1, ["state:dark": .bool(true)]))
     }
 
+    func testASameIdShowAfterAFailedFlushRestoresTheUnsavedValuesAndRetriesTheWrite() throws {
+        let harness = StorageHarness()
+        try harness.show(makeSpec())
+        harness.store.saveError = FakeStoreFailure()
+        try harness.tap("Dark")
+        try harness.tap("Bump")
+        try harness.tap("Add")
+        // The replacement flushes (and fails) first; it must not revert to the stale disk record.
+        try harness.show(makeSpec())
+        XCTAssertEqual(harness.session.state["dark"], .bool(true))
+        XCTAssertEqual(harness.session.state["count"], .number(2))
+        XCTAssertEqual(
+            PrototypeDataPointer.resolve(harness.session.data, pointer: "/cart/items"), .array([.string("x")])
+        )
+        XCTAssertNil(harness.store.records["shop"])
+        harness.store.saveError = nil
+        harness.clock.elapse()
+        XCTAssertEqual(
+            harness.store.records["shop"],
+            stored(1, [
+                "state:dark": .bool(true), "state:count": .number(2),
+                "data:/cart": .object(["items": .array([.string("x")])]),
+            ])
+        )
+    }
+
     // MARK: Corrupt records
 
     func testACorruptRecordIsLoggedDroppedAndTheSpecStands() throws {

@@ -99,9 +99,12 @@ final class PrototypeStorageCoordinator {
     /// a same-id replacement reads its own latest values back.
     func prepare(_ spec: PrototypeSpec) -> PrototypeStoragePreparation {
         flush()
+        // A flush that failed leaves keys dirty. A same-id replacement restores from those values
+        // (not the stale record on disk) and keeps retrying the write.
+        let unsaved = tracking.flatMap { $0.id == spec.id && !$0.dirty.isEmpty ? $0 : nil }
         tracking = nil
         let stored = loadStored(id: spec.id)
-        var restored = PrototypeStorageRestore.restore(spec: spec, stored: stored)
+        var restored = PrototypeStorageRestore.restore(spec: spec, stored: Self.overlay(unsaved, on: stored))
         var shown = spec
         if restored.data != spec.data, let data = restored.data {
             do {
@@ -117,7 +120,7 @@ final class PrototypeStorageCoordinator {
                         values: $0.values.filter { PrototypeStorageKey.parse($0.key).map(Self.isState) ?? false }
                     )
                 }
-                restored = PrototypeStorageRestore.restore(spec: spec, stored: stateOnly)
+                restored = PrototypeStorageRestore.restore(spec: spec, stored: Self.overlay(unsaved, on: stateOnly))
                 restored.dropped = first.dropped + first.applied.filter { !restored.applied.contains($0) }
                     .map { PrototypeStorageDrop(key: $0, reason: .mismatch) }
             }
@@ -126,14 +129,29 @@ final class PrototypeStorageCoordinator {
         reconcile(id: spec.id, block: spec.storage, stored: stored, kept: kept)
         if let block = spec.storage {
             let keys = Self.entryKeys(block)
-            tracking = Tracking(
+            var next = Tracking(
                 id: spec.id, version: block.version, keys: keys, persisted: kept,
                 live: Self.liveValues(keys, state: restored.state, data: shown.data)
             )
+            // Restored values that are still not on disk stay dirty so the write is retried.
+            let unsavedKeys = unsaved?.dirty ?? []
+            next.dirty = Set(restored.applied.filter { unsavedKeys.contains($0) && next.live[$0] != kept[$0] })
+            tracking = next
+            if !next.dirty.isEmpty { scheduleFlush() }
         }
         return PrototypeStoragePreparation(
             spec: shown, state: restored.state, applied: restored.applied, dropped: restored.dropped
         )
+    }
+
+    /// The stored record with the unsaved (dirty) live values of a failed flush laid over it.
+    private static func overlay(_ unsaved: Tracking?, on stored: PrototypeStoredValues?) -> PrototypeStoredValues? {
+        guard let unsaved else { return stored }
+        var values = stored?.version == unsaved.version ? stored?.values ?? [:] : [:]
+        for raw in unsaved.dirty {
+            values[raw] = unsaved.live[raw]
+        }
+        return PrototypeStoredValues(version: unsaved.version, values: values)
     }
 
     private static func isState(_ key: PrototypeStorageKey) -> Bool {
@@ -192,6 +210,10 @@ final class PrototypeStorageCoordinator {
         current.live = live
         current.dirty.formUnion(moved)
         tracking = current
+        scheduleFlush()
+    }
+
+    private func scheduleFlush() {
         timer?.cancel()
         timer = clock.schedule(afterMilliseconds: debounceMilliseconds) { [weak self] in
             self?.timer = nil

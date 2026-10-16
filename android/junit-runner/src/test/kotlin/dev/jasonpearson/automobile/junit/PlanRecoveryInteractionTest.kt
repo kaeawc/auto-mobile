@@ -1,13 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
-import ai.koog.agents.core.agent.AIAgent
 import dev.jasonpearson.automobile.validation.GenericToolResponse
 import dev.jasonpearson.automobile.validation.TapOnResponse
-import io.mockk.coEvery
-import io.mockk.every
-import io.mockk.just
-import io.mockk.mockk
-import io.mockk.runs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -123,16 +117,14 @@ class PlanRecoveryInteractionTest {
   fun `recovery prompt lists succeeded steps by plan index across a skipped step`() {
     daemon.failAtStep = 3
     daemon.succeedOnResume = true
-    val prompts = mutableListOf<String>()
-    val aiAgent = mockk<AIAgent<String, String>>(relaxed = true)
-    coEvery { aiAgent.run(capture(prompts)) } returns "done"
+    val aiAgent = FakeAIAgent().apply { response = "done" }
     val recoveryAgent = realRecoveryAgent(aiAgent)
     collaborators = collaborators.copy(agent = { recoveryAgent })
 
     val result = executePlaceholderPlan()
 
     assertTrue(result.success)
-    val prompt = prompts.single()
+    val prompt = aiAgent.prompts.single()
     assertTrue(prompt, prompt.contains("FAILED STEP: Step 4 using tool \"tapOn\""))
     assertTrue(prompt, prompt.contains("- Step 1: inputText (completed)"))
     assertTrue(prompt, prompt.contains("- Step 3: tapOn (completed)"))
@@ -485,28 +477,15 @@ class PlanRecoveryInteractionTest {
 
   private fun JsonObject.without(key: String): JsonObject = JsonObject(this - key)
 
-  private fun realRecoveryAgent(aiAgent: AIAgent<String, String>): AutoMobileAgent {
-    val config = mockk<AutoMobileAgent.ConfigProvider>()
-    every { config.getMcpServerUrl() } returns "http://localhost:0"
-    every { config.getModelConfig() } returns
-      AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
-    val factory = mockk<AutoMobileAgent.AIAgentFactory>()
-    every { factory.createAIAgentWithMCPTools(any(), any(), any(), any()) } returns aiAgent
-    val mcp = mockk<AutoMobileAgent.MCPClient>()
-    every { mcp.isConnected() } returns true
-    every { mcp.disconnect() } just runs
-    every { mcp.callTool("observe", any()) } returns "{}"
-    val time = mockk<AutoMobileAgent.TimeProvider>()
-    every { time.currentTimeMillis() } returns 1000L
-    return AutoMobileAgent(
-      configProvider = config,
-      fileSystemOperations = mockk(relaxed = true),
-      aiAgentFactory = factory,
-      timeProvider = time,
-      mcpClient = mcp,
+  private fun realRecoveryAgent(aiAgent: FakeAIAgent): AutoMobileAgent =
+    AutoMobileAgent(
+      configProvider = FakeAgentConfigProvider(),
+      fileSystemOperations = FakeAgentFileSystemOperations(),
+      aiAgentFactory = FakeAgentAIAgentFactory(aiAgent),
+      timeProvider = FakeAgentTimeProvider().apply { times = ArrayDeque(listOf(1000L)) },
+      mcpClient = FakeAgentMCPClient().apply { connected = true },
       recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true, maxToolCalls = 5),
     )
-  }
 
   private companion object {
     // Breaks the old text splice in a double-quoted scalar (quote, backslash, ` #`, `: `).

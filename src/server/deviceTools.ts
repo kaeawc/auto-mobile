@@ -35,7 +35,7 @@ import {
   type SystemUiAnrRecoveryResult,
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
-import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import { releasePoolDevice, releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { heldDeviceBindRefusal, isSameHolderSession } from "../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
@@ -4753,7 +4753,7 @@ function createSystemUiAnrRebooter(
             },
           );
         } else {
-          await devicePool.releaseDevice(replacement.id, sessionId);
+          await releasePoolDevice(devicePool, replacement.id, sessionId);
         }
       },
       operations: {

@@ -18,14 +18,18 @@ describe("in-daemon CLI release caller ordering", () => {
               getSession: () => ({ assignedDevice: "d1" }),
               releaseSession: async (...args: unknown[]) => {
                 events.push(["session.releaseSession", ...args]);
-                if (failure === "session") throw error;
+                if (failure === "session") {
+                  throw error;
+                }
                 return "different-returned-device";
               },
             }),
             getDevicePool: () => ({
               releaseDevice: async (...args: unknown[]) => {
                 events.push(["pool.releaseDevice", ...args]);
-                if (failure === "pool") throw error;
+                if (failure === "pool") {
+                  throw error;
+                }
               },
             }),
           } as unknown as DaemonStateLike;

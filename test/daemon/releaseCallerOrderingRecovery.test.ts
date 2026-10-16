@@ -103,7 +103,9 @@ describe("failed recovery release caller ordering", () => {
           "cleanup-expired",
           async () => {
             events.push(["attempt"]);
-            if (failure === "attempt") throw new Error("attempt failed");
+            if (failure === "attempt") {
+              throw new Error("attempt failed");
+            }
             return "returned-device";
           },
           { expiryOrigin: true },

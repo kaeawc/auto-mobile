@@ -34,7 +34,9 @@ function harness(
     getDeviceLabels: () => undefined,
     releaseSession: async (...args) => {
       events.push(["session.releaseSession", ...args]);
-      if (options.failure === "session") throw error;
+      if (options.failure === "session") {
+        throw error;
+      }
       released = true;
       releases++;
       // A published branch's second release returns null: only the unknown path has d1.
@@ -53,12 +55,16 @@ function harness(
         : {
             releaseRehydrationReservation: (id: string) => {
               events.push(["pool.releaseRehydrationReservation", id]);
-              if (options.failure === "reservation") throw error;
+              if (options.failure === "reservation") {
+                throw error;
+              }
             },
           }),
       releaseDevice: async (...args) => {
         events.push(["pool.releaseDevice", ...args]);
-        if (options.failure === "pool") throw error;
+        if (options.failure === "pool") {
+          throw error;
+        }
       },
     }),
   };

@@ -41,7 +41,9 @@ describe("deviceTools preserved-session release caller ordering", () => {
       hasSession: () => live,
       releaseSessionIfOwned: async (...args) => {
         events.push(["session.releaseSessionIfOwned", ...args]);
-        if (scenario === "session-failure") throw failure;
+        if (scenario === "session-failure") {
+          throw failure;
+        }
         live = false;
         return "replacement";
       },
@@ -55,7 +57,9 @@ describe("deviceTools preserved-session release caller ordering", () => {
             : replacement,
       releaseDevice: async (...args) => {
         events.push(["pool.releaseDevice", ...args]);
-        if (scenario === "pool-failure" || scenario === "missing-pool-failure") throw failure;
+        if (scenario === "pool-failure" || scenario === "missing-pool-failure") {
+          throw failure;
+        }
       },
     };
     const daemonState = {
@@ -65,7 +69,9 @@ describe("deviceTools preserved-session release caller ordering", () => {
     } as unknown as DaemonState;
     const reboot = spyOn(systemUiAnr, "rebootAndroidAfterSystemUiAnr").mockImplementation(
       async (context) => {
-        if (scenario === "wrong-owner") replacement.sessionId = "other";
+        if (scenario === "wrong-owner") {
+          replacement.sessionId = "other";
+        }
         await context.releasePreservedSession(
           replacement,
           scenario === "wrong-preserved" ? "other" : "s1",

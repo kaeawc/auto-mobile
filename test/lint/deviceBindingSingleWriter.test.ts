@@ -27,18 +27,16 @@ const DEVICE_RECEIVERS = new Set([
   "entry",
 ]);
 
-// Current member-call inventory, including unrelated APIs named releaseDevice.
-// Shrinking only: route new pool releases through releaseSessionAndDevice.ts.
+// Shrink-only member-call inventory. Pool releases belong to the path-exempt
+// releaseSessionAndDevice.ts funnel or DevicePool's own internal calls.
 const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
-  "src/daemon/cli/runDaemonCommand.ts": 1,
-  "src/daemon/daemon.ts": 3,
-  "src/daemon/daemonRequestHandlers.ts": 1,
+  // Includes the unrelated installed-apps cache write coordinator's releaseDevice call.
   "src/daemon/devicePool.ts": 7,
-  "src/daemon/deviceRecoveryCoordinator.ts": 1,
-  "src/daemon/explicitDeviceBind.ts": 1,
+  // Unrelated APIs sharing the name: prototype agent registry, viewer connections,
+  // events, and the installed-apps cache write coordinator. These counts do not
+  // permit new DevicePool release callers.
   "src/features/prototype/ios/prototypeViewerAttach.ts": 1,
   "src/server/appTools.ts": 2,
-  "src/server/deviceTools.ts": 1,
   "src/server/deviceToolsShutdown.ts": 1,
   "src/server/prototypeTools.ts": 3,
 };
@@ -387,5 +385,19 @@ describe("device binding single writer", () => {
     expect(
       releaseViolations(new Map([["src/daemon/releaseSessionAndDevice.ts", { releases: 9 }]]), {}),
     ).toEqual([]);
+  });
+
+  test.each([
+    "src/daemon/cli/runDaemonCommand.ts",
+    "src/daemon/daemon.ts",
+    "src/daemon/daemonRequestHandlers.ts",
+    "src/daemon/deviceRecoveryCoordinator.ts",
+    "src/daemon/explicitDeviceBind.ts",
+    "src/server/deviceTools.ts",
+  ])("migrated caller %s has no member-call allowance", (file) => {
+    expect(RELEASE_DEVICE_ALLOWLIST[file]).toBeUndefined();
+    expect(releaseViolations(new Map([[file, { releases: 1 }]]))).toContain(
+      `${file}: 1 releaseDevice calls exceeds 0; route through the releaseSessionAndDevice owner`,
+    );
   });
 });

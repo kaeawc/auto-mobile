@@ -7,7 +7,10 @@ import {
   registerDerivedLabelSessionReleaseCascade,
   type DerivedLabelSessionSource,
 } from "../../src/daemon/derivedLabelSessionReleaseCascade";
-import type { SessionReleasePool } from "../../src/daemon/releaseSessionAndDevice";
+import {
+  lazySessionReleasePool,
+  type SessionReleasePool,
+} from "../../src/daemon/releaseSessionAndDevice";
 import type {
   SessionReleaseCallback,
   SessionReleaseSnapshot,
@@ -31,7 +34,9 @@ describe("daemon release pool consumers", () => {
         hasDeviceCleanupInProgress: () => false,
         releaseSession: async (...args) => {
           events.push(["session.releaseSession", ...args]);
-          if (failure === "session") throw error;
+          if (failure === "session") {
+            throw error;
+          }
           live = false;
           return "returned-device";
         },
@@ -39,12 +44,17 @@ describe("daemon release pool consumers", () => {
       const pool: SessionReleasePool = {
         releaseDevice: async (...args) => {
           events.push(["pool.releaseDevice", ...args]);
-          if (failure === "pool") throw error;
+          if (failure === "pool") {
+            throw error;
+          }
         },
       };
       const result = managedExecutionSessionsFrom(manager, pool).releaseSession("s1");
-      if (failure === "success") expect(await result).toBe("returned-device");
-      else await expect(result).rejects.toBe(error);
+      if (failure === "success") {
+        expect(await result).toBe("returned-device");
+      } else {
+        await expect(result).rejects.toBe(error);
+      }
       expect(events).toEqual([
         ["session.releaseSession", "s1"],
         ...(failure === "session" ? [] : [["pool.releaseDevice", "returned-device", "s1"]]),
@@ -112,7 +122,9 @@ describe("daemon release pool consumers", () => {
         },
         releaseSession: async (...args) => {
           events.push(["session.releaseSession", ...args]);
-          if (failure === "session") throw error;
+          if (failure === "session") {
+            throw error;
+          }
           return "d1";
         },
       };
@@ -156,10 +168,7 @@ describe("daemon release pool consumers", () => {
   test("lazySessionReleasePool contract resolves a late instance and its patched method on every call", async () => {
     const events: unknown[][] = [];
     let instance!: SessionReleasePool;
-    // Phase 1 contract for daemon.ts's closures. Phase 2 replaces this with the helper.
-    const port: SessionReleasePool = {
-      releaseDevice: (deviceId, sessionId) => instance.releaseDevice(deviceId, sessionId),
-    };
+    const port = lazySessionReleasePool(() => instance);
     instance = {
       releaseDevice: async (...args) => {
         events.push(["initial", ...args]);

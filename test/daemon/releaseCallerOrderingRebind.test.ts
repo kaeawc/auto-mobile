@@ -65,7 +65,9 @@ describe("explicit rebind release caller ordering", () => {
       const oldDevice = pool.getDevice("old")!;
       const freed = spyOn(pool, "releaseDevice").mockImplementation(async (...args) => {
         events.push(["pool.releaseDevice", ...args]);
-        if (rejectPool) throw failure;
+        if (rejectPool) {
+          throw failure;
+        }
       });
       restores.push(() => freed.mockRestore());
       const binding = pool.bindOrReuseDeviceSession(
@@ -77,8 +79,11 @@ describe("explicit rebind release caller ordering", () => {
         undefined,
         true,
       );
-      if (rejectPool) await expect(binding).rejects.toBe(failure);
-      else expect(await binding).toBe("s1");
+      if (rejectPool) {
+        await expect(binding).rejects.toBe(failure);
+      } else {
+        expect(await binding).toBe("s1");
+      }
       expect(events).toEqual([
         [
           "session.rebindSession",
@@ -98,7 +103,9 @@ describe("explicit rebind release caller ordering", () => {
       expect(sessions.hasSession("s1")).toBe(true);
       expect(sessions.getSession("s1")?.assignedDevice).toBe("new");
     } finally {
-      for (const restore of restores.reverse()) restore();
+      for (const restore of restores.reverse()) {
+        restore();
+      }
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       timer.reset();

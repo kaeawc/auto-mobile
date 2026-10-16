@@ -1,5 +1,6 @@
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
+import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
 import { handleDaemonRequest, refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
@@ -937,8 +938,10 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
       const pool = daemonState.getDevicePool();
       const session = requireDaemonSession(sessionManager, sessionId);
       const deviceId = session.assignedDevice;
-      await sessionManager.releaseSession(sessionId);
-      await pool.releaseDevice(deviceId, sessionId);
+      // Preserve the CLI's ordering: a rejected session release never frees the device.
+      await releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, undefined, {
+        deferFailureFallback: true,
+      });
       printReleased(false, `Session ${sessionId} released`, deviceId);
       return;
     }

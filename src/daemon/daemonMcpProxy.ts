@@ -41,6 +41,10 @@ export {
   type BuildMismatchReason,
 } from "./proxy/daemonErrors";
 import {
+  HeldSessionHeartbeatOutcomes,
+  type HeldSessionHeartbeatOutcomesPort,
+} from "./proxy/HeldSessionHeartbeatOutcomes";
+import {
   HeldSessionLosses,
   type HeldSessionLossesPort,
   type PendingHeldSessionLoss,
@@ -692,6 +696,7 @@ export class DaemonMcpProxy {
   private releaseSurfacedFor: string | undefined;
   /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
   private readonly heldSessionLosses: HeldSessionLosses;
+  private readonly heartbeatOutcomes: HeldSessionHeartbeatOutcomes;
   private get pendingHeldSessionPlatformLosses(): Map<string, PendingHeldSessionLoss> {
     return this.heldSessionLosses.pending;
   }
@@ -974,6 +979,16 @@ export class DaemonMcpProxy {
     this.tickLateness = new TickLatenessClock(this.heartbeatIntervalMs);
     this.livenessRecovery = this.createLivenessRecovery();
     this.livenessOwnerToken = resolveLivenessOwnerToken(config);
+    this.heartbeatOutcomes = new HeldSessionHeartbeatOutcomes({
+      timer: this.timer,
+      otherHeldSessions: this.sessionState.otherHeldSessions,
+      notFoundWindows: this.sessionState.notFoundWindows,
+      livenessAcks: this.livenessAcks,
+      livenessConflictLogged: this.livenessConflictLogged,
+      livenessRecovery: this.livenessRecovery,
+      ownershipConflictLeashMs: this.ownershipConflictLeashMs,
+      port: this.createHeldSessionHeartbeatOutcomesPort(),
+    });
     this.heldSessionLosses = new HeldSessionLosses(
       this.sessionPlatforms,
       this.createHeldSessionLossesPort(),
@@ -5193,6 +5208,16 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createHeldSessionHeartbeatOutcomesPort(): HeldSessionHeartbeatOutcomesPort {
+    return {
+      isClosing: () => this.closing,
+      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      applyNotFoundOutcome: (...args) => this.applyNotFoundOutcome(...args),
+      recordHeldSessionTerminalLoss: (...args) => this.recordHeldSessionTerminalLoss(...args),
+      dropHeldSession: (...args) => this.dropHeldSession(...args),
+    };
+  }
+
   private createStallProbePort(): StallProbePort {
     return {
       isClosing: () => this.closing,
@@ -5290,10 +5315,10 @@ export class DaemonMcpProxy {
       askSessionHeartbeat: (...args) => this.askSessionHeartbeat(...args),
       recordHeldSessionHeartbeatSuccess: (...args) =>
         this.recordHeldSessionHeartbeatSuccess(...args),
-      noteLateHeartbeatAck: (...args) => this.noteLateHeartbeatAck(...args),
+      noteLateHeartbeatAck: (...args) => this.heartbeatOutcomes.noteLateHeartbeatAck(...args),
       handleHeldSessionHeartbeatError: (...args) => this.handleHeldSessionHeartbeatError(...args),
       isMissingHeartbeatAcknowledgement: (...args) =>
-        this.isMissingHeartbeatAcknowledgement(...args),
+        this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(...args),
       heldSessionUuids: (...args) => this.heldSessionUuids(...args),
       isClosing: () => this.closing,
     };
@@ -5490,7 +5515,7 @@ export class DaemonMcpProxy {
       });
       return outcome.kind === "awaited" ? "session-awaited" : "session-gone";
     }
-    if (!this.isMissingHeartbeatAcknowledgement(error)) {
+    if (!this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered: the session's next answer on this connection is not its first.
       this.answersOwnershipReestablishment(attemptedClient, sessionUuid);
     }
@@ -5498,7 +5523,7 @@ export class DaemonMcpProxy {
       // Another token took the session over while this proxy could not heartbeat it.
       return "superseded";
     }
-    if (!this.isMissingHeartbeatAcknowledgement(error)) {
+    if (!this.heartbeatOutcomes.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered with a conflict refusal: it is reachable, and the regular tick's
       // own conflict handling takes it from here.
       return "acknowledged";
@@ -5932,134 +5957,17 @@ export class DaemonMcpProxy {
     return this.proxyHeartbeatKeeper.heartbeatWithStallDetection(sessionUuid, send);
   }
 
-  /**
-   * Whether a failed heartbeat means the daemon never answered, as opposed to answering with a
-   * refusal (ownership, unknown session, fenced binding) that its own handler deals with.
-   */
-  private isMissingHeartbeatAcknowledgement(error: unknown): boolean {
-    if (
-      error instanceof DaemonBoundSessionExpiredError ||
-      error instanceof HeldSessionNotFoundError ||
-      this.isDaemonSessionNotFoundError(error)
-    ) {
-      return false;
-    }
-    if (isLivenessOwnerConflictError(error)) {
-      return false;
-    }
-    return !isLivenessOwnershipLostError(error);
-  }
-
-  /**
-   * A heartbeat the keeper had given up on was acknowledged after all (#10973). While the session
-   * is being recovered that acknowledgement is liveness evidence: the daemon renewed the lease, so
-   * recovery ends instead of handing the session over. Outside recovery it changes nothing.
-   */
-  private noteLateHeartbeatAck(sessionUuid: string): void {
-    if (this.livenessRecovery.isRecovering(sessionUuid)) {
-      this.livenessAcks.set(sessionUuid, this.timer.now());
-    }
-  }
-
+  // Kept as named methods: the liveness-clock guard follows the keeper's port to them.
   private recordHeldSessionHeartbeatSuccess(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
+    ...args: Parameters<HeldSessionHeartbeatOutcomes["recordHeldSessionHeartbeatSuccess"]>
   ): void {
-    const held = this.otherHeldSessions.get(sessionUuid);
-    if (held && claimLivenessOwnership) {
-      held.claimSent = true;
-    }
-    if (held) {
-      held.conflict = undefined;
-    }
-    this.notFoundWindows.delete(sessionUuid);
-    this.livenessAcks.set(sessionUuid, this.timer.now());
-    this.livenessConflictLogged.delete(sessionUuid);
+    this.heartbeatOutcomes.recordHeldSessionHeartbeatSuccess(...args);
   }
 
   private handleHeldSessionHeartbeatError(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
-    error: unknown,
+    ...args: Parameters<HeldSessionHeartbeatOutcomes["handleHeldSessionHeartbeatError"]>
   ): void {
-    if (this.closing) {
-      return;
-    }
-    if (isLivenessOwnershipLostError(error)) {
-      // Same informational outcome as the latest binding: no fencing or re-claim.
-      this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
-      return;
-    }
-    if (error instanceof HeldSessionNotFoundError) {
-      // The daemon does not know this session. Unless it is inside its window, drop it once;
-      // retrying every tick would only keep asking, and resetting the socket to ask again would
-      // hurt its siblings.
-      this.applyNotFoundOutcome(sessionUuid, error.outcome);
-      return;
-    }
-    if (isLivenessOwnerConflictError(error)) {
-      this.handleHeldSessionOwnerConflict(sessionUuid, reportedOwnerHold(error));
-      return;
-    }
-    if (error instanceof DaemonBoundSessionExpiredError) {
-      logger.warn(
-        `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating: ${error.message}`,
-        error,
-      );
-      this.recordHeldSessionTerminalLoss(sessionUuid, error.reason, error.release);
-      this.dropHeldSession(sessionUuid);
-      return;
-    }
-    logger.warn(
-      `[DaemonMcpProxy] Heartbeat for held session ${sessionUuid} failed: ${errorMessage(error)}`,
-      error,
-    );
-  }
-
-  /**
-   * The daemon refused this held session's claim because another token owns it
-   * with a live lease (#10050). The claim stays unsent so each tick retries it,
-   * which succeeds once that lease lapses. The other owner's session stays refused for
-   * its lease plus the suspect grace window (#10051), which the refusal reports, so it is only
-   * given up on once that owner keeps renewing past the handoff allowance (#10701): then this
-   * proxy cannot own the session and stops heartbeating that session alone; siblings are
-   * unaffected.
-   */
-  private handleHeldSessionOwnerConflict(
-    sessionUuid: string,
-    hold: ReportedOwnerHold | undefined,
-  ): void {
-    const held = this.otherHeldSessions.get(sessionUuid);
-    if (!held) {
-      return;
-    }
-    const { leash, exhausted } = advanceOwnerConflictLeash(
-      held.conflict,
-      this.timer.now(),
-      hold,
-      this.ownershipConflictLeashMs,
-    );
-    held.conflict = leash;
-    if (exhausted) {
-      logger.warn(
-        `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
-      );
-      this.livenessConflictLogged.delete(sessionUuid);
-      this.recordHeldSessionTerminalLoss(sessionUuid, "liveness-owner-conflict");
-      this.dropHeldSession(sessionUuid);
-      return;
-    }
-    this.noteLivenessOwnerConflict(sessionUuid);
-  }
-
-  private noteLivenessOwnerConflict(sessionUuid: string): void {
-    if (this.livenessConflictLogged.has(sessionUuid)) {
-      return;
-    }
-    this.livenessConflictLogged.add(sessionUuid);
-    logger.warn(
-      `[DaemonMcpProxy] Session ${sessionUuid} is owned by another live liveness owner; retrying the claim until its lease expires`,
-    );
+    this.heartbeatOutcomes.handleHeldSessionHeartbeatError(...args);
   }
 
   private clearNotFoundHistory(sessionUuid: string): void {
@@ -6451,7 +6359,7 @@ export class DaemonMcpProxy {
       // Another token owns this session with a live lease. Nothing was recorded
       // (no local acknowledgement either), the claim stays unsent so the next
       // tick retries it, and the keeper is not failed by the refusal.
-      this.noteLivenessOwnerConflict(sessionUuid);
+      this.heartbeatOutcomes.noteLivenessOwnerConflict(sessionUuid);
       this.leashLatestBindingConflict(sessionUuid, isCurrent, reportedOwnerHold(error));
       return true;
     }
@@ -6506,7 +6414,7 @@ export class DaemonMcpProxy {
       return;
     }
     if (!isCurrent()) {
-      this.noteLateHeartbeatAck(sessionUuid);
+      this.heartbeatOutcomes.noteLateHeartbeatAck(sessionUuid);
       return;
     }
     if (claimLivenessOwnership) {

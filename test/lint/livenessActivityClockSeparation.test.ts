@@ -97,6 +97,13 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "DaemonMcpProxy.heartbeatHeldSession",
   ],
   "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.heartbeatHeldSession"],
+  // The proxy's forwarders hand held-session heartbeat answers to this object, which the walker
+  // cannot follow through `this.heartbeatOutcomes`, so its entry points are roots themselves.
+  "src/daemon/proxy/HeldSessionHeartbeatOutcomes.ts": [
+    "HeldSessionHeartbeatOutcomes.recordHeldSessionHeartbeatSuccess",
+    "HeldSessionHeartbeatOutcomes.handleHeldSessionHeartbeatError",
+    "HeldSessionHeartbeatOutcomes.noteLateHeartbeatAck",
+  ],
 };
 
 /**

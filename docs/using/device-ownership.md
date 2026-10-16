@@ -949,7 +949,7 @@ failed `ps` read no longer lowers the iOS limit: the limit still derives from ho
 RAM and cores (#11396). A boot that would go over the limit is not queued: it fails at once
 with the retryable code `capacity_exhausted`, which carries `retryAfterMs`,
 `limit`, `booted`, `platform` and, when emulators AutoMobile did not start occupy
-slots, `externalDevices` (the message names them and the
+boot capacity, `externalDevices` (the message names them and the
 `AUTOMOBILE_<PLATFORM>_MAX_BOOTED` / `AUTOMOBILE_BOOT_CAPACITY_GATE=0` escape
 hatches). Adopting an emulator or simulator that is already running never fails
 this way. `listDevices` reports `capacity` per gated platform as

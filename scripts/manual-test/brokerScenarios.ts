@@ -38,6 +38,8 @@ export interface BrokerScenarioFakeControls {
   tool(name: string, sessionUuid?: string): Promise<void>;
   rebind(sessionUuid: string, requestId: string, token: string): Promise<unknown>;
   tools(result: SessionBrokerResult): Promise<readonly string[]>;
+  /** Models the restart-handoff verdict the daemon reports for every active session. */
+  setSessionDisposition(value: "live" | "recoverable-handoff" | "gone"): void;
   recover(): Promise<void>;
   cleanup(): Promise<void>;
 }
@@ -353,6 +355,68 @@ async function pidReuse(ctx: BrokerScenarioContext) {
   const positive = { ...c, config };
   await release(ctx, positive, await prepare(ctx, positive));
 }
+async function parallelAcquire(ctx: BrokerScenarioContext) {
+  const control = fake(ctx);
+  const active = ctx.clients.slice(0, ctx.clients.length - 1);
+  const results = await Promise.all(active.map((c) => prepare(ctx, c)));
+  const sessions = results.map(session);
+  assert.equal(new Set(sessions).size, active.length, "Sessions must be distinct.");
+  const devices = ctx.ledger.devices().map((row) => row.device?.deviceId);
+  assert.equal(new Set(devices).size, active.length, "No native device may be shared.");
+  assert.equal(control.prepared().length, active.length);
+  for (const sessionUuid of sessions) {
+    await ctx.record("tool-observe", { sessionUuid }, () => control.tool("observe", sessionUuid));
+  }
+  assert.equal((await control.inventory()).devices.length, active.length);
+  // The spare client is over capacity until one holder releases.
+  const spare = client(ctx, active.length);
+  const refused = await prepare(ctx, spare);
+  assert.equal(refused.failure?.code, "capacity_exhausted");
+  await release(ctx, active[0], results[0]);
+  const retry = fresh(ctx, spare);
+  const successor = await prepare(ctx, retry);
+  assert.notEqual(session(successor), sessions[0]);
+  await release(ctx, retry, successor);
+  for (const [index, result] of results.entries()) {
+    if (index > 0) {
+      await release(ctx, active[index], result);
+    }
+  }
+}
+async function restartHandoff(ctx: BrokerScenarioContext) {
+  const control = fake(ctx);
+  const a = client(ctx);
+  const b = client(ctx, 1);
+  const ga = await prepare(ctx, a);
+  const gb = await prepare(ctx, b);
+  const before = (await control.inventory()).devices;
+  // Daemon restart window: sessions are absent from memory but recoverable.
+  for (const mode of ["recoverable-handoff", "live"] as const) {
+    control.setSessionDisposition(mode);
+    await ctx.record("recover", { mode }, () => control.recover());
+    assert.deepEqual((await control.inventory()).devices, before, "Handoff must not destroy.");
+    for (const grant of [ga, gb]) {
+      await control.tool("observe", session(grant));
+      assert.equal((await status(ctx, grant === ga ? a : b))?.outcome, "ready");
+    }
+  }
+  assert.equal(control.prepared().length, 2);
+  // The handoff window expires: recovery releases both sessions and capacity frees.
+  control.setSessionDisposition("gone");
+  await ctx.record("recover", { mode: "gone" }, () => control.recover());
+  for (const [c, grant] of [
+    [a, ga],
+    [b, gb],
+  ] as const) {
+    assert.equal((await status(ctx, c))?.cleanupPending, false);
+    await recordAbsence(ctx, session(grant));
+    await assert.rejects(control.tool("observe", session(grant)), /requires a live session/);
+  }
+  assert.equal((await control.inventory()).devices.length, 0);
+  control.setSessionDisposition("live");
+  const next = fresh(ctx, a);
+  await release(ctx, next, await prepare(ctx, next));
+}
 export const brokerScenarios: readonly BrokerScenario[] = [
   {
     name: "capacity-refusal-and-replay",
@@ -387,6 +451,20 @@ export const brokerScenarios: readonly BrokerScenario[] = [
     capacity: 2,
     deviceOnlyAssertions: ["Cross-client device tool call through a bound wire connection"],
     run: isolation,
+  },
+  {
+    name: "parallel-acquire",
+    class: "fake",
+    capacity: 3,
+    deviceOnlyAssertions: ["Distinct native devices per profile across platforms"],
+    run: parallelAcquire,
+  },
+  {
+    name: "#12451-restart-handoff",
+    class: "fake",
+    capacity: 2,
+    deviceOnlyAssertions: ["Real daemon stop/start with reconnecting keepers"],
+    run: restartHandoff,
   },
   {
     name: "#12452-retryable-prep-failure",

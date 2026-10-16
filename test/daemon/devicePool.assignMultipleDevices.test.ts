@@ -1,3 +1,4 @@
+import { EmulatorProcessLifecycle } from "../../src/daemon/emulatorProcessLifecycle";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -639,23 +640,21 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
+      let processLifecycle: EmulatorProcessLifecycle | undefined;
       devicePool = makePool({
         deviceManager: manager,
         recoveryPolicy: { onLoss: true, maxAttempts: 1 },
         emulatorLossIncidentStore: incidents,
+        emulatorProcessLifecycleFactory: (port) => {
+          processLifecycle = new EmulatorProcessLifecycle(port);
+          return processLifecycle;
+        },
       });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
       const incidentResolutionStarted = Promise.withResolvers<void>();
       const releaseIncidentResolution = Promise.withResolvers<void>();
-      const internals = devicePool as unknown as {
-        evictStartedDeviceAfterProcessExit(
-          deviceId: string,
-          code: number | null,
-          signal: NodeJS.Signals | null,
-        ): Promise<void>;
-      };
       const livenessInternals = (
         devicePool as unknown as {
           missingDeviceLiveness: {
@@ -669,7 +668,11 @@ describe("DevicePool", () => {
         return args[2] as string | undefined;
       };
 
-      const eviction = internals.evictStartedDeviceAfterProcessExit("emulator-5554", 1, null);
+      const eviction = processLifecycle!.evictStartedDeviceAfterProcessExit(
+        "emulator-5554",
+        1,
+        null,
+      );
       await incidentResolutionStarted.promise;
 
       expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);

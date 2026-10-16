@@ -338,8 +338,12 @@ struct NodeView: View {
         case "button":
             buttonView
         case "scroll":
-            ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
-                if let child = node.child { NodeView(node: child, model: model) }
+            if node.axis != "horizontal", let refresh = node.refresh {
+                PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
+            } else {
+                ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
+                    if let child = node.child { NodeView(node: child, model: model) }
+                }
             }
         case "stack":
             if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
@@ -1385,5 +1389,39 @@ private struct PrototypeCarouselView: View {
         }
         .scrollTargetBehavior(.viewAligned)
         .scrollIndicators(.hidden)
+    }
+}
+
+/// A vertical scroll with `refresh`: the system refresh control runs the pull actions and stays up
+/// until the prototype writes false to the bound key. A key written true without a pull (an agent
+/// patch) shows a plain spinner instead, since SwiftUI cannot start `refreshable` programmatically.
+private struct PrototypeRefreshableScroll: View {
+    let node: PrototypeNode
+    let refresh: PrototypeScrollRefresh
+    let model: PrototypeModel
+    @State private var pulling = false
+
+    private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            if let child = node.child { NodeView(node: child, model: model) }
+        }
+        .refreshable {
+            guard !refreshing else { return }
+            pulling = true
+            model.run(PrototypeRefresh.actions(for: refresh))
+            await PrototypeRefresh.awaitCompletion(
+                isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                isCancelled: { Task.isCancelled },
+                sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+            )
+            pulling = false
+        }
+        .overlay(alignment: .top) {
+            if refreshing, !pulling {
+                ProgressView().padding(.top, 8)
+            }
+        }
     }
 }

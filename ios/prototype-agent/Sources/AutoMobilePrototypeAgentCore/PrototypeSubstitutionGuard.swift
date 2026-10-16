@@ -149,6 +149,10 @@ private struct PrototypeSubstitutionGuard {
         if case let .object(part)? = fields["openWhen"] {
             try field(part, "key", path: "\(path).openWhen", scope: scope)
         }
+        if case let .object(refresh)? = fields["refresh"] {
+            try field(refresh, "stateKey", path: "\(path).refresh", scope: scope)
+            try actions(refresh, path: "\(path).refresh", scope: scope, list: "onRefresh")
+        }
     }
 
     private mutating func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
@@ -189,13 +193,18 @@ private struct PrototypeSubstitutionGuard {
         try actions(fields, path: path, scope: scope)
     }
 
-    /// Every action list a node runs: a tap, a long press or a double tap binds the same way.
-    private mutating func actions(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
-        for list in ["onTap", "onLongPress", "onDoubleTap"] {
-            guard case let .array(entries)? = fields[list] else { continue }
+    /// Every action list a node runs: a tap, a long press or a double tap binds the same way. A
+    /// caller may name one list instead (`refresh.onRefresh`).
+    private mutating func actions(
+        _ fields: [String: JSONValue], path: String, scope: Scope?, list: String? = nil
+    )
+        throws
+    {
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap"] {
+            guard case let .array(entries)? = fields[name] else { continue }
             for (index, entry) in entries.enumerated() {
                 guard case let .object(action) = entry else { continue }
-                try actionFields(action, path: "\(path).\(list)[\(index)]", scope: scope)
+                try actionFields(action, path: "\(path).\(name)[\(index)]", scope: scope)
             }
         }
     }

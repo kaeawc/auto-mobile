@@ -16,6 +16,7 @@ import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { brokerConnectionControlRefusal } from "../../src/daemon/sessionBroker/connectionScope";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import { handleReleaseBrokerSession } from "../../src/daemon/sessionBroker/handlers";
+import { SESSION_OWNER_EXITED_CODE } from "../../src/devices/sessionBrokerResult";
 import { createFakeBrokerDaemon } from "../helpers/fakeBrokerDaemon";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { useScratchRoot } from "../helpers/scratchRoot";
@@ -101,13 +102,22 @@ function refusalFor(host: Host, grant: Grant, target: { deviceId?: string; sessi
   });
 }
 
-function release(host: Host, client: Client, sessionUuid: string) {
+function release(
+  host: Host,
+  client: Client,
+  sessionUuid: string,
+  reason?: typeof SESSION_OWNER_EXITED_CODE,
+) {
   return handleReleaseBrokerSession(
     {
       id: `release-${sessionUuid}`,
       type: "daemon_request",
       method: "daemon/releaseBrokerSession",
-      params: { sessionId: sessionUuid, livenessOwnerToken: client.token },
+      params: {
+        sessionId: sessionUuid,
+        livenessOwnerToken: client.token,
+        ...(reason ? { reason } : {}),
+      },
     },
     host.state,
   );
@@ -203,6 +213,68 @@ describe("session broker with several MCP clients", () => {
     expect((await host.controls.inventory()).devices.map((device) => device.deviceId)).toEqual([
       deviceOf(host, b2.sessionUuid),
     ]);
+  });
+
+  test("an execution owner's death ends its grant as session_owner_exited; an explicit release stays released (#12791)", async () => {
+    const host = await open({ capacity: 2, liveDisposition: true });
+    const a = await acquire(host, A, 1);
+    const b = await acquire(host, B, 1);
+    for (const [client, grant] of [
+      [A, a],
+      [B, b],
+    ] as const) {
+      expect((await connect(host, client, grant))?.success).not.toBe(false);
+    }
+    const deviceB = deviceOf(host, b.sessionUuid);
+
+    // The proxy's owner watch reports the death on its bounded release. The daemon answers once
+    // the terminal receipt is committed, not after the (slow) native drain and destruction.
+    const drain = Promise.withResolvers<void>();
+    host.devices.releaseHook = () => drain.promise;
+    const ownerExit = await release(host, A, a.sessionUuid, SESSION_OWNER_EXITED_CODE);
+    expect(ownerExit).toEqual({
+      success: true,
+      result: { sessionUuid: a.sessionUuid, outcome: "cleanup_pending" },
+    });
+    expect(await host.client.status(a.config.requestId, A.token)).toMatchObject({
+      outcome: "failed",
+      sessionUuid: a.sessionUuid,
+      cleanupPending: true,
+      failure: { code: SESSION_OWNER_EXITED_CODE, retryable: false },
+    });
+    expect(await host.broker.hasActiveSession(a.sessionUuid)).toBe(false);
+
+    host.devices.releaseHook = undefined;
+    drain.resolve();
+    await host.broker.joinReleases();
+    const receiptA = await host.client.status(a.config.requestId, A.token);
+    expect(receiptA).toMatchObject({
+      outcome: "failed",
+      requestId: a.config.requestId,
+      sessionUuid: a.sessionUuid,
+      cleanupPending: false,
+      failure: { code: SESSION_OWNER_EXITED_CODE },
+    });
+    // The device is destroyed, the sibling's grant is untouched, and replay is the terminal receipt.
+    expect((await host.controls.inventory()).devices.map((device) => device.deviceId)).toEqual([
+      deviceB,
+    ]);
+    expect(await host.prepare(a.config, A.token)).toEqual(receiptA!);
+    expect(await release(host, A, a.sessionUuid, SESSION_OWNER_EXITED_CODE)).toEqual({
+      success: true,
+      result: { sessionUuid: a.sessionUuid, outcome: "released" },
+    });
+    expect(await host.client.status(a.config.requestId, A.token)).toEqual(receiptA);
+
+    // The client's own release is not an owner death.
+    expect(await release(host, B, b.sessionUuid)).toEqual({
+      success: true,
+      result: { sessionUuid: b.sessionUuid, outcome: "released" },
+    });
+    const receiptB = await host.client.status(b.config.requestId, B.token);
+    expect(receiptB).toMatchObject({ outcome: "released", cleanupPending: false });
+    expect(receiptB?.failure).toBeUndefined();
+    expect((await host.controls.inventory()).devices).toEqual([]);
   });
 
   describe("daemon restart", () => {

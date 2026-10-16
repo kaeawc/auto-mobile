@@ -27,6 +27,11 @@ const fixtures: Record<string, Node> = {
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
   prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
+  prototype_refresh_v1: {
+    type: "scroll",
+    refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  },
   prototype_search_bar_v1: {
     type: "searchBar",
     stateKey: "query",

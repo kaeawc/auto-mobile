@@ -147,6 +147,28 @@ describe("session broker proxy lifecycle", () => {
     ).toBe(false);
   });
 
+  test("an execution-owner-loss close reports session_owner_exited on the broker release (#12791)", async () => {
+    const { proxy, clients } = setup((method) =>
+      method === DAEMON_RELEASE_BROKER_SESSION_METHOD
+        ? { sessionUuid: SESSION, outcome: "cleanup_pending" }
+        : undefined,
+    );
+    expect(await proxy.acquireBrokerSession(config)).toEqual(ready);
+
+    await proxy.close({ executionOwnerLost: true });
+
+    expect(
+      clients
+        .flatMap((client) => client.callDaemonMethodCalls)
+        .filter(({ method }) => method === DAEMON_RELEASE_BROKER_SESSION_METHOD),
+    ).toEqual([
+      {
+        method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
+        params: { sessionId: SESSION, livenessOwnerToken: TOKEN, reason: "session_owner_exited" },
+      },
+    ]);
+  });
+
   test("reconnect registers the exact durable receipt without private allocation keys", async () => {
     const { proxy, clients } = setup();
     await proxy.acquireBrokerSession(config);

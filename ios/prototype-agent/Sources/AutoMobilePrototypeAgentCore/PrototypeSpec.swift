@@ -126,6 +126,7 @@ struct PrototypeSpec: Decodable {
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
         try PrototypeCarousel.validate(expanded)
+        try PrototypeRefresh.validate(expanded)
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
@@ -650,6 +651,8 @@ final class PrototypeNode: Decodable {
     let pager: String?
     let scrollable: Bool?
     let openWhen: Condition?
+    /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
+    let refresh: PrototypeScrollRefresh?
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
@@ -708,6 +711,7 @@ final class PrototypeNode: Decodable {
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing
+        case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText,
@@ -749,6 +753,7 @@ final class PrototypeNode: Decodable {
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
+        refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)
         scrim = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .scrim)
         dragHandle = try container.decodeIfPresent(Bool.self, forKey: .dragHandle)

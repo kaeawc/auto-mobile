@@ -1688,6 +1688,23 @@ Android maps `multiBrowse`, `hero` and `uncontained` to `HorizontalMultiBrowseCa
 `maskClip` and only the visible items are composed, so off-screen items are absent from `observe`
 until scrolled in. A repeat that expands to no items draws nothing.
 
+## Pull-to-refresh (`scroll.refresh`, not device-verified)
+
+A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions in `onRefresh`, the
+same union as `onTap`). `stateKey` names a boolean state key that shows the refresh indicator
+while it is true; it must be boolean if declared, and a horizontal scroll with `refresh` is
+rejected at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
+runs `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with a
+`baseRevision`, writes false to end it. A pull while the key is already true is ignored. Repeat
+and component placeholders bind in the key and the actions like `onTap`. The capability is
+`prototype_refresh_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it.
+
+Android draws it with Material `PullToRefreshBox` around the scroll; the authored `testTag` and
+size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays open until the key
+is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
+top because SwiftUI cannot start `refreshable` programmatically.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

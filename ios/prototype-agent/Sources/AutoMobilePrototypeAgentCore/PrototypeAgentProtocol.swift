@@ -35,6 +35,7 @@ enum PrototypeAgentProtocol {
         textFieldOptionsCapability,
         gesturesCapability,
         carouselCapability,
+        refreshCapability,
         searchBarCapability,
         richTextCapability,
         menusCapability,
@@ -99,6 +100,8 @@ enum PrototypeAgentProtocol {
     static let gesturesCapability = "prototype_gestures_v1"
     /// The `carousel` node and the pager `indicator` option (#12071).
     static let carouselCapability = "prototype_carousel_v1"
+    /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
+    static let refreshCapability = "prototype_refresh_v1"
     /// Drawn search field with authored expansion, submit actions and in-window results (#12069).
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.

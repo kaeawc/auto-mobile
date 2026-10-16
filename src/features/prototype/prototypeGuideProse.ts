@@ -12,6 +12,16 @@ Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\
 by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is
 the system's. The host refuses unsupported agents before sending a show.
+
+### Pull-to-refresh
+
+A vertical \`scroll\` may declare \`refresh: {stateKey, onRefresh}\` (needs
+\`prototype_refresh_v1\`). \`stateKey\` names a boolean state key: the platform's refresh indicator
+shows while it is true. A pull sets the key to true and runs \`onRefresh\` like a tap; the prototype
+(an \`onRefresh\` \`setState\`, or the agent through \`patch\` on \`/state/<key>\` with a
+\`baseRevision\`) sets it back to false to hide the indicator. Declare the key in \`state\` as a
+boolean; a horizontal scroll with \`refresh\` is rejected. The pull is a swipe down from the top of
+the scroll (\`swipeOn\` with the prototype layer) and \`observe\` reports the scroll as usual.
 `;
 
 /**

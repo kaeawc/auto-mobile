@@ -8,10 +8,13 @@ import {
 } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
-import type {
-  SessionBrokerFailure,
-  SessionBrokerReleaseResult,
-  SessionBrokerResult,
+import {
+  SESSION_OWNER_EXITED_CODE,
+  SESSION_OWNER_EXITED_MESSAGE,
+  type SessionBrokerFailure,
+  type SessionBrokerReleaseReason,
+  type SessionBrokerReleaseResult,
+  type SessionBrokerResult,
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -410,12 +413,30 @@ export class SessionBroker {
     );
   }
 
-  release(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
+  /**
+   * Ends a session. An ordinary release answers once cleanup settles and records `released`. An
+   * owner-exit release (#12791) is not the client's release: it terminally records
+   * `session_owner_exited` and answers as soon as that receipt is committed, while the session
+   * drain and device destruction continue as tracked release work ({@link joinReleases}).
+   */
+  release(
+    sessionUuid: string,
+    reason?: SessionBrokerReleaseReason,
+  ): Promise<SessionBrokerReleaseResult> {
     const previous = this.releases.get(sessionUuid);
     if (previous) {
       return previous;
     }
-    const pending = this.releaseOnce(sessionUuid);
+    if (reason === SESSION_OWNER_EXITED_CODE) {
+      return this.releaseAfterOwnerExit(sessionUuid);
+    }
+    return this.trackRelease(sessionUuid, this.releaseOnce(sessionUuid));
+  }
+
+  private trackRelease(
+    sessionUuid: string,
+    pending: Promise<SessionBrokerReleaseResult>,
+  ): Promise<SessionBrokerReleaseResult> {
     this.releases.set(sessionUuid, pending);
     // Both handlers terminate; callers still observe the original result/rejection.
     void pending.then(
@@ -423,6 +444,67 @@ export class SessionBroker {
       () => this.releases.delete(sessionUuid),
     );
     return pending;
+  }
+
+  private releaseAfterOwnerExit(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
+    const committed = this.commitOwnerExit(sessionUuid);
+    // Registered synchronously, so a concurrent release joins this cleanup instead of racing it.
+    // trackRelease settles its own rejection; the caller observes the committed answer below.
+    void this.trackRelease(
+      sessionUuid,
+      committed.then((exit) =>
+        exit
+          ? this.finishOwnerExit(sessionUuid, exit)
+          : { sessionUuid, outcome: "unknown_session" },
+      ),
+    );
+    return committed.then(async (exit) =>
+      exit
+        ? this.releaseStatus(exit.request, sessionUuid)
+        : { sessionUuid, outcome: "unknown_session" },
+    );
+  }
+
+  /** Terminal first: the receipt says the owner died even if the native drain never settles. */
+  private async commitOwnerExit(
+    sessionUuid: string,
+  ): Promise<{ request: BrokerRequestRecord; ticket?: DestructionTicket } | undefined> {
+    const request = await this.options.store.getSession(sessionUuid);
+    if (!request) {
+      return undefined;
+    }
+    const ticket = await this.options.store.fail(
+      request.requestId,
+      this.options.owner,
+      SESSION_OWNER_EXITED_MESSAGE,
+      SESSION_OWNER_EXITED_CODE,
+    );
+    logger.info(
+      `Session ${sessionUuid} lost its execution owner; request ${request.requestId} is ` +
+        `terminal (${SESSION_OWNER_EXITED_CODE})`,
+    );
+    return {
+      request: (await this.options.store.getRequest(request.requestId)) ?? request,
+      ...(ticket ? { ticket } : {}),
+    };
+  }
+
+  private async finishOwnerExit(
+    sessionUuid: string,
+    exit: { request: BrokerRequestRecord; ticket?: DestructionTicket },
+  ): Promise<SessionBrokerReleaseResult> {
+    try {
+      await this.options.devices.release(sessionUuid);
+    } catch (error) {
+      // The destroying resource and native journal keep ownership; recovery retries cleanup.
+      logger.warn(
+        `Session ${sessionUuid} drain after owner exit remains pending: ${errorMessage(error)}`,
+      );
+    }
+    if (exit.ticket) {
+      await this.tryCleanup(exit.ticket);
+    }
+    return this.releaseStatus(exit.request, sessionUuid);
   }
 
   /** Daemon shutdown joins callers; unfinished native work retains journal ownership. */

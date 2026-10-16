@@ -149,6 +149,7 @@ export interface SwipeOnArgs {
   apexPause?: number;
   returnSpeed?: number;
   speed?: "slow" | "normal" | "fast";
+  durationMs?: number;
   layer?: HierarchyLayer;
   platform?: Platform;
 }

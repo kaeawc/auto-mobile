@@ -1157,8 +1157,17 @@ data class PrototypeScrollNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val axis: String = "vertical",
+  val refresh: PrototypeScrollRefresh? = null,
   val child: PrototypeNode,
 ) : PrototypeNode()
+
+/**
+ * Pull-to-refresh on a vertical [PrototypeScrollNode]: the indicator shows while the boolean state
+ * [stateKey] is true. A pull writes true to it and runs [onRefresh]; the prototype or a patch
+ * writes false to end it.
+ */
+@Serializable
+data class PrototypeScrollRefresh(val stateKey: String, val onRefresh: List<PrototypeAction>)
 
 @SerialName("pager")
 @Serializable

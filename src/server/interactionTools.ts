@@ -38,6 +38,8 @@ import {
   SWIPE_RETURN_DURATION_MAX_MS,
   SWIPE_BOOMERANG_MAX_MS,
   validateSwipeTimingOptions,
+  SWIPE_DURATION_MIN_MS,
+  SWIPE_DURATION_MAX_MS,
   SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
 } from "../features/action/swipeon/swipeTiming";
 import { SwipeOn } from "../features/action/swipeon";
@@ -860,6 +862,13 @@ export const dragAndDropSchema = withJsonSchemaOverride(
   (js) => compactExclusiveSelectorProperties(js, ["source", "target"]),
 );
 
+function swipeTimingErrorPath(error: string): string {
+  if (error.startsWith("durationMs")) {
+    return "durationMs";
+  }
+  return error.startsWith("apexPause") ? "apexPause" : "returnSpeed";
+}
+
 export const swipeOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
@@ -914,6 +923,15 @@ export const swipeOnSchema = withJsonSchemaOverride(
             `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
           ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        durationMs: z
+          .number()
+          .int()
+          .min(SWIPE_DURATION_MIN_MS)
+          .max(SWIPE_DURATION_MAX_MS)
+          .optional()
+          .describe(
+            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.`,
+          ),
         layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -928,7 +946,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
       context.addIssue({
         code: "custom",
         message: error,
-        path: [error.startsWith("apexPause") ? "apexPause" : "returnSpeed"],
+        path: [swipeTimingErrorPath(error)],
       });
     }
   }),
@@ -1700,6 +1718,7 @@ export async function swipeOnHandler(
       direction: resolvedDirection.direction!,
       lookFor: args.lookFor,
       speed: args.speed,
+      durationMs: args.durationMs,
       includeSystemInsets:
         args.display === undefined ? (args.includeSystemInsets ?? false) : args.includeSystemInsets,
       boomerang: args.boomerang,

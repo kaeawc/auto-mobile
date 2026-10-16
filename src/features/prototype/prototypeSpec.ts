@@ -877,11 +877,15 @@ const datePickerBaseSchema = z
     stateKey: stateKeyFieldSchema,
   })
   .strict();
+const scrollRefreshSchema = z
+  .object({ stateKey: stateKeySchema, onRefresh: z.array(actionSchema).min(1).max(32) })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
+    refresh: scrollRefreshSchema.optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.

@@ -17,6 +17,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
@@ -29,11 +30,19 @@ export class Shake extends BaseVisualChange {
     this.shakeTimer = timer;
   }
 
+  async execute(options?: ShakeOptions, call?: ActionCall): Promise<ShakeResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
-    options: ShakeOptions = {},
+    options?: ShakeOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+  ): Promise<ShakeResult>;
+  async execute(
+    options: ShakeOptions = {},
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
   ): Promise<ShakeResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("shake");

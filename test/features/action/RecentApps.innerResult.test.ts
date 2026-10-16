@@ -316,7 +316,7 @@ describe("RecentApps inner result", () => {
   test("pre-aborted execute rejects without ADB commands", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
+    await expect(recentApps.execute({ signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input "))).toEqual([]);
@@ -325,7 +325,7 @@ describe("RecentApps inner result", () => {
   test("abort during the key event command rejects", async () => {
     const controller = new AbortController();
     adb.abortAfterCommand("shell input keyevent 187", controller);
-    await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
+    await expect(recentApps.execute({ signal: controller.signal })).rejects.toThrow(
       "Operation cancelled",
     );
     expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");

@@ -113,7 +113,7 @@ describe("RecentApps", () => {
       const progressCallback = () => {
         callbackCalled = true;
       };
-      const result = await recentApps.execute(progressCallback);
+      const result = await recentApps.execute({ progress: progressCallback });
 
       expect(result.success).toBe(true);
       expect(callbackCalled).toBe(true);

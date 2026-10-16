@@ -58,7 +58,7 @@ test("recentApps execute preserves indeterminate cancellation before post-action
   recentApps.observeScreen = observe;
   recentApps.window = new FakeWindow();
   try {
-    const outcome = recentApps.execute(undefined, controller.signal).then(
+    const outcome = recentApps.execute({ signal: controller.signal }).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );

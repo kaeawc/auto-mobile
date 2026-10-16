@@ -63,7 +63,7 @@ export class AppLifecycle {
     this.timer = dependencies.timer ?? defaultTimer;
     this.home = dependencies.home ?? {
       execute: async (signal) => {
-        await new HomeScreen(device, null, this.timer).execute(undefined, signal);
+        await new HomeScreen(device, null, this.timer).execute({ signal });
       },
     };
     this.cacheInvalidator =

@@ -29,6 +29,7 @@ import {
   readNaturalLandscape,
   rotationForOrientation,
 } from "./OrientationReader";
+import { resolveRotateCall, type RotateCall } from "./ActionCall";
 
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
@@ -1310,13 +1311,28 @@ export class Rotate extends BaseVisualChange {
     await awaitWhileRequestIsLive(write, signal);
   }
 
+  async execute(orientation: "portrait" | "landscape", call?: RotateCall): Promise<RotateResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     orientation: "portrait" | "landscape",
     progress?: ProgressCallback,
     lockOrientation?: boolean,
     signal?: AbortSignal,
-    display = 0,
+    display?: number,
+  ): Promise<RotateResult>;
+  async execute(
+    orientation: "portrait" | "landscape",
+    progressOrCall?: ProgressCallback | RotateCall,
+    lockOrientationArg?: boolean,
+    signalArg?: AbortSignal,
+    displayArg?: number,
   ): Promise<RotateResult> {
+    const {
+      progress,
+      lockOrientation,
+      signal,
+      display = 0,
+    } = resolveRotateCall(progressOrCall, lockOrientationArg, signalArg, displayArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("rotate");

@@ -165,7 +165,7 @@ describe("Rotate device_state_rotation_lock handling without a session", () => {
     adb.auto = 0;
     adb.lock = LOCKED_STATE_1;
     const rotate = harness(adb);
-    const result = await rotate.execute("landscape", undefined, false);
+    const result = await rotate.execute("landscape", { lockOrientation: false });
     expect(adb.auto).toBe(1);
     expect(adb.lock).toBe(BASELINE);
     expect(lockCommands(adb)).toEqual([

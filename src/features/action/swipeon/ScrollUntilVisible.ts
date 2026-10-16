@@ -40,7 +40,7 @@ import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry"
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { Timer } from "../../../utils/SystemTimer";
 import {
@@ -94,7 +94,7 @@ interface ScrollUntilVisibleDependencies {
   accessibilityService: ScrollAccessibilityService;
   accessibilityDetector: AccessibilityDetector;
   adb: AdbExecutor;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
   voiceOverExecutor?: VoiceOverSwipeRunner;

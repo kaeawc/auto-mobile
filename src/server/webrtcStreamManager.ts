@@ -32,6 +32,7 @@ import {
   type WebRtcCaptureSourceState,
   type WebRtcPublisherConfig,
   type WebRtcPublisherDeps,
+  type WebRtcStreamPublisher,
   type WebRtcPublisherLifecycleEvent,
   type WebRtcStreamDescriptor,
   type WebRtcStreamingOverrides,
@@ -93,7 +94,7 @@ interface WebRtcStreamRecord {
   config: ReturnType<typeof resolveWebRtcStreamingConfig>;
   streamId: string;
   device: BootedDevice;
-  publisher: WebRtcPublisher;
+  publisher: WebRtcStreamPublisher;
   source: H264CaptureSource | null;
   /** Persistent-encoder jar resolved once at stream start; null → screenrecord. */
   jarPath: string | null;
@@ -134,7 +135,10 @@ interface WebRtcStreamRecord {
 export interface WebRtcStreamManagerDependencies {
   captureRegistry?: DeviceCaptureRegistry;
   idGenerator: IdGenerator;
-  createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
+  createPublisher: (
+    config: WebRtcPublisherConfig,
+    deps: WebRtcPublisherDeps,
+  ) => WebRtcStreamPublisher;
   createSource: (options: H264CaptureSourceOptions, jarPath: string | null) => H264CaptureSource;
   /**
    * Resolve the Android persistent-encoder jar once, off the frame path. Returns
@@ -718,7 +722,7 @@ function createStreamRecord(
   bitrateBps: number | undefined,
   requestReceived: string,
 ): WebRtcStreamRecord {
-  const publisherRef: { current?: WebRtcPublisher } = {};
+  const publisherRef: { current?: WebRtcStreamPublisher } = {};
   let publisherStarted = false;
   const publisher = dependencies.createPublisher(
     {

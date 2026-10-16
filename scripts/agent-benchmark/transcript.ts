@@ -177,7 +177,11 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     if (block.type !== "tool_use") {
       continue;
     }
-    const name = asString(block.name) ?? "unknown";
+    const name = asString(block.name)?.trim() || "unknown";
+    if (name === "unknown") {
+      // A nameless call would hide which tool ran from the counts and sequence.
+      state.audit.parseErrors.push(`line ${line}: tool_use without a name`);
+    }
     const id = asString(block.id)?.trim();
     if (!id) {
       // A missing or blank id would let a result with a blank tool_use_id complete it.
@@ -289,6 +293,13 @@ function handleResult(event: JsonRecord, state: AuditState): void {
 }
 
 function handleEvent(event: JsonRecord, line: number, state: AuditState): void {
+  const activity = event.type === "assistant" || event.type === "user" || event.type === "result";
+  if (activity && state.audit.mcpServerStatus === undefined) {
+    // Activity before system/init would set the model and calls before the run's real
+    // initialization, which could then no longer correct them.
+    state.audit.parseErrors.push(`line ${line}: ${String(event.type)} event before system/init`);
+    return;
+  }
   switch (event.type) {
     case "system":
       if (event.subtype === "init") {

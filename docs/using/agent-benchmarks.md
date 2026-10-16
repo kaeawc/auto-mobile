@@ -80,8 +80,10 @@ they can still affect results:
   and compaction, Bash and MCP limits and timeouts, retries, tool search, and extra `CLAUDE.md`
   directories (for example `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL`,
   `CLAUDE_CODE_MAX_TURNS`, `MCP_TOOL_TIMEOUT`), plus the prompt-caching switches
-  (`DISABLE_PROMPT_CACHING*`, `ENABLE_PROMPT_CACHING*`, `FORCE_PROMPT_CACHING*`). The full list is
-  `RUN_SHAPING_CLAUDE_VARIABLES` in `scripts/agent-benchmark/invocation.ts`. Auth, provider,
+  (`DISABLE_PROMPT_CACHING*`, `ENABLE_PROMPT_CACHING*`, `FORCE_PROMPT_CACHING*`) and every
+  `CLAUDE_*`, `API_*`, `MCP_*`, or `BASH_*` timeout or watchdog override (`API_TIMEOUT_MS`,
+  `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`, ...). The full list is `RUN_SHAPING_CLAUDE_VARIABLES` and
+  `isRunShapingClaudeVariable` in `scripts/agent-benchmark/invocation.ts`. Auth, provider,
   and proxy variables are kept, including `ANTHROPIC_MODEL`, which Bedrock and Vertex need; the
   observed model is recorded in every result.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
@@ -227,7 +229,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (a wrapper script by content), and a non-secret provider identity
-(provider selection, every provider base URL and proxy host with a digest of each path, proxy bypass list, region, adb server endpoint, and model-routing variables). A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions and provider-specific region routing, adb server endpoint, and model-routing variables). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

@@ -145,9 +145,18 @@ const RUN_SHAPING_CLAUDE_PREFIXES = [
   "FORCE_PROMPT_CACHING",
 ];
 
+/**
+ * Any Claude, API, MCP, or Bash timeout or watchdog override (API_TIMEOUT_MS,
+ * API_FORCE_IDLE_TIMEOUT, CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS,
+ * CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS, ...): each changes when a request or agent gives up,
+ * so the family is scrubbed by name rather than one variable at a time.
+ */
+const RUN_SHAPING_TIMEOUT = /^(?:CLAUDE_|API_|MCP_|BASH_)\w*TIMEOUT(?:_MS|_SECONDS)?$/;
+
 export function isRunShapingClaudeVariable(key: string): boolean {
   return (
     RUN_SHAPING_CLAUDE_VARIABLES.has(key) ||
+    RUN_SHAPING_TIMEOUT.test(key) ||
     RUN_SHAPING_CLAUDE_PREFIXES.some((prefix) => key.startsWith(prefix))
   );
 }
@@ -302,6 +311,9 @@ const PROVIDER_FLAGS = [
 // ANTHROPIC_FOUNDRY_BASE_URL, ANTHROPIC_AWS_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL, ...).
 const PROVIDER_URL = /^ANTHROPIC_(?:\w+_)?BASE_URL$/;
 const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
+// Provider-specific region routing (ANTHROPIC_BEDROCK_REGION_PREFIX,
+// ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION, VERTEX_REGION_CLAUDE_*, ...).
+const PROVIDER_REGION = /^(?:ANTHROPIC_\w*REGION\w*|VERTEX_REGION_\w+)$/;
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
 const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
@@ -324,9 +336,11 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
       // A gateway can route different paths on one host to different backends, so the path
       // counts too. It is digested, never echoed, in case it carries a key.
       const path = url.pathname.replace(/\/+$/, "");
+      // The scheme counts as well: http and https to one gateway are different transports.
+      const origin = `${url.protocol}//${url.host}`;
       return path === ""
-        ? url.host
-        : `${url.host}/sha256:${createHash("sha256").update(path).digest("hex").slice(0, 12)}`;
+        ? origin
+        : `${origin}/sha256:${createHash("sha256").update(path).digest("hex").slice(0, 12)}`;
     } catch {
       // Not a URL: record that it was set, without echoing the value.
       return "(unparseable)";
@@ -334,13 +348,14 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
   };
   const set = (key: string) => env[key] !== undefined && env[key] !== "";
   const urls = Object.keys(env).filter((key) => PROVIDER_URL.test(key));
+  const regions = Object.keys(env).filter((key) => PROVIDER_REGION.test(key));
   const routing = Object.keys(env)
     .filter((key) => /^ANTHROPIC_(?:DEFAULT_\w+_)?MODEL$|^ANTHROPIC_SMALL_FAST_MODEL$/.test(key))
     .filter(set);
   return [
     ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
     ...[...urls, ...PROXY_URLS].filter(set).map((key) => `${key}=${host(env[key] as string)}`),
-    ...[...PROVIDER_REGIONS, ...PROXY_BYPASS, ...ADB_ENDPOINT, ...routing]
+    ...[...PROVIDER_REGIONS, ...regions, ...PROXY_BYPASS, ...ADB_ENDPOINT, ...routing]
       .filter(set)
       .map((key) => `${key}=${env[key]}`),
   ]

@@ -7,6 +7,7 @@ import {
   isolatedServerEnv,
   providerIdentity,
   systemPromptFor,
+  isRunShapingClaudeVariable,
 } from "../../../scripts/agent-benchmark/invocation";
 import { createHash } from "node:crypto";
 
@@ -185,7 +186,7 @@ describe("agent benchmark provider identity", () => {
     });
     expect(identity).toBe(
       [
-        `ANTHROPIC_BASE_URL=proxy.example.com/sha256:${pathDigest("/v1")}`,
+        `ANTHROPIC_BASE_URL=https://proxy.example.com/sha256:${pathDigest("/v1")}`,
         "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
         "AWS_REGION=us-west-2",
         "CLAUDE_CODE_USE_BEDROCK=1",
@@ -193,6 +194,17 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    // Every Claude/API/MCP/Bash timeout or watchdog override is run-shaping.
+    for (const key of [
+      "API_TIMEOUT_MS",
+      "API_FORCE_IDLE_TIMEOUT",
+      "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS",
+      "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS",
+      "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
+    ]) {
+      expect({ key, scrubbed: isRunShapingClaudeVariable(key) }).toEqual({ key, scrubbed: true });
+    }
+    expect(isRunShapingClaudeVariable("ANTHROPIC_API_KEY")).toBe(false);
     // Every provider endpoint override and the adb endpoint are part of the identity.
     expect(
       providerIdentity({
@@ -206,18 +218,34 @@ describe("agent benchmark provider identity", () => {
       [
         "ADB_SERVER_SOCKET=tcp:10.0.0.5:5037",
         "ANDROID_ADB_SERVER_PORT=5038",
-        "ANTHROPIC_AWS_BASE_URL=aws.example",
-        "ANTHROPIC_BEDROCK_MANTLE_BASE_URL=mantle.example",
-        "ANTHROPIC_FOUNDRY_BASE_URL=foundry.example",
+        "ANTHROPIC_AWS_BASE_URL=https://aws.example",
+        "ANTHROPIC_BEDROCK_MANTLE_BASE_URL=https://mantle.example",
+        "ANTHROPIC_FOUNDRY_BASE_URL=https://foundry.example",
       ].join("\n"),
     );
     // Gateway routes on one host differ by path; a trailing slash is the same route.
     const route = (url: string) => providerIdentity({ ANTHROPIC_BASE_URL: url });
-    expect(route("https://gw:4000")).toBe("ANTHROPIC_BASE_URL=gw:4000");
-    expect(route("https://gw:4000/")).toBe("ANTHROPIC_BASE_URL=gw:4000");
+    expect(route("https://gw:4000")).toBe("ANTHROPIC_BASE_URL=https://gw:4000");
+    expect(route("https://gw:4000/")).toBe("ANTHROPIC_BASE_URL=https://gw:4000");
     expect(route("https://gw:4000/anthropic")).not.toBe(route("https://gw:4000"));
     expect(route("https://gw:4000/anthropic/")).toBe(route("https://gw:4000/anthropic"));
     expect(route("https://gw:4000/anthropic")).not.toContain("anthropic");
+    // http and https to one gateway are different transports.
+    expect(route("http://gw:4000/anthropic")).not.toBe(route("https://gw:4000/anthropic"));
+    // Provider-specific region routing is recorded.
+    expect(
+      providerIdentity({
+        ANTHROPIC_BEDROCK_REGION_PREFIX: "eu",
+        ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION: "us-east-2",
+        VERTEX_REGION_CLAUDE_HAIKU: "europe-west1",
+      }),
+    ).toBe(
+      [
+        "ANTHROPIC_BEDROCK_REGION_PREFIX=eu",
+        "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION=us-east-2",
+        "VERTEX_REGION_CLAUDE_HAIKU=europe-west1",
+      ].join("\n"),
+    );
     expect(
       providerIdentity({ CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" }),
     ).toBe(["CLAUDE_CODE_USE_ANTHROPIC_AWS=1", "CLAUDE_CODE_USE_MANTLE=1"].join("\n"));
@@ -227,7 +255,7 @@ describe("agent benchmark provider identity", () => {
       no_proxy: "localhost,127.0.0.1",
     });
     expect(proxied).toBe(
-      ["HTTPS_PROXY=proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
+      ["HTTPS_PROXY=http://proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
     );
     expect(proxied).not.toContain("pass");
     expect(providerIdentity({ ANTHROPIC_BASE_URL: "not a url" })).toBe(

@@ -3,6 +3,8 @@ import { auditTranscript, toolResultText } from "../../../scripts/agent-benchmar
 import { TranscriptBuilder } from "./transcriptBuilder";
 
 const NO_PATTERNS = { failurePatterns: [], ignoredFailurePatterns: [] };
+/** Builder init output (a connected system/init on line 2 of 3), required before any assistant, user, or result event. */
+const INIT = new TranscriptBuilder().init().build();
 
 describe("agent benchmark transcript audit", () => {
   test("counts MCP and built-in tool calls and reads run metadata", () => {
@@ -139,6 +141,26 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result?.finalText).toBe("first");
   });
 
+  test("activity before system/init fails the transcript", () => {
+    const assistant = JSON.stringify({
+      type: "assistant",
+      message: { model: "wrong-model", content: [] },
+    });
+    const init = new TranscriptBuilder().init().build();
+    const audit = auditTranscript(`${assistant}\n${init}`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["line 1: assistant event before system/init"]);
+    expect(audit.observedModel).not.toBe("wrong-model");
+  });
+
+  test("a tool_use without a name fails the transcript", () => {
+    const use = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id: "toolu_nameless", name: " " }] },
+    });
+    const audit = auditTranscript(`${INIT}${use}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["line 4: tool_use without a name"]);
+  });
+
   test("malformed message content fails the transcript instead of hiding blocks", () => {
     const event = (type: string, content: unknown) =>
       JSON.stringify({ type, message: { content } });
@@ -148,11 +170,11 @@ describe("agent benchmark transcript audit", () => {
       event("user", ["stray"]),
       event("user", "plain text is fine"),
     ];
-    const audit = auditTranscript(`${lines.join("\n")}\n`, NO_PATTERNS);
+    const audit = auditTranscript(`${INIT}${lines.join("\n")}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual([
-      "line 1: assistant event has malformed content",
-      "line 2: assistant event has malformed content",
-      "line 3: user event has a non-object block",
+      "line 4: assistant event has malformed content",
+      "line 5: assistant event has malformed content",
+      "line 6: user event has a non-object block",
     ]);
   });
 
@@ -249,9 +271,9 @@ describe("agent benchmark transcript audit", () => {
       type: "user",
       message: { content: [{ type: "tool_result", tool_use_id: "", content: "ok" }] },
     });
-    const audit = auditTranscript(`${use}\n${result}\n`, NO_PATTERNS);
+    const audit = auditTranscript(`${INIT}${use}\n${result}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual([
-      "line 1: tool_use without an id",
+      "line 4: tool_use without an id",
       "tool_result for unknown tool_use_id (missing)",
     ]);
     expect(audit.toolCalls[0].hasResult).toBe(false);
@@ -270,7 +292,7 @@ describe("agent benchmark transcript audit", () => {
       });
     const lines = [use("mcp__auto-mobile__observe"), result("WAIT_TIMEOUT")];
     lines.push(use("mcp__auto-mobile__tapOn"), result("ok"));
-    const audit = auditTranscript(`${lines.join("\n")}\n`, NO_PATTERNS);
+    const audit = auditTranscript(`${INIT}${lines.join("\n")}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toContain("duplicate tool_use id toolu_x");
     expect(audit.toolCalls[0].resultText).toBe("WAIT_TIMEOUT");
   });
@@ -308,12 +330,12 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.claudeCodeVersion).toBeUndefined();
     // The assistant-event fallback normalizes the same way.
     const assistant = JSON.stringify({ type: "assistant", message: { model: " ", content: [] } });
-    expect(auditTranscript(`${assistant}\n`, NO_PATTERNS).observedModel).toBeUndefined();
+    expect(auditTranscript(`${init}\n${assistant}\n`, NO_PATTERNS).observedModel).toBeUndefined();
   });
 
   test("terminal metrics outside the baseline domains fail the transcript", () => {
     const result = (fields: Record<string, unknown>) =>
-      `${JSON.stringify({ type: "result", subtype: "success", is_error: false, ...fields })}\n`;
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", is_error: false, ...fields })}\n`;
     expect(auditTranscript(result({ num_turns: 2.5 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid num_turns",
     ]);
@@ -338,7 +360,7 @@ describe("agent benchmark transcript audit", () => {
       is_error: false,
       permission_denials: { tool_name: "Bash" },
     });
-    const audit = auditTranscript(`${result}\n`, NO_PATTERNS);
+    const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual(["result event has a non-array permission_denials"]);
   });
 

@@ -234,7 +234,8 @@ export function renderBaselineSnippet(result: BenchmarkResult): string {
     baseline.numTurns = audit.result.numTurns;
   }
   if (audit.result?.costUsd !== undefined) {
-    baseline.costUsd = Math.round(audit.result.costUsd * 10_000) / 10_000;
+    // toFixed rounds without multiplying, so a huge finite cost cannot overflow to Infinity.
+    baseline.costUsd = Number(audit.result.costUsd.toFixed(4));
   }
   baseline.tools = audit.toolCounts;
   // An unreadable build fingerprint would make every later "unknown" look like a match.

@@ -611,7 +611,7 @@ export class SetUIState extends BaseVisualChange {
             // Search direction describes content to reveal, not finger movement.
             await this.getSwipeOn().execute(
               { direction: searchState.currentDirection, gestureType: "scrollTowardsDirection" },
-              { progress: this.withRearmOnTick(fieldProgress(processed.size), onTick) },
+              { progress: this.withRearmOnTick(fieldProgress(processed.size), onTick), signal },
             );
 
             // Re-observe after scroll

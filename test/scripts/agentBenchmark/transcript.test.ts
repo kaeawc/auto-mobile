@@ -210,6 +210,8 @@ describe("agent benchmark transcript audit", () => {
     expect(
       auditTranscript(`${base}${result([{ type: "image", source: {} }])}`, NO_PATTERNS).parseErrors,
     ).toEqual([]);
+    // A nested block needs a type too, or it reads as empty text.
+    expect(auditTranscript(`${base}${result([{}])}`, NO_PATTERNS).parseErrors).toEqual(malformed);
   });
 
   test("a second init event fails the transcript and keeps the first status", () => {
@@ -386,6 +388,30 @@ describe("agent benchmark transcript audit", () => {
       "line 4: invalid parent_tool_use_id",
       "line 5: invalid parent_tool_use_id",
     ]);
+  });
+
+  test("token usage must be non-negative finite counts that sum finitely", () => {
+    const result = (usage: unknown) =>
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done", usage })}\n`;
+    expect(
+      auditTranscript(
+        result({
+          input_tokens: 1e308,
+          cache_creation_input_tokens: 1e308,
+          cache_read_input_tokens: 1e308,
+        }),
+        NO_PATTERNS,
+      ).parseErrors,
+    ).toEqual(["result event usage overflows"]);
+    expect(auditTranscript(result({ output_tokens: -1 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid usage.output_tokens",
+    ]);
+    expect(auditTranscript(result([1]), NO_PATTERNS).parseErrors).toEqual([
+      "result event has a malformed usage",
+    ]);
+    expect(
+      auditTranscript(result({ input_tokens: 4, output_tokens: 2 }), NO_PATTERNS).parseErrors,
+    ).toEqual([]);
   });
 
   test("a terminal result without a final answer fails the transcript", () => {

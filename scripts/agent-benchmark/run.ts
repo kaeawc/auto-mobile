@@ -508,9 +508,10 @@ function claudeCommandIdentity(command: string): Uint8Array {
 }
 
 /**
- * The adb client the measured server will run: AdbClient prefers the SDK's platform-tools/adb
- * (ANDROID_HOME / ANDROID_SDK_ROOT) over PATH, and platform-tools releases differ in command
- * behavior and latency. Its `adb version` output names both the release and the install path.
+ * The adb client the measured server will run, resolved the way AdbClient.getAdbPath does: the
+ * SDK's platform-tools/adb (ANDROID_HOME / ANDROID_SDK_ROOT) when it answers `adb version`, else
+ * the adb on PATH. Platform-tools releases differ in command behavior and latency, and the
+ * version output names both the release and the install path.
  */
 export function adbClientIdentity(
   env: Record<string, string | undefined>,
@@ -518,11 +519,17 @@ export function adbClientIdentity(
     const result = spawnSync(adb, ["version"], { encoding: "utf8", timeout: 5_000 });
     return result.status === 0 ? result.stdout : undefined;
   },
+  onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
 ): string {
   const sdk = resolveAndroidSdkRoot(env);
-  const adb = sdk ? `${sdk}/platform-tools/adb` : "adb";
-  const output = version(adb)?.trim();
-  return output ? output : `unavailable:${adb}`;
+  const candidates = [...(sdk ? [`${sdk}/platform-tools/adb`] : []), onPath("adb") ?? "adb"];
+  for (const adb of candidates) {
+    const output = version(adb)?.trim();
+    if (output) {
+      return output;
+    }
+  }
+  return `unavailable:${candidates.join(",")}`;
 }
 
 function serverDigest(claudeCommand: string): string {

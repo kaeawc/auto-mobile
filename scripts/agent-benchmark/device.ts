@@ -24,6 +24,9 @@ export interface CommandRunner {
 }
 
 const ADB_TIMEOUT_MS = 60_000;
+const SCREEN_DUMP_PATH = "/sdcard/agent-benchmark-ui.xml";
+const INT32_MIN = -2_147_483_648;
+const INT32_MAX = 2_147_483_647;
 const INSTALL_TIMEOUT_MS = 300_000;
 
 /** Parse `adb devices` output into serials that are fully online (`device` state). */
@@ -98,7 +101,12 @@ export function sharedPreferencesXml(values: Record<string, PreferenceValue>): s
       return `<boolean name="${name}" value="${value}" />`;
     }
     if (typeof value === "number") {
-      const tag = Number.isInteger(value) ? "int" : "float";
+      // Android parses <int> as a 32-bit Integer; wider integral values need <long>.
+      const tag = !Number.isInteger(value)
+        ? "float"
+        : value >= INT32_MIN && value <= INT32_MAX
+          ? "int"
+          : "long";
       return `<${tag} name="${name}" value="${value}" />`;
     }
     return `<string name="${name}">${escapeXml(value)}</string>`;
@@ -147,7 +155,14 @@ export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): 
   await adb(runner, [...target, "shell", "am", "force-stop", spec.packageName]);
   log.push(`force-stopped ${spec.packageName}`);
   if (spec.clearAppData) {
-    await adb(runner, [...target, "shell", "pm", "clear", spec.packageName]);
+    // `pm clear` can print "Failed" and still exit 0; require the "Success" line
+    // (as ClearAppData does) so a run never starts from the previous run's state.
+    const cleared = await adb(runner, [...target, "shell", "pm", "clear", spec.packageName]);
+    if (!cleared.split(/\r?\n/).some((line) => line.trim() === "Success")) {
+      throw new Error(
+        `pm clear ${spec.packageName} did not succeed: ${cleared.trim() || "no output"}`,
+      );
+    }
     log.push(`cleared app data for ${spec.packageName}`);
   }
   log.push(...(await seedSharedPreferences(runner, spec)));
@@ -169,13 +184,27 @@ export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): 
   return log;
 }
 
-/** Dump the current UI hierarchy XML straight from the device. */
+/**
+ * Dump the current UI hierarchy XML to a device file and read it back. Dumping to
+ * `/dev/tty` frequently yields only the "UI hierarchy dumped to" status line
+ * instead of the XML (see TalkBackToggle.dumpWindowHierarchy, #3921).
+ */
 export async function captureScreen(runner: CommandRunner, serial: string): Promise<string> {
-  const xml = await adb(runner, ["-s", serial, "exec-out", "uiautomator", "dump", "/dev/tty"]);
-  if (!xml.includes("<hierarchy")) {
-    throw new Error(`uiautomator dump returned no hierarchy: ${xml.slice(0, 200)}`);
+  const target = ["-s", serial];
+  try {
+    await adb(runner, [...target, "shell", "uiautomator", "dump", SCREEN_DUMP_PATH]);
+    const xml = await adb(runner, [...target, "exec-out", "cat", SCREEN_DUMP_PATH]);
+    if (!xml.includes("<hierarchy")) {
+      throw new Error(`uiautomator dump returned no hierarchy: ${xml.slice(0, 200)}`);
+    }
+    return xml;
+  } finally {
+    try {
+      await runner.run("adb", [...target, "shell", "rm", "-f", SCREEN_DUMP_PATH], ADB_TIMEOUT_MS);
+    } catch {
+      // Best effort: a leftover dump file is harmless and overwritten by the next run.
+    }
   }
-  return xml;
 }
 
 /** Decode the five predefined XML entities so screen checks match visible text. */

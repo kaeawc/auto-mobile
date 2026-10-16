@@ -77,7 +77,8 @@ function setup(transcript: string, launchMs = 42_000) {
   const runner = new FakeCommandRunner()
     .onAdb("devices", { stdout: DEVICES })
     .onAdb("pm path", { stdout: "package:/x.apk" })
-    .onAdb("uiautomator", { stdout: SCREEN })
+    .onAdb("pm clear", { stdout: "Success\n" })
+    .onAdb("exec-out cat", { stdout: SCREEN })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
   const launches: ClaudeLaunchSpec[] = [];
   const logs: string[] = [];

@@ -340,6 +340,53 @@ describe("prototype request host", () => {
     expect(coordinator.inFlightCount()).toBe(0);
   });
 
+  test("a cancel frame aborts the fetch, frees the slot and sends no reply", async () => {
+    const executor = new PendingExecutor();
+    const coordinator = new PrototypeRequestCoordinator(executor);
+    const host = createPrototypeRequestHost("d", coordinator);
+    const sent: PrototypeResponseMessage[] = [];
+    const done = host.handleRequest(frame, (r) => sent.push(r));
+    expect(coordinator.inFlightCount("d")).toBe(1);
+    host.handleCancel({ type: "prototype_request_cancel", requestId: "r1" });
+    await done;
+    expect(executor.signals.map((s) => s.aborted)).toEqual([true]);
+    expect(coordinator.inFlightCount()).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  test("a cancel from another connection, or for an unknown id, is ignored", async () => {
+    const executor = new PendingExecutor();
+    const coordinator = new PrototypeRequestCoordinator(executor);
+    const owner = createPrototypeRequestHost("d", coordinator);
+    const other = createPrototypeRequestHost("d", coordinator);
+    const done = owner.handleRequest(frame, () => undefined);
+    other.handleCancel({ type: "prototype_request_cancel", requestId: "r1" });
+    owner.handleCancel({ type: "prototype_request_cancel", requestId: "nope" });
+    owner.handleCancel({ type: "prototype_request_cancel" });
+    expect(executor.signals.map((s) => s.aborted)).toEqual([false]);
+    expect(coordinator.inFlightCount("d")).toBe(1);
+    owner.handleDisconnect();
+    await done;
+  });
+
+  test("four superseded requests and a fifth all run because cancels free capacity", async () => {
+    const executor = new PendingExecutor();
+    const coordinator = new PrototypeRequestCoordinator(executor);
+    const host = createPrototypeRequestHost("d", coordinator);
+    const sent: PrototypeResponseMessage[] = [];
+    const runs: Promise<void>[] = [];
+    for (let i = 1; i <= MAX_PROTOTYPE_REQUESTS_IN_FLIGHT + 1; i++) {
+      runs.push(host.handleRequest({ ...frame, requestId: `r${i}` }, (r) => sent.push(r)));
+      if (i <= MAX_PROTOTYPE_REQUESTS_IN_FLIGHT) {
+        host.handleCancel({ type: "prototype_request_cancel", requestId: `r${i}` });
+      }
+    }
+    expect(coordinator.inFlightCount("d")).toBe(1);
+    expect(sent).toEqual([]);
+    host.handleDisconnect();
+    await Promise.all(runs);
+  });
+
   test("disconnect cancels the device's requests and a failed reply is swallowed", async () => {
     const coordinator = new PrototypeRequestCoordinator(new PendingExecutor());
     const host = createPrototypeRequestHost("d", coordinator);

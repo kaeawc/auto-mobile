@@ -1209,7 +1209,11 @@ the native runtimes):
    appended to its last segment (`/data/feed` reports at `/data/feed__meta`; `prototypeRequestMetaPath`).
    Its value is `{status?: number, headers?: {name: value}, durationMs: number, error?: {code, message}}`.
    `status` and `headers` (lower-cased names) exist once a response arrived; `error` exists for every
-   failure. If it does not fit the data write limit, `headers` is dropped.
+   failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
+   the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
+   is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
+   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+   becomes `error` and `onError` runs.
 4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
    `onError` runs.
 
@@ -1239,9 +1243,11 @@ step 1 and 3 are `change` events as for data actions, sent before it.
 
 **Concurrency (device runtime).** A request whose `into` already has one in flight cancels the
 first: the latest wins. The cancelled request writes nothing to `into`, `<into>__meta` or `statusKey`,
-runs no follow-up and reports a `cancelled` event. A `via: "host"` call has no cancel frame, so the
-device ignores the stale `prototype_response`; the host call runs to its end or timeout and holds
-its in-flight slot until then. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
+runs no follow-up and reports a `cancelled` event. A `via: "host"` call sends
+`{"type":"prototype_request_cancel","requestId":"<id>"}` to the host (also on dismiss, reset or
+abandonment): the host aborts that request's fetch, frees its in-flight slot and sends no reply, and the
+device ignores a `prototype_response` that crosses it. The frame is not in the Kotlin-mirrored wire
+manifest, like `prototype_request`. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
 `too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
 are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
 

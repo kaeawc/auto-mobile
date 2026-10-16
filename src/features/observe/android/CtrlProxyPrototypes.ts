@@ -903,6 +903,11 @@ export class CtrlProxyPrototypes {
     await this.requestHost.handleRequest(frame, send);
   }
 
+  /** A `prototype_request_cancel` frame: aborts that host request; nothing is sent back. */
+  handlePrototypeRequestCancel(frame: unknown): void {
+    this.requestHost?.handleCancel(frame);
+  }
+
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
     this.listeners.add(listener);
     // The device drains its offline ring on any connect, not only for inspect. Events that arrived

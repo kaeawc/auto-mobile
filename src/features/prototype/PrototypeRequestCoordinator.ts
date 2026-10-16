@@ -21,6 +21,8 @@ interface InFlight {
   prototypeId: string;
   /** The socket the request arrived on; unset for requests not tied to one. */
   connection?: symbol;
+  /** The device's id for the request, for a `prototype_request_cancel` from that socket. */
+  requestId?: string;
   controller: AbortController;
 }
 
@@ -39,7 +41,7 @@ export class PrototypeRequestCoordinator implements PrototypeRequestCancellation
   }
 
   async run(
-    target: { deviceId: string; prototypeId: string; connection?: symbol },
+    target: { deviceId: string; prototypeId: string; connection?: symbol; requestId?: string },
     request: PrototypeHttpRequest,
   ): Promise<PrototypeHttpOutcome> {
     if (this.inFlightCount(target.deviceId) >= this.maxInFlight) {
@@ -71,6 +73,19 @@ export class PrototypeRequestCoordinator implements PrototypeRequestCancellation
   }
 
   /**
+   * The device cancelled one request it sent on `connection` (superseded, dismissed or abandoned):
+   * its fetch is aborted and its slot freed. Another connection's request with the same id is not
+   * touched. True when a running request was cancelled.
+   */
+  cancelRequest(connection: symbol, requestId: string): boolean {
+    const match = (entry: InFlight) =>
+      entry.connection === connection && entry.requestId === requestId;
+    const found = [...this.inFlight].some(match);
+    this.cancelWhere(match);
+    return found;
+  }
+
+  /**
    * A socket closed: ends only the requests that came in on it, so another app (or a newer
    * connection) on the same device keeps its requests.
    */
@@ -81,6 +96,8 @@ export class PrototypeRequestCoordinator implements PrototypeRequestCancellation
   private cancelWhere(match: (entry: InFlight) => boolean): void {
     for (const entry of [...this.inFlight].filter(match)) {
       logger.debug(`[PrototypeRequest] cancelling ${entry.deviceId}/${entry.prototypeId}`);
+      // The slot frees now, not when the aborted fetch settles, so a replacement is not refused.
+      this.inFlight.delete(entry);
       entry.controller.abort();
     }
   }

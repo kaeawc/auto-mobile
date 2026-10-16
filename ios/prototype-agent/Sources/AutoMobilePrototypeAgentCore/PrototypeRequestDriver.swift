@@ -28,6 +28,10 @@ final class PrototypeRequestDriver {
     /// A host request left the waiting set (answered, timed out, cancelled or failed); the owner of
     /// its connection no longer needs to be remembered.
     var onHostSettled: ((String) -> Void)?
+    /// Gets the `prototype_request_cancel` frame for a host request the device no longer wants
+    /// (superseded, dismissed, reset or timed out). It goes to the owning connection, if still there;
+    /// the host aborts the call and sends no reply.
+    var onHostCancel: (([String: Any]) -> Void)?
 
     init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, sendToHost: @escaping SendToHost) {
         self.clock = clock
@@ -49,6 +53,7 @@ final class PrototypeRequestDriver {
                 case .device: startDevice(job)
                 }
             case let .cancel(requestId):
+                cancelHost(requestId)
                 settleHost(requestId)?.cancel()
                 deviceTasks.removeValue(forKey: requestId)?.cancel()
             }
@@ -80,6 +85,11 @@ final class PrototypeRequestDriver {
                 durationMs: 0
             ))
         }
+    }
+
+    private func cancelHost(_ requestId: String) {
+        guard hostWatchdogs[requestId] != nil else { return }
+        onHostCancel?(["type": "prototype_request_cancel", "requestId": requestId])
     }
 
     private func settleHost(_ requestId: String) -> PrototypeTimerHandle? {
@@ -116,7 +126,9 @@ final class PrototypeRequestDriver {
         }
         let waitMs = job.effectiveTimeoutMs + Self.hostGraceMs
         hostWatchdogs[job.requestId] = clock.schedule(afterMilliseconds: waitMs) { [weak self] in
-            guard let self, settleHost(job.requestId) != nil else { return }
+            guard let self, hostWatchdogs[job.requestId] != nil else { return }
+            cancelHost(job.requestId)
+            _ = settleHost(job.requestId)
             deliver(job.requestId, .failed(
                 PrototypeRequestError(.timeout, "The host did not answer within \(waitMs)ms."),
                 durationMs: waitMs

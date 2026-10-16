@@ -590,8 +590,10 @@ deterministic:
   reconnecting daemon replaces the one it superseded and a side-effecting call never runs twice
   (events still broadcast to every authenticated connection). The owning connection of each pending call is remembered (`PrototypeHostRouting`), so when that connection closes its calls end at once as `network` even while an older connection remains. The host's
   `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
-  never replies to. The host has no cancel frame, so a cancelled call is forgotten and its late response
-  ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or
+  never replies to. When the device drops a host call (superseded by a newer request to the same `into`,
+  dismissed, reset or timed out) it sends `{"type":"prototype_request_cancel","requestId"}` to the call's
+  owning connection (skipped if that connection is gone); the host aborts the fetch, frees its slot and
+  sends no reply, and a late response is ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or
   the last host leaving, ends it as `network`. The host side is `createPrototypeRequestHost` wired to
   the agent client (`attachIosPrototypeRequests`), which also cancels the device's requests when the
   connection closes.

@@ -42,6 +42,9 @@ struct PrototypeHostRouting<ID: Hashable>: Equatable {
         return id
     }
 
+    /// The connection a pending request was sent to; `nil` once it ended or its connection closed.
+    func owner(of requestId: String) -> ID? { owners[requestId] }
+
     /// The request ended (answered, timed out or cancelled): forget its owner.
     mutating func finish(_ requestId: String) { owners[requestId] = nil }
 

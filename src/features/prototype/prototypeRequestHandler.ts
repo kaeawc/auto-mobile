@@ -8,6 +8,7 @@ import { logger } from "../../utils/logger";
 import type { PrototypeRequestCoordinator } from "./PrototypeRequestCoordinator";
 import {
   PROTOTYPE_RESPONSE_MESSAGE_TYPE,
+  prototypeRequestCancelMessageSchema,
   prototypeRequestMessageSchema,
   type PrototypeResponseMessage,
 } from "./prototypeRequestProtocol";
@@ -30,16 +31,20 @@ export function webSocketResponseSender(
 /** What a platform client calls when a `prototype_request` frame or a disconnect arrives. */
 export interface PrototypeRequestHost {
   handleRequest(frame: unknown, send: PrototypeResponseSender): Promise<void>;
+  /** A `prototype_request_cancel` frame: aborts that request, with no reply. */
+  handleCancel(frame: unknown): void;
   handleDisconnect(): void;
 }
 
 export function createPrototypeRequestHost(
   deviceId: string,
-  coordinator: Pick<PrototypeRequestCoordinator, "run" | "cancelConnection">,
+  coordinator: Pick<PrototypeRequestCoordinator, "run" | "cancelConnection" | "cancelRequest">,
 ): PrototypeRequestHost {
   // One host per socket: closing it must not abort requests another connection on the same
   // device (a second injected app, or a newer connection) is still waiting on.
   const connection = Symbol(`prototype-request-host:${deviceId}`);
+  // Requests the device cancelled: the host sends no reply for them.
+  const cancelled = new Set<string>();
   return {
     async handleRequest(frame, send) {
       const parsed = prototypeRequestMessageSchema.safeParse(frame);
@@ -56,10 +61,19 @@ export function createPrototypeRequestHost(
       }
       const { requestId, prototypeId, method, url, headers, body, timeoutMs } = parsed.data;
       const outcome = await coordinator.run(
-        { deviceId, prototypeId, connection },
+        { deviceId, prototypeId, connection, requestId },
         { method, url, headers, body, timeoutMs },
       );
+      if (cancelled.delete(requestId)) {
+        return;
+      }
       reply(send, { type: PROTOTYPE_RESPONSE_MESSAGE_TYPE, requestId, ...outcome });
+    },
+    handleCancel(frame) {
+      const parsed = prototypeRequestCancelMessageSchema.safeParse(frame);
+      if (parsed.success && coordinator.cancelRequest(connection, parsed.data.requestId)) {
+        cancelled.add(parsed.data.requestId);
+      }
     },
     handleDisconnect: () => coordinator.cancelConnection(connection),
   };

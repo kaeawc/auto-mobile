@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ConfigRepository } from "../../src/db/keyedJsonConfigRepository";
+import type {
+  ConfigRepository,
+  KeyedConfigRepository,
+} from "../../src/db/keyedJsonConfigRepository";
 
 export interface ConfigRepositoryHandle<TConfig> {
   repository: ConfigRepository<TConfig>;
@@ -91,4 +94,36 @@ function mutateDeep(value: unknown): void {
     }
   }
   record.__mutated = true;
+}
+
+/**
+ * Extra contract for repositories whose rows can be enumerated by key prefix (the
+ * per-session appearance rows, #10976). Run it in addition to {@link runConfigRepositoryContract}.
+ */
+export function runKeyedConfigRepositoryContract<TConfig>(
+  name: string,
+  make: () => Promise<{
+    repository: KeyedConfigRepository<TConfig>;
+    dispose?: () => Promise<void>;
+  }>,
+  sample: TConfig,
+): void {
+  describe(`KeyedConfigRepository contract: ${name}`, () => {
+    test("listKeys returns only keys with the prefix and follows set and clear", async () => {
+      const { repository, dispose } = await make();
+      try {
+        expect(await repository.listKeys("session:")).toEqual([]);
+        await repository.setConfig(sample, "session:a");
+        await repository.setConfig(sample, "session:b");
+        await repository.setConfig(sample, "other");
+        await repository.setConfig(sample);
+        expect((await repository.listKeys("session:")).sort()).toEqual(["session:a", "session:b"]);
+        await repository.clearConfig("session:a");
+        expect(await repository.listKeys("session:")).toEqual(["session:b"]);
+        expect(await repository.listKeys("nothing")).toEqual([]);
+      } finally {
+        await dispose?.();
+      }
+    });
+  });
 }

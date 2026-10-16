@@ -1173,6 +1173,9 @@ object PrototypeSpecValidator {
       value.flag("multiline") && (value.flag("secure") || value.text("keyboardType") == "password")
     )
       return fail("$path.multiline", "Multiline text cannot be secure")
+    val imeField = listOf("imeAction", "onSubmit").firstOrNull { value.containsKey(it) }
+    if (value.flag("multiline") && imeField != null)
+      return fail("$path.$imeField", "Multiline text has no IME action")
     val minLines = (value["minLines"] as? JsonPrimitive)?.intOrNull
     val maxLines = (value["maxLines"] as? JsonPrimitive)?.intOrNull
     if (minLines != null && maxLines != null && minLines > maxLines)

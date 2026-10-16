@@ -605,6 +605,16 @@ and stays open until the key is false (or the view goes away). A key set true wi
 a plain `ProgressView` at the top, since SwiftUI cannot start `refreshable` programmatically.
 Android uses Material `PullToRefreshBox`.
 
+## Text field trailing icon and IME action (not device-verified)
+
+`prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
+(`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
+action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
+accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
+`IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

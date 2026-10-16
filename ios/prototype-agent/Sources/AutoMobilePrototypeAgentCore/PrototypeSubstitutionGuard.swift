@@ -167,6 +167,9 @@ private struct PrototypeSubstitutionGuard {
                     }
                 }
             }
+        case "textField":
+            try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
+            try actions(fields, path: path, scope: scope, list: "onSubmit")
         case "topAppBar":
             try field(fields, "title", path: path, text: true, scope: scope)
             try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)

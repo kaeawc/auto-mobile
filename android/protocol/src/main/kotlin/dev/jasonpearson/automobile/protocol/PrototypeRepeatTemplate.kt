@@ -350,6 +350,11 @@ internal object PrototypeBindableFields {
             ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
               part(entry, entryPath)
             }
+        "textField" ->
+          part(node["trailingIcon"], "$path.trailingIcon")
+            ?: objects(node, "onSubmit", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              action(entry, entryPath)
+            }
         "searchBar" ->
           field(node, "placeholder", path, PrototypeBindableKind.TEXT)
             ?: objects(node, "trailingActions", path).firstNotNullOfOrNull { (entry, entryPath) ->

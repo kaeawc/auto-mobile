@@ -133,6 +133,8 @@ enum PrototypeRepeat {
             string("title", in: &fields)
             part("navigationIcon", in: &fields)
             list("actions", in: &fields)
+        case .string("textField")?:
+            part("trailingIcon", in: &fields)
         case .string("searchBar")?:
             string("placeholder", in: &fields)
             list("trailingActions", in: &fields)
@@ -328,6 +330,11 @@ private struct Instance {
         case "topAppBar":
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "textField":
+            bindPart("trailingIcon", in: &fields)
+            if case let .array(actions)? = fields["onSubmit"] {
+                fields["onSubmit"] = .array(actions.map(bindAction))
+            }
         case "searchBar":
             bindList("trailingActions", in: &fields) { bindPartFields(&$0) }
             if case let .array(actions)? = fields["onSubmit"] {

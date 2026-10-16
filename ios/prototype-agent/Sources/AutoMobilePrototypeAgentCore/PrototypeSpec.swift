@@ -733,6 +733,9 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+    /// Text field trailing icon button and keyboard action key (`prototype_text_field_actions_v1`).
+    let trailingIcon: PrototypeAppBarAction?
+    let imeAction: String?
     /// Text field input and supporting-line options (#12066); cross-field rules belong to the host.
     let supportingText: String?
     let keyboardType: String?
@@ -757,8 +760,8 @@ final class PrototypeNode: Decodable {
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
-             dismissOnSwipe, supportingText,
-             keyboardType, secure, multiline, minLines, maxLength
+             dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
+             imeAction
     }
 
     init(from decoder: Decoder) throws {
@@ -848,6 +851,8 @@ final class PrototypeNode: Decodable {
         multiline = try container.decodeIfPresent(Bool.self, forKey: .multiline)
         minLines = try container.decodeIfPresent(Int.self, forKey: .minLines)
         maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
+        trailingIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .trailingIcon)
+        imeAction = try container.decodeIfPresent(String.self, forKey: .imeAction)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

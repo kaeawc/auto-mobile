@@ -1,5 +1,9 @@
 /// Pure text field input policy (#12066). The host validates the authored options before show.
 struct PrototypeTextFieldOptions {
+    enum ImeAction: String {
+        case done, next, search, send, go
+    }
+
     enum Keyboard: String {
         case text, number, decimal, email, phone, url
     }
@@ -12,6 +16,8 @@ struct PrototypeTextFieldOptions {
     let usesDrawnChrome: Bool
     /// The supporting line is also the field's accessibility hint.
     let supportingAccessibilityValue: String?
+    /// The keyboard action key: `imeAction`, else done when only `onSubmit` is authored.
+    let imeAction: ImeAction?
 
     init(node: PrototypeNode) {
         keyboard = Keyboard(rawValue: node.keyboardType ?? "text") ?? .text
@@ -22,6 +28,8 @@ struct PrototypeTextFieldOptions {
         usesDrawnChrome = node.label != nil || node.variant != nil || node.supportingText != nil || node
             .maxLength != nil
         supportingAccessibilityValue = node.supportingText
+        imeAction = node.imeAction.flatMap(ImeAction.init(rawValue:))
+            ?? (node.onSubmit?.isEmpty == false ? .done : nil)
     }
 
     /// Count UTF-16 units like the host; a scalar is appended whole, never half a surrogate pair.

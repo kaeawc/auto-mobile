@@ -5,6 +5,7 @@ import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
+  PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
   PROTOTYPE_CAROUSEL_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
@@ -26,6 +27,8 @@ import {
 import { prototypeDataModelFields, prototypeDataModelUnsupportedMessage } from "./prototypeData";
 import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
+  prototypeTextFieldActionFields,
+  prototypeTextFieldActionsUnsupportedMessage,
   prototypeTextFieldOptionFields,
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
@@ -74,6 +77,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY,
     fields: prototypeTextFieldOptionFields,
     unsupportedMessage: prototypeTextFieldOptionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
+    fields: prototypeTextFieldActionFields,
+    unsupportedMessage: prototypeTextFieldActionsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,

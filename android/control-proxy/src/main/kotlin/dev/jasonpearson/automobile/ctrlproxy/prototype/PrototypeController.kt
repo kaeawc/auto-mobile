@@ -507,8 +507,11 @@ class PrototypeController(
     val authored = validate(spec)
     // A same-id show reads the document the shown prototype is about to have written.
     surfaces[spec.id]?.runtime?.flushStorage()
+    // A flush the disk refused leaves values the old session still owes; they carry over.
+    val unsaved = surfaces[spec.id]?.runtime?.storage?.unsavedValues()
     val opened =
-      storage?.prepare(authored, ::restoredSpecFits) ?: PrototypeStorageOpen(authored, null)
+      storage?.prepare(authored, unsaved, ::restoredSpecFits)
+        ?: PrototypeStorageOpen(authored, null)
     val validated = opened.spec
     val request =
       render(validated)
@@ -591,6 +594,8 @@ class PrototypeController(
     }
     // The accepted window is the first point the stored document may change.
     opened.commit()
+    // Its unsaved values live on in the new session; it must not write them again behind it.
+    if (previous != null) previous.runtime.storage?.invalidate()
     // Render acceptance precedes replacing records. Refused renders keep all old timers/runtime.
     val retiring = if (replaceOthers) surfaces.values.filter { it !== reused } else emptyList()
     reused?.runtime?.flushStorage()

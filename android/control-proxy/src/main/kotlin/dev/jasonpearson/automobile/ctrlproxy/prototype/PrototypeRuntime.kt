@@ -749,23 +749,11 @@ class PrototypeRuntime(
    */
   private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
     val before = current
-    val data =
-      when (val result = PrototypeDataWriter.apply(before.spec.data, write)) {
-        is PrototypeDataWriteResult.Success -> result.data
-        is PrototypeDataWriteResult.Failure -> return result.error
+    val spec =
+      when (val staged = stageDataWrite(before, before.spec, write)) {
+        is StagedWrite.Accepted -> staged.spec
+        is StagedWrite.Refused -> return staged.error
       }
-    val spec = before.spec.copy(data = data)
-    // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
-    // rejected write from touching the runtime's own caches, as for a patch.
-    try {
-      PrototypeRenderMapper()
-        .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
-    } catch (error: IllegalArgumentException) {
-      return PrototypeDataWriteError(
-        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
-        error.message ?: "Data write exceeds a prototype limit",
-      )
-    }
     val revision = allocateRevision()
     // The next state write of this interaction allocates a later revision, so it never regresses.
     interactionRevision = null
@@ -776,6 +764,53 @@ class PrototypeRuntime(
       name = write.path,
       payload = dataWritePayload(write, revision),
     )
+    return null
+  }
+
+  private sealed interface StagedWrite {
+    class Accepted(val spec: PrototypeSpec) : StagedWrite
+
+    class Refused(val error: PrototypeDataWriteError) : StagedWrite
+  }
+
+  /** [write] applied to [from] and checked against the renderer's limits; nothing is changed. */
+  private fun stageDataWrite(
+    before: PrototypeRuntimeSnapshot,
+    from: PrototypeSpec,
+    write: PrototypeDataWrite,
+  ): StagedWrite {
+    val data =
+      when (val result = PrototypeDataWriter.apply(from.data, write)) {
+        is PrototypeDataWriteResult.Success -> result.data
+        is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
+      }
+    val spec = from.copy(data = data)
+    // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
+    // rejected write from touching the runtime's own caches, as for a patch.
+    return try {
+      PrototypeRenderMapper()
+        .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
+      StagedWrite.Accepted(spec)
+    } catch (error: IllegalArgumentException) {
+      StagedWrite.Refused(
+        PrototypeDataWriteError(
+          PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+          error.message ?: "Data write exceeds a prototype limit",
+        ),
+      )
+    }
+  }
+
+  /** The first refusal of [writes] applied in order from now, or null; nothing is applied. */
+  private fun trialDataWrites(writes: List<PrototypeDataWrite>): PrototypeDataWriteError? {
+    val before = current
+    var spec = before.spec
+    for (write in writes) {
+      when (val staged = stageDataWrite(before, spec, write)) {
+        is StagedWrite.Accepted -> spec = staged.spec
+        is StagedWrite.Refused -> return staged.error
+      }
+    }
     return null
   }
 
@@ -1027,7 +1062,7 @@ class PrototypeRuntime(
    */
   private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
     val result =
-      PrototypeRequestOutcome.complete(request.into, response, current.spec.data) { write ->
+      PrototypeRequestOutcome.complete(request.into, response, ::trialDataWrites) { write ->
         applyDataWrite(write)?.also {
           warn("Refused request write at ${write.path}: ${it.message}")
         }

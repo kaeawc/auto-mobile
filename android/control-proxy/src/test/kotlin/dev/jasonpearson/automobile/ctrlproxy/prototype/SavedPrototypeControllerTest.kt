@@ -295,6 +295,38 @@ class SavedPrototypeControllerTest {
     assertEquals(null, disk.stored("prefs"))
   }
 
+  @Test
+  fun `a failed cleanup leaves the open screen's storage session persisting`() = runTest {
+    val registry = PrototypeStorageSessionRegistry()
+    val disk = FakePrototypeStorageStore()
+    val timer = FakePrototypeTimer()
+    val session =
+      PrototypeStoragePersistence(
+          disk,
+          timer,
+          kotlin.coroutines.EmptyCoroutineContext,
+          registry = registry,
+        )
+        .open(storageSpec())
+        .session!!
+    session.record(storageSpec(dark = true))
+    val controller =
+      controller(
+        clearStorage = { throw java.io.IOException("disk") },
+        sessions = registry,
+      )
+
+    controller.delete("delete", "prefs")
+    assertEquals(SavedPrototypeErrorCode.STORAGE_FAILURE, onlyReply("delete").errorCode)
+    // The pending change survives the failed delete and is written once the debounce passes.
+    timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
+    assertEquals(1, disk.saves.size)
+    // Later changes keep persisting too.
+    session.record(storageSpec(dark = false))
+    session.flush()
+    assertEquals(2, disk.saves.size)
+  }
+
   private fun storageSpec(dark: Boolean = false): PrototypeSpec {
     val input =
       """{"id":"prefs","window":{"placement":{"type":"fullscreen"}},"state":{"dark":$dark},""" +

@@ -572,36 +572,39 @@ class PrototypeRequestTest {
   }
 
   @Test
-  fun `a renderer refusal of the metadata rolls the body back and reports invalid_response`() {
+  fun `a renderer refusal of the metadata stages nothing and reports invalid_response`() {
     var data: JsonObject? = obj("""{"feed":"old"}""")
+    val committed = mutableListOf<PrototypeDataWrite>()
     // Stands in for the runtime's rebuilt-render limits: a success-shaped metadata is refused.
+    fun refusedByRenderer(write: PrototypeDataWrite) =
+      write.path == "/data/feed__meta" &&
+        (write as PrototypeDataWrite.Set).value.let { it is JsonObject && "error" !in it }
+    val refusal =
+      PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+        "rendered text too long",
+      )
     val result =
       PrototypeRequestOutcome.complete(
         "/data/feed",
         received(JsonPrimitive("new")),
-        data,
+        { writes ->
+          if (writes.any(::refusedByRenderer)) refusal
+          else PrototypeRequestOutcome.dataTrial(data, writes)
+        },
       ) { write ->
-        val refusedByRenderer =
-          write.path == "/data/feed__meta" &&
-            (write as PrototypeDataWrite.Set).value.let {
-              it is JsonObject && "error" !in it
-            }
-        if (refusedByRenderer) {
-          PrototypeDataWriteError(
-            PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
-            "rendered text too long",
-          )
-        } else {
-          when (val written = PrototypeDataWriter.apply(data, write)) {
-            is PrototypeDataWriteResult.Success -> {
-              data = written.data
-              null
-            }
-            is PrototypeDataWriteResult.Failure -> written.error
+        committed += write
+        when (val written = PrototypeDataWriter.apply(data, write)) {
+          is PrototypeDataWriteResult.Success -> {
+            data = written.data
+            null
           }
+          is PrototypeDataWriteResult.Failure -> written.error
         }
       }
 
+    // Neither the speculative body nor a rollback was ever committed (and so never reported).
+    assertEquals(listOf("/data/feed__meta"), committed.map { it.path })
     assertFalse(result.succeeded)
     assertFalse(result.wroteInto)
     assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.meta.error!!.code)

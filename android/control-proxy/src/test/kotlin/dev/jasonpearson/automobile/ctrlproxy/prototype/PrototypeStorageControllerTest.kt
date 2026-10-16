@@ -148,6 +148,40 @@ class PrototypeStorageControllerTest {
   }
 
   @Test
+  fun `a same-id show after a refused flush keeps the values and writes them again`() = runTest {
+    controller.show("s1", spec())
+    toggle(checkNotNull(controller.activeRuntime))
+    store.refuseWrites = true
+
+    controller.show("s2", spec())
+
+    // The refused values are not reverted by the re-show, and the disk still has nothing.
+    assertEquals(
+      PrototypeScalar.BooleanValue(true),
+      checkNotNull(controller.activeRuntime).current.state["dark"],
+    )
+    assertNull(store.stored("prefs"))
+    store.refuseWrites = false
+    storageTimer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
+    assertEquals(stored("state:dark" to JsonPrimitive(true)), store.stored("prefs"))
+  }
+
+  @Test
+  fun `a same-id show after a refused flush drops unsaved values the new version discards`() =
+    runTest {
+      controller.show("s1", spec())
+      toggle(checkNotNull(controller.activeRuntime))
+      store.refuseWrites = true
+
+      controller.show("s2", spec(storage = """{"version":2,"keys":["state:dark","data:/cart"]}"""))
+
+      assertEquals(
+        PrototypeScalar.BooleanValue(false),
+        checkNotNull(controller.activeRuntime).current.state["dark"],
+      )
+    }
+
+  @Test
   fun `reset does not clear storage`() = runTest {
     store.seed("prefs", stored("state:dark" to JsonPrimitive(true)))
     controller.show("s1", spec())

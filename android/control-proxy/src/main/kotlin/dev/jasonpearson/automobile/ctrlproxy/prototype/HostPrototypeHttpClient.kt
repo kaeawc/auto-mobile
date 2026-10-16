@@ -48,6 +48,9 @@ class HostPrototypeHttpClient(
   private class Pending(val answer: CompletableDeferred<PrototypeRequestResponse>) {
     /** The connection the request frame went to; set once the link accepts it. */
     @Volatile var target: Any? = null
+
+    /** Connections that closed while the frame was still being handed to the link. */
+    val lostWhileSending = HashSet<Any>()
   }
 
   private val pending = ConcurrentHashMap<String, Pending>()
@@ -72,8 +75,14 @@ class HostPrototypeHttpClient(
             timeoutMs = request.timeoutMs,
           ),
         )
-      entry.target =
+      val sentTo =
         link.send(frame) ?: return failed(PrototypeRequestErrorCode.NETWORK, NO_HOST_MESSAGE)
+      val closedMeanwhile =
+        synchronized(entry) {
+          entry.target = sentTo
+          sentTo in entry.lostWhileSending
+        }
+      if (closedMeanwhile) return failed(PrototypeRequestErrorCode.NETWORK, HOST_LOST_MESSAGE)
       val response =
         try {
           withTimeoutOrNull(request.timeoutMs + graceMs) { answer.await() }
@@ -121,15 +130,25 @@ class HostPrototypeHttpClient(
    * waiting request fails.
    */
   fun onHostLost(connection: Any? = null) {
-    pending.values
-      .filter { connection == null || it.target === connection }
-      .forEach {
-        it.answer.complete(
+    pending.values.forEach { entry ->
+      val affected =
+        synchronized(entry) {
+          val target = entry.target
+          when {
+            connection == null || target === connection -> true
+            // Still being handed to the link: remember the close so the send can settle it.
+            target == null -> false.also { entry.lostWhileSending += connection }
+            else -> false
+          }
+        }
+      if (affected) {
+        entry.answer.complete(
           PrototypeRequestResponse.Failed(
             PrototypeRequestError(PrototypeRequestErrorCode.NETWORK, HOST_LOST_MESSAGE),
           ),
         )
       }
+    }
   }
 
   private fun failMalformed(frame: String, error: SerializationException) {

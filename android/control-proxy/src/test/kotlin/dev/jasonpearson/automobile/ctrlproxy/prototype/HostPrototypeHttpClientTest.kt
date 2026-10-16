@@ -24,6 +24,7 @@ class HostPrototypeHttpClientTest {
   private var connected = true
   private var socket: Any = "A"
   private val cancels = mutableListOf<Pair<Any, String>>()
+  private var duringSend: () -> Unit = {}
   private val warnings = mutableListOf<String>()
   private var now = 0L
 
@@ -31,6 +32,7 @@ class HostPrototypeHttpClientTest {
     HostPrototypeHttpClient(
       link =
         PrototypeHostLink { frame ->
+          duringSend()
           if (connected) frames += frame
           socket.takeIf { connected }
         },
@@ -142,6 +144,18 @@ class HostPrototypeHttpClientTest {
     assertTrue(frames.single().contains(""""body":{"a":{"c":2,"d":1},"b":1}"""))
     pending.cancel()
   }
+
+  @Test
+  fun `a connection that closes while its frame is being handed over fails the request`() =
+    runTest {
+      val client = client()
+      socket = "B"
+      duringSend = { client.onHostLost("B") }
+
+      val response = client.execute(request("r-b"))
+
+      assertEquals(PrototypeRequestErrorCode.NETWORK, failure(response).code)
+    }
 
   @Test
   fun `a frame without headers or a body omits them`() = runTest {

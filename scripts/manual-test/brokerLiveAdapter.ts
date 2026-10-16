@@ -373,9 +373,21 @@ export async function createBrokerLiveContext(
   return {
     context,
     close: async () => {
-      // runBrokerScenario joins every client's cleanup. Refuse to discard a failed close.
+      // runBrokerScenario joins every client's cleanup. Refuse to discard a failed close, but
+      // never let one client's failure strand a sibling's proxy: close all, then report.
+      const failures: unknown[] = [];
       for (const name of [...started].reverse()) {
-        await closeClient(clients.find((c) => c.name === name)!);
+        try {
+          await closeClient(clients.find((c) => c.name === name)!);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (failures.length === 1) {
+        throw failures[0];
+      }
+      if (failures.length > 1) {
+        throw new AggregateError(failures, `${failures.length} broker clients failed to close`);
       }
     },
   };

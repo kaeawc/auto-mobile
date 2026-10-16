@@ -457,6 +457,42 @@ describe("device scenario safety and failure logic with fakes", () => {
       expect(result.error).toContain("Missing expected rejection");
     },
   );
+  test("parallel-acquire fails when one client's release ends a sibling's grant", async () => {
+    const f = fixture();
+    const release = f.client.release;
+    f.client.release = async (id, token) => {
+      const receipt = await release(id, token);
+      for (const [requestId, other] of f.receipts) {
+        if (other.sessionUuid !== id) {
+          f.receipts.set(requestId, { ...other, outcome: "released" });
+        }
+      }
+      return receipt;
+    };
+    const result = await runBrokerScenario(
+      scenarios.find((s) => s.name === "parallel-acquire")!,
+      f.context,
+      { device: true },
+    );
+    expect(result.outcome).toBe("failed");
+    expect(result.error).toMatch(/broker_session_ended|lost its grant/);
+  });
+  test("multi-client-crash-isolation fails when the owner death also ends the sibling", async () => {
+    const f = fixture();
+    const kill = f.deviceOps.ownerKill;
+    f.deviceOps.ownerKill = async (c) => {
+      await kill(c);
+      for (const [requestId, receipt] of f.receipts) {
+        f.receipts.set(requestId, { ...receipt, outcome: "failed" });
+      }
+    };
+    const result = await runBrokerScenario(
+      scenarios.find((s) => s.name === "multi-client-crash-isolation")!,
+      f.context,
+      { device: true },
+    );
+    expect(result.outcome).toBe("failed");
+  });
   test("evidence redacts tokens embedded in operation errors", async () => {
     const f = fixture();
     f.deviceOps.observe = async () => {

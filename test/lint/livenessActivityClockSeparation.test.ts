@@ -355,7 +355,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
       "(boundSessionUuidAt or the held lastUsedAt) unchanged, so a resume can put it back (#10989).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.restoreResumedSession": {
+  "src/daemon/proxy/HandoverResolution.ts HandoverResolution.restoreResumedSession": {
     writes: 1,
     reason:
       "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
@@ -368,7 +368,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "and used, after the proxy had dropped it for a not-found heartbeat answer; it is held " +
       "again from that call (#11570). A read or refused call carries no echo and holds nothing.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
+  "src/daemon/proxy/HandoverResolution.ts HandoverResolution.rebindResumedSession": {
     writes: 1,
     reason:
       "Rollback: a latest binding resumed after a daemon_stalled handover gets back the replay " +

@@ -53,6 +53,8 @@ case "$GPU" in swangle|swiftshader_indirect|host|angle_indirect) ;; *) exit 2;; 
 case "$WORKLOAD" in automobile|raw-adb-control|heartbeat-only) ;; *) exit 2;; esac
 jq -e 'type=="array" and all(.[];type=="string" and length>0)' <<< "$GPU_ARGS" >/dev/null
 export REAL_EMULATOR="$ANDROID_HOME/emulator/emulator"
+# Run 38886264776: GitHub runners do not put cmdline-tools on PATH (sdkmanager: command not found).
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 run_wait "$REAL_EMULATOR" -version > "$CELL_DIR/emulator-version.txt" 2>&1
 version=$(cat "$CELL_DIR/emulator-version.txt")
 private=$(mktemp -d "$RUNNER_TEMP/lq.XXXXXX")

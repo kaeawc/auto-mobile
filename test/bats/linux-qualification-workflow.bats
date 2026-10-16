@@ -84,3 +84,12 @@ setup() {
     and ((map((.run // "") | contains("libpulse0")) | index(true)) > $sdk)
     and ((map((.run // "") | contains("libpulse0")) | index(true)) < (map(.run // "") | index("bash scripts/ci/linux-qualification/emulator-cell.sh")))'
 }
+@test "emulator-cell puts SDK cmdline-tools on PATH before the first sdkmanager use" {
+  script="$BATS_TEST_DIRNAME/../../scripts/ci/linux-qualification/emulator-cell.sh"
+  path_line=$(grep -n 'export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:' "$script" | head -1 | cut -d: -f1)
+  sdk_line=$(grep -n '^timeout .*sdkmanager --licenses' "$script" | head -1 | cut -d: -f1)
+  [ -n "$path_line" ] && [ -n "$sdk_line" ] && [ "$path_line" -lt "$sdk_line" ]
+  # The private SDK shadow re-points ANDROID_HOME later; PATH must use the real one.
+  real_line=$(grep -n 'export REAL_EMULATOR=' "$script" | head -1 | cut -d: -f1)
+  [ "$real_line" -lt "$path_line" ]
+}

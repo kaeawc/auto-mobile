@@ -51,6 +51,9 @@ fi
 run_ratchet() {
   local kind="$1" BASELINE="$2" label="$3" noun="$4" current current_total grew
   # shellcheck disable=SC2016 # JavaScript template interpolation is intentional.
+  # Callers run this as `run_ratchet ... || status=1`, which disables `set -e` inside the function,
+  # so a crashed counter must be turned into a failure explicitly. Otherwise an empty result reads
+  # as "no assertions" and --update would wipe the baseline.
   current="$(bun -e '
     import ts from "typescript";
     import { Glob } from "bun";
@@ -83,7 +86,10 @@ run_ratchet() {
     }
     rows.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
     process.stdout.write(rows.map(([file, count]) => `${count}\t${file}`).join("\n"));
-  ' "$TEST_ROOT" "$kind")"
+  ' "$TEST_ROOT" "$kind")" || {
+    echo "ERROR: could not count $noun(s) under $TEST_ROOT; baseline left untouched" >&2
+    return 1
+  }
   current_total="$(printf '%s\n' "$current" | awk -F '\t' 'NF == 2 {s += $1} END {print s+0}')"
 
   # Compare each current file with its old allowance, including newly added files.
@@ -128,8 +134,14 @@ run_ratchet() {
   echo "$label gate: no new ${noun}s ($current_total gated $noun(s) in baseline)."
 }
 
-status=0
-BASELINE_ANY="$ANY_BASELINE"
-run_ratchet any "$BASELINE_ANY" "test as-any ratchet" "assertion" || status=1
-run_ratchet unknown "$UNKNOWN_BASELINE" "test unknown-cast ratchet" "double cast" || status=1
-exit "$status"
+# Run both ratchets so each reports, but without `|| status=1`: a function in an `||` list runs with
+# `set -e` disabled, which is how a crashed counter used to read as success.
+set +e
+run_ratchet any "$ANY_BASELINE" "test as-any ratchet" "assertion"
+status_any=$?
+run_ratchet unknown "$UNKNOWN_BASELINE" "test unknown-cast ratchet" "double cast"
+status_unknown=$?
+set -e
+if [[ "$status_any" -ne 0 || "$status_unknown" -ne 0 ]]; then
+  exit 1
+fi

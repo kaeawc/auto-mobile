@@ -52,4 +52,51 @@ describe("ProxySessionState", () => {
     expect(state.terminalBoundSession).toBe(reference.terminalBoundSession);
     expect(state.terminalBoundSession?.reason).toBe("released");
   });
+
+  describe("per-session liveness records shared with binding", () => {
+    const recordNames = [
+      "recoveryNotFoundOutcomes",
+      "resumedStallNotices",
+      "daemonIdleReports",
+      "sessionDaemonInstances",
+      "livenessAcks",
+      "livenessConflictLogged",
+      "pendingSessionLosses",
+      "plainRestartSessionLosses",
+    ] as const;
+
+    test.each(recordNames)("%s starts empty and is not shared between instances", (name) => {
+      const first = new ProxySessionState();
+      const second = new ProxySessionState();
+      expect(first[name].size).toBe(0);
+      expect(first[name]).not.toBe(second[name]);
+    });
+
+    test("scalar liveness fields start unset", () => {
+      const state = new ProxySessionState();
+      expect(state.latestBindingConflict).toBeUndefined();
+      expect(state.latestHeartbeatAsked).toBeUndefined();
+      expect(state.livenessSupersessionLogged).toBe(false);
+      expect(state.releaseSurfacedFor).toBeUndefined();
+      expect(state.initialSessionAwaitingFirstCall).toBe(false);
+      expect(state.ackedDaemonInstance).toBeUndefined();
+    });
+
+    test("scalar writes through one reference are visible through another", () => {
+      const state = new ProxySessionState();
+      const reference = state;
+      reference.latestBindingConflict = { sessionUuid: "s", since: 5 };
+      reference.latestHeartbeatAsked = { notFound: true, handoff: false };
+      reference.livenessSupersessionLogged = true;
+      reference.releaseSurfacedFor = "s";
+      reference.initialSessionAwaitingFirstCall = true;
+      reference.ackedDaemonInstance = "daemon-1";
+      expect(state.latestBindingConflict).toEqual({ sessionUuid: "s", since: 5 });
+      expect(state.latestHeartbeatAsked).toEqual({ notFound: true, handoff: false });
+      expect(state.livenessSupersessionLogged).toBe(true);
+      expect(state.releaseSurfacedFor).toBe("s");
+      expect(state.initialSessionAwaitingFirstCall).toBe(true);
+      expect(state.ackedDaemonInstance).toBe("daemon-1");
+    });
+  });
 });

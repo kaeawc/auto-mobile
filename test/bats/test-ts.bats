@@ -606,9 +606,9 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
-  [[ "${lines[0]}" == "bun test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO " ]]
+  [[ "${lines[0]}" == "bun test --isolate --timeout 20000 $UNSAFE_ONE $UNSAFE_TWO " ]]
   for k in 1 2; do
-    [[ "${lines[$k]}" == "bun test --isolate --timeout 5000 --path-ignore-patterns $UNSAFE_ONE --path-ignore-patterns $UNSAFE_TWO --shard=$k/2 .integration.test.ts " ]]
+    [[ "${lines[$k]}" == "bun test --isolate --timeout 20000 --path-ignore-patterns $UNSAFE_ONE --path-ignore-patterns $UNSAFE_TWO --shard=$k/2 .integration.test.ts " ]]
   done
   [[ "$output" != *"run_with_timeout"* ]]
   [[ "$output" != *"timeout 900"* ]]
@@ -618,7 +618,7 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts ' ]
 }
 
 @test "Windows integration passthrough bail keeps exactly the legacy command" {
@@ -627,7 +627,7 @@ windows_tier_fixture() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
   [[ "$output" != *"--path-ignore-patterns"* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --bail ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts --bail ' ]
 }
 
 @test "Windows integration passthrough reporter keeps exactly the legacy command" {
@@ -637,7 +637,7 @@ windows_tier_fixture() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
   [[ "$output" != *"--path-ignore-patterns"* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --reporter junit --reporter-outfile x.xml ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts --reporter junit --reporter-outfile x.xml ' ]
 }
 
 @test "Windows unit wall timeout keeps the legacy command" {
@@ -646,7 +646,7 @@ windows_tier_fixture() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
-  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 20000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
 }
 
 @test "Windows integration wall timeout keeps the legacy command" {
@@ -655,7 +655,7 @@ windows_tier_fixture() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
   [[ "$output" != *"--shard="* ]]
-  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+  [ "$output" = 'bun test --isolate --timeout 20000 .integration.test.ts ' ]
 }
 
 @test "Windows unit print mode leaves shard directories untouched" {
@@ -694,7 +694,7 @@ windows_tier_fixture() {
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_UNIT_TEST_WORKERS=1 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
-  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 20000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
 }
 
 @test "Windows explicit unit paths keep one command" {
@@ -752,7 +752,7 @@ EOF
   [ "$status" -eq 7 ]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
   [[ "$output" == *"test-ts: integration unsafe wall="*"s status=0"* ]]
-  [[ "$output" == *"==> integration unsafe"*"output: test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO"* ]]
+  [[ "$output" == *"==> integration unsafe"*"output: test --isolate --timeout 20000 $UNSAFE_ONE $UNSAFE_TWO"* ]]
   [[ "$output" == *"==> integration safe 1/2"*"--shard=1/2"* ]]
   [[ "$output" == *"==> integration safe 2/2"*"--shard=2/2"* ]]
 }
@@ -1377,6 +1377,13 @@ EOF
     bash "$SCRIPT" unit test/scripts/testLaneClassification.test.ts
   [ "$status" -eq 0 ]
   [[ "$output" == *"--timeout 20000"* ]]
+}
+
+@test "Windows CI runner retains per-test and hook timeout headroom" {
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=Windows bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--timeout 20000"* ]]
+  [[ "$output" != *"--timeout 5000"* ]]
 }
 
 @test "changed lane delegates affected selection to Bun" {

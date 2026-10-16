@@ -42,6 +42,7 @@
 1435	src/features/action/swipeon/ScrollUntilVisible.ts
 1804	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
+5883	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
@@ -73,10 +74,9 @@
 1559	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
-4879	src/server/deviceTools.ts
-2527	src/server/deviceToolsProvisioning.ts
-1952	src/server/deviceToolsShutdown.ts
-1302	src/server/deviceToolsStartDevice.ts
+2530	src/server/deviceToolsProvisioning.ts
+1261	src/server/deviceToolsShutdown.ts
+1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
 1642	src/server/finalizeToolResponse.ts
 1878	src/server/index.ts

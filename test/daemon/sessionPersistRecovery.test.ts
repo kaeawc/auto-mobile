@@ -68,16 +68,13 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
         await assign?.();
-        const session = await manager.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(id, DEVICE, "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -121,7 +118,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("two plans back to back under one UUID both run", async () => {
     const { manager, pool } = daemon();
-    await manager.createSession(SESSION, DEVICE, "android", undefined, undefined, "Pixel_8_API_35");
+    await manager.createSession(SESSION, DEVICE, "android", { stableDeviceId: "Pixel_8_API_35" });
 
     for (let plan = 0; plan < 3; plan++) {
       await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
@@ -175,7 +172,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("re-issuing does not let a weaker reason replace a terminal release", async () => {
     const { manager } = daemon();
-    await manager.createSession(SESSION, DEVICE, "android", undefined, undefined, "Pixel_8_API_35");
+    await manager.createSession(SESSION, DEVICE, "android", { stableDeviceId: "Pixel_8_API_35" });
     await manager.releaseSession(SESSION, "explicit-release");
 
     await repo.markReleased(SESSION, "released", 3_000, PLAN_AUTO_RELEASE_REASON);

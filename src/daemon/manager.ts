@@ -128,7 +128,7 @@ import {
   tryAcquireExclusiveLock,
   type LockOwnerGenerationProbe,
 } from "../utils/fileLock";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -140,7 +140,6 @@ import {
   DaemonLauncher,
   type DaemonLaunchCommand,
   type DaemonLaunchedProcess,
-  type DaemonProcessSpawner,
 } from "./DaemonLauncher";
 import { RUNNER_READINESS_TIMEOUT_FLAG } from "../utils/runnerReadinessConfig";
 import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionScopes";
@@ -164,6 +163,8 @@ import {
 } from "./cli/runDaemonCommand";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+export type { DaemonManagerOptions } from "./managerOptions";
+import type { DaemonManagerOptions } from "./managerOptions";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
@@ -565,30 +566,32 @@ export class DaemonManager implements DaemonManagerLike {
    * same way {@link DaemonClient.isAvailable} already is.
    */
   private readonly platform: NodeJS.Platform;
+  private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe;
 
-  constructor(
-    clientFactory: DaemonClientFactory | undefined = undefined,
-    stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
-    timer: Timer = defaultTimer,
-    lockFilePath: string = LOCK_FILE_PATH,
-    pidFilePath: string = PID_FILE_PATH,
-    socketPath: string = SOCKET_PATH,
-    processFinderOrSpawner:
-      | DaemonProcessFinder
-      | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
-    processSpawner: DaemonProcessSpawner | undefined = undefined,
-    extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
-    launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
-    processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
-    platformOverride: NodeJS.Platform = process.platform,
-    portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
-    retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
-    daemonProtocolHealthProbe: (() => Promise<boolean>) | undefined = undefined,
-    identityRecoveryIO?: IdentityRecoveryIO,
-    private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
-  ) {
+  constructor(options: DaemonManagerOptions = {}) {
+    const {
+      clientFactory,
+      stateProvider = () => DaemonState.getInstance(),
+      timer = defaultTimer,
+      lockFilePath = LOCK_FILE_PATH,
+      pidFilePath = PID_FILE_PATH,
+      socketPath = SOCKET_PATH,
+      processFinder = createDefaultDaemonProcessFinder(),
+      processSpawner,
+      extractionCleaner = fileSystemExtractionCleaner,
+      launcher,
+      launchCommandResolver,
+      processSignaler = defaultDaemonProcessSignaler,
+      idGenerator = defaultIdGenerator,
+      peerSocketReachability,
+      platform: platformOverride = process.platform,
+      portAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
+      retryExecutor = new DefaultRetryExecutor(timer),
+      daemonProtocolHealthProbe,
+      identityRecoveryIO,
+      lockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
+    } = options;
+    this.lockOwnerGenerationProbe = lockOwnerGenerationProbe;
     this.identityRecoveryIO = identityRecoveryIO ?? {
       // Windows named pipes cannot use this POSIX socket identity probe. This accepted
       // platform gap means a live Windows daemon with missing PID metadata will not
@@ -619,22 +622,15 @@ export class DaemonManager implements DaemonManagerLike {
     this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
     this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
     this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
-    if ("findDaemonProcesses" in processFinderOrSpawner) {
-      this.processFinder = processFinderOrSpawner;
-      this.processLivenessChecker = hasProcessLivenessChecker(processFinderOrSpawner)
-        ? processFinderOrSpawner
-        : createDefaultDaemonProcessFinder();
-    } else {
-      const processFinder = createDefaultDaemonProcessFinder();
-      this.processFinder = processFinder;
-      this.processLivenessChecker = processFinder;
-      processSpawner = processFinderOrSpawner;
-    }
+    this.processFinder = processFinder;
+    this.processLivenessChecker = hasProcessLivenessChecker(processFinder)
+      ? processFinder
+      : createDefaultDaemonProcessFinder();
     this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
-    this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
+    this.launchCommandResolver = launchCommandResolver;
     this.launcher =
-      (typeof launcher === "object" ? launcher : undefined) ??
+      launcher ??
       new DaemonLauncher({
         spawn: processSpawner?.spawn.bind(processSpawner),
         timer,

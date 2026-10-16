@@ -94,26 +94,16 @@ function createRejoinManager(args: {
   reachability: DaemonSocketReachabilityLike;
   processTable: FakeDaemonProcessTable;
 }): DaemonManager {
-  return new DaemonManager(
-    undefined,
-    undefined,
-    args.timer,
-    args.lockPath,
-    args.pidPath,
-    args.socketPath,
-    args.processTable,
-    args.spawner,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    args.reachability,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    noNamespaceOwner,
-  );
+  return new DaemonManager({
+    timer: args.timer,
+    lockFilePath: args.lockPath,
+    pidFilePath: args.pidPath,
+    socketPath: args.socketPath,
+    processFinder: args.processTable,
+    processSpawner: args.spawner,
+    peerSocketReachability: args.reachability,
+    identityRecoveryIO: noNamespaceOwner,
+  });
 }
 
 describe("DaemonManager readiness", () => {
@@ -166,18 +156,17 @@ describe("DaemonManager readiness", () => {
     writePidFile(pidPath, socketPath);
     writeFileSync(socketPath, "socket placeholder");
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForReady(100)).resolves.toBe(true);
     expect(clients).toHaveLength(1);
@@ -196,18 +185,17 @@ describe("DaemonManager readiness", () => {
     // to reuse it; no PID file is written for this namespace.
     writeFileSync(socketPath, "socket placeholder");
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForReady(100)).resolves.toBe(true);
     expect(clients).toHaveLength(1);
@@ -233,18 +221,17 @@ describe("DaemonManager readiness", () => {
     writePidFile(pidPath, socketPath);
     writeFileSync(socketPath, "stale socket placeholder");
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(false);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForReady(250)).resolves.toBe(false);
     // The probe is retried before giving up, bounded by the remaining readiness
@@ -284,18 +271,17 @@ describe("DaemonManager readiness", () => {
       await new Promise<void>((resolve) => server.listen(socketPath, resolve));
       expect(existsSync(socketPath)).toBe(true);
 
-      const manager = new DaemonManager(
-        () => {
+      const manager = new DaemonManager({
+        clientFactory: () => {
           const client = new ProbeClient(false);
           clients.push(client);
           return client;
         },
-        undefined,
-        fakeTimer,
-        lockPath,
-        pidPath,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: pidPath,
         socketPath,
-      );
+      });
 
       await expect(manager.waitForReady(250)).resolves.toBe(false);
       expect(clients.length).toBeGreaterThan(0);
@@ -321,19 +307,18 @@ describe("DaemonManager readiness", () => {
 
     // Fail the first attempts, then accept — simulating a transient blip.
     let attempt = 0;
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         attempt++;
         const client = new ProbeClient(attempt >= READINESS_PROBE_MAX_ATTEMPTS);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForReady(1000)).resolves.toBe(true);
     expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
@@ -355,26 +340,18 @@ describe("DaemonManager readiness", () => {
     const controller = new AbortController();
     const clients: ProbeClient[] = [];
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(false);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "linux",
-    );
+      platform: "linux",
+    });
 
     const ready = manager.waitForReady(10_000, controller.signal);
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
@@ -392,8 +369,8 @@ describe("DaemonManager readiness", () => {
     const clients: ProbeClient[] = [];
     writeFileSync(socketPath, "socket placeholder");
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         client.connect = async (timeoutMs?: number, signal?: AbortSignal) => {
           client.connectCallCount++;
@@ -412,12 +389,11 @@ describe("DaemonManager readiness", () => {
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     const ready = manager.waitForReady(100);
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -438,8 +414,8 @@ describe("DaemonManager readiness", () => {
     writeFileSync(socketPath, "socket placeholder");
 
     const clients: ProbeClient[] = [];
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         // Model an accepts-but-never-responds socket: connect() stalls forever and
         // only settles when the probe's abort signal fires.
@@ -464,12 +440,11 @@ describe("DaemonManager readiness", () => {
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     // The holder is alive at the poll boundary (so the full budget is taken) but
     // dies during the stalled probe; the liveness watchdog must interrupt the probe
@@ -517,14 +492,12 @@ describe("DaemonManager readiness", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new TestDaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
     // Wait on holder A, then re-arbitrate onto the token-B replacement (#2); B stays
@@ -550,14 +523,12 @@ describe("DaemonManager readiness", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new TestDaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
     expect(waits).toBe(2);
@@ -586,18 +557,17 @@ describe("DaemonManager readiness", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      () => {
+    const manager = new TestDaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     // Without the final non-destructive confirm, the holder-gone exit would report
     // false and the proxy would throw DaemonUnavailableError for a reachable daemon.
@@ -621,14 +591,12 @@ describe("DaemonManager readiness", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new TestDaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
     // No replacement, so exactly one wait: the loop must not spin on an unchanging
@@ -644,8 +612,8 @@ describe("DaemonManager readiness", () => {
     writeFileSync(socketPath, "socket placeholder");
 
     const clients: ProbeClient[] = [];
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(false);
         client.connect = async (_timeoutMs?: number, signal?: AbortSignal) => {
           client.connectCallCount++;
@@ -665,12 +633,11 @@ describe("DaemonManager readiness", () => {
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-    );
+    });
 
     // Change the holder after the initial poll-boundary check, while the socket
     // probe is stalled. The identity-aware watchdog must interrupt that probe.
@@ -697,22 +664,13 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "linux",
-    );
+      platform: "linux",
+    });
 
     try {
       await expect(manager.waitForReady(200)).resolves.toBe(false);
@@ -732,26 +690,15 @@ describe("DaemonManager readiness", () => {
     spawner.logText = `OLD_LOG_START\n${"a".repeat(5000)}\nSQLiteError: database is locked\nstack line\n`;
 
     const processTable = new FakeDaemonProcessTable();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      processTable,
-      spawner,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      noNamespaceOwner,
-    );
+      processFinder: processTable,
+      processSpawner: spawner,
+      identityRecoveryIO: noNamespaceOwner,
+    });
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(async () => false);
 
     try {
@@ -775,30 +722,20 @@ describe("DaemonManager readiness", () => {
     const spawner = new FakeDaemonSpawner(true);
     const clients: ProbeClient[] = [];
     const processTable = new FakeDaemonProcessTable();
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      processTable,
-      spawner,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      noNamespaceOwner,
-    );
+      processFinder: processTable,
+      processSpawner: spawner,
+      identityRecoveryIO: noNamespaceOwner,
+    });
     let statusCalls = 0;
     const statusSpy = spyOn(manager, "status").mockImplementation(async () => {
       statusCalls++;
@@ -834,26 +771,15 @@ describe("DaemonManager readiness", () => {
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
     const processTable = new FakeDaemonProcessTable();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      processTable,
-      spawner,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      noNamespaceOwner,
-    );
+      processFinder: processTable,
+      processSpawner: spawner,
+      identityRecoveryIO: noNamespaceOwner,
+    });
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -875,26 +801,15 @@ describe("DaemonManager readiness", () => {
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
     const processTable = new FakeDaemonProcessTable();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      processTable,
-      spawner,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      noNamespaceOwner,
-    );
+      processFinder: processTable,
+      processSpawner: spawner,
+      identityRecoveryIO: noNamespaceOwner,
+    });
 
     await expect(manager.start()).rejects.toThrow(
       /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/,
@@ -1211,26 +1126,15 @@ describe("DaemonManager readiness", () => {
     };
 
     const processTable = new FakeDaemonProcessTable();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      processTable,
-      spawner,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      noNamespaceOwner,
-    );
+      processFinder: processTable,
+      processSpawner: spawner,
+      identityRecoveryIO: noNamespaceOwner,
+    });
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -1256,26 +1160,18 @@ describe("DaemonManager readiness", () => {
     const clients: ProbeClient[] = [];
     // Deliberately do NOT create a file at socketPath: a named pipe has none.
 
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         const client = new ProbeClient(true);
         clients.push(client);
         return client;
       },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "win32",
-    );
+      platform: "win32",
+    });
 
     await expect(manager.waitForReady(100)).resolves.toBe(true);
     expect(clients).toHaveLength(1);
@@ -1297,18 +1193,17 @@ describe("DaemonManager readiness", () => {
       // No file at socketPath and no explicit platform override (defaults to the
       // real, non-win32 test platform).
 
-      const manager = new DaemonManager(
-        () => {
+      const manager = new DaemonManager({
+        clientFactory: () => {
           const client = new ProbeClient(true);
           clients.push(client);
           return client;
         },
-        undefined,
-        fakeTimer,
-        lockPath,
-        pidPath,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: pidPath,
         socketPath,
-      );
+      });
 
       await expect(manager.waitForReady(100)).resolves.toBe(false);
       expect(clients).toHaveLength(0);
@@ -1410,42 +1305,24 @@ describe("DaemonManager readiness", () => {
     }
 
     test("is false for the built-in default PID file and socket paths", () => {
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        DEFAULT_PID_FILE_PATH,
-        DEFAULT_SOCKET_PATH,
-      );
+      const manager = new DaemonManager({
+        pidFilePath: DEFAULT_PID_FILE_PATH,
+        socketPath: DEFAULT_SOCKET_PATH,
+      });
 
       expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(false);
     });
 
     test("is true for a PID-file-only override, matching AUTOMOBILE_DAEMON_PID_FILE_PATH production isolation", () => {
       const { pidPath } = createPaths();
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        pidPath,
-        DEFAULT_SOCKET_PATH,
-      );
+      const manager = new DaemonManager({ pidFilePath: pidPath, socketPath: DEFAULT_SOCKET_PATH });
 
       expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
     });
 
     test("is true for a socket-only custom path even when the PID file path is the default", () => {
       const { socketPath } = createPaths();
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        DEFAULT_PID_FILE_PATH,
-        socketPath,
-      );
+      const manager = new DaemonManager({ pidFilePath: DEFAULT_PID_FILE_PATH, socketPath });
 
       expect(internalsOf(manager).isIsolatedSocketNamespace()).toBe(true);
     });
@@ -1482,21 +1359,14 @@ describe("DaemonManager readiness", () => {
       },
     };
 
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: lockPath,
+      pidFilePath: pidPath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      reachability,
-    );
+      peerSocketReachability: reachability,
+    });
 
     const internals = manager as unknown as {
       tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;

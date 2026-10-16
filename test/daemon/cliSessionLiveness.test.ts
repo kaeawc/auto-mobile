@@ -70,12 +70,14 @@ describe("CLI-owned session liveness (#6870)", () => {
     );
 
   it("defaults a freshly created session to the heartbeat liveness policy", async () => {
-    const session = await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    const session = await sessionManager.createSession("s1", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     expect(session.livenessPolicy).toBe("heartbeat");
   });
 
   it("adoptCliLivenessPolicy switches a session to the minutes-long idle timeout", async () => {
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
     expect(sessionManager.adoptCliLivenessPolicy("s1")).toBe(true);
 
@@ -95,7 +97,7 @@ describe("CLI-owned session liveness (#6870)", () => {
 
   it("adoptCliLivenessPolicy prefers a valid caller-supplied idle timeout", async () => {
     process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "300000";
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
     sessionManager.adoptCliLivenessPolicy("s1", 90_000);
 
@@ -106,7 +108,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = String(
       MAX_CLI_SESSION_IDLE_TIMEOUT_MS * 2,
     );
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
     sessionManager.adoptCliLivenessPolicy("s1");
 
@@ -116,7 +118,10 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("restoreHeartbeatLivenessPolicy puts the pre-adoption timeouts back", async () => {
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 7_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      heartbeatTimeoutMs: 7_000,
+    });
     sessionManager.adoptCliLivenessPolicy("s1");
     timer.advanceTime(1_000);
 
@@ -134,7 +139,7 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("adoptCliLivenessPolicy widens the idle deadline from the last tool call, not the declaration (#10656)", async () => {
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
     timer.advanceTime(10_000);
     await sessionManager.getOrCreateSession("s1");
     timer.advanceTime(5_000);
@@ -148,7 +153,9 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("restoreHeartbeatLivenessPolicy falls back to the default strict timeout without a snapshot", async () => {
-    const session = await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    const session = await sessionManager.createSession("s1", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("s1");
     delete session.preCliLiveness;
 
@@ -158,13 +165,13 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("restoreHeartbeatLivenessPolicy is a no-op for a session that never adopted", async () => {
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
     expect(sessionManager.restoreHeartbeatLivenessPolicy("s1")).toBe(false);
     expect(sessionManager.restoreHeartbeatLivenessPolicy("nope")).toBe(false);
   });
 
   it("re-adoption after a takeover still restores the ORIGINAL strict timeouts", async () => {
-    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
     sessionManager.adoptCliLivenessPolicy("s1");
     sessionManager.restoreHeartbeatLivenessPolicy("s1");
     sessionManager.adoptCliLivenessPolicy("s1");
@@ -176,8 +183,12 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("survives the agent think-time that kills a default-policy session", async () => {
-    await sessionManager.createSession("cli", "emulator-5554", "android", 30 * 60_000);
-    await sessionManager.createSession("mcp", "emulator-5556", "android", 30 * 60_000);
+    await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
+    await sessionManager.createSession("mcp", "emulator-5556", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
     sessionManager.recordHeartbeat("mcp");
 
@@ -200,7 +211,9 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("never reaps a CLI session for a missing first heartbeat", async () => {
-    await sessionManager.createSession("cli", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
 
     const reaped: Array<{ sessionId: string; reason: string }> = [];
@@ -217,7 +230,10 @@ describe("CLI-owned session liveness (#6870)", () => {
     // heartbeat timeout). Adopting the CLI policy must widen the ordinary expiry
     // deadline too, otherwise the monitor's cleanupExpiredSessions() sweep
     // releases the session at ~60 s, long before the CLI idle timeout (#6870).
-    await sessionManager.createSession("cli", "emulator-5554", "android", 60_000, 60_000);
+    await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
 
     const reaped: Array<{ sessionId: string; reason: string }> = [];
@@ -232,7 +248,10 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("still reaps an autolock-shaped CLI session at the CLI idle timeout", async () => {
-    await sessionManager.createSession("cli", "emulator-5554", "android", 60_000, 60_000);
+    await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
 
     const reaped: Array<{ sessionId: string; reason: string }> = [];
@@ -245,12 +264,9 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("does not shorten the ordinary expiry of a long-lived session on adoption", async () => {
-    const session = await sessionManager.createSession(
-      "cli",
-      "emulator-5554",
-      "android",
-      30 * 60_000,
-    );
+    const session = await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
 
     expect(session.sessionTimeoutMs).toBe(30 * 60_000);
@@ -258,7 +274,9 @@ describe("CLI-owned session liveness (#6870)", () => {
   });
 
   it("reaps a CLI session once it is idle past the CLI idle timeout", async () => {
-    await sessionManager.createSession("cli", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("cli", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("cli");
 
     const reaped: Array<{ sessionId: string; reason: string }> = [];
@@ -296,7 +314,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("adopts the CLI policy when the client declares it", async () => {
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
       const response = await handleDaemonRequest(
         {
@@ -316,7 +334,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     it("applies the idle timeout the invocation carried with its declaration", async () => {
       // The daemon's own env resolves the default; the invocation's override can
       // only reach a running daemon on the wire (#6870 review).
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
       const response = await handleDaemonRequest(
         {
@@ -341,7 +359,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("bounds an oversized carried idle timeout", async () => {
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
       await handleDaemonRequest(
         {
@@ -364,7 +382,7 @@ describe("CLI-owned session liveness (#6870)", () => {
 
     it("falls back to the daemon's own resolution for an unusable carried timeout", async () => {
       process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "300000";
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
       await handleDaemonRequest(
         {
@@ -384,7 +402,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("restores the strict contract when a long-lived proxy declares it", async () => {
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
       sessionManager.adoptCliLivenessPolicy("s1");
       expect(sessionManager.getSession("s1")!.livenessPolicy).toBe("cli-idle");
 
@@ -409,7 +427,10 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("restores strict liveness when an unmarked Desktop heartbeat follows CLI adoption", async () => {
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 7_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 7_000,
+      });
       sessionManager.adoptCliLivenessPolicy("s1", 120_000);
       expect(sessionManager.getSession("s1")!.livenessPolicy).toBe("cli-idle");
 
@@ -434,7 +455,9 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("reaps a taken-over session on the strict timeout again", async () => {
-      await sessionManager.createSession("cli", "emulator-5554", "android", 30 * 60_000);
+      await sessionManager.createSession("cli", "emulator-5554", "android", {
+        timeoutMs: 30 * 60_000,
+      });
       sessionManager.adoptCliLivenessPolicy("cli");
 
       await handleDaemonRequest(
@@ -456,7 +479,7 @@ describe("CLI-owned session liveness (#6870)", () => {
     });
 
     it("leaves the heartbeat policy alone for a plain heartbeat", async () => {
-      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
 
       const response = await handleDaemonRequest(
         {

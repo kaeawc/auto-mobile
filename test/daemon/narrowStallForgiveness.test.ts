@@ -85,7 +85,7 @@ async function setUp(options: { sleepCountingClock?: boolean } = {}): Promise<Ri
         state,
       )
     ).success;
-  await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+  await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
   expect(await heartbeat()).toBe(true);
   const startedAt = timer.monotonicNow();
   monitor.start();

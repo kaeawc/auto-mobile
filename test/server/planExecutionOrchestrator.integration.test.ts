@@ -411,7 +411,9 @@ steps:
       createDevicePoolDependencies(sessionManager, "daemon-session", { timer: timer }),
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
-    await sessionManager.createSession("base", androidDevice.deviceId, "android", 1_000);
+    await sessionManager.createSession("base", androidDevice.deviceId, "android", {
+      timeoutMs: 1_000,
+    });
     const executionTracker = new ExecutionTracker(timer);
     const execution = executionTracker.startExecution("executePlan", undefined, "base");
     const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
@@ -432,7 +434,9 @@ steps:
       for (const [index, sessionId] of sessionIds.entries()) {
         const device = index === 0 ? androidDevice : secondAndroidDevice;
         if (!sessionManager.getSession(sessionId)) {
-          await sessionManager.createSession(sessionId, device.deviceId, "android", 1_000);
+          await sessionManager.createSession(sessionId, device.deviceId, "android", {
+            timeoutMs: 1_000,
+          });
         }
         assignments.set(sessionId, device.deviceId);
       }

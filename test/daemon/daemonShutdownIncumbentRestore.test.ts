@@ -40,22 +40,12 @@ function daemonWith(guard: IncumbentOwnerGuard): Daemon {
   timer.enableAutoAdvance();
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    guard,
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      incumbentOwnerGuard: guard,
+    },
   );
 }
 

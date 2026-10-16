@@ -38,16 +38,13 @@ describe("liveness handoff through the real repository without a schema change",
     expect(
       await manager.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) => {
-          await manager.createSession(
-            id,
-            "emulator-5554",
-            "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          await manager.createSession(id, "emulator-5554", "android", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return "emulator-5554";
         },
       }),
@@ -59,7 +56,10 @@ describe("liveness handoff through the real repository without a schema change",
     db = await createTestDatabase();
     repo = new DeviceSessionRepository(db, timer);
     manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
-    await manager.createSession("handoff", "emulator-5554", "android", 60_000, undefined, "Pixel");
+    await manager.createSession("handoff", "emulator-5554", "android", {
+      timeoutMs: 60_000,
+      stableDeviceId: "Pixel",
+    });
     await manager.claimLivenessOwnership("handoff", "owner");
   });
   afterEach(async () => {

@@ -51,16 +51,13 @@ describe("managed execution across a daemon restart", () => {
   function assigner(manager: SessionManager): SessionDeviceAssigner {
     return {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await manager.createSession(
-          id,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(id, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -128,14 +125,9 @@ describe("managed execution across a daemon restart", () => {
 
   test("a managed execution rehydrated after the startup deadline is re-owned like the startup batch", async () => {
     const before = sessionManager();
-    await before.createSession(
-      SESSION,
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      "Pixel_8_API_35",
-    );
+    await before.createSession(SESSION, "emulator-5554", "android", {
+      stableDeviceId: "Pixel_8_API_35",
+    });
     await before.claimLivenessOwnership(SESSION, TOKEN);
     await before.adoptManagedExecutionLivenessPolicy(SESSION);
     const assignment = (await registry.getAssignment(key))!;

@@ -312,8 +312,7 @@ describe("proxy liveness stalls (#10053)", () => {
         sessionId,
         deviceId,
         sessionId.startsWith("ios") ? "ios" : "android",
-        60_000,
-        LEASE_MS,
+        { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
       );
     }
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -1066,8 +1065,7 @@ describe("proxy liveness stalls (#10053)", () => {
           androidAcquisitionSession,
           DEVICES["android-session"],
           "android",
-          60_000,
-          LEASE_MS,
+          { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
         );
         const acquisition = acquire(proxy, "getAndroid");
         await drainUntilQuiescent(baseTimer);
@@ -1098,8 +1096,7 @@ describe("proxy liveness stalls (#10053)", () => {
         androidAcquisitionSession,
         DEVICES["android-session"],
         "android",
-        60_000,
-        LEASE_MS,
+        { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
       );
       latestClient.emitConnectionClosed();
       isAvailableSpy.mockResolvedValue(false);
@@ -1647,13 +1644,10 @@ describe("proxy liveness stalls (#10053)", () => {
       devicePending = false;
       parkHeartbeats = false;
       hangSessions.clear();
-      await sessionManager.createSession(
-        "android-session",
-        "emulator-5554",
-        "android",
-        60_000,
-        LONG_LEASE_MS,
-      );
+      await sessionManager.createSession("android-session", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: LONG_LEASE_MS,
+      });
     }
 
     beforeEach(() => {

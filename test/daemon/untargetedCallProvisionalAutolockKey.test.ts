@@ -79,9 +79,11 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     daemon.getSessionManager().stopCleanupTimer();
     releaseReasons = [];

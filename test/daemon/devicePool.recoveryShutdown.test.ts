@@ -3212,7 +3212,10 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
 
 test("disconnect recovery retries through the daemon after its deferred shutdown cooldown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+  const daemon = new Daemon(
+    {},
+    { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
+  );
   const internals = daemon as unknown as DaemonDisconnectInternals;
   internals.devicePool = pool;
   internals.sessionManager = sessions;
@@ -3257,7 +3260,10 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
 
 test("a tracked deferred recovery sweep does not block another due-retry check", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+  const daemon = new Daemon(
+    {},
+    { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
+  );
   const internals = daemon as unknown as DaemonDeferredRecoverySweepInternals;
   try {
     const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(

@@ -1296,9 +1296,14 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Internal start implementation (caller must hold lock).
+   * Internal start implementation. REQUIRES the caller to already hold the
+   * daemon start lock (every in-class caller does); calling it without the lock
+   * races concurrent starts. Production code outside this class must use
+   * {@link start}/{@link restart}.
    *
-   * Public so tests can stub the launch step.
+   * Not `private` only so tests can `spyOn` it to stub the launch step.
+   *
+   * @internal
    */
   async startUnlocked(
     options: DaemonOptions,

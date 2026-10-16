@@ -103,7 +103,7 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
  * gives a tool handler the ABSOLUTE wall-clock deadline of the current MCP
  * request -- exported here (rather than kept local to `server/index.ts`,
  * where it originates) so a tool handler outside `server/` (e.g.
- * `setUIStateHandler` in `server/formTools.ts`) can read it back without an
+ * the handler built by `createSetUIStateHandler` in `server/formTools.ts`) can read it back without an
  * import cycle through `server/index.ts` (issue #6222 P1).
  */
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
@@ -154,7 +154,7 @@ export const INTERNAL_MCP_REQUEST_DEADLINE_PARAM = "__mcpRequestDeadlineMs";
  * try to serialize a live object over the loopback HTTP transport, the daemon
  * registers its `ProgressExtendableDeadline` under a fresh key in that
  * shared, in-process registry and forwards only this key. A handler that
- * recognizes it (currently only `setUIStateHandler`) can then read the
+ * recognizes it (currently only the `createSetUIStateHandler` handler) can then read the
  * deadline's CURRENT value at each of its own admission checks instead of a
  * frozen number. Absent when the request carries no progress token (nothing
  * to extend) or is not daemon-forwarded at all.

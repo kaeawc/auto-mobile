@@ -110,8 +110,9 @@ export interface RunOptions {
   runtime: string;
   serverEntry: string;
   /**
-   * Digest of the built server (`dist/`): the entry bundle plus the sidecars it loads at
-   * runtime, such as the plan schemas. A stale or different build reads as different.
+   * Digest of what executes and measures the run: the built server (`dist/`, with the
+   * sidecars it loads at runtime), `bun.lock`, `package.json`, the harness sources, and the
+   * Bun version. A stale or different build, or changed scoring code, reads as different.
    */
   serverBuild: string;
   claudeCommand: string;
@@ -156,7 +157,9 @@ export function runTimestamp(epochMs: number): string {
 async function claudeVersion(deps: HarnessDeps, command: string): Promise<string | undefined> {
   try {
     const result = await deps.runner.run(command, ["--version"], VERSION_TIMEOUT_MS);
-    return result.exitCode === 0 ? result.stdout.trim() : undefined;
+    // "2.1.301 (Claude Code)" -> "2.1.301", the form the stream's init event reports.
+    const version = result.stdout.trim().split(/\s+/)[0];
+    return result.exitCode === 0 && version ? version : undefined;
   } catch (error) {
     // The version is report metadata only; a missing CLI fails loudly at launch instead.
     deps.log(`claude --version failed: ${errorMessage(error)}`);
@@ -346,6 +349,7 @@ function unknownFingerprints(result: BenchmarkResult): string[] {
   return [
     ...(result.preflight.appBuild === "unknown" ? ["app build"] : []),
     ...(result.preflight.device === "unknown" ? ["device"] : []),
+    ...(result.claude.version === undefined ? ["Claude Code version"] : []),
   ];
 }
 
@@ -471,6 +475,8 @@ export async function runSuite(
     deps.fs.exists(transcriptPath) ? deps.fs.readFile(transcriptPath) : "",
     definition,
   );
+  // A wrapper whose --version probe failed still reports its version in the init event.
+  const claudeCodeVersion = version ?? audit.claudeCodeVersion;
   const outcome = {
     claudeExitCode: exit.exitCode,
     timedOut: exit.timedOut,
@@ -488,7 +494,7 @@ export async function runSuite(
     claude: {
       requestedModel: options.modelOverride ?? definition.claude.model,
       observedModel: audit.observedModel,
-      version,
+      version: claudeCodeVersion,
     },
     preflight: prepared.preflight,
     outcome,
@@ -503,7 +509,7 @@ export async function runSuite(
         appBuild: prepared.preflight.appBuild,
         serverBuild,
         suiteDigest: digest,
-        claudeCodeVersion: version,
+        claudeCodeVersion,
         deviceFingerprint: prepared.preflight.device,
       },
     ),
@@ -519,7 +525,7 @@ export async function runSuite(
     // invisibly; the start-screen check sees only text, so the run is not reproducible.
     deps.log(`[${definition.name}] passed, but clearAppData is false; no baseline.yml written`);
   } else if (result.comparison.verdict === "passed" && unknownFingerprints(result).length > 0) {
-    // A baseline without these could never flag a later run on another build or device.
+    // A baseline without these could never flag a later run on another build, device, or CLI.
     deps.log(
       `[${definition.name}] passed, but the ${unknownFingerprints(result).join(" and ")} ` +
         "fingerprint is unknown; no baseline.yml written",

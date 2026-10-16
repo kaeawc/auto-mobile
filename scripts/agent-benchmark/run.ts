@@ -410,17 +410,27 @@ export function bundleDigest(files: Array<{ path: string; read: () => Uint8Array
 }
 
 /**
- * The built `dist/` plus `bun.lock`: the build leaves sharp and jimp external, so they load
- * from `node_modules` at runtime, and the lockfile pins exactly which versions those are.
+ * Everything that executes or scores a run: the built `dist/`; `bun.lock`, since the build
+ * leaves sharp and jimp external and the lockfile pins which versions load at runtime;
+ * `package.json`, which the server reads for its version; this harness's own sources, which
+ * decide verdicts and metrics; and the Bun runtime version. The git commit is left out: it
+ * changes with every unrelated commit, which would flag every baseline as mismatched.
  */
 function serverDigest(): string {
-  const distDir = join(REPO_ROOT, "dist");
-  const files = readdirSync(distDir, { recursive: true, encoding: "utf8" })
-    .filter((path) => statSync(join(distDir, path)).isFile())
-    .map((path) => ({ path: `dist/${path}`, read: () => readFileSync(join(distDir, path)) }));
+  const tree = (dir: string, filter: (path: string) => boolean = () => true) =>
+    readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
+      .filter((path) => filter(path) && statSync(join(REPO_ROOT, dir, path)).isFile())
+      .map((path) => ({
+        path: `${dir}/${path}`,
+        read: () => readFileSync(join(REPO_ROOT, dir, path)),
+      }));
+  const file = (path: string) => ({ path, read: () => readFileSync(join(REPO_ROOT, path)) });
   return bundleDigest([
-    ...files,
-    { path: "bun.lock", read: () => readFileSync(join(REPO_ROOT, "bun.lock")) },
+    ...tree("dist"),
+    ...tree("scripts/agent-benchmark", (path) => path.endsWith(".ts")),
+    file("bun.lock"),
+    file("package.json"),
+    { path: "bun-version", read: () => new TextEncoder().encode(process.versions.bun ?? "") },
   ]);
 }
 

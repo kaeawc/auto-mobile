@@ -233,6 +233,8 @@ type CommandFallbackBuilders<T> = [RequiredNonBaseResultKeys<T>] extends [never]
 
 interface SendCommandBaseOptions {
   idPrefix: string;
+  /** Preserve a caller's wire ID convention; invoked after connecting, before registration. */
+  createRequestId?: () => string;
   responseType: string;
   messageType: string;
   params?: Record<string, unknown>;
@@ -454,7 +456,9 @@ export async function sendCommand<T>(
   if (typeof timeoutMs !== "number") {
     return timeoutMs.result;
   }
-  const requestId = context.requestManager.generateId(options.idPrefix);
+  const requestId = options.createRequestId
+    ? options.createRequestId()
+    : context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
     ? (_id: string, _type: string, timeout: number) => options.timeoutError!(timeout)

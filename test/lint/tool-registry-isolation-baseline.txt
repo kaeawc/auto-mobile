@@ -6,7 +6,6 @@ test/daemon/socketServerOneShotCliAcquisition.integration.test.ts
 test/features/navigation/Explore.test.ts
 test/features/observe/ios/CtrlProxyStorage.test.ts
 test/features/record/ToolCallRecorderCoverage.test.ts
-test/features/toolSelection/putAppFileTargetPolicy.test.ts
 test/lint/gatedToolsAcceptSessionUuid.test.ts
 test/lint/toolReadControlClassification.test.ts
 test/plan/planExecutorInternalNoDiffE2E.test.ts

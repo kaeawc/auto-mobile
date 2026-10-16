@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -68,7 +69,7 @@ describe("DevicePool idle selection Android presence sweep", () => {
     }
     for (const staleId of ["emulator-5554", "emulator-5556", "emulator-5558"]) {
       const entry = pool.getAllDevices().find((device) => device.id === staleId);
-      expect(entry === undefined || entry.status === "error").toBe(true);
+      expect(entry === undefined || statusOf(entry) === "error").toBe(true);
     }
   });
 });

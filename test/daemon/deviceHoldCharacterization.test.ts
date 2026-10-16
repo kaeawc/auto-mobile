@@ -1,3 +1,4 @@
+import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -193,7 +194,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     {
       name: "error status",
       setup: () => {
-        entry().status = "error";
+        markDeviceError(entry());
       },
       expected: {
         availability: "free",

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import path, { resolve } from "node:path";
 import ts from "typescript";
+import { ENV_REGISTRY } from "../../src/config/env";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
 import {
@@ -470,6 +471,13 @@ describe("environment variable documentation", () => {
     reads = extractReads(
       sourceFiles(resolve(ROOT, "src")).map((path) => ({ path, text: readFileSync(path, "utf8") })),
     );
+    // Registry readers index the environment by spec.name, which syntax-only resolution cannot follow.
+    for (const spec of ENV_REGISTRY) {
+      reads.add(spec.name);
+      if (spec.legacyName) {
+        reads.add(spec.legacyName);
+      }
+    }
     markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
     docs = documentedNames(markdown);
   }, 60_000);

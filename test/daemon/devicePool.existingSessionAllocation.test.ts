@@ -1,3 +1,4 @@
+import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -179,7 +180,7 @@ for (const criteria of [false, true]) {
     test("a held device in an error state fails fast naming the label", async () => {
       await setUp(["d1", "d2"]);
       await pool.bindOrReuseDeviceSession("base", "d1", "android");
-      pool.getDevice("d1")!.status = "error";
+      markDeviceError(pool.getDevice("d1")!);
 
       const plan = observe(["base"]);
       await drainUntilQuiescent(timer);

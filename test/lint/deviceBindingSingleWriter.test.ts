@@ -159,7 +159,7 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
     const member = unwrapCallee(target);
     if (
       member.type !== "MemberExpression" ||
-      !["sessionId", "status"].includes(memberName(member) ?? "")
+      !["sessionId", "status", "health"].includes(memberName(member) ?? "")
     ) {
       return;
     }
@@ -235,7 +235,7 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
               : key.type === "Literal" && typeof key.value === "string"
                 ? key.value
                 : undefined;
-          if (name === "sessionId" || name === "status") {
+          if (name === "sessionId" || name === "status" || name === "health") {
             reportWrite(target, name, property.start);
           }
         }
@@ -286,6 +286,10 @@ describe("device binding single writer", () => {
   });
 
   test.each([
+    'device.health = "error";',
+    'device["health"] ||= "ok";',
+    "delete (device!).health;",
+    "({ verdict: device.health } = snapshot);",
     'device.sessionId = "owner";',
     'pooledDevice.status ||= "idle";',
     'replacementDevice["sessionId"] += "x";',
@@ -300,6 +304,9 @@ describe("device binding single writer", () => {
   });
 
   test.each([
+    'this.device.health = "ok";',
+    'Object.assign(device, { health: "error" });',
+    'function update(device) { const d = device; d.health = "ok"; }',
     'this.device.status = "idle";',
     "this.port.pooledDevice.sessionId = null;",
     'this.port["replacementDevice"].status = "idle";',
@@ -319,6 +326,8 @@ describe("device binding single writer", () => {
   });
 
   test.each([
+    'response.health = "ok";',
+    'Object.assign(response, { health: "error" });',
     'response.status = "ok";',
     'this.port.response.status = "ok";',
     'this.port.sessions.get(id)!.status = "ok";',
